@@ -1,19 +1,18 @@
 const std = @import("std");
+const arch = @import("arch/x86_64.zig");
 const puts = @import("root").puts;
 
-fn spin() noreturn {
-    while (true) {
-        std.atomic.spinLoopHint();
-    }
-}
 
-pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace) noreturn {
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace) noreturn
+{
     puts("PANIC!\n");
     puts(msg);
-    spin();
+    arch.spin();
 }
 
-pub fn kmain() noreturn {
+pub fn kmain() noreturn
+{
+    arch.set_cpu_local_storage(0);
     puts("\x1b[31mHello, \x1b[33mworld!\x1b[0m\n");
-    spin();
+    arch.spin();
 }

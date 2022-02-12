@@ -75,14 +75,16 @@ fn run_qemu_with_x86_bios_image(b: *Builder, image_path: []const u8) *std.build.
     return run_step;
 }
 
-fn get_ovmf(_: *Builder) ![]const u8 {
+fn get_ovmf(_: *Builder) ![]const u8
+{
     if (std.os.getenv("OVMF_PATH")) |p|
         return p;
 
     return "OVMF path not found - please set envvar OVMF_PATH";
 }
 
-fn run_qemu_with_x86_uefi_image(b: *Builder, image_path: []const u8) *std.build.RunStep {
+fn run_qemu_with_x86_uefi_image(b: *Builder, image_path: []const u8) *std.build.RunStep
+{
     const cmd = &[_][]const u8{
         // zig fmt: off
         "qemu-system-x86_64",
@@ -103,7 +105,8 @@ fn run_qemu_with_x86_uefi_image(b: *Builder, image_path: []const u8) *std.build.
     return run_step;
 }
 
-fn build_limine_image(b: *Builder, kernel: *std.build.LibExeObjStep, image_path: []const u8) *std.build.RunStep {
+fn build_limine_image(b: *Builder, kernel: *std.build.LibExeObjStep, image_path: []const u8) *std.build.RunStep
+{
     const img_dir = b.fmt("{s}/img_dir", .{b.cache_root});
 
     const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
@@ -144,7 +147,8 @@ fn build_limine_image(b: *Builder, kernel: *std.build.LibExeObjStep, image_path:
     return image_step;
 }
 
-fn build_x86(b: *Builder) void {
+fn build_x86(b: *Builder) void
+{
     const kernel = stivale2_kernel(b, .x86_64);
     const image_path = b.fmt("{s}/universal.iso", .{b.cache_root});
     const image = build_limine_image(b, kernel, image_path);
@@ -159,7 +163,8 @@ fn build_x86(b: *Builder) void {
     run_step.dependOn(&bios_step.step);
 }
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *Builder) void
+{
     build_x86(b);
 
     // Just boots your kernel using sabaton, without a filesystem.
