@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const kernel = @import("../kernel.zig");
+const TODO = kernel.TODO;
 
 pub const GS_base = MSR(0xc0000102);
 
@@ -541,6 +542,7 @@ const Serial = struct
                 if (in8(io_port + 7) != 0) return Serial.InitError.not_present;
                 out8(io_port + 7, 0xff);
                 if (in8(io_port + 7) != 0xff) return Serial.InitError.not_present;
+                TODO();
             }
         };
     }
@@ -571,4 +573,47 @@ pub fn write_to_debug_port(str: []const u8) callconv(.Inline) void
     {
         out8(IOPort.E9_hack, c);
     }
+}
+
+const PIC = struct
+{
+    const master_command = IOPort.PIC1;
+    const master_data = IOPort.PIC1 + 1;
+    const slave_command = IOPort.PIC2;
+    const slave_data = IOPort.PIC2 + 1;
+
+    fn wait() callconv(.Inline) void
+    {
+        out8(0x80, undefined);
+    }
+
+    fn disable() void
+    {
+        out8(master_command, 0x11);
+        wait();
+        out8(slave_command, 0x11);
+        wait();
+        out8(master_data, 0x20);
+        wait();
+        out8(slave_data, 0x28);
+        wait();
+        out8(master_data, 0b0000_0100);
+        wait();
+        out8(slave_data, 0b0000_0010);
+        wait();
+        out8(master_data, 0x01);
+        wait();
+        out8(slave_data, 0x01);
+        wait();
+
+        // Masking out all PIC interrupts
+        out8(master_data, 0xFF);
+        out8(slave_data, 0xFF);
+        wait();
+    }
+};
+
+pub fn init_interrupts() void
+{
+    PIC.disable();
 }

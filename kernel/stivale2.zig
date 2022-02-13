@@ -24,7 +24,6 @@ pub fn terminal_write(str: []const u8) callconv(.Inline) void
     }
 }
 
-
 fn parse_tag(comptime T: type, tag: *align(1) stivale2.stivale2_tag) T {
     return @ptrCast(*align(1) T, tag).*;
 }

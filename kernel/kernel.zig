@@ -22,3 +22,8 @@ pub fn main() noreturn
     log("\x1b[31mHello, \x1b[33mworld!\x1b[0m\n");
     arch.spin();
 }
+
+pub fn TODO() noreturn
+{
+    panic("TODO: Not implemented\n", null);
+}

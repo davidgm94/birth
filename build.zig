@@ -29,7 +29,10 @@ fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) v
         else => unreachable,
     }
 
+    // exec.pie = true;
+    exec.force_pic = true;
     exec.disable_stack_probing = true;
+    exec.strip = false;
     exec.setTarget(.{
         .cpu_arch = arch,
         .os_tag = std.Target.Os.Tag.freestanding,
