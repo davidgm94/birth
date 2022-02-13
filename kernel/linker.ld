@@ -64,6 +64,7 @@ SECTIONS {
   .data . : {
     *(.data*)
   }:data
+
   . = ALIGN(64K);
 
   .bss . : {
