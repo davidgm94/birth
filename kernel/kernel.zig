@@ -19,6 +19,7 @@ pub fn main() noreturn
 {
     arch.set_cpu_local_storage(0);
     arch.fpu_flags();
+    arch.init_interrupts();
     log("\x1b[31mHello, \x1b[33mworld!\x1b[0m\n");
     arch.spin();
 }
