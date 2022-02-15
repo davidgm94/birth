@@ -136,13 +136,13 @@ const LimineImage = struct
             "limine-eltorito-efi.bin", 
             "limine-cd.bin",
             "limine.sys",
+            "limine.cfg",
         };
 
         for (files_to_copy_from_limine_dir) |filename|
         {
             try std.fs.Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
         }
-        try std.fs.Dir.copyFile(cwd, "limine.cfg", img_dir, "limine.cfg", .{});
         try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
         try std.fs.Dir.copyFile(cwd, self.kernel_path, img_dir, std.fs.path.basename(self.kernel_path), .{});
 

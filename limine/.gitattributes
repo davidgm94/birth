@@ -1,0 +1,5 @@
+limine.sys binary merge
+limine-cd.bin binary merge
+limine-hdd.bin binary merge
+limine-eltorito-efi.bin binary merge
+BOOTX64.EFI binary merge
