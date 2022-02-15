@@ -1,5 +1,6 @@
 const std = @import("std");
 const Builder = std.build.Builder;
+const limine_installer = @import("limine/limine_installer.zig");
 
 fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 {
@@ -154,17 +155,87 @@ fn build_limine_image(b: *Builder, kernel: *std.build.LibExeObjStep, image_path:
     return image_step;
 }
 
+const LimineImage = struct
+{
+    step: std.build.Step,
+    b: *Builder,
+    image_path: []const u8,
+    kernel_path: []const u8,
+
+    fn build(step: *std.build.Step) !void
+    {
+        const self = @fieldParentPtr(@This(), "step", step);
+        const img_dir_path = self.b.fmt("{s}/img_dir", .{self.b.cache_root});
+        std.debug.print("Trying to delete {s}\n", .{self.image_path});
+        const cwd = std.fs.cwd();
+        cwd.deleteFile(self.image_path) catch {};
+        const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
+        const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+        const limine_dir = try cwd.openDir("extern/limine-bin", .{});
+
+        const files_to_copy_from_limine_dir = [_][]const u8
+        { 
+            "limine-eltorito-efi.bin", 
+            "limine-cd.bin",
+            "limine.sys",
+        };
+
+        for (files_to_copy_from_limine_dir) |filename|
+        {
+            try std.fs.Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+        }
+        try std.fs.Dir.copyFile(cwd, "limine.cfg", img_dir, "limine.cfg", .{});
+        try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+        try std.fs.Dir.copyFile(cwd, self.kernel_path, img_dir, std.fs.path.basename(self.kernel_path), .{});
+
+        const xorriso_process = try std.ChildProcess.init(
+            & .{
+                "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin",
+                "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table",
+                "--efi-boot", "limine-eltorito-efi.bin",
+                "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label",
+                img_dir_path, "-o", self.image_path
+            },
+            self.b.allocator);
+        _ = try xorriso_process.spawnAndWait();
+
+        try limine_installer.install(self.image_path, false, null);
+    }
+    
+    fn create(b: *Builder, kernel: *std.build.LibExeObjStep, image_path: []const u8) *std.build.Step
+    {
+        const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
+        var self = b.allocator.create(@This()) catch @panic("out of memory");
+
+        self.* = @This()
+        {
+            .step = std.build.Step.init(.custom, "_limine_image_", b.allocator, @This().build),
+            .b = b,
+            .image_path = image_path,
+            .kernel_path = kernel_path,
+        };
+
+        self.step.dependOn(&kernel.install_step.?.step);
+
+        const image_step = b.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
+        image_step.dependOn(&self.step);
+
+        return image_step;
+    }
+
+};
+
 fn build_x86(b: *Builder) void
 {
     const kernel = stivale2_kernel(b, .x86_64);
     const image_path = b.fmt("{s}/universal.iso", .{b.cache_root});
-    const image = build_limine_image(b, kernel, image_path);
+    const image_step = LimineImage.create(b, kernel, image_path);
 
     const uefi_step = run_qemu_with_x86_uefi_image(b, image_path);
-    uefi_step.step.dependOn(&image.step);
+    uefi_step.step.dependOn(image_step);
 
     const bios_step = run_qemu_with_x86_bios_image(b, image_path);
-    bios_step.step.dependOn(&image.step);
+    bios_step.step.dependOn(image_step);
 
     const run_step = b.step("run", "Run step. Default is BIOS");
     run_step.dependOn(&bios_step.step);
