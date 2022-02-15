@@ -46,16 +46,29 @@ fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjStep
 {
     const kernel_filename = b.fmt("kernel_{s}.elf", .{@tagName(arch)});
-    const kernel = b.addExecutable(kernel_filename, "src/kernel/kernel.zig");
+    const kernel = b.addExecutable(kernel_filename, "src/kernel/main.zig");
+    kernel_exe(kernel, arch);
     kernel.addIncludeDir("stivale");
     kernel.setOutputDir(b.cache_root);
     kernel.setBuildMode(b.standardReleaseOptions());
-    kernel.setMainPkgPath("src/kernel");
-    kernel.addPackagePath("stivale", "stivale/stivale2.zig");
-    kernel.addPackagePath("kernel", "src/kernel/kernel.zig");
+
+    const stivale_package = std.build.Pkg
+    {
+        .name = "stivale",
+        .path = std.build.FileSource.relative("stivale/stivale2.zig"),
+    };
+    const kernel_package = std.build.Pkg
+    {
+        .name = "kernel",
+        .path = std.build.FileSource.relative("src/kernel/kernel.zig"),
+        .dependencies = &.{stivale_package},
+    };
+
+    kernel.setMainPkgPath(std.fs.path.dirname(kernel_package.path.getPath(b)) orelse @panic("unable to get directory name for kernel package"));
+    kernel.addPackage(stivale_package);
+    kernel.addPackage(kernel_package);
     kernel.install();
 
-    kernel_exe(kernel, arch);
     kernel.setLinkerScriptPath(.{ .path = "src/kernel/linker.ld" });
 
     b.default_step.dependOn(&kernel.step);
