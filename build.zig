@@ -1,8 +1,8 @@
 const std = @import("std");
 const Builder = std.build.Builder;
-const limine_installer = @import("limine/limine_installer.zig");
+const limine_installer = @import("limine/installer.zig");
 
-fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
+fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 {
     var disabled_features = std.Target.Cpu.Feature.Set.empty;
     var enabled_feautres = std.Target.Cpu.Feature.Set.empty;
@@ -17,7 +17,7 @@ fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) v
             disabled_features.addFeature(@enumToInt(features.avx2));
 
             enabled_feautres.addFeature(@enumToInt(features.soft_float));
-            exec.code_model = .kernel;
+            kernel.code_model = .kernel;
         },
         //.aarch64 => {
             //@compi
@@ -25,16 +25,16 @@ fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) v
             //disabled_features.addFeature(@enumToInt(features.fp_armv8));
             //disabled_features.addFeature(@enumToInt(features.crypto));
             //disabled_features.addFeature(@enumToInt(features.neon));
-            //exec.code_model = .small;
+            //kernel.code_model = .small;
         //},
         else => unreachable,
     }
 
-    // exec.pie = true;
-    exec.force_pic = true;
-    exec.disable_stack_probing = true;
-    exec.strip = false;
-    exec.setTarget(.{
+    // kernel.pie = true;
+    kernel.force_pic = true;
+    kernel.disable_stack_probing = true;
+    kernel.strip = false;
+    kernel.setTarget(.{
         .cpu_arch = arch,
         .os_tag = std.Target.Os.Tag.freestanding,
         .abi = std.Target.Abi.none,
@@ -46,17 +46,17 @@ fn baremetal_target(exec: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) v
 fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjStep
 {
     const kernel_filename = b.fmt("kernel_{s}.elf", .{@tagName(arch)});
-    const kernel = b.addExecutable(kernel_filename, "kernel/stivale2.zig");
-
-    kernel.addIncludeDir("extern/stivale/");
-    kernel.setMainPkgPath(".");
+    const kernel = b.addExecutable(kernel_filename, "src/kernel/kernel.zig");
+    kernel.addIncludeDir("stivale");
     kernel.setOutputDir(b.cache_root);
-    //kernel.setBuildMode(.ReleaseSafe);
     kernel.setBuildMode(b.standardReleaseOptions());
+    kernel.setMainPkgPath("src/kernel");
+    kernel.addPackagePath("stivale", "stivale/stivale2.zig");
+    kernel.addPackagePath("kernel", "src/kernel/kernel.zig");
     kernel.install();
 
-    baremetal_target(kernel, arch);
-    kernel.setLinkerScriptPath(.{ .path = "kernel/linker.ld" });
+    kernel_exe(kernel, arch);
+    kernel.setLinkerScriptPath(.{ .path = "src/kernel/linker.ld" });
 
     b.default_step.dependOn(&kernel.step);
 
@@ -114,47 +114,6 @@ fn run_qemu_with_x86_uefi_image(b: *Builder, image_path: []const u8) *std.build.
     return run_step;
 }
 
-fn build_limine_image(b: *Builder, kernel: *std.build.LibExeObjStep, image_path: []const u8) *std.build.RunStep
-{
-    const img_dir = b.fmt("{s}/img_dir", .{b.cache_root});
-
-    const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
-
-    const cmd = &[_][]const u8{
-        "/bin/sh", "-c",
-        std.mem.concat(b.allocator, u8, &[_][]const u8{
-            // zig fmt: off
-            "rm ", image_path, " || true && ",
-            "mkdir -p ", img_dir, "/EFI/BOOT && ",
-            "make -C extern/limine-bin limine-install && ",
-            "cp ",
-                "extern/limine-bin/limine-eltorito-efi.bin ",
-                "extern/limine-bin/limine-cd.bin ",
-                "extern/limine-bin/limine.sys ",
-                "limine.cfg ",
-                img_dir, " && ",
-            "cp extern/limine-bin/BOOTX64.EFI ", img_dir, "/EFI/BOOT/ && ",
-            "cp ", kernel_path, " ", img_dir, " && ",
-            "xorriso -as mkisofs -quiet -b limine-cd.bin ",
-                "-no-emul-boot -boot-load-size 4 -boot-info-table ",
-                "--efi-boot limine-eltorito-efi.bin ",
-                "-efi-boot-part --efi-boot-image --protective-msdos-label ",
-                img_dir, " -o ", image_path, " && ",
-            "extern/limine-bin/limine-install ", image_path, " && ",
-            "true",
-            // zig fmt: on
-        }) catch unreachable,
-    };
-
-    const image_step = b.addSystemCommand(cmd);
-    image_step.step.dependOn(&kernel.install_step.?.step);
-
-    const image_command = b.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
-    image_command.dependOn(&image_step.step);
-
-    return image_step;
-}
-
 const LimineImage = struct
 {
     step: std.build.Step,
@@ -170,7 +129,7 @@ const LimineImage = struct
         cwd.deleteFile(self.image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-        const limine_dir = try cwd.openDir("extern/limine-bin", .{});
+        const limine_dir = try cwd.openDir("limine", .{});
 
         const files_to_copy_from_limine_dir = [_][]const u8
         { 

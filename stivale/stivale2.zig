@@ -1,5 +1,5 @@
 const std = @import("std");
-const kernel = @import("kernel.zig");
+const kernel = @import("../src/kernel/kernel.zig");
 
 const stivale2 = @cImport(@cInclude("stivale2.h"));
 

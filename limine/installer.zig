@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
-const stage2 = @embedFile("../extern/limine-bin/limine-hdd.bin");
+const stage2 = @embedFile("limine-hdd.bin");
 
 const InstallerError = error
 {

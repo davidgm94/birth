@@ -1,6 +1,6 @@
 const std = @import("std");
 const arch = @import("arch/x86_64.zig");
-const stivale = @import("stivale2.zig");
+const stivale = @import("stivale");
 
 pub fn log(str: []const u8) void
 {
