@@ -68,7 +68,7 @@ fn print_error_and_exit(e: InstallerError) InstallerError
     return e;
 }
 
-const gpt_header_signature = [_]u8 { 'E', 'F', 'I', ' ', 'P', 'A', 'R', 'T', 0 };
+const gpt_header_signature = [_]u8 { 'E', 'F', 'I', ' ', 'P', 'A', 'R', 'T', };
 
 fn div_roundup(a: u64, b: u64) u64
 {
@@ -96,17 +96,17 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
     defer device_array_list.deinit();
 
     // Point to the second block where the GPT header might be
-    var file_pointer: u64 = 0;
     var do_gpt = false;
     var gpt_header: *GPT.Header = undefined;
     const lb_guesses = [_]u64 { 512, 4096 };
+    var lb_size: u64 = 0;
 
     for (lb_guesses) |guess|
     {
-        file_pointer = guess;
-        gpt_header = @ptrCast(*GPT.Header, &device[file_pointer]);
+        gpt_header = @ptrCast(*GPT.Header, &device[guess]);
         if (std.mem.eql(u8, &gpt_header.signature, &gpt_header_signature))
         {
+            lb_size = guess;
             do_gpt = !force_mbr;
             if (force_mbr)
             {
@@ -117,18 +117,16 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
     }
 
 
-    const secondary_GPT_header = @ptrCast(*GPT.Header, &device[gpt_header.alternate_LBA]);
+    const secondary_GPT_header = @ptrCast(*GPT.Header, &device[lb_size * gpt_header.alternate_LBA]);
     if (do_gpt)
     {
-        print("Installing to GPT. Logical block size of {}\nSecondary header at LBA 0x{x}\n", .{file_pointer, gpt_header.alternate_LBA});
+        //print("Installing to GPT. Logical block size of {}\nSecondary header at LBA 0x{x}\n", .{lb_size, gpt_header.alternate_LBA});
         if (!std.mem.eql(u8, &secondary_GPT_header.signature, &gpt_header_signature))
         {
             return print_error_and_exit(InstallerError.secondary_GPT_header_invalid);
         }
 
-        stdout_write("Secondary header valid\n");
-
-        @panic("todo");
+        //stdout_write("Secondary header valid\n");
     }
     else
     {
@@ -228,8 +226,6 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         if (!mbr) return print_error_and_exit(InstallerError.invalid_partition_table);
     }
 
-    const lb_size = file_pointer;
-        
     const stage2_size = stage2.len - 512;
     const stage2_sections = div_roundup(stage2_size, 512);
     var stage2_size_a = @intCast(u16, (stage2_sections / 2) * 512 + @as(u64, if (stage2_sections % 2 != 0) 512 else 0));
@@ -246,7 +242,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         }
         else
         {
-            stdout_write("GPT partition not specified. Attempting GPT embedding\n");
+            //stdout_write("GPT partition not specified. Attempting GPT embedding\n");
 
             var max_partition_entry_used: u64 = 0;
             const partition_entries = @intToPtr([*]GPT.Entry, @ptrToInt(device.ptr) + gpt_header.partition_entry_LBA * lb_size)[0..gpt_header.partition_entry_count];
@@ -263,7 +259,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
             stage2_loc_a -= stage2_size_a;
             stage2_loc_a &= ~(lb_size - 1);
 
-            stage2_size_a = @intCast(u16, (secondary_GPT_header.partition_entry_LBA + 32) * lb_size);
+            stage2_loc_b = (secondary_GPT_header.partition_entry_LBA + 32) * lb_size;
             stage2_loc_b -= stage2_size_b;
             stage2_loc_b &= ~(lb_size - 1);
 
@@ -276,7 +272,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
                 @panic("todo");
             }
 
-            print("New maximum count of partition entries: {}\n", .{new_partition_entry_count});
+            //print("New maximum count of partition entries: {}\n", .{new_partition_entry_count});
 
             std.mem.set(u8, device[gpt_header.partition_entry_LBA * lb_size .. (gpt_header.partition_entry_LBA * lb_size) + ((max_partition_entry_used + 1) * gpt_header.partition_entry_size)], 0);
             std.mem.set(u8, device[secondary_GPT_header.partition_entry_LBA * lb_size .. (secondary_GPT_header.partition_entry_LBA * lb_size) + ((max_partition_entry_used + 1) * secondary_GPT_header.partition_entry_size)], 0);
@@ -297,10 +293,10 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
     }
     else
     {
-        stdout_write("Installing to MBR\n");
+        //stdout_write("Installing to MBR\n");
     }
 
-    print("Stage 2 to be located at 0x{x} and 0x{x}\n", .{stage2_loc_a, stage2_loc_b});
+    // print("Stage 2 to be located at 0x{x} and 0x{x}\n", .{stage2_loc_a, stage2_loc_b});
 
     const original_timestamp = @ptrCast(*[6]u8, &device[218]).*;
     const original_partition_table = @ptrCast(*[70]u8, &device[440]).*;

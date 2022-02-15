@@ -166,7 +166,6 @@ const LimineImage = struct
     {
         const self = @fieldParentPtr(@This(), "step", step);
         const img_dir_path = self.b.fmt("{s}/img_dir", .{self.b.cache_root});
-        std.debug.print("Trying to delete {s}\n", .{self.image_path});
         const cwd = std.fs.cwd();
         cwd.deleteFile(self.image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
@@ -197,6 +196,10 @@ const LimineImage = struct
                 img_dir_path, "-o", self.image_path
             },
             self.b.allocator);
+        // Ignore stderr and stdout
+        xorriso_process.stdin_behavior = std.ChildProcess.StdIo.Ignore;
+        xorriso_process.stdout_behavior = std.ChildProcess.StdIo.Ignore;
+        xorriso_process.stderr_behavior = std.ChildProcess.StdIo.Ignore;
         _ = try xorriso_process.spawnAndWait();
 
         try limine_installer.install(self.image_path, false, null);
