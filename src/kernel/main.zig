@@ -1,10 +1,9 @@
 const StackTrace = @import("std").builtin.StackTrace;
-const log = @import("kernel").log;
-const spin = @import("kernel").arch.spin;
+const logf = @import("kernel.zig").logf;
+const spin = @import("kernel.zig").arch.spin;
 
-pub fn panic(msg: []const u8, _: ?*StackTrace) noreturn
+pub fn panic(msg: []const u8, stack_trace: ?*StackTrace) noreturn
 {
-    log("PANIC!\n");
-    log(msg);
+    logf("PANIC!\n{s}\nStack trace:\n{}\n", .{msg, stack_trace});
     spin();
 }

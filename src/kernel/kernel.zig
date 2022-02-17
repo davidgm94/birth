@@ -14,20 +14,32 @@ fn log_format(format_buffer: []u8, comptime format: []const u8, args: anytype) c
     return std.fmt.bufPrint(format_buffer, format, args) catch @panic("unable to format log call");
 }
 
-var log_format_buffer: [0x4000]u8 = undefined;
-
+var log_format_buffer: [0x4000]u8 align(0x1000) = undefined;
 pub fn logf(comptime format: []const u8, args: anytype) void
 {
     const formatted_slice = log_format(&log_format_buffer, format, args);
     log(formatted_slice);
 }
 
+// @TODO: turn off interrupts
+var panic_format_buffer: [0x4000]u8 align(0x1000) = undefined;
+pub fn panic(comptime format: []const u8, args: anytype) noreturn
+{
+    const formatted_slice = log_format(&panic_format_buffer, format, args);
+    log(formatted_slice);
+    arch.spin();
+}
+
+pub fn assert(condition: bool, src: std.builtin.SourceLocation) void
+{
+    if (!condition) panic("Assert failed at {s}:{}:{} {s}()\n", .{src.file, src.line, src.column, src.fn_name});
+}
+
 pub fn main() noreturn
 {
-    arch.set_cpu_local_storage(0);
-    arch.fpu_flags();
-    arch.init_interrupts();
-    log("\x1b[31mHello, \x1b[33mworld!\x1b[0m\n");
+    log("Welcome to the RNU kernel!\n");
+    arch.init();
+    log("Everything worked so far!\n");
     arch.spin();
 }
 

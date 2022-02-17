@@ -1,9 +1,31 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const kernel = @import("../kernel.zig");
+const interrupts = @import("x86_64/interrupts.zig");
 const TODO = kernel.TODO;
 
 pub const GS_base = MSR(0xc0000102);
+pub const page_size = 0x1000;
+pub const page_table_level_count = 4;
+
+fn page_table_level_count_to_bit_map(level: u8) u8
+{
+    return if (level == 4) return 48 else if (level == 5) return 57 else @panic("invalid page table level count\n");
+}
+
+fn is_canonical_address(address: u64) bool
+{
+    const sign_bit = address & (1 << 63) != 0;
+    const significant_bit_count = page_table_level_count_to_bit_map(page_table_level_count);
+    var i: u8 = 63;
+    while (i >= significant_bit_count) : (i -= 1)
+    {
+        const bit = address & (1 << i) != 0;
+        if (bit != sign_bit) return false;
+    }
+
+    return true;
+}
 
 pub const CPU = struct
 {
@@ -193,6 +215,11 @@ const CR0 = struct
     fn read() callconv(.Inline) u64
     {
         return R64("cr0").read();
+    }
+
+    fn get_flag(comptime bit: Bit) callconv(.Inline) bool
+    {
+        return read() & (1 << @enumToInt(bit)) != 0;
     }
 };
 
@@ -413,6 +440,11 @@ const CR4 = struct
     {
         return R64("cr4").read();
     }
+
+    fn get_flag(comptime bit: Bit) callconv(.Inline) bool
+    {
+        return read() & (1 << @enumToInt(bit)) != 0;
+    }
 };
 
 /// Provides read and write access to the Task Priority Register (TPR). It specifies the priority threshold
@@ -454,31 +486,14 @@ pub fn set_cpu_local_storage(index: u64) void
     GS_base.write(@ptrToInt(&cpus[index]));
 }
 
-pub export fn fpu_flags() void
+pub fn initialize_FPU() void
 {
-    var cr0 = CR0.read();
-    var mp_enabled = cr0 & (1 << @enumToInt(CR0.Bit.MP)) != 0;
-    var em_enabled = cr0 & (1 << @enumToInt(CR0.Bit.EM)) != 0;
-    var ne_enabled = cr0 & (1 << @enumToInt(CR0.Bit.NE)) != 0;
-
-    kernel.log("MP: "); if (mp_enabled) kernel.log("true\n") else kernel.log("false\n");
-    kernel.log("EM: "); if (em_enabled) kernel.log("true\n") else kernel.log("false\n");
-    kernel.log("NE: "); if (ne_enabled) kernel.log("true\n") else kernel.log("false\n");
-
-    const new_cr0 = 
-        cr0
-        | (1 << @enumToInt(CR0.Bit.MP))
-        | (1 << @enumToInt(CR0.Bit.NE));
-
-    CR0.write(new_cr0);
-
-    cr0 = CR0.read();
-    mp_enabled = cr0 & (1 << @enumToInt(CR0.Bit.MP)) != 0;
-    em_enabled = cr0 & (1 << @enumToInt(CR0.Bit.EM)) != 0;
-    ne_enabled = cr0 & (1 << @enumToInt(CR0.Bit.NE)) != 0;
-    kernel.log("MP: "); if (mp_enabled) kernel.log("true\n") else kernel.log("false\n");
-    kernel.log("EM: "); if (em_enabled) kernel.log("true\n") else kernel.log("false\n");
-    kernel.log("NE: "); if (ne_enabled) kernel.log("true\n") else kernel.log("false\n");
+    kernel.log("Initializing FPU...\n");
+    defer kernel.log("FPU initialized\n");
+    CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.MP)) | (1 << @enumToInt(CR0.Bit.NE)));
+    CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.OSFXSR)) | (1 << @enumToInt(CR4.Bit.OSXMMEXCPT))); 
+    kernel.log("@TODO: MXCSR. See Intel manual\n");
+    kernel.log("@TODO: look at Essence code. fldcw\n");
 }
 
 const IOPort = struct
@@ -616,4 +631,47 @@ const PIC = struct
 pub fn init_interrupts() void
 {
     PIC.disable();
+    kernel.log("TODO: initialize interrupts\n");
+}
+
+pub fn init_cache() void
+{
+    defer kernel.log("Cache initialized!\n");
+    kernel.log("Ensuring cache is initialized...\n");
+    kernel.assert(!CR0.get_flag(.CD), @src());
+    kernel.assert(!CR0.get_flag(.NW), @src());
+}
+
+const IDT = struct
+{
+    const Descriptor = packed struct
+    {
+        offset_low: u16,
+        segment_selector: u16,
+        interrupt_stack_table: u3,
+        reserved0: u5 = 0,
+        type: u4,
+        reserved1: u1 = 0, // storage?
+        descriptor_privilege_level: u2,
+        present: u1,
+        offset_mid: u16,
+        offset_high: u32,
+        reserved2: u32 = 0,
+    };
+
+    const Table = [256]Descriptor;
+
+    comptime { assert(@sizeOf(Descriptor) == 16); }
+
+    var table: IDT.Table align(page_size) = undefined;
+};
+
+pub fn init() void
+{
+    const foo = interrupts.raw_interrupt_handlers[0];
+    _ = foo;
+    set_cpu_local_storage(0);
+    initialize_FPU();
+    init_cache();
+    init_interrupts();
 }

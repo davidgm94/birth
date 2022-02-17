@@ -1,6 +1,7 @@
 const std = @import("std");
 const Builder = std.build.Builder;
 const limine_installer = @import("limine/installer.zig");
+const Autogenerator = @import("autogenerator.zig");
 
 fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 {
@@ -50,23 +51,17 @@ fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjS
     kernel_exe(kernel, arch);
     kernel.addIncludeDir("stivale");
     kernel.setOutputDir(b.cache_root);
-    kernel.setBuildMode(b.standardReleaseOptions());
+    kernel.setBuildMode(.ReleaseSafe);
+    //kernel.setBuildMode(b.standardReleaseOptions());
 
     const stivale_package = std.build.Pkg
     {
         .name = "stivale",
         .path = std.build.FileSource.relative("stivale/stivale2.zig"),
     };
-    const kernel_package = std.build.Pkg
-    {
-        .name = "kernel",
-        .path = std.build.FileSource.relative("src/kernel/kernel.zig"),
-        .dependencies = &.{stivale_package},
-    };
 
-    kernel.setMainPkgPath(std.fs.path.dirname(kernel_package.path.getPath(b)) orelse @panic("unable to get directory name for kernel package"));
+    kernel.setMainPkgPath("src/kernel");
     kernel.addPackage(stivale_package);
-    kernel.addPackage(kernel_package);
     kernel.install();
 
     kernel.setLinkerScriptPath(.{ .path = "src/kernel/linker.ld" });
@@ -75,27 +70,111 @@ fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjS
 
     return kernel;
 }
-
-fn run_qemu_with_x86_bios_image(b: *Builder, image_path: []const u8) *std.build.RunStep
+const Loader = enum
 {
-    const cmd = &[_][]const u8{
-        // zig fmt: off
-        "qemu-system-x86_64",
-        "-cdrom", image_path,
-        "-debugcon", "stdio",
-        "-vga", "std",
-        "-m", "4G",
-        "-machine", "q35",
-        // zig fmt: on
-    };
+    uefi,
+    bios,
+};
 
-    const run_step = b.addSystemCommand(cmd);
+fn get_qemu_command(arch: std.Target.Cpu.Arch, loader: Loader, debug: bool) []const []const u8
+{
+    switch (arch)
+    {
+        .x86_64 =>
+        {
+            switch (loader)
+            {
+                .bios =>
+                {
+                    const x86_bios_qemu_cmd = [_][]const u8
+                    {
+                        // zig fmt: off
+                        "qemu-system-x86_64",
+                        "-cdrom", image_path,
+                        "-debugcon", "stdio",
+                        "-vga", "std",
+                        "-m", "4G",
+                        "-machine", "q35",
+                        // zig fmt: on
+                    };
+
+                    if (debug)
+                    {
+                        const debug_flags = [_][]const u8 { "-S", "-s" };
+                        const result = x86_bios_qemu_cmd ++ debug_flags;
+                        return &result;
+                    }
+                    else
+                    {
+
+                        return &x86_bios_qemu_cmd;
+                    }
+                },
+                .uefi => unreachable,
+            }
+        },
+        else => unreachable,
+    }
+}
+
+
+fn run_qemu_with_x86_bios_image(b: *Builder) *std.build.RunStep
+{
+    const run_step = b.addSystemCommand(get_qemu_command(.x86_64, .bios, false));
 
     const run_command = b.step("run-x86_64-bios", "Run on x86_64 with Limine BIOS bootloader");
     run_command.dependOn(&run_step.step);
 
     return run_step;
 }
+
+const Debug = struct
+{
+    step: std.build.Step,
+    b: *Builder,
+
+    fn create(b: *Builder) *@This()
+    {
+        var self = b.allocator.create(@This()) catch @panic("out of memory\n");
+        self.* =
+        .{
+            .step = std.build.Step.init(.custom, "_debug_", b.allocator, @This().build),
+            .b = b,
+        };
+
+        return self;
+    }
+
+    fn build(step: *std.build.Step) !void
+    {
+        const self = @fieldParentPtr(@This(), "step", step);
+        const gdb_script_path = "zig-cache/.gdb_script";
+        // @TODO: stop hardcoding the kernel path
+        const gdb_script =
+            \\set disassembly-flavor intel
+            \\symbol-file zig-cache/kernel_x86_64.elf
+            \\b _start
+            \\target remote localhost:1234
+            \\c
+            ;
+        try std.fs.cwd().writeFile(gdb_script_path, gdb_script);
+        const first_pid = try std.os.fork();
+        if (first_pid == 0)
+        {
+            const debugger = try std.ChildProcess.init( &.{ "gf2", "-x", gdb_script_path }, self.b.allocator);
+            _ = try debugger.spawnAndWait();
+        }
+        else
+        {
+            const qemu_debug_command = get_qemu_command(.x86_64, .bios, true);
+            const qemu = try std.ChildProcess.init(qemu_debug_command, self.b.allocator);
+            try qemu.spawn();
+
+            _ = std.os.waitpid(first_pid, 0);
+            _ = try qemu.kill();
+        }
+    }
+};
 
 fn get_ovmf(_: *Builder) ![]const u8
 {
@@ -105,7 +184,8 @@ fn get_ovmf(_: *Builder) ![]const u8
     return "OVMF path not found - please set envvar OVMF_PATH";
 }
 
-fn run_qemu_with_x86_uefi_image(b: *Builder, image_path: []const u8) *std.build.RunStep
+const image_path = "zig-cache/universal.iso";
+fn run_qemu_with_x86_uefi_image(b: *Builder) *std.build.RunStep
 {
     const cmd = &[_][]const u8{
         // zig fmt: off
@@ -131,7 +211,6 @@ const LimineImage = struct
 {
     step: std.build.Step,
     b: *Builder,
-    image_path: []const u8,
     kernel_path: []const u8,
 
     fn build(step: *std.build.Step) !void
@@ -139,7 +218,7 @@ const LimineImage = struct
         const self = @fieldParentPtr(@This(), "step", step);
         const img_dir_path = self.b.fmt("{s}/img_dir", .{self.b.cache_root});
         const cwd = std.fs.cwd();
-        cwd.deleteFile(self.image_path) catch {};
+        cwd.deleteFile(image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
         const limine_dir = try cwd.openDir("limine", .{});
@@ -165,7 +244,7 @@ const LimineImage = struct
                 "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table",
                 "--efi-boot", "limine-eltorito-efi.bin",
                 "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label",
-                img_dir_path, "-o", self.image_path
+                img_dir_path, "-o", image_path
             },
             self.b.allocator);
         // Ignore stderr and stdout
@@ -174,10 +253,10 @@ const LimineImage = struct
         xorriso_process.stderr_behavior = std.ChildProcess.StdIo.Ignore;
         _ = try xorriso_process.spawnAndWait();
 
-        try limine_installer.install(self.image_path, false, null);
+        try limine_installer.install(image_path, false, null);
     }
     
-    fn create(b: *Builder, kernel: *std.build.LibExeObjStep, image_path: []const u8) *std.build.Step
+    fn create(b: *Builder, kernel: *std.build.LibExeObjStep) *std.build.Step
     {
         const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
         var self = b.allocator.create(@This()) catch @panic("out of memory");
@@ -186,7 +265,6 @@ const LimineImage = struct
         {
             .step = std.build.Step.init(.custom, "_limine_image_", b.allocator, @This().build),
             .b = b,
-            .image_path = image_path,
             .kernel_path = kernel_path,
         };
 
@@ -202,18 +280,27 @@ const LimineImage = struct
 
 fn build_x86(b: *Builder) void
 {
+    const interrupts_file = Autogenerator.generate_interrupts(b.allocator) catch @panic("unable to generate interrupts file string\n");
+    const interrupt_file_step = b.addWriteFile("interrupts.zig", interrupts_file);
+    var interrupt_file_step_install = Autogenerator.InstallInSourceStep.init(b, interrupt_file_step.getFileSource("interrupts.zig").?, "src/kernel/arch/x86_64/interrupts.zig");
+    interrupt_file_step_install.step.dependOn(&interrupt_file_step.step);
     const kernel = stivale2_kernel(b, .x86_64);
-    const image_path = b.fmt("{s}/universal.iso", .{b.cache_root});
-    const image_step = LimineImage.create(b, kernel, image_path);
+    kernel.step.dependOn(&interrupt_file_step_install.step);
+    const image_step = LimineImage.create(b, kernel);
 
-    const uefi_step = run_qemu_with_x86_uefi_image(b, image_path);
+    const uefi_step = run_qemu_with_x86_uefi_image(b);
     uefi_step.step.dependOn(image_step);
 
-    const bios_step = run_qemu_with_x86_bios_image(b, image_path);
+    const bios_step = run_qemu_with_x86_bios_image(b);
     bios_step.step.dependOn(image_step);
 
     const run_step = b.step("run", "Run step. Default is BIOS");
     run_step.dependOn(&bios_step.step);
+
+    const debug_step = b.step("debug", "Debug step. Launch QEMU and GF (GDB frontend)");
+    const debug_custom = Debug.create(b);
+    debug_custom.step.dependOn(image_step);
+    debug_step.dependOn(&debug_custom.step);
 }
 
 pub fn build(b: *Builder) void
