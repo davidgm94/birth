@@ -51,8 +51,8 @@ fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjS
     kernel_exe(kernel, arch);
     kernel.addIncludeDir("stivale");
     kernel.setOutputDir(b.cache_root);
-    kernel.setBuildMode(.ReleaseSafe);
-    //kernel.setBuildMode(b.standardReleaseOptions());
+    //kernel.setBuildMode(.ReleaseSafe);
+    kernel.setBuildMode(b.standardReleaseOptions());
 
     const stivale_package = std.build.Pkg
     {

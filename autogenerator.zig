@@ -25,7 +25,7 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
 {
     @setEvalBranchQuota(std.math.maxInt(u32));
     const interrupt_context =
-        \\pub const InterruptContext = extern struct
+        \\pub const Context = extern struct
         \\{
         \\    es: u64,
         \\    ds: u64,
@@ -74,13 +74,13 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
         \\        \\push %%r13
         \\        \\push %%r14
         \\        \\push %%r15
-        \\        \\mov 0x123456789ABCDEF, %rax
-        \\        \\push rax
+        \\        \\mov $0x123456789ABCDEF, %%rax
+        \\        \\push %%rax
         \\        \\mov %%rsp, %%rbx
-        \\        \\and ~0xf, %rsp
-        \\        \\fxsave -0x200(%rsp)
+        \\        \\and $~0xf, %%rsp 
+        \\        \\fxsave -0x200(%%rsp)
         \\        \\mov %%rbx, %%rsp
-        \\        \\sub $0x210, %rsp
+        \\        \\sub $0x210, %%rsp
         \\        \\xor %%rax, %%rax
         \\        \\mov %%ds, %%ax
         \\        \\push %%rax
@@ -88,11 +88,11 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
         \\        \\mov %%es, %%rax
         \\        \\push %%rax
         \\        \\mov %%rsp, %%rdi
-        \\        \\mov $0x10, %ax
+        \\        \\mov $0x10, %%ax
         \\        \\mov %%ax, %%ds
         \\        \\mov %%ax, %%es
         \\        \\mov %%rsp, %%rbx
-        \\        \\and ~0xf, %rsp
+        \\        \\and $~0xf, %%rsp 
         \\    );
         \\
         \\
@@ -108,14 +108,14 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
         \\        \\add $0x210, %%rsp
         \\        \\mov %%rsp, %%rbx
         \\        \\and $~0xf, %%rbx
-        \\        \\and $0xfffffffffffffff0, %rbx
-        \\        \\fxrstor -0x200(%rbx)
+        \\        \\and $~0xf, %%rbx
+        \\        \\fxrstor -0x200(%%rbx)
         \\        // @TODO: if this is a new thread, we must initialize the FPU
         \\        \\pop %%rax
-        \\        \\mov $0x123456789ABCDEF, %%rbx
-        \\        \\cmp %%rbx, %%rax
-        \\        \\.loop:
-        \\        \\jne .loop
+        //\\        \\mov $0x123456789ABCDEF, %%rbx
+        //\\        \\cmp %%rbx, %%rax
+        //\\        \\.loop:
+        //\\        \\jne .loop
         \\        \\pop %%r15
         \\        \\pop %%r14
         \\        \\pop %%r13
@@ -164,9 +164,9 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
 
         const handler = try std.fmt.allocPrint(allocator,
             \\    asm volatile(
-            \\        \\mov $interrupt_handlers, %rax
-            \\        \\add ${}, %rax
-            \\        \\call %%rax
+            \\        \\mov $interrupt_handlers, %%rax
+            \\        \\add ${}, %%rax
+            \\        \\callq *%%rax
             \\    );
             \\
             \\
@@ -182,10 +182,19 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
     i = 0;
     inline while (i < 256) : (i += 1)
     {
-        try array_list.appendSlice(try std.fmt.allocPrint(allocator, "raw_interrupt_handler{},\n", .{i}));
+        try array_list.appendSlice(try std.fmt.allocPrint(allocator, "    raw_interrupt_handler{},\n", .{i}));
     }
-
     try array_list.appendSlice("};\n");
+
+    try array_list.appendSlice("pub export var interrupt_handlers = [256]fn(context: *Context) callconv(.C) void\n{\n");
+    i = 0;
+    inline while (i < 256) : (i += 1)
+    {
+        try array_list.appendSlice("    unhandled_interrupt,\n");
+    }
+    try array_list.appendSlice("};\n");
+
+    try array_list.appendSlice("export fn unhandled_interrupt(_: *Context) callconv(.C) void { while (true) { } }\n\n");
 
     return array_list.items;
 }
