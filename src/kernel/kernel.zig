@@ -3,6 +3,11 @@ const stivale = @import("stivale");
 
 const std = @import("std");
 
+pub const LocalStorage = struct
+{
+    arch: arch.LocalStorage,
+};
+
 pub fn log(str: []const u8) void
 {
     stivale.terminal_write(str);

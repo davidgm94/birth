@@ -139,11 +139,18 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
         ;
 
     var array_list = std.ArrayList(u8).init(allocator);
+    try array_list.appendSlice(
+        \\const x86_64 = @import("../x86_64.zig");
+        \\const page_size = x86_64.page_size;
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+    );
     try array_list.appendSlice(interrupt_context);
-    comptime var i: u16 = 0;
-    inline while (i < 256) : (i += 1)
+    var i: u16 = 0;
+    while (i < 256) : (i += 1)
     {
-        const first = try std.fmt.allocPrint(allocator, "fn raw_interrupt_handler{}() callconv(.Naked) void\n{c}\n", .{i, '{'});
+        const first = try std.fmt.allocPrint(allocator, "pub export fn raw_interrupt_handler{}() callconv(.Naked) void\n{c}\n", .{i, '{'});
         try array_list.appendSlice(first);
 
         if (has_error_code(i))
@@ -178,23 +185,81 @@ pub fn generate_interrupts(allocator: std.mem.Allocator) ![]const u8
         try array_list.appendSlice(try std.fmt.allocPrint(allocator, "    unreachable;\n{c}\n", .{'}'}));
     }
 
-    try array_list.appendSlice("pub export var raw_interrupt_handlers = [256]fn() callconv(.Naked) void\n{\n");
-    i = 0;
-    inline while (i < 256) : (i += 1)
-    {
-        try array_list.appendSlice(try std.fmt.allocPrint(allocator, "    raw_interrupt_handler{},\n", .{i}));
-    }
-    try array_list.appendSlice("};\n");
-
     try array_list.appendSlice("pub export var interrupt_handlers = [256]fn(context: *Context) callconv(.C) void\n{\n");
     i = 0;
-    inline while (i < 256) : (i += 1)
+    while (i < 256) : (i += 1)
     {
         try array_list.appendSlice("    unhandled_interrupt,\n");
     }
     try array_list.appendSlice("};\n");
 
-    try array_list.appendSlice("export fn unhandled_interrupt(_: *Context) callconv(.C) void { while (true) { } }\n\n");
+    try array_list.appendSlice("pub export fn unhandled_interrupt(_: *Context) callconv(.C) void { while (true) { } }\n\n");
+
+    const idt_common = 
+        \\pub const IDT = struct
+        \\{
+        \\    pub const Descriptor = packed struct
+        \\    {
+        \\        offset_low: u16,
+        \\        segment_selector: u16,
+        \\        interrupt_stack_table: u3,
+        \\        reserved0: u5 = 0,
+        \\        type: u4,
+        \\        reserved1: u1 = 0, // storage?
+        \\        descriptor_privilege_level: u2,
+        \\        present: u1,
+        \\        offset_mid: u16,
+        \\        offset_high: u32,
+        \\        reserved2: u32 = 0,
+        \\    };
+        \\
+        \\    pub const Register = extern struct
+        \\    {
+        \\        limit: u16 = @sizeOf(IDT.Table) - 1,
+        \\        address: *IDT.Table,
+        \\    };
+        \\
+        \\    comptime { assert(@sizeOf(Descriptor) == 16); }
+        \\
+        \\    const Table = [256]Descriptor;
+        \\    pub var table: IDT.Table align(page_size) = undefined;
+        \\
+        \\    pub fn fill() void
+        \\    {
+        \\
+        ;
+    try array_list.appendSlice(idt_common);
+
+    i = 0;
+    while (i < 256) : (i += 1)
+    {
+        try array_list.appendSlice(try std.fmt.allocPrint(allocator,
+            \\    table[{}] = Descriptor
+            , .{i}));
+        try array_list.appendSlice(
+            \\    {
+        );
+
+        const descriptor = try std.fmt.allocPrint(allocator,
+            \\        .offset_low = @truncate(u16, @ptrToInt(raw_interrupt_handler{})),
+            \\        .offset_mid = @truncate(u16, @ptrToInt(raw_interrupt_handler{}) >> 16),
+            \\        .offset_high = @truncate(u32, @ptrToInt(raw_interrupt_handler{}) >> 32),
+            \\        .segment_selector = 0x08, // @TODO: this should change as the GDT selector changes
+            \\        .interrupt_stack_table = 0,
+            \\        .type = 0xe,
+            \\        .descriptor_privilege_level = 0,
+            \\        .present = 1,
+            , .{i, i, i});
+        try array_list.appendSlice(descriptor);
+
+        try array_list.appendSlice(
+            \\    };
+            \\
+        );
+    }
+
+    try array_list.appendSlice("\n}\n};\n");
+
 
     return array_list.items;
 }

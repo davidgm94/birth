@@ -27,12 +27,13 @@ fn is_canonical_address(address: u64) bool
     return true;
 }
 
-pub const CPU = struct
+/// Arch-specific part of kernel.LocalStorage
+pub const LocalStorage = struct
 {
     id: u64,
 };
 
-pub var cpus: [256]CPU = undefined;
+pub var cpu_local_storages: [256]kernel.LocalStorage = undefined;
 
 pub fn MSR(comptime msr: u32) type
 {
@@ -483,7 +484,7 @@ pub fn spin() callconv(.Inline) noreturn
 /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
 pub fn set_cpu_local_storage(index: u64) void
 {
-    GS_base.write(@ptrToInt(&cpus[index]));
+    GS_base.write(@ptrToInt(&cpu_local_storages[index]));
 }
 
 pub fn initialize_FPU() void
@@ -631,6 +632,16 @@ const PIC = struct
 pub fn init_interrupts() void
 {
     PIC.disable();
+    interrupts.IDT.fill();
+    const idtr = interrupts.IDT.Register
+    {
+        .address = &interrupts.IDT.table,
+    };
+    asm volatile(
+        \\lidt (%[idt_address])
+        :
+        : [idt_address] "r" (&idtr));
+    asm volatile("sti");
     kernel.log("TODO: initialize interrupts\n");
 }
 
@@ -642,33 +653,9 @@ pub fn init_cache() void
     kernel.assert(!CR0.get_flag(.NW), @src());
 }
 
-const IDT = struct
-{
-    const Descriptor = packed struct
-    {
-        offset_low: u16,
-        segment_selector: u16,
-        interrupt_stack_table: u3,
-        reserved0: u5 = 0,
-        type: u4,
-        reserved1: u1 = 0, // storage?
-        descriptor_privilege_level: u2,
-        present: u1,
-        offset_mid: u16,
-        offset_high: u32,
-        reserved2: u32 = 0,
-    };
-
-    const Table = [256]Descriptor;
-
-    comptime { assert(@sizeOf(Descriptor) == 16); }
-
-    var table: IDT.Table align(page_size) = undefined;
-};
-
 pub fn init() void
 {
-    const foo = interrupts.raw_interrupt_handlers[0];
+    const foo = interrupts.IDT.table;
     _ = foo;
     set_cpu_local_storage(0);
     initialize_FPU();
