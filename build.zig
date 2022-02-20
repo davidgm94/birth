@@ -2,6 +2,7 @@ const std = @import("std");
 const Builder = std.build.Builder;
 const limine_installer = @import("limine/installer.zig");
 const Autogenerator = @import("autogenerator.zig");
+const builtin = @import("builtin");
 
 fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 {
@@ -62,7 +63,6 @@ fn stivale2_kernel(b: *Builder, arch: std.Target.Cpu.Arch) *std.build.LibExeObjS
 
     kernel.setMainPkgPath("src/kernel");
     kernel.addPackage(stivale_package);
-    kernel.install();
 
     kernel.setLinkerScriptPath(.{ .path = "src/kernel/linker.ld" });
 
@@ -158,20 +158,30 @@ const Debug = struct
             \\c
             ;
         try std.fs.cwd().writeFile(gdb_script_path, gdb_script);
-        const first_pid = try std.os.fork();
-        if (first_pid == 0)
+
+        if (builtin.os.tag == .linux)
         {
-            const debugger = try std.ChildProcess.init( &.{ "gf2", "-x", gdb_script_path }, self.b.allocator);
-            _ = try debugger.spawnAndWait();
+            const first_pid = try std.os.fork();
+            if (first_pid == 0)
+            {
+                const debugger = try std.ChildProcess.init( &.{ "gf2", "-x", gdb_script_path }, self.b.allocator);
+                _ = try debugger.spawnAndWait();
+            }
+            else
+            {
+                const qemu_debug_command = get_qemu_command(.x86_64, .bios, true);
+                const qemu = try std.ChildProcess.init(qemu_debug_command, self.b.allocator);
+                try qemu.spawn();
+
+                _ = std.os.waitpid(first_pid, 0);
+                _ = try qemu.kill();
+            }
         }
         else
         {
             const qemu_debug_command = get_qemu_command(.x86_64, .bios, true);
             const qemu = try std.ChildProcess.init(qemu_debug_command, self.b.allocator);
-            try qemu.spawn();
-
-            _ = std.os.waitpid(first_pid, 0);
-            _ = try qemu.kill();
+            _ = try qemu.spawnAndWait();
         }
     }
 };
@@ -258,7 +268,7 @@ const LimineImage = struct
     
     fn create(b: *Builder, kernel: *std.build.LibExeObjStep) *std.build.Step
     {
-        const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
+        const kernel_path = "zig-cache/kernel_x86_64.elf";
         var self = b.allocator.create(@This()) catch @panic("out of memory");
 
         self.* = @This()
@@ -268,7 +278,7 @@ const LimineImage = struct
             .kernel_path = kernel_path,
         };
 
-        self.step.dependOn(&kernel.install_step.?.step);
+        self.step.dependOn(&kernel.step);
 
         const image_step = b.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
         image_step.dependOn(&self.step);
