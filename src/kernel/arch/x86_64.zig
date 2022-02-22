@@ -27,6 +27,47 @@ fn is_canonical_address(address: u64) bool
     return true;
 }
 
+const CPUID = extern struct
+{
+    eax: u32,
+    ebx: u32,
+    edx: u32,
+    ecx: u32,
+
+    /// Returns the maximum number bits a physical address is allowed to have in this CPU
+    pub fn get_max_physical_address() callconv(.Inline) u6
+    {
+        return @truncate(u6, cpuid(0x80000008).eax);
+    }
+};
+
+var max_physical_address: u6 = 0;
+
+pub fn cpuid(leaf: u32) callconv(.Inline) CPUID
+{
+    var eax: u32 = undefined;
+    var ebx: u32 = undefined;
+    var edx: u32 = undefined;
+    var ecx: u32 = undefined;
+
+    asm volatile(
+        \\cpuid
+        : [eax] "={eax}" (eax),
+          [ebx] "={ebx}" (ebx),
+          [edx] "={edx}" (edx),
+          [ecx] "={ecx}" (ecx),
+        : [leaf] "{eax}" (leaf),
+    );
+
+    return CPUID
+    {
+        .eax = eax,
+        .ebx = ebx,
+        .edx = edx,
+        .ecx = ecx,
+    };
+}
+
 /// Arch-specific part of kernel.LocalStorage
 pub const LocalStorage = struct
 {
@@ -47,7 +88,7 @@ pub fn MSR(comptime msr: u32) type
             asm volatile("rdmsr"
                 : [_] "={eax}" (low),
                   [_] "={edx}" (high)
-                : [_] "={ecx}" (msr)
+                : [_] "{ecx}" (msr)
             );
             return (@as(u64, high) << 32) | low;
         }
@@ -66,6 +107,118 @@ pub fn MSR(comptime msr: u32) type
         }
     };
 }
+
+pub const EFER = struct
+{
+    pub const Bit = enum(u6)
+    {
+        // Syscall Enable - syscall, sysret
+        SCE = 0,
+        LME = 8, // Long Mode Enable
+        LMA = 10, // Long Mode Active
+        NXE = 11, // Enables page access restriction by preventing instruction fetches from PAE pages with the XD bit set
+        SVME = 12,
+        LMSLE = 13,
+        FFXSR = 14,
+        TCE = 15,
+    };
+
+    const msr = MSR(0xC0000080);
+
+    pub fn read() callconv(.Inline) u64
+    {
+        return msr.read();
+    }
+
+    pub fn write(value: u64) callconv(.Inline) void
+    {
+        msr.write(value);
+    }
+
+    pub fn get_flag(comptime bit: Bit) callconv(.Inline) bool
+    {
+        return msr.read() & (1 << @enumToInt(bit)) != 0;
+    }
+};
+
+const PAT = struct
+{
+    value: u64,
+    uncacheable: ?Index,
+    write_combining: ?Index,
+    write_through: ?Index,
+    write_back: ?Index,
+
+    const Index = u3;
+    const EncodingInt = u3;
+    const Encoding = enum(EncodingInt)
+    {
+        UC = 0,
+        WC = 1,
+        WT = 4,
+        WP = 5,
+        WB = 6,
+        UC_ = 7,
+    };
+
+    const msr = MSR(0x277);
+
+    fn init() PAT
+    {
+        const id = cpuid(0x00000001);
+        kernel.assert(@truncate(u1, id.edx >> 16) == 1, @src());
+        const value = msr.read();
+
+        return PAT
+        {
+            .value = value,
+            .uncacheable = find_index(value, Encoding.UC),
+            .write_combining = find_index(value, Encoding.WC),
+            .write_through = find_index(value, Encoding.WT),
+            .write_back = find_index(value, Encoding.WB),
+        };
+    }
+
+    fn find_index(pat: u64, comptime encoding: Encoding) callconv(.Inline) ?Index
+    {
+        if (@truncate(EncodingInt, pat >> (@as(u6, 0) * 8)) == @enumToInt(encoding)) return 0;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 1) * 8)) == @enumToInt(encoding)) return 1;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 2) * 8)) == @enumToInt(encoding)) return 2;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 3) * 8)) == @enumToInt(encoding)) return 3;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 4) * 8)) == @enumToInt(encoding)) return 4;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 5) * 8)) == @enumToInt(encoding)) return 5;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 6) * 8)) == @enumToInt(encoding)) return 6;
+        if (@truncate(EncodingInt, pat >> (@as(u6, 7) * 8)) == @enumToInt(encoding)) return 7;
+
+        return null;
+    }
+};
+
+const Paging = struct
+{
+    pat: PAT,
+    cr3: u64,
+    level_5_paging: bool,
+
+    pub fn init(self: *@This()) void
+    {
+        kernel.log("Initializing paging...\n");
+        defer kernel.log("Paging initialized\n");
+        CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.WP)));
+        CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.PCIDE)) | (1 << @enumToInt(CR4.Bit.SMEP)));
+        EFER.write(EFER.read() | (1 << @enumToInt(EFER.Bit.NXE)) | (1 << @enumToInt(EFER.Bit.SCE)) | (1 << @enumToInt(EFER.Bit.TCE)));
+        const pae = CR4.get_flag(.PAE);
+        kernel.assert(pae, @src());
+        max_physical_address = CPUID.get_max_physical_address();
+        kernel.logf("Max physical addresss: {}\n", .{max_physical_address});
+        self.pat = PAT.init();
+        kernel.logf("{}\n", .{self.pat});
+        self.cr3 = CR3.read();
+        self.level_5_paging = false;
+    }
+};
+
+var paging: Paging = undefined;
 
 fn R64(comptime name: []const u8) type
 {
@@ -252,6 +405,8 @@ const CR3 = struct
         /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
         /// is not used if paging is disabled, with PAE paging, or with 4-level paging1 or 5-level paging if CR4.PCIDE=1.
         PCD = 4,
+
+        PCID_top_bit = 11,
     };
 
     fn write(value: u64) callconv(.Inline) void 
@@ -493,8 +648,16 @@ pub fn initialize_FPU() void
     defer kernel.log("FPU initialized\n");
     CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.MP)) | (1 << @enumToInt(CR0.Bit.NE)));
     CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.OSFXSR)) | (1 << @enumToInt(CR4.Bit.OSXMMEXCPT))); 
+
     kernel.log("@TODO: MXCSR. See Intel manual\n");
-    kernel.log("@TODO: look at Essence code. fldcw\n");
+    // @TODO: is this correct?
+    const cw: u16 = 0x037a;
+    asm volatile(
+        \\fninit
+        \\fldcw (%[cw])
+        :
+        : [cw] "r" (&cw)
+    );
 }
 
 const IOPort = struct
@@ -629,8 +792,20 @@ const PIC = struct
     }
 };
 
+pub fn init_cache() void
+{
+    kernel.log("Ensuring cache is initialized...\n");
+    defer kernel.log("Cache initialized!\n");
+
+    kernel.assert(!CR0.get_flag(.CD), @src());
+    kernel.assert(!CR0.get_flag(.NW), @src());
+}
+
 pub fn init_interrupts() void
 {
+    kernel.log("Initializing interrupts...\n");
+    defer kernel.log("Interrupts initialized!\n");
+
     PIC.disable();
     interrupts.IDT.fill();
     const idtr = interrupts.IDT.Register
@@ -641,17 +816,69 @@ pub fn init_interrupts() void
         \\lidt (%[idt_address])
         :
         : [idt_address] "r" (&idtr));
-    asm volatile("sti");
-    kernel.log("TODO: initialize interrupts\n");
+    kernel.log("@TODO: initialize interrupts\n");
+    kernel.log("@TODO: load GDT since the segment selectors are wrong\n");
 }
 
-pub fn init_cache() void
+
+const ACPI = struct
 {
-    defer kernel.log("Cache initialized!\n");
-    kernel.log("Ensuring cache is initialized...\n");
-    kernel.assert(!CR0.get_flag(.CD), @src());
-    kernel.assert(!CR0.get_flag(.NW), @src());
-}
+    /// ACPI initialization. We should have a page mapper ready before executing this function
+    pub fn init(rsdp_address: u64) void
+    {
+        const rsdp1 = @intToPtr(*RSDP1, rsdp_address);
+        if (rsdp1.revision == 0)
+        {
+            kernel.log("First version\n");
+            const rsdt = @intToPtr(*Header, rsdp1.RSDT_address);
+            const tables = @intToPtr([*]align(1) u32, rsdp1.RSDT_address + @sizeOf(Header))[0..(rsdt.length - @sizeOf(Header)) / @sizeOf(u32)];
+            for (tables) |table_address|
+            {
+                kernel.logf("Table address: 0x{x}\n", .{table_address});
+                const header = @intToPtr(*Header, table_address);
+                kernel.logf("Table: {}\n", .{header});
+            }
+        }
+        else
+        {
+            assert(rsdp1.revision == 2);
+            //const rsdp2 = @ptrCast(*RSDP2, rsdp1);
+            kernel.log("Second version\n");
+            TODO();
+        }
+    }
+
+    const RSDP1 = packed struct
+    {
+        signature: [8]u8,
+        checksum: u8,
+        OEM_ID: [6]u8,
+        revision: u8,
+        RSDT_address: u32,
+    };
+
+    const RSDP2 = packed struct
+    {
+        rsdp1: RSDP1,
+        length: u32,
+        XSDT_address: u64,
+        extended_checksum: u8,
+        reserved: [3]u8,
+    };
+
+    const Header = packed struct
+    {
+        signature: [4]u8,
+        length: u32,
+        revision: u8,
+        checksum: u8,
+        OEM_ID: [6]u8,
+        OEM_table_ID: [8]u8,
+        OEM_revision: u32,
+        creator_ID: u32,
+        creator_revision: u32,
+    };
+};
 
 pub fn init() void
 {
@@ -661,4 +888,5 @@ pub fn init() void
     initialize_FPU();
     init_cache();
     init_interrupts();
+    paging.init();
 }

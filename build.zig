@@ -7,7 +7,7 @@ const builtin = @import("builtin");
 fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
 {
     var disabled_features = std.Target.Cpu.Feature.Set.empty;
-    var enabled_feautres = std.Target.Cpu.Feature.Set.empty;
+    var enabled_features = std.Target.Cpu.Feature.Set.empty;
 
     switch (arch) {
         .x86_64 => {
@@ -18,8 +18,7 @@ fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
             disabled_features.addFeature(@enumToInt(features.avx));
             disabled_features.addFeature(@enumToInt(features.avx2));
 
-            enabled_feautres.addFeature(@enumToInt(features.soft_float));
-            kernel.code_model = .kernel;
+            enabled_features.addFeature(@enumToInt(features.soft_float));
         },
         //.aarch64 => {
             //@compi
@@ -36,12 +35,15 @@ fn kernel_exe(kernel: *std.build.LibExeObjStep, arch: std.Target.Cpu.Arch) void
     kernel.force_pic = true;
     kernel.disable_stack_probing = true;
     kernel.strip = false;
+    kernel.code_model = .kernel;
+    kernel.red_zone = false;
+    kernel.omit_frame_pointer = false;
     kernel.setTarget(.{
         .cpu_arch = arch,
         .os_tag = std.Target.Os.Tag.freestanding,
         .abi = std.Target.Abi.none,
         .cpu_features_sub = disabled_features,
-        .cpu_features_add = enabled_feautres,
+        .cpu_features_add = enabled_features,
     });
 }
 
@@ -179,9 +181,11 @@ const Debug = struct
         }
         else
         {
-            const qemu_debug_command = get_qemu_command(.x86_64, .bios, true);
-            const qemu = try std.ChildProcess.init(qemu_debug_command, self.b.allocator);
-            _ = try qemu.spawnAndWait();
+            const debugger = try std.ChildProcess.init( &.{ "gf2", "-x", gdb_script_path }, self.b.allocator);
+            debugger.stdin_behavior = std.ChildProcess.StdIo.Ignore;
+            debugger.stdout_behavior = std.ChildProcess.StdIo.Ignore;
+            debugger.stderr_behavior = std.ChildProcess.StdIo.Ignore;
+            _ = try debugger.spawnAndWait();
         }
     }
 };

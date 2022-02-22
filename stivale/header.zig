@@ -88,7 +88,7 @@ pub const Struct = extern struct
         pub const id = 0xe5e76a1b4597a781;
     };
 
-    pub const MMap = extern struct
+    pub const MemoryMap = extern struct
     {
         tag: Tag align(1),
         entries: u64,
@@ -99,21 +99,24 @@ pub const Struct = extern struct
             return @ptrCast(ReturnType, @alignCast(@alignOf(Entry), @ptrCast(Intermediate, self) + 24));
         }
 
-        pub const usable = 1;
-        pub const reserved = 2;
-        pub const acpi_reclaimable = 3;
-        pub const acpi_nvs = 4;
-        pub const bad_memory = 5;
-        pub const bootloader_reclaimable = 0x1000;
-        pub const kernel_and_modules = 0x1001;
-        pub const framebuffer = 0x1002;
-        
         pub const Entry = extern struct
         {
             base: u64,
             length: u64,
-            type: u32,
+            type: Type,
             unused: u32,
+
+            pub const Type = enum(u32)
+            {
+                usable = 1,
+                reserved = 2,
+                acpi_reclaimable = 3,
+                acpi_nvs = 4,
+                bad_memory = 5,
+                bootloader_reclaimable = 0x1000,
+                kernel_and_modules = 0x1001,
+                framebuffer = 0x1002,
+            };
         };
         pub const id = 0x2187f79e8612de07;
     };
@@ -363,7 +366,7 @@ pub const Struct = extern struct
         guid: GUID,
         partition_guid: GUID,
 
-        const id = 0x9b4358364c19ee62;
+        pub const id = 0x9b4358364c19ee62;
     };
 };
 
