@@ -200,6 +200,8 @@ const Paging = struct
     cr3: u64,
     level_5_paging: bool,
 
+    write_back_virtual_base: u64 = 0,
+
     pub fn init(self: *@This()) void
     {
         kernel.log("Initializing paging...\n");
@@ -878,6 +880,16 @@ const ACPI = struct
         creator_ID: u32,
         creator_revision: u32,
     };
+};
+
+pub const PhysicalAddress = struct
+{
+    value: u64,
+
+    fn get_writeback(self: *const @This()) u64
+    {
+        return paging.pat.
+    }
 };
 
 pub fn init() void
