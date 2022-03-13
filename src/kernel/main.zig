@@ -4,6 +4,6 @@ const spin = @import("kernel.zig").arch.spin;
 
 pub fn panic(msg: []const u8, _: ?*StackTrace) noreturn
 {
-    logf("PANIC!\n{s}\n", .{msg}); 
+    logf("PANIC: {s}\n", .{msg}); 
     spin();
 }

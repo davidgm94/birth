@@ -201,6 +201,9 @@ const Paging = struct
     level_5_paging: bool,
 
     write_back_virtual_base: u64 = 0,
+    write_cache_virtual_base: u64 = 0,
+    uncacheable_virtual_base: u64 = 0,
+    max_physical_address: u64 = 0,
 
     pub fn init(self: *@This()) void
     {
@@ -217,7 +220,68 @@ const Paging = struct
         kernel.logf("{}\n", .{self.pat});
         self.cr3 = CR3.read();
         self.level_5_paging = false;
+
+        if (!self.level_5_paging)
+        {
+            const base = 0xFFFF800000000000; 
+            self.write_back_virtual_base = base;
+            self.write_cache_virtual_base = base;
+            self.uncacheable_virtual_base = base;
+            self.max_physical_address = 0x7F0000000000;
+        }
+        else
+        {
+            TODO();
+        }
+
+        {
+            kernel.log("Consuming bootloader memory map...\n");
+            defer kernel.log("Memory map consumed!\n");
+            for (kernel.bootloader.info.memory_map_entries[0..kernel.bootloader.info.memory_map_entry_count]) |*entry|
+            {
+                var region_address = entry.address;
+                var region_size = entry.size;
+
+                outer: while (region_size != 0)
+                {
+                    for (kernel.PhysicalAllocator.reverse_sizes) |pmm_size, reverse_i|
+                    {
+                        const i = kernel.PhysicalAllocator.sizes.len - reverse_i - 1;
+                        if (region_size >= pmm_size and kernel.is_aligned(region_address, pmm_size))
+                        {
+                            kernel.PhysicalAllocator.free(region_address, i);
+                            region_size -= pmm_size;
+                            region_address += pmm_size;
+                            continue :outer;
+                        }
+                    }
+
+                    @panic("unreachable");
+                }
+            }
+        }
+
+        const last_entry = kernel.bootloader.info.memory_map_entries[kernel.bootloader.info.memory_map_entry_count - 1];
+        const physical_high = kernel.align_forward(last_entry.address + last_entry.size, page_size);
+        _ = physical_high;
+        
+        TODO();
     }
+
+    pub fn make_page_table() !u64
+    {
+        const page_table = try kernel.PhysicalAllocator.allocate_physical(page_size);
+        std.mem.set(u8, @intToPtr([*]u8, page_table.get_writeback_virtual_address())[0..page_size], 0);
+        return page_table;
+    }
+
+    const LevelType = u3;
+    const PTE = struct
+    {
+        physical_address: PhysicalAddress,
+        current_level: LevelType,
+        context: *Paging,
+    };
 };
 
 var paging: Paging = undefined;
@@ -886,9 +950,15 @@ pub const PhysicalAddress = struct
 {
     value: u64,
 
-    fn get_writeback(self: *const @This()) u64
+
+    pub fn check(self: *const @This()) callconv(.Inline) void
     {
-        return paging.pat.
+        if (self.value > paging.max_physical_address) @panic("invalid physical address\n");
+    }
+    pub fn get_writeback_virtual_address(self: *const @This()) u64
+    {
+        self.check();
+        return paging.write_back_virtual_base + self.value;
     }
 };
 

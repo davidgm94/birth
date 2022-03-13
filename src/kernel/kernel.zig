@@ -56,9 +56,9 @@ export fn _start(info: *align(1) stivale.Struct) callconv(.C) noreturn
     main();
 }
 
-const PhysicalAllocator = struct
+pub const PhysicalAllocator = struct
 {
-    const sizes = [_]u64
+    pub const sizes = [_]u64
     {
         1 << 12,
         1 << 13,
@@ -111,51 +111,83 @@ const PhysicalAllocator = struct
         1 << 60,
     };
 
-    const reverse_sizes = blk:
+    pub const reverse_sizes = blk:
     {
         var result = sizes;
-        std.mem.reverse(u64, result);
+        std.mem.reverse(u64, &result);
         break :blk result;
     };
 
     var free_roots: [sizes.len]u64 = undefined;
 
-    fn free(physical_address: u64, index: u64) void
+    pub fn allocate(index: u64) error{out_of_memory}!u64
+    {
+        if (free_roots[index] == 0)
+        {
+            if (index + 1 >= sizes.len) return error.out_of_memory;
+
+            var next = try allocate(index + 1);
+            var next_size = sizes[index + 1];
+            const current_size = sizes[index];
+            
+            while (next_size > current_size)
+            {
+                free(next, index);
+                next += current_size;
+                next_size -= current_size;
+            }
+
+            return next;
+        }
+        else
+        {
+            const result = free_roots[index];
+            const new_root = @intToPtr(*u64, (arch.PhysicalAddress { .value = result }).get_writeback_virtual_address()).*;
+            // @TODO: @Safety check
+            free_roots[index] = new_root;
+            return result;
+        }
+    }
+
+    pub fn free(physical_address: u64, index: u64) void
     {
         const last = free_roots[index];
         free_roots[index] = physical_address;
+        @intToPtr(*u64, (arch.PhysicalAddress { .value = physical_address }).get_writeback_virtual_address()).* = last;
+    }
+
+    pub fn allocate_physical(size: u64) !arch.PhysicalAddress
+    {
+        for (sizes) |pmm_size, i|
+        {
+            if (size <= pmm_size)
+            {
+                // @Lock defer @Unlock
+                return arch.PhysicalAddress { allocate(i) };
+            }
+        }
+
+        return error.physical_allocation_too_small;
     }
 };
 
-var physical_allocator: PhysicalAllocator = undefined;
-
-fn is_aligned(value: u64, alignment: u64) bool
+pub fn is_aligned(value: u64, alignment: u64) bool
 {
     const mask = alignment - 1;
     return (value & mask) == 0;
 }
 
-pub fn main() noreturn
+pub fn align_forward(value: u64, alignment: u64) u64
+{
+    const mask = alignment - 1;
+    return (value + mask) & ~mask;
+}
+
+fn main() noreturn
 {
     log("Welcome to the RNU kernel!\n");
     arch.init();
 
-    for (bootloader.info.memory_map_entries[0..bootloader.info.memory_map_entry_count]) |*entry|
-    {
-        var region_address = entry.address;
-        var region_size = entry.size;
-
-        while (region_size != 0)
-        {
-            for (reverse_sizes) |pmm_size, reverse_i|
-            {
-                const i = sizes.len - reverse_i - 1;
-                if (size >= pmm_size and is_aligned(pmm_size, region_address))
-                {
-                }
-            }
-        }
-    }
 
     log("Everything worked so far!\n");
     arch.spin();
