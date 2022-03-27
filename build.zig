@@ -112,8 +112,8 @@ const Debug = struct {
                 // zig fmt: off
                 const process = std.ChildProcess.init(&.{
                     "kitty", "--start-as=maximized",
-                    get_gdb_name(),
-                    "-ex", "symbol-file zig-cache/riscv",
+                    "riscv64-unknown-elf-gdb",
+                    "-ex", "symbol-file zig-cache/kernel.elf",
                     "-ex", "target remote :1234",
                     "-ex", "b main",
                     "-ex", "b panic",
@@ -131,14 +131,6 @@ const Debug = struct {
             return "kitty";
         } else unreachable;
     }
-
-    fn get_gdb_name() []const u8 {
-        return "riscv64-unknown-elf-gdb";
-    }
-
-    fn get_kernel_exe() []const u8 {
-        return "zig-cache/riscv";
-    }
 };
 // zig fmt: off
 const qemu_command_str = [_][]const u8 {
@@ -153,8 +145,7 @@ const qemu_command_str = [_][]const u8 {
     "-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
     "-device", "virtio-blk-device,drive=foo",
     "-device", "virtio-gpu-device",
-    "-d", "guest_errors",
-    "-d", "guest_errors,int",
+    "-d", "guest_errors,int,in_asm",
     "-D", "logfile",
     //"-trace", "virtio*",
     //"-S", "-s",

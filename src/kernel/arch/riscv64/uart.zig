@@ -96,3 +96,13 @@ pub fn Uart(comptime base_address: u64) type {
     };
 }
 
+pub fn handle_interrupt() void {
+    if (uart.get()) |byte| {
+        switch (byte) {
+            8 => {
+                kernel.arch.writer.print("{} {}", .{byte, byte}) catch unreachable;
+            },
+            else => uart.put(byte),
+        }
+    }
+}

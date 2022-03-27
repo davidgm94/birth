@@ -212,3 +212,8 @@ pub fn init() void {
         DeviceProcessor(mmio_it).parse();
     }
 }
+
+pub fn handle_interrupt(interrupt_number: u32) void {
+    _ = interrupt_number;
+    while (true) {}
+}

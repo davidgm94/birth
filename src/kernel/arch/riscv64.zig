@@ -4,9 +4,9 @@
 const builtin = @import("builtin");
 const kernel = @import("../kernel.zig");
 const sbi = @import("riscv64/opensbi.zig");
-const uart = @import("riscv64/uart.zig");
+pub const uart = @import("riscv64/uart.zig");
 const device_tree = @import("riscv64/device_tree.zig");
-const virtio = @import("riscv64/virtio.zig");
+pub const virtio = @import("riscv64/virtio.zig");
 const PLIC = @import("riscv64/plic.zig");
 pub const virtual = @import("riscv64/virtual.zig");
 pub const physical = @import("riscv64/physical.zig");
@@ -309,8 +309,10 @@ export fn zig_handler(context: *Context, scause: Scause, stval: usize) void {
             context.sepc += 2; // magic number to bypass ebreak itself, see https://rcore-os.github.io/rCore-Tutorial-deploy/docs/lab-1/guide/part-6.html
         },
         .supervisor_timer_interrupt => Clock.handle(),
+        .supervisor_external_interrupt => PLIC.handle_interrupt(),
         else => {
-            std.log.err("Interrupt scause: {s} (0x{x}), [sepc] = 0x{x:0>16}, [stval] = 0x{x:0>16}", .{ @tagName(scause), @enumToInt(scause), context.sepc, stval});
+            _ = scause; _ = context; _ = stval;
+            //std.log.err("Interrupt scause: {s} (0x{x}), [sepc] = 0x{x:0>16}, [stval] = 0x{x:0>16}", .{ @tagName(scause), @enumToInt(scause), context.sepc, stval});
             @panic("Unhandled interrupt");
         },
     }

@@ -55,12 +55,12 @@ pub fn main() noreturn {
     logger.debug("Initializing IRQ...", .{});
     arch.init_interrupts(); // Interrupt Vector
 
-    arch.Clock.enable(); // Accept timer interrupt
+    //arch.Clock.enable(); // Accept timer interrupt
     logger.debug("Clock IRQ initialized with {} Hz", .{arch.HZ});
 
     // Done initializing interrupt
     logger.debug("Initialized IRQ.", .{});
-    arch.set_timer(1); // Set next timer to something other than 0 to activate timer
+    //arch.set_timer(1); // Set next timer to something other than 0 to activate timer
     arch.enable_interrupts();
     logger.info("IRQ enabled.", .{});
 
@@ -86,6 +86,7 @@ pub fn main() noreturn {
     std.log.info("Shutting down", .{});
     arch.shutdown(); // No return for shutdown
 }
+
 pub const MemoryRegion = struct {
     address: u64,
     size: u64,
