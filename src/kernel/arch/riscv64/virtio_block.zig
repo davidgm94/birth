@@ -9,4 +9,3 @@ pub const Device = struct {
     ack_used_index: u16,
     read_only: bool,
 };
-

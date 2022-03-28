@@ -53,23 +53,29 @@ pub fn build(b: *Builder) void {
 const HDD = struct {
     const block_size = 0x400;
     const block_count = 32;
-    var zero_buffer: [block_size * block_count]u8 align(0x1000) = undefined;
+    var buffer: [block_size * block_count]u8 align(0x1000) = undefined;
     const path = "zig-cache/hdd.bin";
 
     step: std.build.Step,
+    b: *std.build.Builder,
 
     fn create(b: *Builder) *HDD {
         const step = b.allocator.create(HDD) catch @panic("out of memory\n");
         step.* = .{
             .step = std.build.Step.init(.custom, "hdd_create", b.allocator, make),
+            .b = b,
         };
 
         return step;
     }
 
     fn make(step: *std.build.Step) !void {
-        _ = step;
-        try std.fs.cwd().writeFile(HDD.path, &HDD.zero_buffer);
+        const parent = @fieldParentPtr(HDD, "step", step);
+        const allocator = parent.b.allocator;
+        const font_file = try std.fs.cwd().readFileAlloc(allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
+        std.debug.print("Font file size: {} bytes\n", .{font_file.len});
+        std.mem.copy(u8, &buffer, font_file);
+        try std.fs.cwd().writeFile(HDD.path, &HDD.buffer);
     }
 };
 
@@ -132,6 +138,7 @@ const Debug = struct {
         } else unreachable;
     }
 };
+
 // zig fmt: off
 const qemu_command_str = [_][]const u8 {
     "qemu-system-riscv64",
