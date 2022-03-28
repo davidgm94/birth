@@ -2,11 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 const logger = std.log.scoped(.init);
 
-pub const arch = switch (builtin.target.cpu.arch) {
-    .riscv64 => @import("arch/riscv64.zig"),
-    .x86_64 => @import("arch/x86_64.zig"),
-    else => unreachable,
-};
+pub const arch = @import("arch/riscv64.zig");
+//pub const arch = switch (builtin.target.cpu.arch) {
+//.riscv64 => @import("arch/riscv64.zig"),
+//.x86_64 => @import("arch/x86_64.zig"),
+//else => unreachable,
+//};
 
 pub inline fn align_forward(n: u64, alignment: u64) u64 {
     const mask: u64 = alignment - 1;
@@ -93,4 +94,3 @@ pub const MemoryRegion = struct {
     bitset: []u8,
     allocated_page_count: u64,
 };
-
