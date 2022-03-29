@@ -439,6 +439,6 @@ const file_size = 5312;
 var file_buffer: [0x4000]u8 align(0x1000) = undefined;
 pub fn read_file_test() void {
     logger.debug("Trying to read file", .{});
-    const size = virtio.block.access(&file_buffer, @intCast(u32, kernel.align_forward(file_size, 512)), 0, .write, 0);
+    const size = virtio.block.access(&file_buffer, @intCast(u32, kernel.align_forward(file_size, 512)), 0, .read, 0);
     logger.debug("Size: {}", .{size});
 }
