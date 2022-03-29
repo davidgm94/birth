@@ -36,7 +36,6 @@ pub fn set_priority(comptime id: u6, comptime asked_priority: u3) void {
 }
 
 pub fn init() void {
-    set_priority(0, 1);
     set_priority(1, 1);
     set_priority(2, 1);
     set_priority(3, 1);
@@ -51,8 +50,7 @@ pub fn init() void {
     const hart_id = kernel.arch.hart_id();
     kernel.assert(@src(), hart_id == 0);
     comptime var i: u4 = 0;
-    inline while (i <= 10) : (i += 1)
-    {
+    inline while (i <= 10) : (i += 1) {
         s_enable.* = 1 << i;
     }
 
@@ -60,8 +58,8 @@ pub fn init() void {
 
     //comptime var i: u6 = 1;
     //inline while (i <= 10) : (i += 1) {
-        //enable(i);
-        //set_priority(i, 1);
+    //enable(i);
+    //set_priority(i, 1);
     //}
     //set_threshold(0);
 
@@ -77,7 +75,6 @@ fn complete(interrupt_number: u32) void {
     s_claim.* = interrupt_number;
 }
 
-
 pub fn handle_interrupt() void {
     if (get_next()) |interrupt| {
         switch (interrupt) {
@@ -87,6 +84,5 @@ pub fn handle_interrupt() void {
         }
 
         complete(interrupt);
-    }
-    else @panic("not an interrupt in the queue");
+    } else @panic("not an interrupt in the queue");
 }

@@ -40,6 +40,13 @@ pub fn panicf(comptime format: []const u8, args: anytype) noreturn {
     }
 }
 
+pub const MemoryRegion = struct {
+    address: u64,
+    size: u64,
+    bitset: []u8,
+    allocated_page_count: u64,
+};
+
 pub fn main() noreturn {
     // TODO: panic if HZ value is unreasonable
     // No interrupt during initialization
@@ -83,14 +90,8 @@ pub fn main() noreturn {
 
     logger.debug("After breakpoint", .{});
 
+    arch.read_file_test();
     while (true) {}
     std.log.info("Shutting down", .{});
     arch.shutdown(); // No return for shutdown
 }
-
-pub const MemoryRegion = struct {
-    address: u64,
-    size: u64,
-    bitset: []u8,
-    allocated_page_count: u64,
-};

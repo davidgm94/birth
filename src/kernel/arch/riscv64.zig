@@ -15,7 +15,6 @@ pub const Spinlock = _spinlock.Spinlock;
 
 const logger = std.log.scoped(.arch);
 
-
 const std = @import("std");
 
 /// Page size 4K
@@ -156,7 +155,7 @@ pub inline fn flush_tlb() void {
 
 export fn asm_kernel_irq_vec() align(4) callconv(.Naked) void {
     asm volatile (
-        // Store all register values on the stack
+    // Store all register values on the stack
         \\addi sp, sp, -8 * 34
         \\sd x1, 0(sp)
         \\sd x2, 1 * 8(sp) // sp - 8 * 34 
@@ -311,7 +310,9 @@ export fn zig_handler(context: *Context, scause: Scause, stval: usize) void {
         .supervisor_timer_interrupt => Clock.handle(),
         .supervisor_external_interrupt => PLIC.handle_interrupt(),
         else => {
-            _ = scause; _ = context; _ = stval;
+            _ = scause;
+            _ = context;
+            _ = stval;
             //std.log.err("Interrupt scause: {s} (0x{x}), [sepc] = 0x{x:0>16}, [stval] = 0x{x:0>16}", .{ @tagName(scause), @enumToInt(scause), context.sepc, stval});
             @panic("Unhandled interrupt");
         },
@@ -330,7 +331,7 @@ pub fn init_interrupts() void {
     sstatus.set(.SIE);
     const sie_value = sie.read();
     const sstatus_value = sstatus.read();
-    logger.debug("SIE: 0x{x}, SSTATUS: 0x{x}", .{sie_value, sstatus_value});
+    logger.debug("SIE: 0x{x}, SSTATUS: 0x{x}", .{ sie_value, sstatus_value });
 }
 
 fn CSR(comptime reg_name: []const u8, comptime BitT: type) type {
@@ -368,7 +369,7 @@ fn CSR(comptime reg_name: []const u8, comptime BitT: type) type {
 }
 
 const sstatus = CSR("sstatus", enum(u32) {
-    SIE = 1, 
+    SIE = 1,
     SPIE = 5,
     UBE = 6,
     SPP = 8,
@@ -423,7 +424,7 @@ pub fn get_memory_map() void {
 pub fn init_devices() void {
     const sstatus_value = sstatus.read();
     const sie_value = sie.read();
-    logger.debug("SSTATUS: 0x{x}, SIE: 0x{x}", .{sstatus_value, sie_value});
+    logger.debug("SSTATUS: 0x{x}, SIE: 0x{x}", .{ sstatus_value, sie_value });
     virtio.init();
     if (virtio.gpu.address == 0) @panic("No GPU device found\n");
     if (virtio.block.address == 0) @panic("No block device found\n");
@@ -432,4 +433,12 @@ pub fn init_devices() void {
 
 pub fn setup_external_interrupts() void {
     PLIC.init();
+}
+
+const file_size = 5312;
+var file_buffer: [0x4000]u8 align(0x1000) = undefined;
+pub fn read_file_test() void {
+    logger.debug("Trying to read file", .{});
+    const size = virtio.block.access(&file_buffer, @intCast(u32, kernel.align_forward(file_size, 512)), 0, .write, 0);
+    logger.debug("Size: {}", .{size});
 }
