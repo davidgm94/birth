@@ -152,8 +152,8 @@ const qemu_command_str = [_][]const u8 {
     "-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
     "-device", "virtio-blk-device,drive=foo",
     "-device", "virtio-gpu-device",
-    "-d", "guest_errors,int,in_asm",
-    "-D", "logfile",
+    //"-d", "guest_errors,int,in_asm",
+    //"-D", "logfile",
     //"-trace", "virtio*",
     //"-S", "-s",
 };
