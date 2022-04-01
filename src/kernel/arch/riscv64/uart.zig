@@ -7,6 +7,7 @@ const Spinlock = kernel.arch.Spinlock;
 // some have different meanings for
 // read vs write.
 // http://byterunner.com/16550.html
+
 const RHR = 0; // receive holding register (for input bytes)
 const THR = 0; // transmit holding register (for output bytes)
 const IER = 1; // interrupt enable register
@@ -15,25 +16,19 @@ const ISR = 2; // interrupt status register
 const LCR = 3; // line control register
 const LSR = 5; // line status register
 
-pub var uart: Uart(kernel.arch.memory_layout.UART0) = .{
-    .lock = Spinlock{
-        ._lock = 0,
-        .hart = -1,
-    },
-};
-
 /// UART Driver
 /// seems not thread-safe, use with caution when in SMP mode
-pub fn Uart(comptime base_address: u64) type {
+pub fn UART(comptime base_address: u64) type {
     return struct {
         const ptr = @intToPtr([*c]volatile u8, base_address);
         lock: Spinlock,
 
         /// Return an uninitialized Uart instance
         /// init set baud rate and enable UART
-        pub fn init(self: *@This()) void {
-            self.lock.lock();
-            defer self.lock.unlock();
+        /// We need this comptime parameter to avoid locking, which causes to enable interrupts
+        pub fn init(self: *@This(), comptime lock: bool) void {
+            if (lock) self.lock.lock();
+            defer if (lock) self.lock.unlock();
 
             // Volatile needed
             // using C-type ptr
@@ -69,14 +64,6 @@ pub fn Uart(comptime base_address: u64) type {
             ptr[0] = byte;
         }
 
-        /// Put a char in to UART
-        pub fn put(self: *@This(), c: u8) void {
-            self.lock.lock();
-            defer self.lock.unlock();
-
-            raw_write(c);
-        }
-
         /// Get a char from UART
         /// Return a optional u8, must check
         pub fn get(self: *@This()) ?u8 {
@@ -86,23 +73,23 @@ pub fn Uart(comptime base_address: u64) type {
             return result;
         }
 
-        pub fn write_bytes(self: *@This(), bytes: []const u8) void {
-            self.lock.lock();
-            defer self.lock.unlock();
+        pub fn write_bytes(self: *@This(), bytes: []const u8, comptime lock: bool) void {
+            if (lock) self.lock.lock();
+            defer if (lock) self.lock.unlock();
             for (bytes) |byte| {
                 raw_write(byte);
             }
         }
-    };
-}
 
-pub fn handle_interrupt() void {
-    if (uart.get()) |byte| {
-        switch (byte) {
-            8 => {
-                kernel.arch.writer.print("{} {}", .{byte, byte}) catch unreachable;
-            },
-            else => uart.put(byte),
+        pub fn handle_interrupt(self: *@This()) void {
+            if (self.get()) |byte| {
+                switch (byte) {
+                    8 => {
+                        kernel.arch.writer.print("{} {}", .{ byte, byte }) catch unreachable;
+                    },
+                    else => kernel.arch.writer.print("{c}", .{byte}),
+                }
+            }
         }
-    }
+    };
 }

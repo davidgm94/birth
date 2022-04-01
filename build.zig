@@ -2,8 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Builder = std.build.Builder;
 
-const os = builtin.target.os.tag;
-
+const building_os = builtin.target.os.tag;
 const current_arch = std.Target.Cpu.Arch.riscv64;
 
 const cache_dir = "zig-cache";
@@ -28,6 +27,14 @@ fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
             kernel_exe.code_model = .medium;
             kernel_exe.setTarget(target);
             kernel_exe.setLinkerScriptPath(std.build.FileSource.relative("src/kernel/arch/riscv64/linker.ld"));
+            const riscv_folder = "src/kernel/arch/riscv64/";
+            const riscv_asssembly_files = [_][]const u8{
+                riscv_folder ++ "start.S",
+                riscv_folder ++ "interrupt.S",
+            };
+            inline for (riscv_asssembly_files) |asm_file| {
+                kernel_exe.addAssemblyFile(asm_file);
+            }
         },
         else => @compileError("Not supported arch\n"),
     }
@@ -113,7 +120,7 @@ const Debug = struct {
     }
 
     fn terminal_and_gdb_thread(b: *std.build.Builder) void {
-        switch (os) {
+        switch (building_os) {
             .linux, .macos => {
                 // zig fmt: off
                 const process = std.ChildProcess.init(&.{

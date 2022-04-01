@@ -43,7 +43,7 @@ pub fn init() void {
     // Calculate the start and end of the usable memory
     logger.debug("Kernel end: 0x{x:0>16}", .{&kernel_end});
     const memory_start = PAGE_ROUND_UP(@ptrToInt(&kernel_end));
-    const memory_end = PAGE_ROUND_DOWN(arch.flattened_device_tree);
+    const memory_end = PAGE_ROUND_DOWN(arch.device_tree_address);
     // const memory_end = PAGE_ROUND_DOWN(hwinfo.info.memory_start + hwinfo.info.memory_size);
     logger.debug("Usable RAM start:\t 0x{x:0>16}", .{memory_start});
     logger.debug("Usable RAM end:\t 0x{x:0>16}", .{memory_end});
