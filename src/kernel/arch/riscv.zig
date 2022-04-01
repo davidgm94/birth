@@ -2,11 +2,21 @@ const std = @import("std");
 pub const page_size = 0x1000;
 pub const Spinlock = @import("riscv64/spinlock.zig");
 pub const sync = @import("riscv64/sync.zig");
+pub const DeviceTree = @import("riscv64/device_tree.zig");
 pub const max_cpu = 64;
 
 const UART = @import("riscv64/uart.zig").UART;
 var device_tree_address: u64 = 0;
 const assert = std.debug.assert;
+
+export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
+    init_logger();
+    writer.lockless.print("Hello RNU. Boot HART id: {}. Device tree address: 0x{x}\n", .{boot_hart_id, fdt_address}) catch unreachable;
+    const result = DeviceTree.parse(fdt_address);
+    _ = result;
+    spinloop();
+}
+
 
 const Context = struct {
     integer: [32]u64,
@@ -18,22 +28,15 @@ const Context = struct {
 
 pub const LocalStorage = struct {
     context: Context,
+    padding: [page_size - @sizeOf(Context)]u8,
 
     comptime {
-        @compileLog("size of context", @sizeOf(Context));
         std.debug.assert(@sizeOf(LocalStorage) == page_size);
     }
 };
 
-export var local_storage: [max_cpu]LocalStorage = undefined;
+var local_storage: [max_cpu]LocalStorage = undefined;
 
-export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
-    _ = boot_hart_id;
-    _ = fdt_address;
-    init_logger();
-    spinloop();
-    local_storage[0].integer[0] = 1;
-}
 
 export fn kernel_interrupt_handler() callconv(.C) noreturn {
     spinloop();
@@ -136,4 +139,17 @@ const Writer = struct {
 pub const writer = Writer{
     .locked = Writer.Locked{ .context = {} },
     .lockless = Writer.Lockless{ .context = {} },
+};
+
+pub const Bounds = struct {
+    extern const kernel_start: u8;
+    extern const kernel_end: u8;
+
+    pub inline fn get_start() u64 {
+        return @ptrToInt(&kernel_start);
+    }
+
+    pub inline fn get_end() u64 {
+        return @ptrToInt(&kernel_end);
+    }
 };

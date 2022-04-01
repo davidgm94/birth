@@ -2,14 +2,13 @@ const std = @import("std");
 const kernel = @import("../../kernel.zig");
 const assert = kernel.assert;
 const TODO = kernel.TODO;
-const panicf = kernel.panicf;
 const align_forward = kernel.align_forward;
 const string_eq = kernel.string_eq;
 const write = kernel.arch.write;
 const log = kernel.log;
 const read_big_endian = std.mem.readIntSliceBig;
 const page_size = kernel.arch.page_size;
-const MemoryRegion = kernel.MemoryRegion;
+const Memory = kernel.Memory;
 const logger = std.log.scoped(.init);
 
 const DeviceTree = @This();
@@ -193,7 +192,7 @@ const StructureBlock = struct {
                                                                     }
                                                                 },
                                                                 .end_node => break,
-                                                                else => panicf("Not implemented: {}\n", .{reserved_memory_node_token}),
+                                                                else => kernel.panic("Not implemented: {}\n", .{reserved_memory_node_token}),
                                                             }
                                                         }
                                                     } else {
@@ -201,7 +200,7 @@ const StructureBlock = struct {
                                                     }
                                                 },
                                                 .end_node => break,
-                                                else => panicf("Not implemented: {}\n", .{node_token}),
+                                                else => kernel.panic("Not implemented: {}\n", .{node_token}),
                                             }
                                         }
                                     } else if (std.mem.startsWith(u8, name, "fw-cfg")) {
@@ -217,7 +216,7 @@ const StructureBlock = struct {
                                         //logger.debug("Property key: {s}\n", .{key});
                                         //TODO(@src());
                                         //},
-                                        //else => panicf("FW cfg token is not implemented: {}\n", .{fw_cfg_token}),
+                                        //else => kernel.panic("FW cfg token is not implemented: {}\n", .{fw_cfg_token}),
                                         //}
                                         //}
                                     } else if (std.mem.startsWith(u8, name, "flash")) {
@@ -250,7 +249,7 @@ const StructureBlock = struct {
                                                     }
                                                 },
                                                 .end_node => break,
-                                                else => panicf("Memory token is not implemented: {}\n", .{memory_token}),
+                                                else => kernel.panic("Memory token is not implemented: {}\n", .{memory_token}),
                                             }
                                         }
                                     } else if (string_eq(name, "cpus")) {
@@ -262,18 +261,18 @@ const StructureBlock = struct {
                                     }
                                 },
                                 .end_node => break,
-                                else => panicf("Unexpected token: {}\n", .{token}),
+                                else => kernel.panic("Unexpected token: {}\n", .{token}),
                             }
                         }
                     },
                     .end => break,
-                    else => panicf("Unexpected token: {}\n", .{main_token}),
+                    else => kernel.panic("Unexpected token: {}\n", .{main_token}),
                 }
             }
 
             // Add the kernel memory region
-            const kernel_address = kernel.arch.get_start();
-            const kernel_end = kernel.arch.get_end();
+            const kernel_address = kernel.bounds.get_start();
+            const kernel_end = kernel.bounds.get_end();
             const kernel_size = kernel_end - kernel_address;
             assert(@src(), kernel_address & (page_size - 1) == 0);
             assert(@src(), kernel_end & (page_size - 1) == 0);
@@ -315,7 +314,7 @@ const StructureBlock = struct {
                     .end_node => {
                         break;
                     },
-                    else => panicf("token unimplemented: {}\n", .{skip_token}),
+                    else => kernel.panic("token unimplemented: {}\n", .{skip_token}),
                 }
             }
         }
@@ -389,9 +388,9 @@ const StructureBlock = struct {
 };
 
 pub const Result = struct {
-    memory_regions: [1024]MemoryRegion,
+    memory_regions: [1024]Memory.Region.Descriptor,
     memory_region_count: u64,
-    reserved_memory_regions: [64]MemoryRegion,
+    reserved_memory_regions: [64]Memory.Region.Descriptor,
     reserved_memory_region_count: u64,
     address: u64,
 };
