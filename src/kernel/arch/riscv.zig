@@ -11,12 +11,11 @@ const assert = std.debug.assert;
 
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     init_logger();
-    writer.lockless.print("Hello RNU. Boot HART id: {}. Device tree address: 0x{x}\n", .{boot_hart_id, fdt_address}) catch unreachable;
+    writer.lockless.print("Hello RNU. Boot HART id: {}. Device tree address: 0x{x}\n", .{ boot_hart_id, fdt_address }) catch unreachable;
     const result = DeviceTree.parse(fdt_address);
     _ = result;
     spinloop();
 }
-
 
 const Context = struct {
     integer: [32]u64,
@@ -36,7 +35,6 @@ pub const LocalStorage = struct {
 };
 
 var local_storage: [max_cpu]LocalStorage = undefined;
-
 
 export fn kernel_interrupt_handler() callconv(.C) noreturn {
     spinloop();
@@ -140,6 +138,14 @@ pub const writer = Writer{
     .locked = Writer.Locked{ .context = {} },
     .lockless = Writer.Lockless{ .context = {} },
 };
+
+pub fn early_print(comptime format: []const u8, args: anytype) void {
+    writer.lockless.print(format, args) catch unreachable;
+}
+
+pub fn early_write(bytes: []const u8) void {
+    _ = writer.lockless.write(bytes) catch unreachable;
+}
 
 pub const Bounds = struct {
     extern const kernel_start: u8;

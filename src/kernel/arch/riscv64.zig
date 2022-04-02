@@ -275,7 +275,6 @@ pub const Clock = struct {
 };
 
 const WriteError = error{};
-
 const Writer = std.io.Writer(void, WriteError, write_bytes);
 pub const writer = @as(Writer, .{ .context = {} });
 fn write_bytes(_: void, bytes: []const u8) WriteError!usize {

@@ -25,7 +25,8 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
 //var panicking: usize = 0;
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace) noreturn {
     @setCold(true);
-    _ = message;
+    _ = kernel.arch.writer.locked.write("Panic!!! ") catch unreachable;
+    _ = kernel.arch.writer.locked.write(message) catch unreachable;
     kernel.arch.spinloop();
     //kernel.arch.disable_interrupts();
 

@@ -9,5 +9,5 @@ pub fn panic(comptime format: []const u8, args: anytype) noreturn {
 }
 
 pub fn TODO(src: std.builtin.SourceLocation) noreturn {
-    panic("TODO: {}\n", .{src});
+    panic("TODO: {s}:{}:{} {s}()\n", .{ src.file, src.line, src.column, src.fn_name });
 }
