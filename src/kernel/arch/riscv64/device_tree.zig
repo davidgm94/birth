@@ -22,15 +22,14 @@ header: Header,
 base_address: u64,
 main_nodes_start: u64,
 
-pub fn parse(self: *@This(), fdt_address: u64) void {
+pub fn parse(self: *@This()) void {
     write(hard_separator);
     defer write(hard_separator);
     print("Starting parsing the Flattened Device Tree...\n", .{});
-    self.base_address = fdt_address;
     self.header = DeviceTree.Header.read(@intToPtr([*]const u8, self.base_address)[0..@sizeOf(DeviceTree.Header)]) catch unreachable;
     DeviceTree.MemoryReservationBlock.parse(self.header, self.base_address);
-    var dt_structure_block_parser: DeviceTree.StructureBlock.Parser = undefined;
-    dt_structure_block_parser.parse(self);
+    var dt_structure_block_parser = DeviceTree.StructureBlock.Parser { .slice = undefined, .i = 0, .device_tree = self };
+    dt_structure_block_parser.parse();
     print("Done parsing the FDT\n", .{});
 }
 
@@ -148,14 +147,12 @@ const StructureBlock = struct {
         i: u64,
         device_tree: *DeviceTree,
 
-        fn parse(self: *@This(), device_tree: *DeviceTree) void {
-            const offset = device_tree.header.device_tree_struct_offset;
-            const size = device_tree.header.device_tree_struct_size;
-            const address = device_tree.base_address + offset;
+        fn parse(self: *@This()) void {
+            const offset = self.device_tree.header.device_tree_struct_offset;
+            const size = self.device_tree.header.device_tree_struct_size;
+            const address = self.device_tree.base_address + offset;
 
             self.slice = @intToPtr([*]u8, address)[0..size];
-            self.i = 0;
-            self.device_tree = device_tree;
 
             var address_cells: u32 = 0;
             var size_cells: u32 = 0;

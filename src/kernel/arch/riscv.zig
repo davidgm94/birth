@@ -18,7 +18,8 @@ const UART = @import("riscv64/uart.zig").UART;
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     init_logger();
     writer.lockless.print("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}\n", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address }) catch unreachable;
-    device_tree.parse(fdt_address);
+    device_tree.base_address = fdt_address;
+    device_tree.parse();
     init_cpu_count();
     cpu_count = 1;
     Timer.init();
