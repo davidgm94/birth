@@ -1,20 +1,34 @@
-const std = @import("std");
+const kernel = @import("../kernel.zig");
 pub const page_size = 0x1000;
 pub const Spinlock = @import("riscv64/spinlock.zig");
 pub const sync = @import("riscv64/sync.zig");
 pub const DeviceTree = @import("riscv64/device_tree.zig");
+pub const Timer = @import("riscv64/timer.zig");
+pub const Paging = @import("riscv64/paging.zig");
+pub const Physical = @import("riscv64/physical.zig");
+pub const Virtual = @import("riscv64/virtual.zig");
 pub const max_cpu = 64;
+pub const dt_read_int = kernel.read_int_big;
+pub var cpu_count: u64 = 0;
+
+const TODO = kernel.TODO;
 
 const UART = @import("riscv64/uart.zig").UART;
-var device_tree_address: u64 = 0;
-const assert = std.debug.assert;
 
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     init_logger();
-    writer.lockless.print("Hello RNU. Boot HART id: {}. Device tree address: 0x{x}\n", .{ boot_hart_id, fdt_address }) catch unreachable;
-    const result = DeviceTree.parse(fdt_address);
-    _ = result;
+    writer.lockless.print("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}\n", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address }) catch unreachable;
+    device_tree.parse(fdt_address);
+    init_cpu_count();
+    cpu_count = 1;
+    Timer.init();
+    Paging.init();
     spinloop();
+}
+
+fn init_cpu_count() void {
+    // TODO: take from the device tree
+    cpu_count = 1;
 }
 
 const Context = struct {
@@ -30,13 +44,41 @@ pub const LocalStorage = struct {
     padding: [page_size - @sizeOf(Context)]u8,
 
     comptime {
-        std.debug.assert(@sizeOf(LocalStorage) == page_size);
+        kernel.assert(@sizeOf(LocalStorage) == page_size);
     }
 };
 
 var local_storage: [max_cpu]LocalStorage = undefined;
 
-export fn kernel_interrupt_handler() callconv(.C) noreturn {
+pub const OldContext = struct {
+    reg: [32]usize,
+    sstatus: usize,
+    sepc: usize,
+};
+
+const Scause = enum(u64) {
+    instruction_address_misaligned = 0,
+    instruction_access_fault = 1,
+    illegal_instruction = 2,
+    breakpoint = 3,
+    load_address_misaligned = 4,
+    load_access_fault = 5,
+    store_address_misaligned = 6,
+    store_access_fault = 7,
+    environment_call_from_user_mode = 8,
+    environment_call_from_supervisor_mode = 9,
+    instruction_page_fault = 12,
+    load_page_fault = 13,
+    store_page_fault = 15,
+
+    supervisor_software_interrupt = 0x8000_0000_0000_0001,
+    supervisor_timer_interrupt = 0x8000_0000_0000_0005,
+    supervisor_external_interrupt = 0x8000_0000_0000_0009,
+};
+
+export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
+    disable_interrupts();
+    writer.lockless.print("Interrupt. SCAUSE: {}. STVAL: 0x{x}. Context: {}\n", .{ scause, stval, context }) catch unreachable;
     spinloop();
 }
 
@@ -52,9 +94,10 @@ pub var uart = UART(UART0){
     },
 };
 
+pub var device_tree: DeviceTree = undefined;
+
 pub fn init_logger() void {
     uart.init(false);
-    _ = writer.lockless.write("Hello RNU\n") catch unreachable;
 }
 
 fn CSR(comptime reg_name: []const u8, comptime BitT: type) type {
@@ -120,8 +163,8 @@ const Writer = struct {
     locked: Locked,
     lockless: Lockless,
 
-    const Locked = std.io.Writer(void, Error, locked_write);
-    const Lockless = std.io.Writer(void, Error, lockless_write);
+    const Locked = kernel.Writer(void, Error, locked_write);
+    const Lockless = kernel.Writer(void, Error, lockless_write);
 
     fn locked_write(_: void, bytes: []const u8) Error!usize {
         uart.write_bytes(bytes, true);

@@ -152,7 +152,7 @@ const qemu_command_str = [_][]const u8 {
     "-no-reboot", "-no-shutdown",
     "-machine", "virt",
     "-cpu", "rv64",
-    "-m", "128M",
+    "-m", "4G",
     "-bios", "default",
     "-kernel", kernel_path,
     "-serial", "mon:stdio",

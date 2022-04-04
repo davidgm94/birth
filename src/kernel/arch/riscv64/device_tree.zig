@@ -5,6 +5,7 @@ const TODO = kernel.TODO;
 const align_forward = kernel.align_forward;
 const string_eq = kernel.string_eq;
 const starts_with = kernel.string_starts_with;
+const ends_with = kernel.string_ends_with;
 const read_big_endian = std.mem.readIntSliceBig;
 const page_size = kernel.arch.page_size;
 const Memory = kernel.Memory;
@@ -17,16 +18,66 @@ var result: DeviceTree.Result = undefined;
 const soft_separator = "----------------------------------------------------------------\n";
 const hard_separator = "================================================================\n";
 
-pub fn parse(fdt_address: u64) *DeviceTree.Result {
+header: Header,
+base_address: u64,
+main_nodes_start: u64,
+
+pub fn parse(self: *@This(), fdt_address: u64) void {
     write(hard_separator);
     defer write(hard_separator);
     print("Starting parsing the Flattened Device Tree...\n", .{});
-    const dt_header = DeviceTree.Header.read(@intToPtr([*]const u8, fdt_address)[0..@sizeOf(DeviceTree.Header)]) catch unreachable;
-    DeviceTree.MemoryReservationBlock.parse(dt_header, fdt_address);
+    self.base_address = fdt_address;
+    self.header = DeviceTree.Header.read(@intToPtr([*]const u8, self.base_address)[0..@sizeOf(DeviceTree.Header)]) catch unreachable;
+    DeviceTree.MemoryReservationBlock.parse(self.header, self.base_address);
     var dt_structure_block_parser: DeviceTree.StructureBlock.Parser = undefined;
-    const returned_result = dt_structure_block_parser.parse(dt_header, fdt_address);
+    dt_structure_block_parser.parse(self);
     print("Done parsing the FDT\n", .{});
-    return returned_result;
+}
+
+pub const SearchType = enum {
+    exact,
+    start,
+    end,
+};
+
+pub fn get_node_finding_parser(self: *@This()) StructureBlock.Parser {
+    const slice_size = self.header.device_tree_struct_size - self.main_nodes_start;
+    return StructureBlock.Parser{
+        .slice = @intToPtr([*]u8, self.base_address + self.header.device_tree_struct_offset + self.main_nodes_start)[0..slice_size],
+        .i = 0,
+        .device_tree = self,
+    };
+}
+
+pub fn find_property(self: *@This(), main_node: []const u8, intermediate_nodes: ?[][]const u8, property_name: []const u8, comptime search_type: SearchType) ?StructureBlock.Parser.Property {
+    var parser = self.get_node_finding_parser();
+
+    if (parser.find_main_node_from_main_node_offset(main_node, search_type)) |_| {
+        if (intermediate_nodes) |_| {
+            TODO(@src());
+        } else {
+            return parser.find_property_in_current_node(property_name);
+        }
+    }
+
+    return null;
+}
+
+const FindNodeResult = struct {
+    parser: StructureBlock.Parser,
+    name: []const u8,
+};
+
+pub fn find_node(self: *@This(), node: []const u8, comptime search_type: SearchType) ?FindNodeResult {
+    var parser = self.get_node_finding_parser();
+    if (parser.find_main_node_from_main_node_offset(node, search_type)) |node_name| {
+        return FindNodeResult{
+            .parser = parser,
+            .name = node_name,
+        };
+    }
+
+    return null;
 }
 
 const Header = struct {
@@ -95,18 +146,16 @@ const StructureBlock = struct {
     const Parser = struct {
         slice: []const u8,
         i: u64,
-        header_address: u64,
-        header: Header,
+        device_tree: *DeviceTree,
 
-        fn parse(self: *@This(), header: Header, header_address: u64) *Result {
-            self.header = header;
-            self.header_address = header_address;
-            const offset = self.header.device_tree_struct_offset;
-            const size = self.header.device_tree_struct_size;
-            const address = header_address + offset;
+        fn parse(self: *@This(), device_tree: *DeviceTree) void {
+            const offset = device_tree.header.device_tree_struct_offset;
+            const size = device_tree.header.device_tree_struct_size;
+            const address = device_tree.base_address + offset;
 
             self.slice = @intToPtr([*]u8, address)[0..size];
             self.i = 0;
+            self.device_tree = device_tree;
 
             var address_cells: u32 = 0;
             var size_cells: u32 = 0;
@@ -148,128 +197,10 @@ const StructureBlock = struct {
                             }
                         },
                         .begin_node => {
+                            if (self.device_tree.main_nodes_start == 0) {
+                                self.device_tree.main_nodes_start = self.i - @sizeOf(Token);
+                            }
                             self.parse_node(1, address_cells, size_cells);
-
-                            //if (string_eq(name, "reserved-memory")) {
-                            //while (true) {
-                            //const node_token = self.parse_token();
-
-                            //switch (node_token) {
-                            //.property => {
-                            //const descriptor = self.parse_property_value_descriptor();
-                            //const key = self.parse_string_in_string_table(descriptor);
-
-                            //if (string_eq(key, "#address-cells")) {
-                            //assert(@src(), descriptor.len == @sizeOf(u32));
-                            //const value = self.parse_int(u32);
-                            //_ = value;
-                            //} else if (string_eq(key, "#size-cells")) {
-                            //assert(@src(), descriptor.len == @sizeOf(u32));
-                            //const value = self.parse_int(u32);
-                            //_ = value;
-                            //} else if (string_eq(key, "ranges")) {
-                            //assert(@src(), descriptor.len == 0);
-                            //const ranges_value = self.parse_string_in_string_table(descriptor);
-                            //_ = ranges_value;
-                            //} else {
-                            //TODO(@src());
-                            //}
-                            //},
-                            //.begin_node => {
-                            //const reserved_memory_name_node = self.parse_begin_node();
-
-                            //if (std.mem.startsWith(u8, reserved_memory_name_node, "mmode")) {
-                            //const at_index = std.mem.indexOf(u8, reserved_memory_name_node, "@") orelse @panic("expected address\n");
-                            //const address_str = reserved_memory_name_node[at_index + 1 ..];
-                            //const reserved_memory_address = std.fmt.parseInt(u64, address_str, 16) catch unreachable;
-                            //_ = reserved_memory_address;
-
-                            //while (true) {
-                            //const reserved_memory_node_token = self.parse_token();
-
-                            //switch (reserved_memory_node_token) {
-                            //.property => {
-                            //const descriptor = self.parse_property_value_descriptor();
-                            //const key = self.parse_string_in_string_table(descriptor);
-
-                            //if (string_eq(key, "reg")) {
-                            //const reserved_address = self.parse_int(u64);
-                            //const reserved_size = self.parse_int(u64);
-                            //result.reserved_memory_regions[result.reserved_memory_region_count].address = reserved_address;
-                            //result.reserved_memory_regions[result.reserved_memory_region_count].size = reserved_size;
-                            //result.reserved_memory_region_count += 1;
-                            //} else {
-                            //TODO(@src());
-                            //}
-                            //},
-                            //.end_node => break,
-                            //else => kernel.panic("Not implemented: {}\n", .{reserved_memory_node_token}),
-                            //}
-                            //}
-                            //} else {
-                            //TODO(@src());
-                            //}
-                            //},
-                            //.end_node => break,
-                            //else => kernel.panic("Not implemented: {}\n", .{node_token}),
-                            //}
-                            //}
-                            //} else if (std.mem.startsWith(u8, name, "fw-cfg")) {
-                            //self.skip_node();
-                            ////while (true) {
-                            ////const fw_cfg_token = self.parse_token();
-
-                            ////switch (fw_cfg_token) {
-                            ////.property => {
-                            ////const descriptor = self.parse_property_value_descriptor();
-                            ////logger.debug("Descriptor: {}\n", .{descriptor});
-                            ////const key = self.parse_string_in_string_table(descriptor);
-                            ////logger.debug("Property key: {s}\n", .{key});
-                            ////TODO(@src());
-                            ////},
-                            ////else => kernel.panic("FW cfg token is not implemented: {}\n", .{fw_cfg_token}),
-                            ////}
-                            ////}
-                            //} else if (std.mem.startsWith(u8, name, "flash")) {
-                            //self.skip_node();
-                            //} else if (string_eq(name, "chosen")) {
-                            //self.skip_node();
-                            //} else if (std.mem.startsWith(u8, name, "memory")) {
-                            //while (true) {
-                            //const memory_token = self.parse_token();
-
-                            //switch (memory_token) {
-                            //.property => {
-                            //const descriptor = self.parse_property_value_descriptor();
-                            //const key = self.parse_string_in_string_table(descriptor);
-
-                            //if (string_eq(key, "device_type")) {
-                            //const device_type_value = self.parse_property_name(descriptor);
-                            //_ = device_type_value;
-                            //} else if (string_eq(key, "reg")) {
-                            //const i = self.i;
-                            //while (self.i < i + descriptor.len) {
-                            //const memory_address = self.parse_int(u64);
-                            //const memory_size = self.parse_int(u64);
-                            //result.memory_regions[result.memory_region_count].address = memory_address;
-                            //result.memory_regions[result.memory_region_count].size = memory_size;
-                            //result.memory_region_count += 1;
-                            //}
-                            //} else {
-                            //TODO(@src());
-                            //}
-                            //},
-                            //.end_node => break,
-                            //else => kernel.panic("Memory token is not implemented: {}\n", .{memory_token}),
-                            //}
-                            //}
-                            //} else if (string_eq(name, "cpus")) {
-                            //self.skip_node();
-                            //} else if (string_eq(name, "soc")) {
-                            //self.skip_node();
-                            //} else {
-                            //TODO(@src());
-                            //}
                         },
                         .end_node => break,
                         else => kernel.panic("Unexpected token: {}\n", .{token}),
@@ -278,23 +209,23 @@ const StructureBlock = struct {
             }
 
             // Add the kernel memory region
-            const kernel_address = kernel.bounds.get_start();
-            const kernel_end = kernel.bounds.get_end();
-            const kernel_size = kernel_end - kernel_address;
-            assert(@src(), kernel_address & (page_size - 1) == 0);
-            assert(@src(), kernel_end & (page_size - 1) == 0);
-            result.reserved_memory_regions[result.reserved_memory_region_count].address = kernel_address;
-            result.reserved_memory_regions[result.reserved_memory_region_count].size = kernel_size;
-            result.reserved_memory_region_count += 1;
+            //const kernel_address = kernel.bounds.get_start();
+            //const kernel_end = kernel.bounds.get_end();
+            //const kernel_size = kernel_end - kernel_address;
+            //assert(@src(), kernel_address & (page_size - 1) == 0);
+            //assert(@src(), kernel_end & (page_size - 1) == 0);
+            //result.reserved_memory_regions[result.reserved_memory_region_count].address = kernel_address;
+            //result.reserved_memory_regions[result.reserved_memory_region_count].size = kernel_size;
+            //result.reserved_memory_region_count += 1;
 
-            // Add the FDT memory region
-            result.reserved_memory_regions[result.reserved_memory_region_count].address = header_address;
-            result.reserved_memory_regions[result.reserved_memory_region_count].size = align_forward(header.size, page_size);
-            result.reserved_memory_region_count += 1;
+            //// Add the FDT memory region
+            //result.reserved_memory_regions[result.reserved_memory_region_count].address = header_address;
+            //result.reserved_memory_regions[result.reserved_memory_region_count].size = align_forward(header.size, page_size);
+            //result.reserved_memory_region_count += 1;
 
-            result.address = header_address;
+            //result.address = header_address;
 
-            return &result;
+            //return &result;
         }
 
         fn parse_node(self: *@This(), identation: u32, parent_address_cells: u32, parent_size_cells: u32) void {
@@ -451,7 +382,7 @@ const StructureBlock = struct {
                             } else if (starts_with(node_name, "core")) {
                                 if (string_eq(property_name, "cpu")) {
                                     const value = self.parse_int(u32);
-                                    print("{}\n", .{value});
+                                    print("{}", .{value});
                                 } else {
                                     TODO(@src());
                                 }
@@ -567,7 +498,36 @@ const StructureBlock = struct {
             }
         }
 
-        fn parse_and_print_freq(self: *@This(), property_value_descriptor: Property.Descriptor) void {
+        // This assumes the begin_node token has already been parsed
+        pub fn find_property_in_current_node(self: *@This(), wanted_property_name: []const u8) ?Property {
+            while (true) {
+                const token = self.parse_token();
+                switch (token) {
+                    .property => {
+                        const property_value_descriptor = self.parse_property_value_descriptor();
+                        const property_name = self.parse_string_in_string_table(property_value_descriptor);
+                        const property_value = self.slice.ptr[self.i .. self.i + property_value_descriptor.len];
+                        self.i = align_to_u32(self.i + property_value_descriptor.len);
+
+                        if (string_eq(property_name, wanted_property_name)) {
+                            return Property{
+                                .name = property_name,
+                                .value = property_value,
+                            };
+                        }
+                    },
+                    else => kernel.panic("NI find: {}\n", .{token}),
+                }
+            }
+
+            return null;
+        }
+
+        fn skip_property_value(self: *@This(), property_value_descriptor: Property.ValueDescriptor) void {
+            self.i = align_to_u32(self.i + property_value_descriptor.len);
+        }
+
+        fn parse_and_print_freq(self: *@This(), property_value_descriptor: Property.ValueDescriptor) void {
             switch (property_value_descriptor.len) {
                 @sizeOf(u32) => {
                     const value = self.parse_int(u32);
@@ -597,16 +557,16 @@ const StructureBlock = struct {
             write(bytes);
         }
 
-        fn parse_property_name(self: *@This(), descriptor: Property.Descriptor) []const u8 {
+        fn parse_property_name(self: *@This(), descriptor: Property.ValueDescriptor) []const u8 {
             const property_value = self.slice[self.i .. self.i + descriptor.len];
             self.i = align_to_u32(self.i + descriptor.len);
             return property_value;
         }
 
-        //fn parse_properly_encoded_array(self: *@This(), descriptor: Property.Descriptor) []const u8 {
+        //fn parse_properly_encoded_array(self: *@This(), descriptor: Property.ValueDescriptor) []const u8 {
         //}
 
-        fn skip_node(self: *@This()) void {
+        pub fn skip_node(self: *@This()) void {
             while (true) {
                 const skip_token = self.parse_token();
                 switch (skip_token) {
@@ -615,8 +575,7 @@ const StructureBlock = struct {
                         self.skip_node();
                     },
                     .property => {
-                        const len = self.parse_int(u32);
-                        self.i = align_to_u32(self.i + @sizeOf(u32) + len);
+                        self.skip_property();
                     },
                     .end_node => {
                         break;
@@ -624,6 +583,11 @@ const StructureBlock = struct {
                     else => kernel.panic("token unimplemented: {}\n", .{skip_token}),
                 }
             }
+        }
+
+        fn skip_property(self: *@This()) void {
+            const descriptor = self.parse_property_value_descriptor();
+            self.skip_property_value(descriptor);
         }
 
         fn skip_cstr(self: *@This()) void {
@@ -637,16 +601,16 @@ const StructureBlock = struct {
             return node_name;
         }
 
-        fn parse_property_value_descriptor(self: *@This()) Property.Descriptor {
-            return Property.Descriptor{
+        fn parse_property_value_descriptor(self: *@This()) Property.ValueDescriptor {
+            return Property.ValueDescriptor{
                 .len = self.parse_int(u32),
                 .name_offset = self.parse_int(u32),
             };
         }
 
-        fn parse_string_in_string_table(self: *@This(), descriptor: Property.Descriptor) []const u8 {
-            const strings_offset = self.header.device_tree_strings_offset;
-            const string_offset = self.header_address + strings_offset + descriptor.name_offset;
+        fn parse_string_in_string_table(self: *@This(), descriptor: Property.ValueDescriptor) []const u8 {
+            const strings_offset = self.device_tree.header.device_tree_strings_offset;
+            const string_offset = self.device_tree.base_address + strings_offset + descriptor.name_offset;
             const property_key_cstr = @intToPtr([*:0]u8, string_offset);
             const value = property_key_cstr[0..std.mem.len(property_key_cstr)];
             return value;
@@ -683,15 +647,9 @@ const StructureBlock = struct {
 
         const Property = struct {
             name: []const u8,
-            value: union(enum) {
-                empty: void,
-                int32: u32,
-                int64: u64,
-                string: []const u8,
-                phandle: u32,
-                string_list: []const u8, // We store stringlist in a single string
-            },
-            const Descriptor = struct {
+            value: []const u8,
+
+            const ValueDescriptor = struct {
                 len: u32,
                 name_offset: u32,
             };
@@ -708,6 +666,50 @@ const StructureBlock = struct {
 
         inline fn align_to_u32(i: u64) u64 {
             return align_forward(i, @sizeOf(u32));
+        }
+
+        fn find_main_node_from_main_node_offset(self: *@This(), wanted_node_name: []const u8, comptime search_type: SearchType) ?[]const u8 {
+            while (true) {
+                const token = self.parse_token();
+                switch (token) {
+                    .begin_node => {
+                        const node_name = self.parse_begin_node();
+
+                        const found = switch (search_type) {
+                            .exact => string_eq(node_name, wanted_node_name),
+                            .start => starts_with(node_name, wanted_node_name),
+                            .end => ends_with(node_name, wanted_node_name),
+                        };
+
+                        if (found) {
+                            return node_name;
+                        }
+
+                        self.skip_node();
+                    },
+                    .end_node => break,
+                    else => kernel.panic("NI: {}\n", .{token}),
+                }
+            }
+
+            return null;
+        }
+
+        pub fn get_subnode(self: *@This()) ?[]const u8 {
+            while (true) {
+                const token = self.parse_token();
+                switch (token) {
+                    .begin_node => {
+                        const node_name = self.parse_begin_node();
+                        return node_name;
+                    },
+                    .property => self.skip_property(),
+                    .end_node => break,
+                    else => unreachable,
+                }
+            }
+
+            return null;
         }
     };
 };
