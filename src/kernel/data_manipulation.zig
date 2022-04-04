@@ -22,3 +22,9 @@ pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
 }
 
 pub const copy = std.mem.copy;
+
+pub inline fn zero(bytes: []const u8) void {
+    for (bytes) |*byte| {
+        byte.* = 0;
+    }
+}

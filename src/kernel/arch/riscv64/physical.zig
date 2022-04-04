@@ -108,7 +108,7 @@ pub fn init() void {
     }
 }
 
-fn allocate(page_count: u64) ?u64 {
+fn allocate(page_count: u64, zero: bool) ?u64 {
     const take_hint = true;
     var first_address: u64 = 0;
 
@@ -129,6 +129,9 @@ fn allocate(page_count: u64) ?u64 {
                         if (region_allocated_page_count == page_count) {
                             region.allocated_page_count += region_allocated_page_count;
                             kernel.assert(@src(), first_address != 0);
+                            if (zero) {
+                                kernel.zero(@intToPtr([*]u8, first_address)[0..page_count * kernel.arch.page_size]);
+                            }
                             return first_address;
                         } else {
                             if (!bit_set) {
