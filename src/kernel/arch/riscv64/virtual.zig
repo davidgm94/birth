@@ -82,6 +82,12 @@ pub fn init() void {
 
     enablePaging();
     write("enabled paging\n");
+
+    var total_allocated_page_count: u64 = 0;
+    for (Physical.available_regions) |region| {
+        total_allocated_page_count += region.allocated_page_count;
+    }
+    print("Total page count allocated for mapping: {}\n", .{total_allocated_page_count});
 }
 
 /// enable_paging setup paging for initialization-time paging

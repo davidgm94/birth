@@ -28,7 +28,7 @@ pub fn parse(self: *@This()) void {
     print("Starting parsing the Flattened Device Tree...\n", .{});
     self.header = DeviceTree.Header.read(@intToPtr([*]const u8, self.base_address)[0..@sizeOf(DeviceTree.Header)]) catch unreachable;
     DeviceTree.MemoryReservationBlock.parse(self.header, self.base_address);
-    var dt_structure_block_parser = DeviceTree.StructureBlock.Parser { .slice = undefined, .i = 0, .device_tree = self };
+    var dt_structure_block_parser = DeviceTree.StructureBlock.Parser{ .slice = undefined, .i = 0, .device_tree = self };
     dt_structure_block_parser.parse();
     print("Done parsing the FDT\n", .{});
 }
@@ -48,7 +48,7 @@ pub fn get_node_finding_parser(self: *@This()) StructureBlock.Parser {
     };
 }
 
-pub fn find_property(self: *@This(), main_node: []const u8, intermediate_nodes: ?[][]const u8, property_name: []const u8, comptime search_type: SearchType) ?StructureBlock.Parser.Property {
+pub fn find_property(self: *@This(), main_node: []const u8, intermediate_nodes: ?[]const []const u8, property_name: []const u8, comptime search_type: SearchType) ?StructureBlock.Parser.Property {
     var parser = self.get_node_finding_parser();
 
     if (parser.find_main_node_from_main_node_offset(main_node, search_type)) |_| {

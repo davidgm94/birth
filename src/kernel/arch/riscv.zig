@@ -7,6 +7,7 @@ pub const Timer = @import("riscv64/timer.zig");
 pub const Paging = @import("riscv64/paging.zig");
 pub const Physical = @import("riscv64/physical.zig");
 pub const Virtual = @import("riscv64/virtual.zig");
+pub const Interrupts = @import("riscv64/interrupts.zig");
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
@@ -24,6 +25,7 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     cpu_count = 1;
     Timer.init();
     Paging.init();
+    Interrupts.init();
     kernel.arch.early_write("Initialized successfully\n");
     spinloop();
 }
