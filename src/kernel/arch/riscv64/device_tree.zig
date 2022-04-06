@@ -48,12 +48,20 @@ pub fn get_node_finding_parser(self: *@This()) StructureBlock.Parser {
     };
 }
 
-pub fn find_property(self: *@This(), main_node: []const u8, intermediate_nodes: ?[]const []const u8, property_name: []const u8, comptime search_type: SearchType) ?StructureBlock.Parser.Property {
+pub fn find_property(self: *@This(), main_node: []const u8, property_name: []const u8, comptime search_type: SearchType, maybe_intermediate_nodes: ?[]const []const u8, comptime maybe_intermediate_search_types: ?[]const SearchType) ?StructureBlock.Parser.Property {
     var parser = self.get_node_finding_parser();
 
-    if (parser.find_main_node_from_main_node_offset(main_node, search_type)) |_| {
-        if (intermediate_nodes) |_| {
-            TODO(@src());
+    if (parser.find_node_from_current_offset(main_node, search_type)) |_| {
+        if (maybe_intermediate_nodes) |intermediate_nodes| {
+            if (maybe_intermediate_search_types) |intermediate_search_types| {
+                var last_node = false;
+                for (intermediate_nodes) |node, i| {
+                    const intermediate_search_type = intermediate_search_types[i];
+                    last_node = parser.find_node_from_current_offset(node, intermediate_search_type) != null;
+                }
+                kernel.assert(@src(), last_node);
+                return parser.find_property_in_current_node(property_name);
+            }
         } else {
             return parser.find_property_in_current_node(property_name);
         }
@@ -69,7 +77,7 @@ const FindNodeResult = struct {
 
 pub fn find_node(self: *@This(), node: []const u8, comptime search_type: SearchType) ?FindNodeResult {
     var parser = self.get_node_finding_parser();
-    if (parser.find_main_node_from_main_node_offset(node, search_type)) |node_name| {
+    if (parser.find_node_from_current_offset(node, search_type)) |node_name| {
         return FindNodeResult{
             .parser = parser,
             .name = node_name,
@@ -665,7 +673,7 @@ const StructureBlock = struct {
             return align_forward(i, @sizeOf(u32));
         }
 
-        fn find_main_node_from_main_node_offset(self: *@This(), wanted_node_name: []const u8, comptime search_type: SearchType) ?[]const u8 {
+        fn find_node_from_current_offset(self: *@This(), wanted_node_name: []const u8, search_type: SearchType) ?[]const u8 {
             while (true) {
                 const token = self.parse_token();
                 switch (token) {
@@ -684,6 +692,7 @@ const StructureBlock = struct {
 
                         self.skip_node();
                     },
+                    .property => self.skip_property(),
                     .end_node => break,
                     else => kernel.panic("NI: {}\n", .{token}),
                 }

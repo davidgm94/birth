@@ -18,7 +18,7 @@ pub const MemoryMap = struct {
 };
 
 pub fn get() MemoryMap {
-    const memory_properties = kernel.arch.device_tree.find_property("memory", null, "reg", .start) orelse @panic("not found");
+    const memory_properties = kernel.arch.device_tree.find_property("memory", "reg", .start, null, null) orelse @panic("not found");
     var bytes_processed: u64 = 0;
 
     var memory_map: MemoryMap = undefined;
