@@ -7,8 +7,8 @@ const MemoryMap = @import("memory_map.zig");
 var bitset_memory: [0x400_000 + (10 * kernel.arch.page_size)]u8 align(kernel.arch.page_size) = undefined;
 var bitset_byte_count: u64 = 0;
 
-var available_regions: []Region = undefined;
-var reserved_regions: []Region.Descriptor = undefined;
+pub var available_regions: []Region = undefined;
+pub var reserved_regions: []Region.Descriptor = undefined;
 var _reserved: [64]Region.Descriptor = undefined;
 var _available: [64]Region = undefined;
 
@@ -100,7 +100,8 @@ pub fn init() void {
 
     for (available_regions) |*region| {
         // Align to u64
-        const bytes_to_allocate = kernel.align_forward(@sizeOf(u64), (region.descriptor.page_count / @bitSizeOf(u8)) + @boolToInt(region.descriptor.page_count % @bitSizeOf(u8) != 0));
+        const bitset_len = (region.descriptor.page_count / @bitSizeOf(u64)) + @boolToInt(region.descriptor.page_count % @bitSizeOf(u64) != 0);
+        const bytes_to_allocate = bitset_len * @sizeOf(u64);
         bitset_byte_count = kernel.align_forward(bitset_byte_count, kernel.arch.page_size);
         region.bitset.ptr = @ptrCast([*]u64, @alignCast(kernel.arch.page_size, &bitset_memory[bitset_byte_count]));
         region.bitset.len = bytes_to_allocate / @sizeOf(u64);
@@ -108,49 +109,79 @@ pub fn init() void {
     }
 }
 
-fn allocate(page_count: u64, zero: bool) ?u64 {
+pub fn allocate(page_count: u64, zero: bool) ?u64 {
     const take_hint = true;
-    var first_address: u64 = 0;
 
     // TODO: don't allocate if they are different regions (this can cause issues?)
     for (available_regions) |*region| {
         if (region.descriptor.page_count - region.allocated_page_count >= page_count) {
+            kernel.assert(@src(), region.bitset.len >= region.descriptor.page_count / @bitSizeOf(u64));
             var region_allocated_page_count: u64 = 0;
 
-            if (take_hint) {
-                const hint_index = region.allocated_page_count / @bitSizeOf(u64);
-                print("Hint index: {}\n", .{hint_index});
+            const start_index = if (take_hint) region.allocated_page_count / @bitSizeOf(u64) else 0;
+            var first_address: u64 = 0;
 
-                for (region.bitset[hint_index..]) |*bitset_elem, byte_i| {
-                    comptime var bit: u64 = 0;
-                    inline while (bit < @bitSizeOf(u64)) : (bit += 1) {
-                        const bit_set = bitset_elem.* & (1 << bit) != 0;
-                        print("[B{}][b{}] = {}\n", .{ hint_index + byte_i, bit, bit_set });
-                        if (region_allocated_page_count == page_count) {
-                            region.allocated_page_count += region_allocated_page_count;
-                            kernel.assert(@src(), first_address != 0);
-                            if (zero) {
-                                kernel.zero(@intToPtr([*]u8, first_address)[0..page_count * kernel.arch.page_size]);
-                            }
-                            return first_address;
-                        } else {
-                            if (!bit_set) {
-                                if (first_address == 0) {
-                                    const offset = (bit + (hint_index * @bitSizeOf(u64))) * kernel.arch.page_size;
-                                    first_address = region.descriptor.address + offset;
-                                }
+            for (region.bitset[start_index..]) |*bitset_elem| {
+                comptime var bit: u64 = 0;
 
-                                bitset_elem.* = bitset_elem.* | (1 << bit);
-                                region_allocated_page_count += 1;
+                inline while (bit < @bitSizeOf(u64)) : (bit += 1) {
+                    const bit_set = bitset_elem.* & (1 << bit) != 0;
+                    if (region_allocated_page_count == page_count) {
+                        region.allocated_page_count += region_allocated_page_count;
+                        kernel.assert(@src(), first_address != 0);
+                        if (zero) {
+                            kernel.zero(@intToPtr([*]u8, first_address)[0 .. page_count * kernel.arch.page_size]);
+                        }
+                        return first_address;
+                    } else {
+                        if (!bit_set) {
+                            if (first_address == 0) {
+                                const offset = (bit + (start_index * @bitSizeOf(u64))) * kernel.arch.page_size;
+                                first_address = region.descriptor.address + offset;
                             }
+
+                            bitset_elem.* = bitset_elem.* | (1 << bit);
+                            region_allocated_page_count += 1;
                         }
                     }
                 }
-            } else {
+            }
+
+            if (region_allocated_page_count == page_count) {
+                region.allocated_page_count += region_allocated_page_count;
+                kernel.assert(@src(), first_address != 0);
+                if (zero) {
+                    kernel.zero(@intToPtr([*]u8, first_address)[0 .. page_count * kernel.arch.page_size]);
+                }
+                return first_address;
+            }
+
+            print("Asked page count: {}. Pages to deallocate: {}\n. Region page count: {}. Region already allocated: {}\n", .{ page_count, region_allocated_page_count, region.descriptor.page_count, region.allocated_page_count });
+
+            kernel.assert(@src(), region.allocated_page_count + page_count > region.descriptor.page_count);
+            kernel.assert(@src(), first_address != 0);
+            const original_allocated_page_count = region.allocated_page_count - region_allocated_page_count;
+            var byte = original_allocated_page_count / @bitSizeOf(u64);
+            var bit = original_allocated_page_count % @bitSizeOf(u64);
+
+            kernel.assert(@src(), region_allocated_page_count > 0);
+
+            if (bit > 0) {
+                while (bit < @bitSizeOf(u64)) : (bit += 1) {
+                    region.bitset[byte] &= (~(@as(u64, 1) << @intCast(u6, bit)));
+                    region_allocated_page_count -= 1;
+                }
+            }
+
+            if (region_allocated_page_count >= 64) {
                 TODO(@src());
             }
 
-            @panic("deallocate and move to another region");
+            if (region_allocated_page_count > 0) {
+                TODO(@src());
+            }
+
+            region.allocated_page_count = original_allocated_page_count;
         }
     }
 

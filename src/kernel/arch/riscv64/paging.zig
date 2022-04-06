@@ -4,4 +4,5 @@ const Virtual = @import("virtual.zig");
 
 pub fn init() void {
     Physical.init();
+    Virtual.init();
 }

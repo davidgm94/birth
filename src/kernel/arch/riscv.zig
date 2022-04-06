@@ -24,6 +24,7 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     cpu_count = 1;
     Timer.init();
     Paging.init();
+    kernel.arch.early_write("Initialized successfully\n");
     spinloop();
 }
 
@@ -87,7 +88,7 @@ pub fn spinloop() noreturn {
     while (true) {}
 }
 
-const UART0 = 0x1000_0000;
+pub const UART0 = 0x1000_0000;
 pub var uart = UART(UART0){
     .lock = Spinlock{
         ._lock = 0,
@@ -148,7 +149,12 @@ const sie = CSR("sie", enum(u32) {
 });
 const cycle = CSR("cycle", enum(u32) { foo = 0 });
 const stvec = CSR("stvec", enum(u32) { foo = 0 });
-const SATP = CSR("satp", enum(u32) { foo = 0 });
+pub const SATP = CSR("satp", enum(u32) { foo = 0 });
+
+const SATP_SV39: usize = (8 << 60);
+pub inline fn MAKE_SATP(pagetable: usize) usize {
+    return (SATP_SV39 | (pagetable >> 12));
+}
 
 pub fn enable_interrupts() void {
     sstatus.set(.SIE);
@@ -203,3 +209,39 @@ pub const Bounds = struct {
         return @ptrToInt(&kernel_end);
     }
 };
+
+pub const PTE_VALID: usize = (1 << 0); // valid
+pub const PTE_READ: usize = (1 << 1); // read permission
+pub const PTE_WRITE: usize = (1 << 2); // write permission
+pub const PTE_EXEC: usize = (1 << 3); // execute permission
+pub const PTE_USER: usize = (1 << 4); // belongs to U mode
+
+pub const memory_layout = struct {
+    pub const UART0: usize = 0x1000_0000;
+    pub const PLIC: usize = 0x0C00_0000;
+};
+pub inline fn flush_tlb() void {
+    asm volatile ("sfence.vma zero, zero");
+}
+pub const PAGE_INDEX_MASK: usize = 0x1FF; // 9 bits
+pub const PTE_FLAG_MASK: usize = 0x3FF; // 10 bits
+
+pub inline fn PTE_FLAGS(pte: usize) usize {
+    return pte & PTE_FLAG_MASK;
+}
+
+pub inline fn PAGE_INDEX(level: usize, virtual_address: usize) usize {
+    return (virtual_address >> PAGE_INDEX_SHIFT(level)) & PAGE_INDEX_MASK;
+}
+
+pub inline fn PTE_TO_PA(pte: usize) usize {
+    return (pte >> 10) << 12;
+}
+
+pub inline fn PA_TO_PTE(pa: usize) usize {
+    return (pa >> 12) << 10;
+}
+pub inline fn PAGE_INDEX_SHIFT(level: usize) u6 {
+    return @intCast(u6, PAGE_SHIFT + 9 * level);
+}
+pub const PAGE_SHIFT: usize = 12;

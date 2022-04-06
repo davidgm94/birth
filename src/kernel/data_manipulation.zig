@@ -17,13 +17,21 @@ pub inline fn align_forward(n: u64, alignment: u64) u64 {
     return result;
 }
 
+pub inline fn align_backward(n: u64, alignment: u64) u64 {
+    return n & ~(alignment - 1);
+}
+
+pub inline fn is_aligned(n: u64, alignment: u64) bool {
+    return n & (alignment - 1) == 0;
+}
+
 pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
     return std.mem.readIntBig(T, slice[0..@sizeOf(T)]);
 }
 
 pub const copy = std.mem.copy;
 
-pub inline fn zero(bytes: []const u8) void {
+pub inline fn zero(bytes: []u8) void {
     for (bytes) |*byte| {
         byte.* = 0;
     }
