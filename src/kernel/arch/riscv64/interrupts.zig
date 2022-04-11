@@ -45,6 +45,7 @@ pub fn init(hart_id: u64) void {
         get_priority()[interrupt_i] = 0xffff_ffff;
     }
 
-    get_senable(hart_id)[0] = 0b11111111110;
+    get_senable(hart_id)[0] = 0b11111111111;
     get_spriority(hart_id)[0] = 0;
+    write("PLIC initialized\n");
 }

@@ -8,6 +8,7 @@ pub const Paging = @import("riscv64/paging.zig");
 pub const Physical = @import("riscv64/physical.zig");
 pub const Virtual = @import("riscv64/virtual.zig");
 pub const Interrupts = @import("riscv64/interrupts.zig");
+pub const SBI = @import("riscv64/opensbi.zig");
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
@@ -22,17 +23,18 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     device_tree.base_address = fdt_address;
     device_tree.parse();
     init_cpu_count();
-    cpu_count = 1;
     Timer.init();
     const start = Timer.get_timestamp();
     Paging.init();
     Interrupts.init(boot_hart_id);
+    local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
     spinloop();
 }
 
 fn init_cpu_count() void {
+    early_write("CPU count initialized with 1. Is it correct?\n");
     // TODO: take from the device tree
     cpu_count = 1;
 }
@@ -43,14 +45,39 @@ const Context = struct {
     interrupt_stack: u64,
     float: [32]u64,
     hart_id: u64,
+    pid: u64,
 };
+
+extern var stack_top: u64;
+const hart_stack_size = 0x8000;
 
 pub const LocalStorage = struct {
     context: Context,
     padding: [page_size - @sizeOf(Context)]u8,
 
     comptime {
-        kernel.assert(@sizeOf(LocalStorage) == page_size);
+        kernel.assert_unsafe(@sizeOf(LocalStorage) == page_size);
+    }
+
+    fn init(self: *@This(), hart_id: u64, boot_hart: bool) void {
+        self.context.hart_id = hart_id;
+        self.context.interrupt_stack = @ptrToInt(&stack_top) - hart_stack_size * hart_id;
+        early_print("Interrupt stack: 0x{x}\n", .{self.context.interrupt_stack});
+        self.context.pid = 0xffff_ffff_ffff_ffff;
+
+        sscratch.write(@ptrToInt(&self.context));
+
+        var sstatus_value = sstatus.read();
+        sstatus_value |= 1 << 18  | 1 << 1;
+        if (!boot_hart) sstatus_value |= 1 << 8 | 1 << 5;
+        sstatus.write(sstatus_value);
+
+        sie.write(0x220);
+
+        if (!boot_hart) {
+            TODO(@src());
+        }
+        //SBI.set_timer(0);
     }
 };
 
@@ -154,6 +181,7 @@ const sie = CSR("sie", enum(u32) {
 const cycle = CSR("cycle", enum(u32) { foo = 0 });
 const stvec = CSR("stvec", enum(u32) { foo = 0 });
 pub const SATP = CSR("satp", enum(u32) { foo = 0 });
+const sscratch = CSR("sscratch", enum(u32) { foo = 0 });
 
 const SATP_SV39: usize = (8 << 60);
 pub inline fn MAKE_SATP(pagetable: usize) usize {
