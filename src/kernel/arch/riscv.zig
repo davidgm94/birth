@@ -24,9 +24,11 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     init_cpu_count();
     cpu_count = 1;
     Timer.init();
+    const start = Timer.get_timestamp();
     Paging.init();
-    Interrupts.init();
-    kernel.arch.early_write("Initialized successfully\n");
+    Interrupts.init(boot_hart_id);
+    const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
+    early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
     spinloop();
 }
 
@@ -220,7 +222,6 @@ pub const PTE_USER: usize = (1 << 4); // belongs to U mode
 
 pub const memory_layout = struct {
     pub const UART0: usize = 0x1000_0000;
-    pub const PLIC: usize = 0x0C00_0000;
 };
 pub inline fn flush_tlb() void {
     asm volatile ("sfence.vma zero, zero");
@@ -247,3 +248,7 @@ pub inline fn PAGE_INDEX_SHIFT(level: usize) u6 {
     return @intCast(u6, PAGE_SHIFT + 9 * level);
 }
 pub const PAGE_SHIFT: usize = 12;
+
+pub fn get_context(hart_id: u64, machine: u64) u64 {
+    return 2 * hart_id + machine;
+}

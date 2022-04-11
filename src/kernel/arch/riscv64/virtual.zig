@@ -3,7 +3,7 @@ const arch = kernel.arch;
 const Physical = kernel.arch.Physical;
 const page_size = kernel.arch.page_size;
 /// Kernel pagetable before KPTI enabled
-var kernel_init_pagetable: [*]usize = undefined; // use optional type
+pub var kernel_init_pagetable: [*]usize = undefined; // use optional type
 
 const early_print = kernel.arch.early_print;
 const early_write = kernel.arch.early_write;
@@ -34,16 +34,6 @@ pub fn init() void {
         kernel_init_pagetable,
         arch.UART0,
         1,
-        arch.PTE_READ | arch.PTE_WRITE,
-        false,
-    );
-
-    write("mapping PLIC\n");
-    // PLIC
-    directMap(
-        kernel_init_pagetable,
-        arch.memory_layout.PLIC,
-        64,
         arch.PTE_READ | arch.PTE_WRITE,
         false,
     );
@@ -103,7 +93,7 @@ pub fn enablePaging() void {
 
 /// directMap map the physical memory to virtual memory
 /// the start and the end must be page start
-fn directMap(pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
+pub fn directMap(pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
     map_pages(pagetable, start, start, page_count, permission, allow_remap);
 }
 

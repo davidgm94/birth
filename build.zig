@@ -160,6 +160,8 @@ const qemu_command_str = [_][]const u8 {
     "-device", "virtio-blk-device,drive=foo",
     "-device", "virtio-gpu-device",
     "-d", "guest_errors,int",
+    //"-D", "logfile",
+
     "-trace", "virtio*",
     //"-S", "-s",
 };
