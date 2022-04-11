@@ -157,6 +157,7 @@ const qemu_command_str = [_][]const u8 {
     "-kernel", kernel_path,
     "-serial", "mon:stdio",
     "-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
+    "-global", "virtio-mmio.force-legacy=false",
     "-device", "virtio-blk-device,drive=foo",
     "-device", "virtio-gpu-device",
     "-d", "guest_errors,int",

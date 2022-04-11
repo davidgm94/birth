@@ -9,6 +9,7 @@ pub const Physical = @import("riscv64/physical.zig");
 pub const Virtual = @import("riscv64/virtual.zig");
 pub const Interrupts = @import("riscv64/interrupts.zig");
 pub const SBI = @import("riscv64/opensbi.zig");
+pub const virtio = @import("riscv64/virtio_common.zig");
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
