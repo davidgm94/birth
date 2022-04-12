@@ -1,4 +1,6 @@
-pub const MMIO = packed struct {
+const kernel = @import("../../kernel.zig");
+const TODO = kernel.TODO;
+pub const MMIO = struct {
     magic_value: u32,
     version: u32,
     device_id: u32,
@@ -23,7 +25,7 @@ pub const MMIO = packed struct {
 
     queue_notify: u32,
     reserved6: [12]u8,
-    
+
     interrupt_status: u32,
     interrupt_ack: u32,
     reserved7: [8]u8,
@@ -49,12 +51,12 @@ pub const MMIO = packed struct {
     const magic = 0x74726976;
     const version = 2;
 
-    pub fn init(self: *volatile @This()) void {
+    pub fn init(self: *align(4) volatile @This()) void {
+        const magic_value = self.magic_value;
+        kernel.arch.early_print("0x{x}\n", .{magic_value});
         if (self.magic_value != magic) @panic("virtio magic corrupted");
         if (self.version != version) @panic("outdated virtio spec");
         if (self.device_id == 0) @panic("invalid device");
-
-        const device_id = self.device_id;
 
         // 1. Reset
         self.status = 0;
@@ -68,7 +70,7 @@ pub const MMIO = packed struct {
         // 4. Read device feature bits and write (a subset of) them
         var features = self.device_features;
         // Disable VIRTIO F RING EVENT INDEX
-        features &= ~(1 << 29);
+        features &= ~@as(u32, 1 << 29);
         self.driver_features = features;
 
         // 5. Set features ok status bit
@@ -82,4 +84,11 @@ pub const MMIO = packed struct {
         driver = 1 << 1,
         features_ok = 1 << 7,
     };
+};
+
+pub const block = struct {
+    pub fn init(mmio: *align(4) volatile MMIO) void {
+        _ = mmio;
+        TODO(@src());
+    }
 };

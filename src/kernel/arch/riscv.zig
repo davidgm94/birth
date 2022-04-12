@@ -31,6 +31,10 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
+    kernel.arch.Virtual.map(0x10008000, 1);
+    const virtio_disk_mmio = @intToPtr(*align(4) volatile virtio.MMIO, 0x10008000);
+    virtio_disk_mmio.init();
+    virtio.block.init(virtio_disk_mmio);
     spinloop();
 }
 
@@ -69,7 +73,7 @@ pub const LocalStorage = struct {
         sscratch.write(@ptrToInt(&self.context));
 
         var sstatus_value = sstatus.read();
-        sstatus_value |= 1 << 18  | 1 << 1;
+        sstatus_value |= 1 << 18 | 1 << 1;
         if (!boot_hart) sstatus_value |= 1 << 8 | 1 << 5;
         sstatus.write(sstatus_value);
 
