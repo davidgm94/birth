@@ -30,11 +30,8 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     Interrupts.init(boot_hart_id);
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
+    virtio.block.init(0x10008000);
     early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
-    kernel.arch.Virtual.map(0x10008000, 1);
-    const virtio_disk_mmio = @intToPtr(*align(4) volatile virtio.MMIO, 0x10008000);
-    virtio_disk_mmio.init();
-    virtio.block.init(virtio_disk_mmio);
     spinloop();
 }
 

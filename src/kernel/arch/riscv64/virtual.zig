@@ -126,14 +126,14 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
             // Existing entry
             if ((@intToPtr(*usize, pte).* & arch.PTE_VALID != 0) and !allow_remap) {
                 //logger.err("mapping pages failed, [virtual_addr] = 0x{x:0>16}, [physical_addr] = 0x{x:0>16}, [size] = {d}", .{ virtual_page, physical_page, size });
-                @panic("mapping pages failed");
+                @panic("mapping pages failed 1");
             }
 
             // Map a physical to virtual page
             @intToPtr(*usize, pte).* = arch.PA_TO_PTE(physical_page) | permission | arch.PTE_VALID;
         } else {
             // Walk is going wrong somewhere
-            @panic("mapping pages failed");
+            @panic("mapping pages failed 2");
         }
     }
 }

@@ -1,5 +1,12 @@
 const kernel = @import("../../kernel.zig");
 const TODO = kernel.TODO;
+
+const print = kernel.arch.early_print;
+const write = kernel.arch.early_write;
+const page_size = kernel.arch.page_size;
+
+const ring_size = 128;
+
 pub const MMIO = struct {
     magic_value: u32,
     version: u32,
@@ -51,9 +58,9 @@ pub const MMIO = struct {
     const magic = 0x74726976;
     const version = 2;
 
-    pub fn init(self: *align(4) volatile @This()) void {
+    pub fn init(self: *volatile @This()) void {
         const magic_value = self.magic_value;
-        kernel.arch.early_print("0x{x}\n", .{magic_value});
+        print("0x{x}\n", .{magic_value});
         if (self.magic_value != magic) @panic("virtio magic corrupted");
         if (self.version != version) @panic("outdated virtio spec");
         if (self.device_id == 0) @panic("invalid device");
@@ -79,6 +86,53 @@ pub const MMIO = struct {
         if (self.status & @enumToInt(Status.features_ok) == 0) @panic("unsupported features");
     }
 
+    pub fn add_queue_to_device(self: *volatile @This(), selected_queue: u32) *volatile Queue {
+        print("Queue max: {}\n", .{self.queue_num_max});
+        if (self.queue_num_max < ring_size) {
+            @panic("foooo");
+        }
+        self.queue_selector = selected_queue;
+        self.queue_num = ring_size;
+
+        if (self.queue_ready != 0) @panic("queue ready");
+
+        const total_size = @sizeOf(Queue) + (@sizeOf(Descriptor) * ring_size) + @sizeOf(Available) + @sizeOf(Used);
+        const page_count = total_size / page_size + @boolToInt(total_size % page_size != 0);
+        // All physical address space is identity-mapped so mapping is not needed here
+        const queue = @intToPtr(*volatile Queue, kernel.arch.Physical.allocate(page_count, true) orelse @panic("unable to allocate memory for virtio block device queue"));
+        queue.num = 0;
+        queue.last_seen_used = 0;
+        queue.descriptor = @intToPtr(@TypeOf(queue.descriptor), @ptrToInt(queue) + @sizeOf(Queue));
+        // identity-mapped
+        const physical = @ptrToInt(queue);
+        const descriptor = physical + @sizeOf(Queue);
+        queue.available = @intToPtr(@TypeOf(queue.available), @ptrToInt(queue) + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)));
+        const available = physical + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor));
+        queue.available.flags = 0;
+        queue.available.index = 0;
+        queue.used = @intToPtr(@TypeOf(queue.used), @ptrToInt(queue) + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available));
+        const used = physical + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available);
+        queue.used.flags = 0;
+        queue.used.index = 0;
+
+        write("notify of queue\n");
+        // notify device of queue
+        self.queue_num = ring_size;
+
+        // specify queue structs
+        self.queue_descriptor_low = @truncate(u32, descriptor);
+        self.queue_descriptor_high = @truncate(u32, descriptor >> 32);
+        self.queue_available_low = @truncate(u32, available);
+        self.queue_available_high = @truncate(u32, available >> 32);
+        self.queue_used_low = @truncate(u32, used);
+        self.queue_used_high = @truncate(u32, used >> 32);
+
+        write("sending queue ready\n");
+        self.queue_ready = 1;
+
+        return queue;
+    }
+
     const Status = enum(u32) {
         acknowledge = 1 << 0,
         driver = 1 << 1,
@@ -86,9 +140,56 @@ pub const MMIO = struct {
     };
 };
 
+pub const Descriptor = struct {
+    address: u64,
+    length: u32,
+    flags: u16,
+    next: u16,
+
+    pub const Flag = enum(u32) {
+        next = 1 << 0,
+        write_only = 1 << 1,
+        indirect = 1 << 2,
+    };
+};
+
+const Available = struct {
+    flags: u16,
+    index: u16,
+    ring: [ring_size]u16,
+    event: u16,
+    padding: [2]u8,
+};
+
+const Used = struct {
+    flags: u16,
+    index: u16,
+    ring: [ring_size]Entry,
+    event: u16,
+
+    const Entry = struct {
+        id: u32,
+        length: u32,
+    };
+};
+
+const Queue = struct {
+    num: u32,
+    last_seen_used: u32,
+    descriptor: *volatile Descriptor,
+    available: *volatile Available,
+    used: *volatile Used,
+};
+
 pub const block = struct {
-    pub fn init(mmio: *align(4) volatile MMIO) void {
-        _ = mmio;
+    var queue: *volatile Queue = undefined;
+    pub fn init(mmio_address: u64) void {
+        kernel.arch.Virtual.map(mmio_address, 1);
+        const mmio = @intToPtr(*volatile MMIO, mmio_address);
+        mmio.init();
+        queue = mmio.add_queue_to_device(0);
+        mmio.status |= @enumToInt(MMIO.Status.driver);
+        write("Block driver initialized\n");
         TODO(@src());
     }
 };
