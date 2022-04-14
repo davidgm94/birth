@@ -183,13 +183,17 @@ const Queue = struct {
 
 pub const block = struct {
     var queue: *volatile Queue = undefined;
+    var mmio: *volatile MMIO = undefined;
     pub fn init(mmio_address: u64) void {
         kernel.arch.Virtual.map(mmio_address, 1);
-        const mmio = @intToPtr(*volatile MMIO, mmio_address);
+        mmio = @intToPtr(*volatile MMIO, mmio_address);
         mmio.init();
         queue = mmio.add_queue_to_device(0);
         mmio.status |= @enumToInt(MMIO.Status.driver);
         write("Block driver initialized\n");
-        TODO(@src());
+    }
+
+    pub fn perform_block_operation() void {
+        kernel.arch.Physical.allocate(
     }
 };
