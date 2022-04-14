@@ -110,7 +110,7 @@ pub fn DeviceProcessor(comptime device_base: u64) type {
             switch (device_ID) {
                 .block => {
                     const queue_ptr = setup_queue();
-                    block = Block.Device {
+                    block = Block.Device{
                         .queue = queue_ptr,
                         .address = device_base,
                         .index = 0,

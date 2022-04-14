@@ -7,7 +7,7 @@ var plic_base: u64 = 0;
 var plic_size: u64 = 0;
 const max_interrupt = 32;
 
-pub const InterruptHandler = fn()void;
+pub const InterruptHandler = fn () void;
 var interrupt_handlers: [max_interrupt]InterruptHandler = undefined;
 
 inline fn get_priority() [*]volatile u32 {

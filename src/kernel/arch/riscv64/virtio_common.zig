@@ -224,7 +224,6 @@ pub const block = struct {
     };
 
     const Request = struct {
-
         const Header = struct {
             block_type: BlockType,
             reserved: u32,
@@ -249,12 +248,12 @@ pub const block = struct {
         write("Block driver initialized\n");
     }
 
-    pub fn perform_block_operation(operation: Operation, sector_index: u64) void {
+    pub fn perform_block_operation(comptime operation: Operation, sector_index: u64) void {
         const sector_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
         const status_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
         const header_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("unable to allocate memory for request header\n");
         // Here we should distinguish between virtual and physical addresses
-        const header = @intToPtr(*Request.Header, header_physical); 
+        const header = @intToPtr(*Request.Header, header_physical);
         header.block_type = switch (operation) {
             .read => BlockType.in,
             .write => BlockType.out,
@@ -265,21 +264,21 @@ pub const block = struct {
         var descriptor2: u16 = 0;
         var descriptor3: u16 = 0;
 
-        queue.push_descriptor(&descriptor3).* = Descriptor {
+        queue.push_descriptor(&descriptor3).* = Descriptor{
             .address = status_buffer_physical,
             .flags = @enumToInt(Descriptor.Flag.write_only),
             .length = 1,
             .next = 0,
         };
 
-        queue.push_descriptor(&descriptor2).* = Descriptor {
+        queue.push_descriptor(&descriptor2).* = Descriptor{
             .address = sector_buffer_physical,
             .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
             .length = 512,
             .next = descriptor3,
         };
 
-        queue.push_descriptor(&descriptor1).* = Descriptor {
+        queue.push_descriptor(&descriptor1).* = Descriptor{
             .address = header_physical,
             .flags = @enumToInt(Descriptor.Flag.next),
             .length = @sizeOf(Request.Header),
@@ -304,7 +303,7 @@ pub const block = struct {
         const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
         // TODO: @Virtual @Physical
         const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
-        for (data) |byte, i| print("[{}] = 0x{x}\n", .{i, byte});
+        for (data) |byte, i| print("[{}] = 0x{x}\n", .{ i, byte });
 
         TODO(@src());
     }

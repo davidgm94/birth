@@ -8,18 +8,15 @@ pub const GS_base = MSR(0xc0000102);
 pub const page_size = 0x1000;
 pub const page_table_level_count = 4;
 
-fn page_table_level_count_to_bit_map(level: u8) u8
-{
+fn page_table_level_count_to_bit_map(level: u8) u8 {
     return if (level == 4) return 48 else if (level == 5) return 57 else @panic("invalid page table level count\n");
 }
 
-fn is_canonical_address(address: u64) bool
-{
+fn is_canonical_address(address: u64) bool {
     const sign_bit = address & (1 << 63) != 0;
     const significant_bit_count = page_table_level_count_to_bit_map(page_table_level_count);
     var i: u8 = 63;
-    while (i >= significant_bit_count) : (i -= 1)
-    {
+    while (i >= significant_bit_count) : (i -= 1) {
         const bit = address & (1 << i) != 0;
         if (bit != sign_bit) return false;
     }
@@ -27,30 +24,27 @@ fn is_canonical_address(address: u64) bool
     return true;
 }
 
-const CPUID = extern struct
-{
+const CPUID = extern struct {
     eax: u32,
     ebx: u32,
     edx: u32,
     ecx: u32,
 
     /// Returns the maximum number bits a physical address is allowed to have in this CPU
-    pub fn get_max_physical_address() callconv(.Inline) u6
-    {
+    pub inline fn get_max_physical_address() u6 {
         return @truncate(u6, cpuid(0x80000008).eax);
     }
 };
 
 var max_physical_address: u6 = 0;
 
-pub fn cpuid(leaf: u32) callconv(.Inline) CPUID
-{
+pub inline fn cpuid(leaf: u32) CPUID {
     var eax: u32 = undefined;
     var ebx: u32 = undefined;
     var edx: u32 = undefined;
     var ecx: u32 = undefined;
 
-    asm volatile(
+    asm volatile (
         \\cpuid
         : [eax] "={eax}" (eax),
           [ebx] "={ebx}" (ebx),
@@ -59,8 +53,7 @@ pub fn cpuid(leaf: u32) callconv(.Inline) CPUID
         : [leaf] "{eax}" (leaf),
     );
 
-    return CPUID
-    {
+    return CPUID{
         .eax = eax,
         .ebx = ebx,
         .edx = edx,
@@ -69,49 +62,42 @@ pub fn cpuid(leaf: u32) callconv(.Inline) CPUID
 }
 
 /// Arch-specific part of kernel.LocalStorage
-pub const LocalStorage = struct
-{
+pub const LocalStorage = struct {
     id: u64,
 };
 
 pub var cpu_local_storages: [256]kernel.LocalStorage = undefined;
 
-pub fn MSR(comptime msr: u32) type
-{
-    return struct
-    {
-        pub fn read() callconv(.Inline) u64
-        {
+pub fn MSR(comptime msr: u32) type {
+    return struct {
+        pub inline fn read() u64 {
             var low: u32 = undefined;
             var high: u32 = undefined;
 
-            asm volatile("rdmsr"
+            asm volatile ("rdmsr"
                 : [_] "={eax}" (low),
-                  [_] "={edx}" (high)
-                : [_] "{ecx}" (msr)
+                  [_] "={edx}" (high),
+                : [_] "{ecx}" (msr),
             );
             return (@as(u64, high) << 32) | low;
         }
 
-        pub fn write(value: u64) callconv(.Inline) void
-        {
+        pub inline fn write(value: u64) void {
             const low = @truncate(u32, value);
             const high = @truncate(u32, value >> 32);
 
-            asm volatile("wrmsr"
+            asm volatile ("wrmsr"
                 :
                 : [_] "{eax}" (low),
                   [_] "{edx}" (high),
-                  [_] "{ecx}" (msr)
+                  [_] "{ecx}" (msr),
             );
         }
     };
 }
 
-pub const EFER = struct
-{
-    pub const Bit = enum(u6)
-    {
+pub const EFER = struct {
+    pub const Bit = enum(u6) {
         // Syscall Enable - syscall, sysret
         SCE = 0,
         LME = 8, // Long Mode Enable
@@ -125,24 +111,20 @@ pub const EFER = struct
 
     const msr = MSR(0xC0000080);
 
-    pub fn read() callconv(.Inline) u64
-    {
+    pub inline fn read() u64 {
         return msr.read();
     }
 
-    pub fn write(value: u64) callconv(.Inline) void
-    {
+    pub inline fn write(value: u64) void {
         msr.write(value);
     }
 
-    pub fn get_flag(comptime bit: Bit) callconv(.Inline) bool
-    {
+    pub inline fn get_flag(comptime bit: Bit) bool {
         return msr.read() & (1 << @enumToInt(bit)) != 0;
     }
 };
 
-const PAT = struct
-{
+const PAT = struct {
     value: u64,
     uncacheable: ?Index,
     write_combining: ?Index,
@@ -151,8 +133,7 @@ const PAT = struct
 
     const Index = u3;
     const EncodingInt = u3;
-    const Encoding = enum(EncodingInt)
-    {
+    const Encoding = enum(EncodingInt) {
         UC = 0,
         WC = 1,
         WT = 4,
@@ -163,14 +144,12 @@ const PAT = struct
 
     const msr = MSR(0x277);
 
-    fn init() PAT
-    {
+    fn init() PAT {
         const id = cpuid(0x00000001);
         kernel.assert(@truncate(u1, id.edx >> 16) == 1, @src());
         const value = msr.read();
 
-        return PAT
-        {
+        return PAT{
             .value = value,
             .uncacheable = find_index(value, Encoding.UC),
             .write_combining = find_index(value, Encoding.WC),
@@ -179,8 +158,7 @@ const PAT = struct
         };
     }
 
-    fn find_index(pat: u64, comptime encoding: Encoding) callconv(.Inline) ?Index
-    {
+    inline fn find_index(pat: u64, comptime encoding: Encoding) ?Index {
         if (@truncate(EncodingInt, pat >> (@as(u6, 0) * 8)) == @enumToInt(encoding)) return 0;
         if (@truncate(EncodingInt, pat >> (@as(u6, 1) * 8)) == @enumToInt(encoding)) return 1;
         if (@truncate(EncodingInt, pat >> (@as(u6, 2) * 8)) == @enumToInt(encoding)) return 2;
@@ -194,8 +172,7 @@ const PAT = struct
     }
 };
 
-const Paging = struct
-{
+const Paging = struct {
     pat: PAT,
     cr3: u64,
     level_5_paging: bool,
@@ -205,8 +182,7 @@ const Paging = struct
     uncacheable_virtual_base: u64 = 0,
     max_physical_address: u64 = 0,
 
-    pub fn init(self: *@This()) void
-    {
+    pub fn init(self: *@This()) void {
         kernel.log("Initializing paging...\n");
         defer kernel.log("Paging initialized\n");
         CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.WP)));
@@ -221,34 +197,27 @@ const Paging = struct
         self.cr3 = CR3.read();
         self.level_5_paging = false;
 
-        if (!self.level_5_paging)
-        {
-            const base = 0xFFFF800000000000; 
+        if (!self.level_5_paging) {
+            const base = 0xFFFF800000000000;
             self.write_back_virtual_base = base;
             self.write_cache_virtual_base = base;
             self.uncacheable_virtual_base = base;
             self.max_physical_address = 0x7F0000000000;
-        }
-        else
-        {
+        } else {
             TODO();
         }
 
         {
             kernel.log("Consuming bootloader memory map...\n");
             defer kernel.log("Memory map consumed!\n");
-            for (kernel.bootloader.info.memory_map_entries[0..kernel.bootloader.info.memory_map_entry_count]) |*entry|
-            {
+            for (kernel.bootloader.info.memory_map_entries[0..kernel.bootloader.info.memory_map_entry_count]) |*entry| {
                 var region_address = entry.address;
                 var region_size = entry.size;
 
-                outer: while (region_size != 0)
-                {
-                    for (kernel.PhysicalAllocator.reverse_sizes) |pmm_size, reverse_i|
-                    {
+                outer: while (region_size != 0) {
+                    for (kernel.PhysicalAllocator.reverse_sizes) |pmm_size, reverse_i| {
                         const i = kernel.PhysicalAllocator.sizes.len - reverse_i - 1;
-                        if (region_size >= pmm_size and kernel.is_aligned(region_address, pmm_size))
-                        {
+                        if (region_size >= pmm_size and kernel.is_aligned(region_address, pmm_size)) {
                             kernel.PhysicalAllocator.free(region_address, i);
                             region_size -= pmm_size;
                             region_address += pmm_size;
@@ -264,20 +233,18 @@ const Paging = struct
         const last_entry = kernel.bootloader.info.memory_map_entries[kernel.bootloader.info.memory_map_entry_count - 1];
         const physical_high = kernel.align_forward(last_entry.address + last_entry.size, page_size);
         _ = physical_high;
-        
+
         TODO();
     }
 
-    pub fn make_page_table() !u64
-    {
+    pub fn make_page_table() !u64 {
         const page_table = try kernel.PhysicalAllocator.allocate_physical(page_size);
         std.mem.set(u8, @intToPtr([*]u8, page_table.get_writeback_virtual_address())[0..page_size], 0);
         return page_table;
     }
 
     const LevelType = u3;
-    const PTE = struct
-    {
+    const PTE = struct {
         physical_address: PhysicalAddress,
         current_level: LevelType,
         context: *Paging,
@@ -286,22 +253,19 @@ const Paging = struct
 
 var paging: Paging = undefined;
 
-fn R64(comptime name: []const u8) type
-{
-    return struct
-    {
-        fn read() callconv(.Inline) u64
-        {
-            return asm volatile(
-                "mov %%" ++ name ++ ", %[result]"
-                : [result] "={rax}" (-> u64));
+fn R64(comptime name: []const u8) type {
+    return struct {
+        inline fn read() u64 {
+            return asm volatile ("mov %%" ++ name ++ ", %[result]"
+                : [result] "={rax}" (-> u64),
+            );
         }
 
-        fn write(value: u64) callconv(.Inline) void
-        {
-            asm volatile("mov %[in], %%" ++ name
+        inline fn write(value: u64) void {
+            asm volatile ("mov %[in], %%" ++ name
                 :
-                : [in] "r" (value));
+                : [in] "r" (value),
+            );
         }
     };
 }
@@ -309,10 +273,8 @@ fn R64(comptime name: []const u8) type
 // From Intel manual, volume 3, chapter 2.5: Control Registers
 
 /// Contains system control flags that control operating mode and states of the processor.
-const CR0 = struct
-{
-    const Bit = enum(u6)
-    {
+const CR0 = struct {
+    const Bit = enum(u6) {
         /// Protection Enable (bit 0 of CR0) — Enables protected mode when set; enables real-address mode when
         /// clear. This flag does not enable paging directly. It only enables segment-level protection. To enable paging,
         /// both the PE and PG flags must be set.
@@ -427,18 +389,15 @@ const CR0 = struct
         PG = 31,
     };
 
-    fn write(value: u64) callconv(.Inline) void 
-    {
+    inline fn write(value: u64) void {
         R64("cr0").write(value);
     }
 
-    fn read() callconv(.Inline) u64
-    {
+    inline fn read() u64 {
         return R64("cr0").read();
     }
 
-    fn get_flag(comptime bit: Bit) callconv(.Inline) bool
-    {
+    inline fn get_flag(comptime bit: Bit) bool {
         return read() & (1 << @enumToInt(bit)) != 0;
     }
 };
@@ -458,10 +417,8 @@ const CR2 = R64("cr2");
 /// table and PML5 table, respectively. If PCIDs are enabled, CR3 has a format different from that illustrated in
 /// Figure 2-7. See Section 4.5, “4-Level Paging and 5-Level Paging.”
 /// See also: Chapter 4, “Paging.”
-const CR3 = struct
-{
-    const Bit = enum(u6)
-    {
+const CR3 = struct {
+    const Bit = enum(u6) {
         /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
         /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
         /// is not used if paging is disabled, with PAE paging, or with 4-level paging or 5-level paging if CR4.PCIDE=1.
@@ -475,13 +432,11 @@ const CR3 = struct
         PCID_top_bit = 11,
     };
 
-    fn write(value: u64) callconv(.Inline) void 
-    {
+    inline fn write(value: u64) void {
         R64("cr3").write(value);
     }
 
-    fn read() callconv(.Inline) u64
-    {
+    inline fn read() u64 {
         return R64("cr3").read();
     }
 };
@@ -490,10 +445,8 @@ const CR3 = struct
 /// executive support for specific processor capabilities. Bits CR4[63:32] can only be used for IA-32e mode only
 /// features that are enabled after entering 64-bit mode. Bits CR4[63:32] do not have any effect outside of IA-32e
 /// mode.
-const CR4 = struct
-{
-    const Bit = enum(u6)
-    {
+const CR4 = struct {
+    const Bit = enum(u6) {
         /// Virtual-8086 Mode Extensions (bit 0 of CR4) — Enables interrupt- and exception-handling extensions
         /// in virtual-8086 mode when set; disables the extensions when clear. Use of the virtual mode extensions can
         /// improve the performance of virtual-8086 applications by eliminating the overhead of calling the virtual-
@@ -568,7 +521,7 @@ const CR4 = struct
         /// bit provides operating system software with a means of enabling FXSAVE/FXRSTOR to save/restore
         /// the contents of the X87 FPU, XMM and MXCSR registers. Consequently OSFXSR bit indicates that
         /// the operating system provides context switch support for SSE/SSE2/SSE3/SSSE3/SSE4.
-        OSFXSR = 9, 
+        OSFXSR = 9,
 
         /// Operating System Support for Unmasked SIMD Floating-Point Exceptions (bit 10 of CR4) —
         /// When set, indicates that the operating system supports the handling of unmasked SIMD floating-point
@@ -605,7 +558,6 @@ const CR4 = struct
         /// PCID-Enable Bit (bit 17 of CR4) — Enables process-context identifiers (PCIDs) when set. See Section
         /// 4.10.1, “Process-Context Identifiers (PCIDs)”. Applies only in IA-32e mode (if IA32_EFER.LMA = 1).
         PCIDE = 17,
-        
 
         /// XSAVE and Processor Extended States-Enable Bit (bit 18 of CR4) — When set, this flag: (1) indi-
         /// cates (via CPUID.01H:ECX.OSXSAVE[bit 27]) that the operating system supports the use of the XGETBV,
@@ -626,7 +578,7 @@ const CR4 = struct
         /// SMEP-Enable Bit (bit 20 of CR4) — Enables supervisor-mode execution prevention (SMEP) when set.
         /// See Section 4.6, “Access Rights”.
         SMEP = 20,
-        
+
         /// SMAP-Enable Bit (bit 21 of CR4) — Enables supervisor-mode access prevention (SMAP) when set. See
         /// Section 4.6, “Access Rights.”
         SMAP = 21,
@@ -645,7 +597,6 @@ const CR4 = struct
         /// clear before CR0.WP can be cleared (see below).
         CET = 23,
 
-
         /// Enable protection keys for supervisor-mode pages (bit 24 of CR4) — 4-level paging and 5-level
         /// paging associate each supervisor-mode linear address with a protection key. When set, this flag allows use
         /// of the IA32_PKRS MSR to specify, for each protection key, whether supervisor-mode linear addresses with
@@ -653,18 +604,15 @@ const CR4 = struct
         PKS = 24,
     };
 
-    fn write(value: u64) callconv(.Inline) void 
-    {
+    inline fn write(value: u64) void {
         R64("cr4").write(value);
     }
 
-    fn read() callconv(.Inline) u64
-    {
+    inline fn read() u64 {
         return R64("cr4").read();
     }
 
-    fn get_flag(comptime bit: Bit) callconv(.Inline) bool
-    {
+    inline fn get_flag(comptime bit: Bit) bool {
         return read() & (1 << @enumToInt(bit)) != 0;
     }
 };
@@ -673,61 +621,52 @@ const CR4 = struct
 /// value that operating systems use to control the priority class of external interrupts allowed to interrupt the
 /// processor. This register is available only in 64-bit mode. However, interrupt filtering continues to apply in
 /// compatibility mode.
-const CR8 = struct
-{
+const CR8 = struct {
     const TPL = u4;
-    fn write(value: u64) callconv(.Inline) void 
-    {
+    inline fn write(value: u64) void {
         R64("cr8").write(value);
     }
 
-    fn read() callconv(.Inline) u64
-    {
+    inline fn read() u64 {
         return R64("cr8").read();
     }
 
-    fn get_task_priority_level() u8
-    {
+    fn get_task_priority_level() u8 {
         return @truncate(TPL, read());
     }
 };
 
-pub fn spin() callconv(.Inline) noreturn
-{
-    asm volatile("cli");
-    while (true)
-    {
+pub inline fn spin() noreturn {
+    asm volatile ("cli");
+    while (true) {
         std.atomic.spinLoopHint();
     }
 }
 
 /// This sets the address of the CPU local storage
 /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
-pub fn set_cpu_local_storage(index: u64) void
-{
+pub fn set_cpu_local_storage(index: u64) void {
     GS_base.write(@ptrToInt(&cpu_local_storages[index]));
 }
 
-pub fn initialize_FPU() void
-{
+pub fn initialize_FPU() void {
     kernel.log("Initializing FPU...\n");
     defer kernel.log("FPU initialized\n");
     CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.MP)) | (1 << @enumToInt(CR0.Bit.NE)));
-    CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.OSFXSR)) | (1 << @enumToInt(CR4.Bit.OSXMMEXCPT))); 
+    CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.OSFXSR)) | (1 << @enumToInt(CR4.Bit.OSXMMEXCPT)));
 
     kernel.log("@TODO: MXCSR. See Intel manual\n");
     // @TODO: is this correct?
     const cw: u16 = 0x037a;
-    asm volatile(
+    asm volatile (
         \\fninit
         \\fldcw (%[cw])
         :
-        : [cw] "r" (&cw)
+        : [cw] "r" (&cw),
     );
 }
 
-const IOPort = struct
-{
+const IOPort = struct {
     const DMA1 = 0x0000;
     const PIC1 = 0x0020;
     const Cyrix_MSR = 0x0022;
@@ -748,10 +687,8 @@ const IOPort = struct
     const serial1 = 0x03f8;
 };
 
-const Serial = struct
-{
-    const io_ports = [8]u16
-    {
+const Serial = struct {
+    const io_ports = [8]u16{
         0x3F8,
         0x2F8,
         0x3E8,
@@ -764,23 +701,19 @@ const Serial = struct
 
     var initialization_state = [1]bool{false} ** 8;
 
-    const InitError = error
-    {
+    const InitError = error{
         already_initialized,
         not_present,
     };
 
-    fn Port(comptime port_number: u8) type
-    {
+    fn Port(comptime port_number: u8) type {
         assert(port_number > 0 and port_number <= 8);
         const port_index = port_number - 1;
 
-        return struct
-        {
+        return struct {
             const io_port = io_ports[port_index];
 
-            fn init() Serial.InitError!void
-            {
+            fn init() Serial.InitError!void {
                 if (initialization_state[port_index]) return Serial.InitError.already_initialized;
 
                 out8(io_port + 7, 0);
@@ -793,47 +726,38 @@ const Serial = struct
     }
 };
 
-fn out8(comptime port: u16, value: u8) callconv(.Inline) void
-{
-    asm volatile(
-        "outb %[value], %[port]"
+inline fn out8(comptime port: u16, value: u8) void {
+    asm volatile ("outb %[value], %[port]"
         :
         : [value] "{al}" (value),
-          [port] "N{dx}" (port)
+          [port] "N{dx}" (port),
     );
 }
 
-fn in8(comptime port: u16) callconv(.Inline) u8
-{
-    return asm volatile(
-        "inb %[port], %[result]"
-        : [result] "={al}" (-> u8)
-        : [port] "N{dx}" (port)
+inline fn in8(comptime port: u16) u8 {
+    return asm volatile ("inb %[port], %[result]"
+        : [result] "={al}" (-> u8),
+        : [port] "N{dx}" (port),
     );
 }
 
-pub fn write_to_debug_port(str: []const u8) callconv(.Inline) void
-{
-    for (str) |c|
-    {
+pub inline fn write_to_debug_port(str: []const u8) void {
+    for (str) |c| {
         out8(IOPort.E9_hack, c);
     }
 }
 
-const PIC = struct
-{
+const PIC = struct {
     const master_command = IOPort.PIC1;
     const master_data = IOPort.PIC1 + 1;
     const slave_command = IOPort.PIC2;
     const slave_data = IOPort.PIC2 + 1;
 
-    fn wait() callconv(.Inline) void
-    {
+    inline fn wait() void {
         out8(0x80, undefined);
     }
 
-    fn disable() void
-    {
+    fn disable() void {
         out8(master_command, 0x11);
         wait();
         out8(slave_command, 0x11);
@@ -858,8 +782,7 @@ const PIC = struct
     }
 };
 
-pub fn init_cache() void
-{
+pub fn init_cache() void {
     kernel.log("Ensuring cache is initialized...\n");
     defer kernel.log("Cache initialized!\n");
 
@@ -867,46 +790,38 @@ pub fn init_cache() void
     kernel.assert(!CR0.get_flag(.NW), @src());
 }
 
-pub fn init_interrupts() void
-{
+pub fn init_interrupts() void {
     kernel.log("Initializing interrupts...\n");
     defer kernel.log("Interrupts initialized!\n");
 
     PIC.disable();
     interrupts.IDT.fill();
-    const idtr = interrupts.IDT.Register
-    {
+    const idtr = interrupts.IDT.Register{
         .address = &interrupts.IDT.table,
     };
-    asm volatile(
+    asm volatile (
         \\lidt (%[idt_address])
         :
-        : [idt_address] "r" (&idtr));
+        : [idt_address] "r" (&idtr),
+    );
     kernel.log("@TODO: initialize interrupts\n");
     kernel.log("@TODO: load GDT since the segment selectors are wrong\n");
 }
 
-
-const ACPI = struct
-{
+const ACPI = struct {
     /// ACPI initialization. We should have a page mapper ready before executing this function
-    pub fn init(rsdp_address: u64) void
-    {
+    pub fn init(rsdp_address: u64) void {
         const rsdp1 = @intToPtr(*RSDP1, rsdp_address);
-        if (rsdp1.revision == 0)
-        {
+        if (rsdp1.revision == 0) {
             kernel.log("First version\n");
             const rsdt = @intToPtr(*Header, rsdp1.RSDT_address);
-            const tables = @intToPtr([*]align(1) u32, rsdp1.RSDT_address + @sizeOf(Header))[0..(rsdt.length - @sizeOf(Header)) / @sizeOf(u32)];
-            for (tables) |table_address|
-            {
+            const tables = @intToPtr([*]align(1) u32, rsdp1.RSDT_address + @sizeOf(Header))[0 .. (rsdt.length - @sizeOf(Header)) / @sizeOf(u32)];
+            for (tables) |table_address| {
                 kernel.logf("Table address: 0x{x}\n", .{table_address});
                 const header = @intToPtr(*Header, table_address);
                 kernel.logf("Table: {}\n", .{header});
             }
-        }
-        else
-        {
+        } else {
             assert(rsdp1.revision == 2);
             //const rsdp2 = @ptrCast(*RSDP2, rsdp1);
             kernel.log("Second version\n");
@@ -914,8 +829,7 @@ const ACPI = struct
         }
     }
 
-    const RSDP1 = packed struct
-    {
+    const RSDP1 = packed struct {
         signature: [8]u8,
         checksum: u8,
         OEM_ID: [6]u8,
@@ -923,8 +837,7 @@ const ACPI = struct
         RSDT_address: u32,
     };
 
-    const RSDP2 = packed struct
-    {
+    const RSDP2 = packed struct {
         rsdp1: RSDP1,
         length: u32,
         XSDT_address: u64,
@@ -932,8 +845,7 @@ const ACPI = struct
         reserved: [3]u8,
     };
 
-    const Header = packed struct
-    {
+    const Header = packed struct {
         signature: [4]u8,
         length: u32,
         revision: u8,
@@ -946,24 +858,19 @@ const ACPI = struct
     };
 };
 
-pub const PhysicalAddress = struct
-{
+pub const PhysicalAddress = struct {
     value: u64,
 
-
-    pub fn check(self: *const @This()) callconv(.Inline) void
-    {
+    pub inline fn check(self: *const @This()) void {
         if (self.value > paging.max_physical_address) @panic("invalid physical address\n");
     }
-    pub fn get_writeback_virtual_address(self: *const @This()) u64
-    {
+    pub fn get_writeback_virtual_address(self: *const @This()) u64 {
         self.check();
         return paging.write_back_virtual_base + self.value;
     }
 };
 
-pub fn init() void
-{
+pub fn init() void {
     const foo = interrupts.IDT.table;
     _ = foo;
     set_cpu_local_storage(0);

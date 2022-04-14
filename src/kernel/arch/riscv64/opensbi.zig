@@ -22,12 +22,12 @@ inline fn sbi_call(
 
     asm volatile ("ecall"
         : [ret] "={x10}" (err), // err a0
-          [val] "={x11}" (val) // err a0
+          [val] "={x11}" (val), // err a0
         : [eid] "{x17}" (eid), // a7 for EID
           [fid] "{x16}" (fid), // a6 for FID
           [arg0] "{x10}" (arg0),
           [arg1] "{x11}" (arg1),
-          [arg2] "{x12}" (arg2)
+          [arg2] "{x12}" (arg2),
         : "memory"
     );
 

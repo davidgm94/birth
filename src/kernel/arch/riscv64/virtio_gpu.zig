@@ -225,7 +225,6 @@ pub const Device = struct {
             .height = self.height,
         });
 
-
         // 2. Attach backing
         self.new_communication_with_memory_entry(AttachBacking, .{
             .resource_ID = 1,
@@ -242,7 +241,6 @@ pub const Device = struct {
             .resource_ID = 1,
         });
 
-
         self.new_communication(TransferToHost2D, TransferToHost2D{
             .rect = Rect{ .x = 0, .y = 0, .width = self.width, .height = self.height },
             .offset = 0,
@@ -250,13 +248,11 @@ pub const Device = struct {
             .padding = 0,
         });
 
-
         self.new_communication(ResourceFlush, ResourceFlush{
             .rect = .{ .x = 0, .y = 0, .width = self.width, .height = self.height },
             .resource_ID = 1,
             .padding = 0,
         });
-
 
         self.run_queue();
         self.fill_all(Pixel{ .r = 0, .g = 122, .b = 0, .a = 255 });

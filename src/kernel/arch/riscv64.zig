@@ -111,7 +111,6 @@ const Memory_layout = struct {
 };
 pub const memory_layout = Memory_layout{};
 
-
 pub fn hart_id() usize {
     return asm volatile ("mv %[result], tp"
         : [result] "=r" (-> usize),
