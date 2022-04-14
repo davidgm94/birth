@@ -22,7 +22,6 @@ An experiment of RISC-V and x86_64 kernel which focuses on learning to build a b
 * Userspace
 
 ### x86_64
-=====
 * Catch up to the RISCV progress
 * ACPI
 * memory map
