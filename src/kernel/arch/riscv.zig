@@ -13,12 +13,14 @@ pub const virtio = @import("riscv64/virtio_common.zig");
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
+pub var current_cpu: u64 = 0;
 
 const TODO = kernel.TODO;
 
 const UART = @import("riscv64/uart.zig").UART;
 
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
+    current_cpu = boot_hart_id;
     init_logger();
     writer.lockless.print("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}\n", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address }) catch unreachable;
     device_tree.base_address = fdt_address;
@@ -31,6 +33,7 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
+    virtio.block.perform_block_operation(.read, 0);
     early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
     spinloop();
 }
@@ -114,7 +117,13 @@ const Scause = enum(u64) {
 export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
     disable_interrupts();
     writer.lockless.print("Interrupt. SCAUSE: {}. STVAL: 0x{x}. Context: {}\n", .{ scause, stval, context }) catch unreachable;
-    spinloop();
+    const hart_id = local_storage[current_cpu].context.hart_id;
+    switch (scause) {
+        .supervisor_external_interrupt => Interrupts.handle_external_interrupt(hart_id),
+        else => spinloop(),
+    }
+
+    enable_interrupts();
 }
 
 pub fn spinloop() noreturn {

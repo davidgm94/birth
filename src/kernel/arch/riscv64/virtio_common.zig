@@ -102,7 +102,7 @@ pub const MMIO = struct {
         const queue = @intToPtr(*volatile Queue, kernel.arch.Physical.allocate(page_count, true) orelse @panic("unable to allocate memory for virtio block device queue"));
         queue.num = 0;
         queue.last_seen_used = 0;
-        queue.descriptor = @intToPtr(@TypeOf(queue.descriptor), @ptrToInt(queue) + @sizeOf(Queue));
+        queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), @ptrToInt(queue) + @sizeOf(Queue));
         // identity-mapped
         const physical = @ptrToInt(queue);
         const descriptor = physical + @sizeOf(Queue);
@@ -146,7 +146,7 @@ pub const Descriptor = struct {
     flags: u16,
     next: u16,
 
-    pub const Flag = enum(u32) {
+    pub const Flag = enum(u16) {
         next = 1 << 0,
         write_only = 1 << 1,
         indirect = 1 << 2,
@@ -176,24 +176,136 @@ const Used = struct {
 const Queue = struct {
     num: u32,
     last_seen_used: u32,
-    descriptor: *volatile Descriptor,
+    descriptors: [*]volatile Descriptor,
     available: *volatile Available,
     used: *volatile Used,
+
+    fn push_descriptor(self: *volatile @This(), p_descriptor_index: *u16) *volatile Descriptor {
+        // TODO Cause for a bug
+        p_descriptor_index.* = @intCast(u16, self.num);
+        const descriptor = &self.descriptors[self.num];
+        self.num += 1;
+
+        while (self.num >= ring_size) : (self.num -= ring_size) {}
+
+        return descriptor;
+    }
+
+    fn push_available(self: *volatile @This(), descriptor: u16) void {
+        self.available.ring[self.available.index % ring_size] = descriptor;
+        self.available.index += 1;
+    }
+
+    pub fn pop_used(self: *volatile @This()) ?*volatile Descriptor {
+        if (self.last_seen_used == self.used.index) return null;
+
+        const id = self.used.ring[self.last_seen_used % ring_size].id;
+        self.last_seen_used += 1;
+        const used = &self.descriptors[id];
+
+        return used;
+    }
+
+    pub fn get_descriptor(self: *volatile @This(), descriptor_id: u16) ?*volatile Descriptor {
+        if (descriptor_id < ring_size) return &self.descriptors[descriptor_id] else return null;
+    }
 };
 
 pub const block = struct {
     var queue: *volatile Queue = undefined;
     var mmio: *volatile MMIO = undefined;
+
+    const BlockType = enum(u32) {
+        in = 0,
+        out = 1,
+        flush = 4,
+        discard = 11,
+        write_zeroes = 13,
+    };
+
+    const Request = struct {
+
+        const Header = struct {
+            block_type: BlockType,
+            reserved: u32,
+            sector: u64,
+        };
+    };
+
+    const Operation = enum {
+        read,
+        write,
+    };
+
     pub fn init(mmio_address: u64) void {
         kernel.arch.Virtual.map(mmio_address, 1);
         mmio = @intToPtr(*volatile MMIO, mmio_address);
         mmio.init();
         queue = mmio.add_queue_to_device(0);
+        // TODO: stop hardcoding interrupt number
+        kernel.arch.Interrupts.register_external_interrupt_handler(8, handler);
         mmio.status |= @enumToInt(MMIO.Status.driver);
+
         write("Block driver initialized\n");
     }
 
-    pub fn perform_block_operation() void {
-        kernel.arch.Physical.allocate(
+    pub fn perform_block_operation(operation: Operation, sector_index: u64) void {
+        const sector_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
+        const status_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
+        const header_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("unable to allocate memory for request header\n");
+        // Here we should distinguish between virtual and physical addresses
+        const header = @intToPtr(*Request.Header, header_physical); 
+        header.block_type = switch (operation) {
+            .read => BlockType.in,
+            .write => BlockType.out,
+        };
+        header.sector = sector_index;
+
+        var descriptor1: u16 = 0;
+        var descriptor2: u16 = 0;
+        var descriptor3: u16 = 0;
+
+        queue.push_descriptor(&descriptor3).* = Descriptor {
+            .address = status_buffer_physical,
+            .flags = @enumToInt(Descriptor.Flag.write_only),
+            .length = 1,
+            .next = 0,
+        };
+
+        queue.push_descriptor(&descriptor2).* = Descriptor {
+            .address = sector_buffer_physical,
+            .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
+            .length = 512,
+            .next = descriptor3,
+        };
+
+        queue.push_descriptor(&descriptor1).* = Descriptor {
+            .address = header_physical,
+            .flags = @enumToInt(Descriptor.Flag.next),
+            .length = @sizeOf(Request.Header),
+            .next = descriptor2,
+        };
+
+        queue.push_available(descriptor1);
+        mmio.queue_notify = 0;
+    }
+
+    pub fn handler() void {
+        const descriptor = queue.pop_used() orelse @panic("descriptor corrupted");
+        // TODO Get virtual of this physical address @Virtual @Physical
+        const header = @intToPtr(*volatile Request.Header, descriptor.address);
+        const operation: Operation = switch (header.block_type) {
+            .in => .read,
+            .out => .write,
+            else => unreachable,
+        };
+        _ = operation;
+
+        const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
+        // TODO: @Virtual @Physical
+        const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
+        for (data) |byte, i| print("[{}] = 0x{x}\n", .{i, byte});
+
+        TODO(@src());
     }
 };

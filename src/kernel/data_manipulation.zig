@@ -1,4 +1,6 @@
 const std = @import("std");
+const kernel = @import("kernel.zig");
+const page_size = kernel.arch.page_size;
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
@@ -32,7 +34,10 @@ pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
 pub const copy = std.mem.copy;
 
 pub inline fn zero(bytes: []u8) void {
-    for (bytes) |*byte| {
-        byte.* = 0;
-    }
+    for (bytes) |*byte| byte.* = 0;
+}
+
+pub inline fn bytes_to_pages(bytes: u64) u64 {
+    const pages = (bytes / page_size) + @boolToInt(bytes % page_size != 0);
+    return pages;
 }
