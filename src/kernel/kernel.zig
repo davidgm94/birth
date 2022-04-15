@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const logger = std.log.scoped(.init);
-
+pub const log = std.log;
 pub const current_arch = builtin.cpu.arch;
 pub const build_mode = builtin.mode;
 pub const arch = @import("arch/riscv.zig");

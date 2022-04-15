@@ -36,7 +36,7 @@ fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
                 kernel_exe.addAssemblyFile(asm_file);
             }
         },
-        else => @compileError("Not supported arch\n"),
+        else => @compileError("CPU architecture not supported\n"),
     }
 }
 

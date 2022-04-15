@@ -1,7 +1,6 @@
 const kernel = @import("../../kernel.zig");
-const print = kernel.arch.early_print;
-const write = kernel.arch.early_write;
 const TODO = kernel.TODO;
+const log = kernel.log.scoped(.Physical);
 
 const MemoryMap = @import("memory_map.zig");
 var bitset_memory: [0x400_000 + (10 * kernel.arch.page_size)]u8 align(kernel.arch.page_size) = undefined;
@@ -46,9 +45,9 @@ pub fn init() void {
     device_tree_region.address = kernel.arch.device_tree.base_address;
     device_tree_region.page_count = kernel.align_forward(kernel.arch.device_tree.header.size, kernel.arch.page_size) / kernel.arch.page_size;
 
-    write("Reserved regions\n");
+    log.debug("Reserved regions", .{});
     for (reserved_regions) |reserved, i| {
-        print("[{}] (0x{x}, {})\n", .{ i, reserved.address, reserved.page_count });
+        log.debug("[{}] (0x{x}, {})", .{ i, reserved.address, reserved.page_count });
     }
 
     available_regions.ptr = &_available;
@@ -93,9 +92,9 @@ pub fn init() void {
         }
     }
 
-    write("Available regions:\n");
+    log.debug("Available regions:", .{});
     for (available_regions) |region, i| {
-        print("[{}] (0x{x}, {} -- 0x{x})\n", .{ i, region.descriptor.address, region.descriptor.page_count, region.descriptor.page_count * kernel.arch.page_size });
+        log.debug("[{}] (0x{x}, {} -- 0x{x})", .{ i, region.descriptor.address, region.descriptor.page_count, region.descriptor.page_count * kernel.arch.page_size });
     }
 
     for (available_regions) |*region| {
@@ -156,7 +155,7 @@ pub fn allocate(page_count: u64, zero: bool) ?u64 {
                 return first_address;
             }
 
-            print("Asked page count: {}. Pages to deallocate: {}\n. Region page count: {}. Region already allocated: {}\n", .{ page_count, region_allocated_page_count, region.descriptor.page_count, region.allocated_page_count });
+            log.debug("Asked page count: {}. Pages to deallocate: {}. Region page count: {}. Region already allocated: {}", .{ page_count, region_allocated_page_count, region.descriptor.page_count, region.allocated_page_count });
 
             kernel.assert(@src(), region.allocated_page_count + page_count > region.descriptor.page_count);
             kernel.assert(@src(), first_address != 0);

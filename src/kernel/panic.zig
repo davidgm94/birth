@@ -1,10 +1,13 @@
 const std = @import("std");
 const kernel = @import("kernel.zig");
+
+const log = kernel.log.scoped(.PANIC);
+
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     @setCold(true);
     kernel.arch.disable_interrupts();
-    _ = kernel.arch.writer.locked.write("Panic!!! ") catch unreachable;
-    kernel.arch.writer.locked.print(format, args) catch unreachable;
+    kernel.arch.Writer.should_lock = true;
+    kernel.arch.writer.print(format, args) catch unreachable;
     while (true) {}
 }
 

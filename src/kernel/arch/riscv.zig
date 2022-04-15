@@ -15,6 +15,8 @@ pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
 pub var current_cpu: u64 = 0;
 
+const log = kernel.log.scoped(.RISCV64);
+
 const TODO = kernel.TODO;
 
 const UART = @import("riscv64/uart.zig").UART;
@@ -22,7 +24,7 @@ const UART = @import("riscv64/uart.zig").UART;
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     current_cpu = boot_hart_id;
     init_logger();
-    writer.lockless.print("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}\n", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address }) catch unreachable;
+    log.debug("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address });
     device_tree.base_address = fdt_address;
     device_tree.parse();
     init_cpu_count();
@@ -34,12 +36,12 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
     virtio.block.perform_block_operation(.read, 0);
-    early_print("Initialized in {} s {} us\n", .{ time.s, time.us });
+    log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
 }
 
 fn init_cpu_count() void {
-    early_write("CPU count initialized with 1. Is it correct?\n");
+    log.debug("CPU count initialized with 1. Is it correct?", .{});
     // TODO: take from the device tree
     cpu_count = 1;
 }
@@ -67,7 +69,7 @@ pub const LocalStorage = struct {
     fn init(self: *@This(), hart_id: u64, boot_hart: bool) void {
         self.context.hart_id = hart_id;
         self.context.interrupt_stack = @ptrToInt(&stack_top) - hart_stack_size * hart_id;
-        early_print("Interrupt stack: 0x{x}\n", .{self.context.interrupt_stack});
+        log.debug("Interrupt stack: 0x{x}", .{self.context.interrupt_stack});
         self.context.pid = 0xffff_ffff_ffff_ffff;
 
         sscratch.write(@ptrToInt(&self.context));
@@ -114,9 +116,14 @@ const Scause = enum(u64) {
     supervisor_external_interrupt = 0x8000_0000_0000_0009,
 };
 
+const ilog = kernel.log.scoped(.Interrupt);
+
 export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
     disable_interrupts();
-    writer.lockless.print("Interrupt. SCAUSE: {}. STVAL: 0x{x}. Context: {}\n", .{ scause, stval, context }) catch unreachable;
+    Writer.should_lock = false;
+    defer Writer.should_lock = true;
+
+    ilog.debug("Interrupt. SCAUSE: {}. STVAL: 0x{x}. Context: {}", .{ scause, stval, context });
     const hart_id = local_storage[current_cpu].context.hart_id;
     switch (scause) {
         .supervisor_external_interrupt => Interrupts.handle_external_interrupt(hart_id),
@@ -208,36 +215,23 @@ pub fn disable_interrupts() void {
     sstatus.clear(.SIE);
 }
 
-const Writer = struct {
+pub const Writer = struct {
     const Error = error{};
-    locked: Locked,
-    lockless: Lockless,
-
-    const Locked = kernel.Writer(void, Error, locked_write);
-    const Lockless = kernel.Writer(void, Error, lockless_write);
-
-    fn locked_write(_: void, bytes: []const u8) Error!usize {
-        uart.write_bytes(bytes, true);
-        return bytes.len;
-    }
-
-    fn lockless_write(_: void, bytes: []const u8) Error!usize {
-        uart.write_bytes(bytes, false);
+    pub var should_lock = false;
+    fn write(_: void, bytes: []const u8) Error!usize {
+        if (should_lock) uart.write_bytes(bytes, true) else uart.write_bytes(bytes, false);
         return bytes.len;
     }
 };
 
-pub const writer = Writer{
-    .locked = Writer.Locked{ .context = {} },
-    .lockless = Writer.Lockless{ .context = {} },
-};
+pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} };
 
-pub fn early_print(comptime format: []const u8, args: anytype) void {
-    writer.lockless.print(format, args) catch unreachable;
+pub inline fn print(comptime format: []const u8, args: anytype) void {
+    writer.print(format, args) catch unreachable;
 }
 
-pub fn early_write(bytes: []const u8) void {
-    _ = writer.lockless.write(bytes) catch unreachable;
+pub inline fn write(bytes: []const u8) void {
+    _ = writer.write(bytes) catch unreachable;
 }
 
 pub const Bounds = struct {

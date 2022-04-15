@@ -1,6 +1,7 @@
 const kernel = @import("../../kernel.zig");
 const Physical = kernel.arch.Physical;
 const TODO = kernel.TODO;
+const log = kernel.log.scoped(.memory_map);
 
 var available: BootloaderMemoryRegionGroup = undefined;
 var reserved: BootloaderMemoryRegionGroup = undefined;
@@ -41,7 +42,7 @@ pub fn get() MemoryMap {
     if (kernel.arch.device_tree.find_node("reserved-memory", .exact)) |find_result| {
         var parser = find_result.parser;
         while (parser.get_subnode()) |subnode_name| {
-            kernel.arch.early_print("Getting subnode: {s}\n", .{subnode_name});
+            log.debug("Getting subnode: {s}", .{subnode_name});
 
             if (parser.find_property_in_current_node("reg")) |reserved_memory_prop| {
                 bytes_processed = 0;
@@ -60,14 +61,14 @@ pub fn get() MemoryMap {
         }
     }
 
-    kernel.arch.early_write("Regions:\n");
+    log.debug("Regions:", .{});
     for (memory_map.available) |region, i| {
-        kernel.arch.early_print("[{}] (0x{x}, {})\n", .{ i, region.address, region.page_count });
+        log.debug("[{}] (0x{x}, {})", .{ i, region.address, region.page_count });
     }
 
-    kernel.arch.early_write("Reserved regions:\n");
+    log.debug("Reserved regions:", .{});
     for (memory_map.reserved) |region, i| {
-        kernel.arch.early_print("[{}] (0x{x}, {})\n", .{ i, region.address, region.page_count });
+        log.debug("[{}] (0x{x}, {})", .{ i, region.address, region.page_count });
     }
 
     return memory_map;

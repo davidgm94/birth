@@ -5,14 +5,10 @@ const page_size = kernel.arch.page_size;
 /// Kernel pagetable before KPTI enabled
 pub var kernel_init_pagetable: [*]usize = undefined; // use optional type
 
-const early_print = kernel.arch.early_print;
-const early_write = kernel.arch.early_write;
+const log = kernel.log.scoped(.Virtual);
 const pagetable_t = [*]usize;
 const pte_t = usize;
 const MAXVA: usize = (1 << (9 + 9 + 9 + 12 - 1));
-
-const print = kernel.arch.early_print;
-const write = kernel.arch.early_write;
 
 fn page_round_up(address: u64) u64 {
     return kernel.align_forward(address, kernel.arch.page_size);
@@ -28,7 +24,7 @@ pub fn init() void {
     const new_page = Physical.allocate(1, true) orelse @panic("Failed to allocate kernel pagetable. Out of memory");
     kernel_init_pagetable = @intToPtr([*]usize, new_page);
 
-    write("mapping UART\n");
+    log.debug("mapping UART", .{});
     // Map UART
     directMap(
         kernel_init_pagetable,
@@ -40,14 +36,14 @@ pub fn init() void {
 
     for (kernel.arch.Physical.reserved_regions) |region, i| {
         if (i == 1) {
-            write("mapping kernel\n");
+            log.debug("mapping kernel", .{});
             // map kernel properly
             kernel.assert(@src(), kernel.arch.Physical.kernel_region.address == region.address);
             directMap(kernel_init_pagetable, kernel.arch.Physical.kernel_region.address, kernel.arch.Physical.kernel_region.page_count,
             // this can cause issues
             arch.PTE_READ | arch.PTE_EXEC | arch.PTE_WRITE, false);
         } else {
-            print("mapping region {}\n", .{i});
+            log.debug("mapping region {}", .{i});
             directMap(
                 kernel_init_pagetable,
                 region.address,
@@ -71,13 +67,13 @@ pub fn init() void {
     }
 
     enablePaging();
-    write("enabled paging\n");
+    log.debug("enabled paging", .{});
 
     var total_allocated_page_count: u64 = 0;
     for (Physical.available_regions) |region| {
         total_allocated_page_count += region.allocated_page_count;
     }
-    print("Total page count allocated for mapping: {}\n", .{total_allocated_page_count});
+    log.debug("Total page count allocated for mapping: {}", .{total_allocated_page_count});
 }
 
 /// enable_paging setup paging for initialization-time paging

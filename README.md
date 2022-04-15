@@ -2,7 +2,7 @@
 
 An experiment of RISC-V and x86_64 kernel which focuses on learning to build a better operating system.
 
-## External dependencies to compile and run the code
+## External dependencies to compile and run the code (executables your machine should have in the PATH variable)
 * The Zig compiler - to compile the kernel code
 * xorriso - to create the image to be loaded (only x86_64)
 * QEMU - to load and execute the kernel in a virtual environment
@@ -22,9 +22,10 @@ An experiment of RISC-V and x86_64 kernel which focuses on learning to build a b
 * Userspace
 
 ### x86_64
-* Catch up to the RISCV progress
 * ACPI
 * memory map
+* To consider: update to Limine 3.0 and forget about Stivale?
+* Catch up to the RISCV progress
 
 ## Task to be done in order to update Limine
-* update at the same time the stivale and limine files
+* Update at the same time the Stivale and Limine files

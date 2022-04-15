@@ -10,8 +10,8 @@ const read_big_endian = std.mem.readIntSliceBig;
 const page_size = kernel.arch.page_size;
 const Memory = kernel.Memory;
 
-const print = kernel.arch.early_print;
-const write = kernel.arch.early_write;
+const print = kernel.arch.print;
+const write = kernel.arch.write;
 
 const DeviceTree = @This();
 var result: DeviceTree.Result = undefined;

@@ -19,27 +19,10 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     //kernel.arch.writer.writeAll("[") catch unreachable;
     //kernel.arch.writer.writeAll(time_str) catch unreachable;
     //kernel.arch.writer.writeAll("] ") catch unreachable;
-    kernel.arch.writer.locked.print(prefix ++ format ++ "\n", args) catch unreachable;
+    kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
 }
 
 //var panicking: usize = 0;
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace) noreturn {
-    @setCold(true);
-    _ = kernel.arch.writer.locked.write("Panic!!! ") catch unreachable;
-    _ = kernel.arch.writer.locked.write(message) catch unreachable;
-    kernel.arch.spinloop();
-    //kernel.arch.disable_interrupts();
-
-    //if (panicking != 0) {
-    //kernel.arch.writer.writeAll("\npanicked during kernel panic!\n") catch unreachable;
-    //kernel.arch.spinloop();
-    //}
-
-    //_ = @atomicRmw(usize, &panicking, .Add, 1, .SeqCst);
-    //std.log.err("KERNEL PANIC: {s}", .{message});
-
-    //kernel.arch.writer.writeAll("\n") catch unreachable;
-    //kernel.arch.writer.writeAll("\n") catch unreachable;
-    //kernel.arch.writer.writeAll("\n") catch unreachable;
-    //kernel.arch.spinloop();
+    kernel.panic("{s}", .{message});
 }

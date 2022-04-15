@@ -1,8 +1,6 @@
 const kernel = @import("../../kernel.zig");
 const TODO = kernel.TODO;
 
-const print = kernel.arch.early_print;
-const write = kernel.arch.early_write;
 const page_size = kernel.arch.page_size;
 
 const ring_size = 128;
@@ -59,8 +57,6 @@ pub const MMIO = struct {
     const version = 2;
 
     pub fn init(self: *volatile @This()) void {
-        const magic_value = self.magic_value;
-        print("0x{x}\n", .{magic_value});
         if (self.magic_value != magic) @panic("virtio magic corrupted");
         if (self.version != version) @panic("outdated virtio spec");
         if (self.device_id == 0) @panic("invalid device");
@@ -87,7 +83,6 @@ pub const MMIO = struct {
     }
 
     pub fn add_queue_to_device(self: *volatile @This(), selected_queue: u32) *volatile Queue {
-        print("Queue max: {}\n", .{self.queue_num_max});
         if (self.queue_num_max < ring_size) {
             @panic("foooo");
         }
@@ -115,7 +110,6 @@ pub const MMIO = struct {
         queue.used.flags = 0;
         queue.used.index = 0;
 
-        write("notify of queue\n");
         // notify device of queue
         self.queue_num = ring_size;
 
@@ -127,7 +121,6 @@ pub const MMIO = struct {
         self.queue_used_low = @truncate(u32, used);
         self.queue_used_high = @truncate(u32, used >> 32);
 
-        write("sending queue ready\n");
         self.queue_ready = 1;
 
         return queue;
@@ -138,6 +131,8 @@ pub const MMIO = struct {
         driver = 1 << 1,
         features_ok = 1 << 7,
     };
+
+    const log = kernel.log.scoped(.MMIO);
 };
 
 pub const Descriptor = struct {
@@ -215,6 +210,8 @@ pub const block = struct {
     var queue: *volatile Queue = undefined;
     var mmio: *volatile MMIO = undefined;
 
+    const log = kernel.log.scoped(.VirtioBlock);
+
     const BlockType = enum(u32) {
         in = 0,
         out = 1,
@@ -245,13 +242,13 @@ pub const block = struct {
         kernel.arch.Interrupts.register_external_interrupt_handler(8, handler);
         mmio.status |= @enumToInt(MMIO.Status.driver);
 
-        write("Block driver initialized\n");
+        log.debug("Block driver initialized", .{});
     }
 
     pub fn perform_block_operation(comptime operation: Operation, sector_index: u64) void {
-        const sector_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
-        const status_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated\n");
-        const header_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("unable to allocate memory for request header\n");
+        const sector_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated");
+        const status_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated");
+        const header_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("unable to allocate memory for request header");
         // Here we should distinguish between virtual and physical addresses
         const header = @intToPtr(*Request.Header, header_physical);
         header.block_type = switch (operation) {
@@ -303,7 +300,7 @@ pub const block = struct {
         const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
         // TODO: @Virtual @Physical
         const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
-        for (data) |byte, i| print("[{}] = 0x{x}\n", .{ i, byte });
+        for (data) |byte, i| log.debug("[{}] = 0x{x}", .{ i, byte });
 
         TODO(@src());
     }
