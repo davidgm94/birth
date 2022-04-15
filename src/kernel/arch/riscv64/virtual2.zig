@@ -16,8 +16,8 @@ pub inline fn PAGE_ROUND_DOWN(ptr: usize) usize {
 extern const kernel_end: usize;
 extern const kernel_start: usize;
 
-/// Global logger for this file
-const logger = std.log.scoped(.memory);
+/// Global log for this file
+const log = std.log.scoped(.memory);
 
 /// MAXVA is the maximum address for virtual address space
 /// SV39 mode, to avoid having to sign-extend virtual addresses
@@ -38,20 +38,20 @@ pub fn init() void {
         @panic("Abnormal memory start, maybe the device tree hasn't been parsed yet'");
     }
 
-    logger.debug("Start building memory data structure", .{});
+    log.debug("Start building memory data structure", .{});
 
     // Calculate the start and end of the usable memory
-    logger.debug("Kernel end: 0x{x:0>16}", .{&kernel_end});
+    log.debug("Kernel end: 0x{x:0>16}", .{&kernel_end});
     const memory_start = PAGE_ROUND_UP(@ptrToInt(&kernel_end));
     const memory_end = PAGE_ROUND_DOWN(arch.device_tree_address);
     // const memory_end = PAGE_ROUND_DOWN(hwinfo.info.memory_start + hwinfo.info.memory_size);
-    logger.debug("Usable RAM start:\t 0x{x:0>16}", .{memory_start});
-    logger.debug("Usable RAM end:\t 0x{x:0>16}", .{memory_end});
-    logger.debug("Total usable RAM:\t {d}MiB", .{@intToFloat(f64, memory_end - memory_start) / 1024 / 1024});
+    log.debug("Usable RAM start:\t 0x{x:0>16}", .{memory_start});
+    log.debug("Usable RAM end:\t 0x{x:0>16}", .{memory_end});
+    log.debug("Total usable RAM:\t {d}MiB", .{@intToFloat(f64, memory_end - memory_start) / 1024 / 1024});
 
     physical.init(memory_start, memory_end);
 
-    logger.info("Physical memory data structure initialized", .{});
+    log.info("Physical memory data structure initialized", .{});
 }
 
 /// Kernel pagetable before KPTI enabled
@@ -63,7 +63,7 @@ pub fn kernel_vm_init() void {
     // Initialize the kernel pagetable
     const new_page = physical.alloc();
     if (new_page == null) {
-        logger.err("Failed to allocate kernel pagetable", .{});
+        log.err("Failed to allocate kernel pagetable", .{});
         @panic("Out of memory");
     }
     kernel_init_pagetable = @intToPtr(*usize, new_page.?);
@@ -112,7 +112,7 @@ pub fn kernel_vm_init() void {
 /// enable_paging setup paging for initialization-time paging
 pub fn enablePaging() void {
     if (kernel_init_pagetable) |pagetable| {
-        logger.debug("Enabling paging for pagetable at 0x{x:0>16}", .{@ptrToInt(pagetable)});
+        log.debug("Enabling paging for pagetable at 0x{x:0>16}", .{@ptrToInt(pagetable)});
 
         // Set CSR satp
         arch.SATP.write(arch.MAKE_SATP(@ptrToInt(pagetable)));
@@ -141,7 +141,7 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
 
     // Security check for permission
     if (permission & ~(arch.PTE_FLAG_MASK) != 0) {
-        logger.err("Illegal permission, [permission] = {x:0>16}", .{permission});
+        log.err("Illegal permission, [permission] = {x:0>16}", .{permission});
         @panic("illegal permission");
     }
 
@@ -154,7 +154,7 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
 
             // Existing entry
             if ((@intToPtr(*usize, pte).* & arch.PTE_VALID != 0) and !allow_remap) {
-                logger.err("mapping pages failed, [virtual_addr] = 0x{x:0>16}, [physical_addr] = 0x{x:0>16}, [size] = {d}", .{ virtual_page, physical_page, size });
+                log.err("mapping pages failed, [virtual_addr] = 0x{x:0>16}, [physical_addr] = 0x{x:0>16}, [size] = {d}", .{ virtual_page, physical_page, size });
                 @panic("mapping pages failed");
             }
 
@@ -162,7 +162,7 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
             @intToPtr(*usize, pte).* = arch.PA_TO_PTE(physical_page) | permission | arch.PTE_VALID;
         } else {
             // Walk is going wrong somewhere
-            logger.err(
+            log.err(
                 \\mapping pages failed, 
                 \\[virtual_addr] = 0x{x:0>16},
                 \\[physical_addr] = 0x{x:0>16},
@@ -178,14 +178,18 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
 fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
     // Safety check
     if (virtual_addr >= MAXVA) {
-        logger.err("Virtual address overflow: [virtual_addr] = 0x{x:0>16}", .{virtual_addr});
+        log.err("Virtual address overflow: [virtual_addr] = 0x{x:0>16}", .{virtual_addr});
         @panic("walk: virtual_addr overflow");
     }
 
     var level: usize = 2;
     var pg_iter: pagetable_t = pagetable;
     while (level > 0) : (level -= 1) {
-        const pte: *usize = &pg_iter[arch.PAGE_INDEX(level, virtual_addr)];
+        const index = arch.PAGE_INDEX(level, virtual_addr);
+        if (index == 74) {
+            log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
+        }
+        const pte: *usize = &pg_iter[index];
         if (pte.* & arch.PTE_VALID != 0) {
             // Next level if valid
             pg_iter = @intToPtr([*]usize, arch.PTE_TO_PA(pte.*));
@@ -198,7 +202,7 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
                     @memset(@ptrCast([*]u8, pg_iter), 0, arch.page_size);
                     pte.* = arch.PA_TO_PTE(page) | arch.PTE_VALID;
                 } else {
-                    logger.err("allocate pagetable physical memory failed", .{});
+                    log.err("allocate pagetable physical memory failed", .{});
                     @panic("Out of memory");
                 }
             } else {
@@ -206,7 +210,11 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
             }
         }
     }
-    return @ptrToInt(&pg_iter[arch.PAGE_INDEX(0, virtual_addr)]);
+    const index = arch.PAGE_INDEX(0, virtual_addr);
+    if (index == 74) {
+        log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
+    }
+    return @ptrToInt(&pg_iter[index]);
 }
 
 /// translate_addr translate a virtual address to a physical address
@@ -220,7 +228,7 @@ pub fn translate_addr(pagetable: pagetable_t, virtual_addr: usize) ?usize {
 /// vmprint print out the pagetable
 /// for debug usage
 pub fn vmprint(pagetable: pagetable_t) void {
-    logger.debug("page table 0x{x}", .{@ptrToInt(pagetable)});
+    log.debug("page table 0x{x}", .{@ptrToInt(pagetable)});
     if (@ptrToInt(pagetable) == 0) {
         @panic("null pagetable");
     }
@@ -237,7 +245,7 @@ fn vmprint_walk(pagetable: pagetable_t, level: usize, prefix: []const u8) void {
         if (pte & arch.PTE_VALID == 0) {
             continue;
         }
-        logger.debug("{s}{d}: pte 0x{x:0>16} pa 0x{x:0>16}", .{
+        log.debug("{s}{d}: pte 0x{x:0>16} pa 0x{x:0>16}", .{
             prefix[0 .. level * 3],
             i,
             pte,

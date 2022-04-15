@@ -37,6 +37,12 @@ pub inline fn zero(bytes: []u8) void {
     for (bytes) |*byte| byte.* = 0;
 }
 
+pub inline fn zeroes(comptime T: type) T {
+    var result: T = undefined;
+    zero(@ptrCast([*]u8, &result)[0..@sizeOf(T)]);
+    return result;
+}
+
 pub inline fn bytes_to_pages(bytes: u64) u64 {
     const pages = (bytes / page_size) + @boolToInt(bytes % page_size != 0);
     return pages;

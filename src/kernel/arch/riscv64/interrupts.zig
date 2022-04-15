@@ -29,11 +29,13 @@ inline fn get_sclaim(hart_id: u64) *volatile u32 {
 }
 
 pub fn init(hart_id: u64) void {
+    log.debug("About to initialized interrupts", .{});
     const plic_dt = kernel.arch.device_tree.find_property("soc", "reg", .exact, &[_][]const u8{"plic"}, &[_]kernel.arch.DeviceTree.SearchType{.start}) orelse @panic("unable to find PLIC in the device tree");
     plic_base = kernel.arch.dt_read_int(u64, plic_dt.value);
     plic_size = kernel.arch.dt_read_int(u64, plic_dt.value[@sizeOf(u64)..]);
     kernel.assert(@src(), plic_size & (kernel.arch.page_size - 1) == 0);
     kernel.arch.Virtual.directMap(
+        @src(),
         kernel.arch.Virtual.kernel_init_pagetable,
         plic_base,
         plic_size / kernel.arch.page_size,

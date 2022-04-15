@@ -20,6 +20,8 @@ fn page_round_down(address: u64) u64 {
 
 /// kernel_vm_init initialize the kernel_init_pagetable during initialization phase
 pub fn init() void {
+    kernel.address_space.range.start = 0xf000_0000;
+    kernel.address_space.range.end = 0x1000_0000;
     // Initialize the kernel pagetable
     const new_page = Physical.allocate(1, true) orelse @panic("Failed to allocate kernel pagetable. Out of memory");
     kernel_init_pagetable = @intToPtr([*]usize, new_page);
@@ -27,6 +29,7 @@ pub fn init() void {
     log.debug("mapping UART", .{});
     // Map UART
     directMap(
+        @src(),
         kernel_init_pagetable,
         arch.UART0,
         1,
@@ -34,34 +37,31 @@ pub fn init() void {
         false,
     );
 
-    for (kernel.arch.Physical.reserved_regions) |region, i| {
-        if (i == 1) {
-            log.debug("mapping kernel", .{});
-            // map kernel properly
-            kernel.assert(@src(), kernel.arch.Physical.kernel_region.address == region.address);
-            directMap(kernel_init_pagetable, kernel.arch.Physical.kernel_region.address, kernel.arch.Physical.kernel_region.page_count,
+    log.debug("mapping kernel", .{});
+    directMap(@src(), kernel_init_pagetable, kernel.arch.Physical.kernel_region.address, kernel.arch.Physical.kernel_region.page_count,
+    // TODO: this can cause issues
+    arch.PTE_READ | arch.PTE_EXEC | arch.PTE_WRITE, false);
+
+    // Map what's already been allocated of the free regions
+    for (kernel.arch.Physical.available_regions) |region| {
+        if (region.allocated_page_count > 0) {
+            directMap(@src(), kernel_init_pagetable, region.descriptor.address, region.allocated_page_count,
             // this can cause issues
-            arch.PTE_READ | arch.PTE_EXEC | arch.PTE_WRITE, false);
-        } else {
-            log.debug("mapping region {}", .{i});
-            directMap(
-                kernel_init_pagetable,
-                region.address,
-                region.page_count,
-                // this can cause issues
-                arch.PTE_READ,
-                false,
-            );
+            arch.PTE_READ | arch.PTE_WRITE, false);
         }
     }
 
-    for (kernel.arch.Physical.available_regions) |region| {
+    for (kernel.arch.Physical.reserved_regions) |region| {
+        if (kernel.arch.Physical.kernel_region.address == region.address) continue;
+
+        log.debug("mapping region (0x{x}, {})", .{ region.address, region.page_count });
         directMap(
+            @src(),
             kernel_init_pagetable,
-            region.descriptor.address,
-            region.descriptor.page_count,
+            region.address,
+            region.page_count,
             // this can cause issues
-            arch.PTE_READ | arch.PTE_WRITE,
+            arch.PTE_READ,
             false,
         );
     }
@@ -89,15 +89,19 @@ pub fn enablePaging() void {
 
 /// directMap map the physical memory to virtual memory
 /// the start and the end must be page start
-pub fn directMap(pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
+pub fn directMap(src: kernel.SourceLocation, pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
+    log.debug("Direct mapping {} pages from 0x{x}", .{ page_count, start });
+    log.debug("{s}:{}:{} {s}()\n", .{ src.file, src.line, src.column, src.fn_name });
     map_pages(pagetable, start, start, page_count, permission, allow_remap);
+    log.debug("Direct mapping succeeded", .{});
 }
 
 pub fn map(start: u64, page_count: u64) void {
-    directMap(kernel_init_pagetable, start, page_count, arch.PTE_READ | arch.PTE_WRITE, false);
+    directMap(@src(), kernel_init_pagetable, start, page_count, arch.PTE_READ | arch.PTE_WRITE, false);
 }
 
 fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, page_count: usize, permission: usize, allow_remap: bool) void {
+    kernel.assert(@src(), page_count != 0);
     kernel.assert(@src(), kernel.is_aligned(virtual_addr, page_size));
     kernel.assert(@src(), kernel.is_aligned(physical_addr, page_size));
 
@@ -116,9 +120,10 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
         physical_page += arch.page_size;
         page_i += 1;
     }) {
+        log.debug("about to walk PTE with 0x{x}\n", .{virtual_page});
         const optional_pte = walk(pagetable, virtual_page, true);
         if (optional_pte) |pte| {
-
+            log.debug("PTE: 0x{x}", .{pte});
             // Existing entry
             if ((@intToPtr(*usize, pte).* & arch.PTE_VALID != 0) and !allow_remap) {
                 //logger.err("mapping pages failed, [virtual_addr] = 0x{x:0>16}, [physical_addr] = 0x{x:0>16}, [size] = {d}", .{ virtual_page, physical_page, size });
@@ -146,13 +151,19 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
     var level: usize = 2;
     var pg_iter: pagetable_t = pagetable;
     while (level > 0) : (level -= 1) {
-        const pte: *usize = &pg_iter[arch.PAGE_INDEX(level, virtual_addr)];
+        const index = arch.PAGE_INDEX(level, virtual_addr);
+        const pte: *usize = &pg_iter[index];
+        log.debug("[{}] PTE: 0x{x}", .{ level, @ptrToInt(pte) });
+        if (index == 74) {
+            log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
+        }
         if (pte.* & arch.PTE_VALID != 0) {
             // Next level if valid
             pg_iter = @intToPtr([*]usize, arch.PTE_TO_PA(pte.*));
         } else {
             if (alloc) {
                 // Allocate a new page if not valid and need to allocate
+                // This already identity maps the page as it has to zero the page out
                 if (Physical.allocate(1, true)) |page| {
                     pg_iter = @intToPtr([*]usize, page);
                     pte.* = arch.PA_TO_PTE(page) | arch.PTE_VALID;
@@ -165,7 +176,11 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
             }
         }
     }
-    return @ptrToInt(&pg_iter[arch.PAGE_INDEX(0, virtual_addr)]);
+    const index = arch.PAGE_INDEX(0, virtual_addr);
+    if (index == 74) {
+        log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
+    }
+    return @ptrToInt(&pg_iter[index]);
 }
 
 /// translate_addr translate a virtual address to a physical address
@@ -211,3 +226,16 @@ fn vmprint_walk(pagetable: pagetable_t, level: usize, prefix: []const u8) void {
         }
     }
 }
+
+pub const Range = struct {
+    start: u64,
+    end: u64,
+};
+
+pub const Region = struct {};
+pub const AddressSpace = struct {
+    arch: arch.AddressSpace,
+    range: Range,
+    free_regions_by_address: kernel.AVL.Tree(Region),
+    free_regions_by_size: kernel.AVL.Tree(Region),
+};

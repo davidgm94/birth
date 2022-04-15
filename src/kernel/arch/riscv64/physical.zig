@@ -110,7 +110,6 @@ pub fn init() void {
 
 pub fn allocate(page_count: u64, zero: bool) ?u64 {
     const take_hint = true;
-
     // TODO: don't allocate if they are different regions (this can cause issues?)
     for (available_regions) |*region| {
         if (region.descriptor.page_count - region.allocated_page_count >= page_count) {
@@ -120,18 +119,13 @@ pub fn allocate(page_count: u64, zero: bool) ?u64 {
             const start_index = if (take_hint) region.allocated_page_count / @bitSizeOf(u64) else 0;
             var first_address: u64 = 0;
 
-            for (region.bitset[start_index..]) |*bitset_elem| {
+            bitset_loop: for (region.bitset[start_index..]) |*bitset_elem| {
                 comptime var bit: u64 = 0;
 
                 inline while (bit < @bitSizeOf(u64)) : (bit += 1) {
                     const bit_set = bitset_elem.* & (1 << bit) != 0;
                     if (region_allocated_page_count == page_count) {
-                        region.allocated_page_count += region_allocated_page_count;
-                        kernel.assert(@src(), first_address != 0);
-                        if (zero) {
-                            kernel.zero(@intToPtr([*]u8, first_address)[0 .. page_count * kernel.arch.page_size]);
-                        }
-                        return first_address;
+                        break :bitset_loop;
                     } else {
                         if (!bit_set) {
                             if (first_address == 0) {
@@ -147,12 +141,16 @@ pub fn allocate(page_count: u64, zero: bool) ?u64 {
             }
 
             if (region_allocated_page_count == page_count) {
+                log.debug("about to allocate", .{});
+                const result = first_address;
                 region.allocated_page_count += region_allocated_page_count;
-                kernel.assert(@src(), first_address != 0);
+                kernel.assert(@src(), result != 0);
                 if (zero) {
-                    kernel.zero(@intToPtr([*]u8, first_address)[0 .. page_count * kernel.arch.page_size]);
+                    if (kernel.arch.Paging.enabled) kernel.arch.Virtual.map(result, page_count);
+                    kernel.zero(@intToPtr([*]u8, result)[0 .. page_count * kernel.arch.page_size]);
                 }
-                return first_address;
+                log.debug("Allocated 0x{x} Zero: {}", .{ result, zero });
+                return result;
             }
 
             log.debug("Asked page count: {}. Pages to deallocate: {}. Region page count: {}. Region already allocated: {}", .{ page_count, region_allocated_page_count, region.descriptor.page_count, region.allocated_page_count });

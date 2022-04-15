@@ -1,5 +1,4 @@
 const kernel = @import("../kernel.zig");
-pub const page_size = 0x1000;
 pub const Spinlock = @import("riscv64/spinlock.zig");
 pub const sync = @import("riscv64/sync.zig");
 pub const DeviceTree = @import("riscv64/device_tree.zig");
@@ -10,6 +9,8 @@ pub const Virtual = @import("riscv64/virtual.zig");
 pub const Interrupts = @import("riscv64/interrupts.zig");
 pub const SBI = @import("riscv64/opensbi.zig");
 pub const virtio = @import("riscv64/virtio_common.zig");
+
+pub const page_size = 0x1000;
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
@@ -123,7 +124,8 @@ export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: 
     Writer.should_lock = false;
     defer Writer.should_lock = true;
 
-    ilog.debug("Interrupt. SCAUSE: {}. STVAL: 0x{x}. Context: {}", .{ scause, stval, context });
+    _ = context;
+    ilog.debug("Interrupt. SCAUSE: {}. STVAL: 0x{x}", .{ scause, stval });
     const hart_id = local_storage[current_cpu].context.hart_id;
     switch (scause) {
         .supervisor_external_interrupt => Interrupts.handle_external_interrupt(hart_id),
@@ -267,15 +269,21 @@ pub inline fn PTE_FLAGS(pte: usize) usize {
 }
 
 pub inline fn PAGE_INDEX(level: usize, virtual_address: usize) usize {
-    return (virtual_address >> PAGE_INDEX_SHIFT(level)) & PAGE_INDEX_MASK;
+    const page_index = (virtual_address >> PAGE_INDEX_SHIFT(level)) & PAGE_INDEX_MASK;
+    log.debug("page index {} for level {} and VA 0x{x}", .{ page_index, level, virtual_address });
+    return page_index;
 }
 
 pub inline fn PTE_TO_PA(pte: usize) usize {
-    return (pte >> 10) << 12;
+    const pa = (pte >> 10) << 12;
+    log.debug("PTE 0x{x} to PA 0x{x}", .{ pte, pa });
+    return pa;
 }
 
 pub inline fn PA_TO_PTE(pa: usize) usize {
-    return (pa >> 12) << 10;
+    const pte = (pa >> 12) << 10;
+    log.debug("Generating PTE 0x{x} for 0x{x}", .{ pte, pa });
+    return pte;
 }
 pub inline fn PAGE_INDEX_SHIFT(level: usize) u6 {
     return @intCast(u6, PAGE_SHIFT + 9 * level);
@@ -285,3 +293,5 @@ pub const PAGE_SHIFT: usize = 12;
 pub fn get_context(hart_id: u64, machine: u64) u64 {
     return 2 * hart_id + machine;
 }
+
+pub const AddressSpace = struct {};

@@ -8,7 +8,7 @@ _lock: usize align(64),
 hart: i64,
 
 /// Lock itself
-pub fn lock(self: *@This()) void {
+pub fn acquire(self: *@This()) void {
     if (self.holding()) {
         @panic("lock already held");
     } else {
@@ -20,7 +20,7 @@ pub fn lock(self: *@This()) void {
 }
 
 /// Release itself
-pub fn unlock(self: *@This()) void {
+pub fn release(self: *@This()) void {
     if (self.holding()) {
         self.hart = -1;
         arch.sync.synchronize();

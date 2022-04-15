@@ -27,8 +27,8 @@ pub fn UART(comptime base_address: u64) type {
         /// init set baud rate and enable UART
         /// We need this comptime parameter to avoid locking, which causes to enable interrupts
         pub fn init(self: *@This(), comptime lock: bool) void {
-            if (lock) self.lock.lock();
-            defer if (lock) self.lock.unlock();
+            if (lock) self.lock.acquire();
+            defer if (lock) self.lock.release();
 
             // Volatile needed
             // using C-type ptr
@@ -67,15 +67,15 @@ pub fn UART(comptime base_address: u64) type {
         /// Get a char from UART
         /// Return a optional u8, must check
         pub fn get(self: *@This()) ?u8 {
-            self.lock.lock();
-            defer self.lock.unlock();
+            self.lock.acquire();
+            defer self.lock.release();
             const result = raw_read();
             return result;
         }
 
         pub fn write_bytes(self: *@This(), bytes: []const u8, comptime lock: bool) void {
-            if (lock) self.lock.lock();
-            defer if (lock) self.lock.unlock();
+            if (lock) self.lock.acquire();
+            defer if (lock) self.lock.release();
             for (bytes) |byte| {
                 raw_write(byte);
             }

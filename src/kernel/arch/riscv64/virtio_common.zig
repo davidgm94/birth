@@ -297,10 +297,10 @@ pub const block = struct {
         };
         _ = operation;
 
-        const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
+        //const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
         // TODO: @Virtual @Physical
-        const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
-        for (data) |byte, i| log.debug("[{}] = 0x{x}", .{ i, byte });
+        //const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
+        //for (data) |byte, i| log.debug("[{}] = 0x{x}", .{ i, byte });
 
         TODO(@src());
     }

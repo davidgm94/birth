@@ -3,6 +3,8 @@ const kernel = @import("kernel.zig");
 
 const log = kernel.log.scoped(.PANIC);
 
+pub const SourceLocation = std.builtin.SourceLocation;
+
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     @setCold(true);
     kernel.arch.disable_interrupts();
@@ -11,6 +13,6 @@ pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     while (true) {}
 }
 
-pub fn TODO(src: std.builtin.SourceLocation) noreturn {
+pub fn TODO(src: SourceLocation) noreturn {
     panic("TODO: {s}:{}:{} {s}()\n", .{ src.file, src.line, src.column, src.fn_name });
 }
