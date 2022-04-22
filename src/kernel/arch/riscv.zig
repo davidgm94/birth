@@ -143,7 +143,7 @@ pub const UART0 = 0x1000_0000;
 pub var uart = UART(UART0){
     .lock = Spinlock{
         ._lock = 0,
-        .hart = -1,
+        .hart = null,
     },
 };
 
@@ -249,11 +249,14 @@ pub const Bounds = struct {
     }
 };
 
-pub const PTE_VALID: usize = (1 << 0); // valid
-pub const PTE_READ: usize = (1 << 1); // read permission
-pub const PTE_WRITE: usize = (1 << 2); // write permission
-pub const PTE_EXEC: usize = (1 << 3); // execute permission
-pub const PTE_USER: usize = (1 << 4); // belongs to U mode
+pub const PTE_VALID: usize = (1 << 0);
+pub const PTE_READ: usize = (1 << 1);
+pub const PTE_WRITE: usize = (1 << 2);
+pub const PTE_EXEC: usize = (1 << 3);
+pub const PTE_USER: usize = (1 << 4);
+pub const PTE_GLOBAL: usize = (1 << 5);
+pub const PTE_ACCESSED: usize = (1 << 6);
+pub const PTE_DIRTY: usize = (1 << 7);
 
 pub const memory_layout = struct {
     pub const UART0: usize = 0x1000_0000;
@@ -270,19 +273,16 @@ pub inline fn PTE_FLAGS(pte: usize) usize {
 
 pub inline fn PAGE_INDEX(level: usize, virtual_address: usize) usize {
     const page_index = (virtual_address >> PAGE_INDEX_SHIFT(level)) & PAGE_INDEX_MASK;
-    log.debug("page index {} for level {} and VA 0x{x}", .{ page_index, level, virtual_address });
     return page_index;
 }
 
 pub inline fn PTE_TO_PA(pte: usize) usize {
     const pa = (pte >> 10) << 12;
-    log.debug("PTE 0x{x} to PA 0x{x}", .{ pte, pa });
     return pa;
 }
 
 pub inline fn PA_TO_PTE(pa: usize) usize {
     const pte = (pa >> 12) << 10;
-    log.debug("Generating PTE 0x{x} for 0x{x}", .{ pte, pa });
     return pte;
 }
 pub inline fn PAGE_INDEX_SHIFT(level: usize) u6 {

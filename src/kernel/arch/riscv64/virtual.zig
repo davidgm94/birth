@@ -2,6 +2,7 @@ const kernel = @import("../../kernel.zig");
 const arch = kernel.arch;
 const Physical = kernel.arch.Physical;
 const page_size = kernel.arch.page_size;
+const AddressPair = kernel.Memory.AddressPair;
 /// Kernel pagetable before KPTI enabled
 pub var kernel_init_pagetable: [*]usize = undefined; // use optional type
 
@@ -23,13 +24,14 @@ pub fn init() void {
     kernel.address_space.range.start = 0xf000_0000;
     kernel.address_space.range.end = 0x1000_0000;
     // Initialize the kernel pagetable
-    const new_page = Physical.allocate(1, true) orelse @panic("Failed to allocate kernel pagetable. Out of memory");
+    const new_page = Physical.allocate1(1) orelse @panic("Failed to allocate kernel pagetable. Out of memory");
+    kernel.zero_a_page(new_page);
+
     kernel_init_pagetable = @intToPtr([*]usize, new_page);
 
     log.debug("mapping UART", .{});
     // Map UART
     directMap(
-        @src(),
         kernel_init_pagetable,
         arch.UART0,
         1,
@@ -38,17 +40,15 @@ pub fn init() void {
     );
 
     log.debug("mapping kernel", .{});
-    directMap(@src(), kernel_init_pagetable, kernel.arch.Physical.kernel_region.address, kernel.arch.Physical.kernel_region.page_count,
-    // TODO: this can cause issues
+    directMap(kernel_init_pagetable, kernel.arch.Physical.kernel_region.address, kernel.arch.Physical.kernel_region.page_count,
+    // TODO: PTE_EXEC can cause security issues
     arch.PTE_READ | arch.PTE_EXEC | arch.PTE_WRITE, false);
 
-    // Map what's already been allocated of the free regions
+    // Map all free memory
     for (kernel.arch.Physical.available_regions) |region| {
-        if (region.allocated_page_count > 0) {
-            directMap(@src(), kernel_init_pagetable, region.descriptor.address, region.allocated_page_count,
-            // this can cause issues
-            arch.PTE_READ | arch.PTE_WRITE, false);
-        }
+        directMap(kernel_init_pagetable, region.descriptor.address, region.descriptor.page_count,
+        // this can cause issues
+        arch.PTE_READ | arch.PTE_WRITE, false);
     }
 
     for (kernel.arch.Physical.reserved_regions) |region| {
@@ -56,7 +56,6 @@ pub fn init() void {
 
         log.debug("mapping region (0x{x}, {})", .{ region.address, region.page_count });
         directMap(
-            @src(),
             kernel_init_pagetable,
             region.address,
             region.page_count,
@@ -89,15 +88,12 @@ pub fn enablePaging() void {
 
 /// directMap map the physical memory to virtual memory
 /// the start and the end must be page start
-pub fn directMap(src: kernel.SourceLocation, pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
-    log.debug("Direct mapping {} pages from 0x{x}", .{ page_count, start });
-    log.debug("{s}:{}:{} {s}()\n", .{ src.file, src.line, src.column, src.fn_name });
+pub fn directMap(pagetable: pagetable_t, start: usize, page_count: usize, permission: usize, allow_remap: bool) void {
     map_pages(pagetable, start, start, page_count, permission, allow_remap);
-    log.debug("Direct mapping succeeded", .{});
 }
 
 pub fn map(start: u64, page_count: u64) void {
-    directMap(@src(), kernel_init_pagetable, start, page_count, arch.PTE_READ | arch.PTE_WRITE, false);
+    directMap(kernel_init_pagetable, start, page_count, arch.PTE_READ | arch.PTE_WRITE, false);
 }
 
 fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, page_count: usize, permission: usize, allow_remap: bool) void {
@@ -120,10 +116,8 @@ fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, 
         physical_page += arch.page_size;
         page_i += 1;
     }) {
-        log.debug("about to walk PTE with 0x{x}\n", .{virtual_page});
         const optional_pte = walk(pagetable, virtual_page, true);
         if (optional_pte) |pte| {
-            log.debug("PTE: 0x{x}", .{pte});
             // Existing entry
             if ((@intToPtr(*usize, pte).* & arch.PTE_VALID != 0) and !allow_remap) {
                 //logger.err("mapping pages failed, [virtual_addr] = 0x{x:0>16}, [physical_addr] = 0x{x:0>16}, [size] = {d}", .{ virtual_page, physical_page, size });
@@ -153,10 +147,6 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
     while (level > 0) : (level -= 1) {
         const index = arch.PAGE_INDEX(level, virtual_addr);
         const pte: *usize = &pg_iter[index];
-        log.debug("[{}] PTE: 0x{x}", .{ level, @ptrToInt(pte) });
-        if (index == 74) {
-            log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
-        }
         if (pte.* & arch.PTE_VALID != 0) {
             // Next level if valid
             pg_iter = @intToPtr([*]usize, arch.PTE_TO_PA(pte.*));
@@ -164,9 +154,10 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
             if (alloc) {
                 // Allocate a new page if not valid and need to allocate
                 // This already identity maps the page as it has to zero the page out
-                if (Physical.allocate(1, true)) |page| {
-                    pg_iter = @intToPtr([*]usize, page);
-                    pte.* = arch.PA_TO_PTE(page) | arch.PTE_VALID;
+                if (Physical.allocate1(1)) |page_physical| {
+                    kernel.zero_a_page(kernel.arch.Virtual.AddressSpace.physical_to_virtual(page_physical));
+                    pg_iter = @intToPtr([*]usize, page_physical);
+                    pte.* = arch.PA_TO_PTE(page_physical) | arch.PTE_VALID;
                 } else {
                     //logger.err("allocate pagetable physical memory failed", .{});
                     @panic("Out of memory");
@@ -177,9 +168,6 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
         }
     }
     const index = arch.PAGE_INDEX(0, virtual_addr);
-    if (index == 74) {
-        log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
-    }
     return @ptrToInt(&pg_iter[index]);
 }
 
@@ -236,6 +224,37 @@ pub const Region = struct {};
 pub const AddressSpace = struct {
     arch: arch.AddressSpace,
     range: Range,
-    free_regions_by_address: kernel.AVL.Tree(Region),
-    free_regions_by_size: kernel.AVL.Tree(Region),
+    lock: kernel.Spinlock,
+
+    pub fn allocate(self: *@This(), size: u64, flags: u32) ?AddressPair {
+        self.lock.acquire();
+        defer self.lock.release();
+
+        const reserved = self.reserve(size, flags) orelse return null;
+        // TODO: commit
+
+        return reserved;
+    }
+
+    pub fn reserve(self: *@This(), size: u64, flags: u32) ?AddressPair {
+        _ = flags;
+
+        const needed_page_count = kernel.bytes_to_pages(size);
+
+        if (needed_page_count == 0) @panic("Reserved called without needing memory");
+        kernel.assert(@src(), self.lock.is_locked());
+
+        // TODO: This is wrong in so many ways
+        const physical = Physical.allocate(needed_page_count) orelse return null;
+
+        return AddressPair{
+            .physical = physical,
+            .virtual = physical_to_virtual(physical),
+        };
+    }
+
+    // TODO:
+    pub fn physical_to_virtual(physical: u64) u64 {
+        return physical;
+    }
 };

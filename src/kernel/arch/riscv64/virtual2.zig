@@ -186,9 +186,6 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
     var pg_iter: pagetable_t = pagetable;
     while (level > 0) : (level -= 1) {
         const index = arch.PAGE_INDEX(level, virtual_addr);
-        if (index == 74) {
-            log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
-        }
         const pte: *usize = &pg_iter[index];
         if (pte.* & arch.PTE_VALID != 0) {
             // Next level if valid
@@ -211,9 +208,6 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
         }
     }
     const index = arch.PAGE_INDEX(0, virtual_addr);
-    if (index == 74) {
-        log.debug("Index 74 for VA 0x{x}", .{virtual_addr});
-    }
     return @ptrToInt(&pg_iter[index]);
 }
 

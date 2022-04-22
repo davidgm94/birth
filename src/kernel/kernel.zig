@@ -15,7 +15,9 @@ pub const SourceLocation = panic_file.SourceLocation;
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("avl.zig");
+pub const Heap = @import("heap.zig");
 
 pub var address_space: arch.Virtual.AddressSpace = undefined;
+pub var heap: Heap = undefined;
 
 pub const Writer = std.io.Writer;

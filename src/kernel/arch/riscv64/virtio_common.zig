@@ -94,7 +94,9 @@ pub const MMIO = struct {
         const total_size = @sizeOf(Queue) + (@sizeOf(Descriptor) * ring_size) + @sizeOf(Available) + @sizeOf(Used);
         const page_count = total_size / page_size + @boolToInt(total_size % page_size != 0);
         // All physical address space is identity-mapped so mapping is not needed here
-        const queue = @intToPtr(*volatile Queue, kernel.arch.Physical.allocate(page_count, true) orelse @panic("unable to allocate memory for virtio block device queue"));
+        const queue_physical = kernel.arch.Physical.allocate1(page_count) orelse @panic("unable to allocate memory for virtio block device queue");
+        const queue = @intToPtr(*volatile Queue, kernel.arch.Virtual.AddressSpace.physical_to_virtual(queue_physical));
+        // TODO: distinguist between physical and virtual
         queue.num = 0;
         queue.last_seen_used = 0;
         queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), @ptrToInt(queue) + @sizeOf(Queue));
@@ -246,11 +248,15 @@ pub const block = struct {
     }
 
     pub fn perform_block_operation(comptime operation: Operation, sector_index: u64) void {
-        const sector_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated");
-        const status_buffer_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("sector buffer unable to be allocated");
-        const header_physical = kernel.arch.Physical.allocate(1, true) orelse @panic("unable to allocate memory for request header");
-        // Here we should distinguish between virtual and physical addresses
-        const header = @intToPtr(*Request.Header, header_physical);
+        const sector_size = 512;
+        const status_size = 1;
+        const header_size = @sizeOf(Request.Header);
+
+        const sector_buffer = kernel.heap.allocate(sector_size, true, true) orelse @panic("sector buffer unable to be allocated");
+        const status_buffer = kernel.heap.allocate(status_size, true, true) orelse @panic("status buffer unable to be allocated");
+        const header_buffer = kernel.heap.allocate(header_size, true, true) orelse @panic("header buffer unable to be allocated");
+        // TODO: Here we should distinguish between virtual and physical addresses
+        const header = @intToPtr(*Request.Header, header_buffer.virtual);
         header.block_type = switch (operation) {
             .read => BlockType.in,
             .write => BlockType.out,
@@ -262,21 +268,21 @@ pub const block = struct {
         var descriptor3: u16 = 0;
 
         queue.push_descriptor(&descriptor3).* = Descriptor{
-            .address = status_buffer_physical,
+            .address = status_buffer.physical,
             .flags = @enumToInt(Descriptor.Flag.write_only),
             .length = 1,
             .next = 0,
         };
 
         queue.push_descriptor(&descriptor2).* = Descriptor{
-            .address = sector_buffer_physical,
+            .address = sector_buffer.physical,
             .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
             .length = 512,
             .next = descriptor3,
         };
 
         queue.push_descriptor(&descriptor1).* = Descriptor{
-            .address = header_physical,
+            .address = header_buffer.physical,
             .flags = @enumToInt(Descriptor.Flag.next),
             .length = @sizeOf(Request.Header),
             .next = descriptor2,
@@ -295,9 +301,9 @@ pub const block = struct {
             .out => .write,
             else => unreachable,
         };
-        _ = operation;
+        const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
+        log.debug("Data {}: {}", .{ operation, new_descriptor.length });
 
-        //const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
         // TODO: @Virtual @Physical
         //const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
         //for (data) |byte, i| log.debug("[{}] = 0x{x}", .{ i, byte });

@@ -43,7 +43,14 @@ pub inline fn zeroes(comptime T: type) T {
     return result;
 }
 
+pub inline fn zero_a_page(page_address: u64) void {
+    kernel.assert(@src(), is_aligned(page_address, kernel.arch.page_size));
+    zero(@intToPtr([*]u8, page_address)[0..kernel.arch.page_size]);
+}
+
 pub inline fn bytes_to_pages(bytes: u64) u64 {
     const pages = (bytes / page_size) + @boolToInt(bytes % page_size != 0);
     return pages;
 }
+
+pub const maxInt = std.math.maxInt;

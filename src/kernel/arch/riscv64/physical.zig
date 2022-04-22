@@ -108,12 +108,13 @@ pub fn init() void {
     }
 }
 
-pub fn allocate(page_count: u64, zero: bool) ?u64 {
+pub fn allocate1(page_count: u64) ?u64 {
     const take_hint = true;
     // TODO: don't allocate if they are different regions (this can cause issues?)
     for (available_regions) |*region| {
         if (region.descriptor.page_count - region.allocated_page_count >= page_count) {
-            kernel.assert(@src(), region.bitset.len >= region.descriptor.page_count / @bitSizeOf(u64));
+            const supposed_bitset_size = region.descriptor.page_count / @bitSizeOf(u64);
+            kernel.assert(@src(), region.bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
 
             const start_index = if (take_hint) region.allocated_page_count / @bitSizeOf(u64) else 0;
@@ -141,15 +142,9 @@ pub fn allocate(page_count: u64, zero: bool) ?u64 {
             }
 
             if (region_allocated_page_count == page_count) {
-                log.debug("about to allocate", .{});
                 const result = first_address;
                 region.allocated_page_count += region_allocated_page_count;
                 kernel.assert(@src(), result != 0);
-                if (zero) {
-                    if (kernel.arch.Paging.enabled) kernel.arch.Virtual.map(result, page_count);
-                    kernel.zero(@intToPtr([*]u8, result)[0 .. page_count * kernel.arch.page_size]);
-                }
-                log.debug("Allocated 0x{x} Zero: {}", .{ result, zero });
                 return result;
             }
 
