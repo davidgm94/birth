@@ -1,6 +1,7 @@
 const std = @import("std");
 const kernel = @import("kernel.zig");
 const page_size = kernel.arch.page_size;
+const sector_size = kernel.arch.sector_size;
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
@@ -50,6 +51,11 @@ pub inline fn zero_a_page(page_address: u64) void {
 
 pub inline fn bytes_to_pages(bytes: u64) u64 {
     const pages = (bytes / page_size) + @boolToInt(bytes % page_size != 0);
+    return pages;
+}
+
+pub inline fn bytes_to_sector(bytes: u64) u64 {
+    const pages = (bytes / sector_size) + @boolToInt(bytes % sector_size != 0);
     return pages;
 }
 

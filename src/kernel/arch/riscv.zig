@@ -11,6 +11,7 @@ pub const SBI = @import("riscv64/opensbi.zig");
 pub const virtio = @import("riscv64/virtio_common.zig");
 
 pub const page_size = 0x1000;
+pub const sector_size = 0x200;
 pub const max_cpu = 64;
 pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
@@ -24,6 +25,25 @@ const UART = @import("riscv64/uart.zig").UART;
 
 const file_size = 5312;
 var file_buffer: [kernel.align_forward(file_size, 512)]u8 align(kernel.arch.page_size) = undefined;
+
+fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) void {
+    var bytes_asked: u64 = 0;
+    var sector_i: u64 = start_sector;
+    while (sector_i < sector_count) : ({
+        bytes_asked += 512;
+        sector_i += 1;
+    }) {
+        const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
+        virtio.block.perform_block_operation(.read, sector_i, sector_physical);
+        while (virtio.read != bytes_asked + 512) {
+            asm volatile ("wfi" ::: "memory");
+        }
+    }
+
+    log.debug("Read: {}", .{virtio.read});
+    kernel.assert(@src(), sector_count * 512 == virtio.read);
+    virtio.read = 0;
+}
 
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     current_cpu = boot_hart_id;
@@ -39,16 +59,16 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
-    var bytes_asked: u64 = 0;
-    var sector_i: u64 = 0;
-    while (bytes_asked < file_size) : ({
-        bytes_asked += 512;
-        sector_i += 1;
-    }) {
-        const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&file_buffer[bytes_asked]));
-        virtio.block.perform_block_operation(.read, sector_i, sector_physical);
+    read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
+    for (file_buffer) |byte, i| {
+        if (i % 10 == 0) {
+            kernel.arch.write("\n");
+        }
+        kernel.arch.print("0x{x:0>2}\t", .{byte});
     }
-    log.debug("Bytes read: {}", .{virtio.read});
+
+    kernel.arch.write("\n");
+
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
 }
@@ -149,9 +169,7 @@ export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: 
 }
 
 pub fn spinloop() noreturn {
-    while (true) {
-        asm volatile ("wfi");
-    }
+    while (true) {}
 }
 
 pub const UART0 = 0x1000_0000;

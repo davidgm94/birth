@@ -292,11 +292,12 @@ pub const block = struct {
         mmio.queue_notify = 0;
     }
 
+    var lock: kernel.Spinlock = undefined;
     pub fn handler() void {
+        lock.acquire();
         const descriptor = queue.pop_used() orelse @panic("descriptor corrupted");
         // TODO Get virtual of this physical address @Virtual @Physical
         const header = @intToPtr(*volatile Request.Header, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
-        //log.debug("Reading sector {}", .{header.sector});
         const operation: Operation = switch (header.block_type) {
             .in => .read,
             .out => .write,
@@ -311,6 +312,7 @@ pub const block = struct {
         if (status != 0) @panic("Disk operation failed");
 
         read += 512;
+        lock.release();
     }
 };
 
