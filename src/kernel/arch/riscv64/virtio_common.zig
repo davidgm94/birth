@@ -211,6 +211,7 @@ const Queue = struct {
 pub const block = struct {
     var queue: *volatile Queue = undefined;
     var mmio: *volatile MMIO = undefined;
+    const sector_size = 512;
 
     const log = kernel.log.scoped(.VirtioBlock);
 
@@ -247,12 +248,11 @@ pub const block = struct {
         log.debug("Block driver initialized", .{});
     }
 
-    pub fn perform_block_operation(comptime operation: Operation, sector_index: u64) void {
-        const sector_size = 512;
+    /// The sector buffer address needs to be physical and have at least 512 bytes available
+    pub fn perform_block_operation(comptime operation: Operation, sector_index: u64, sector_buffer_physical_address: u64) void {
         const status_size = 1;
         const header_size = @sizeOf(Request.Header);
 
-        const sector_buffer = kernel.heap.allocate(sector_size, true, true) orelse @panic("sector buffer unable to be allocated");
         const status_buffer = kernel.heap.allocate(status_size, true, true) orelse @panic("status buffer unable to be allocated");
         const header_buffer = kernel.heap.allocate(header_size, true, true) orelse @panic("header buffer unable to be allocated");
         // TODO: Here we should distinguish between virtual and physical addresses
@@ -275,7 +275,7 @@ pub const block = struct {
         };
 
         queue.push_descriptor(&descriptor2).* = Descriptor{
-            .address = sector_buffer.physical,
+            .address = sector_buffer_physical_address,
             .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
             .length = 512,
             .next = descriptor3,
@@ -295,19 +295,23 @@ pub const block = struct {
     pub fn handler() void {
         const descriptor = queue.pop_used() orelse @panic("descriptor corrupted");
         // TODO Get virtual of this physical address @Virtual @Physical
-        const header = @intToPtr(*volatile Request.Header, descriptor.address);
+        const header = @intToPtr(*volatile Request.Header, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
+        //log.debug("Reading sector {}", .{header.sector});
         const operation: Operation = switch (header.block_type) {
             .in => .read,
             .out => .write,
             else => unreachable,
         };
-        const new_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
-        log.debug("Data {}: {}", .{ operation, new_descriptor.length });
+        _ = operation;
+        const sector_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
 
-        // TODO: @Virtual @Physical
-        //const data = @intToPtr([*]u8, new_descriptor.address)[0..new_descriptor.length];
-        //for (data) |byte, i| log.debug("[{}] = 0x{x}", .{ i, byte });
+        const status_descriptor = queue.get_descriptor(sector_descriptor.next) orelse @panic("unable to get descriptor");
+        const status = @intToPtr([*]u8, kernel.arch.Virtual.AddressSpace.physical_to_virtual(status_descriptor.address))[0];
+        //log.debug("Disk operation status: {}", .{status});
+        if (status != 0) @panic("Disk operation failed");
 
-        TODO(@src());
+        read += 512;
     }
 };
+
+pub var read: u64 = 0;

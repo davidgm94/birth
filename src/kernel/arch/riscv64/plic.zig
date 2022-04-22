@@ -77,7 +77,7 @@ fn complete(interrupt_number: u32) void {
 
 pub fn handle_interrupt() void {
     if (get_next()) |interrupt| {
-        logger.debug("External interrupt {}\n", .{interrupt});
+        //logger.debug("External interrupt {}\n", .{interrupt});
         switch (interrupt) {
             1...8 => virtio.handle_interrupt(interrupt),
             10 => uart.handle_interrupt(),

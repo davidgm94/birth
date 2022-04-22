@@ -58,7 +58,7 @@ const ilog = kernel.log.scoped(.Interrupts_PLIC);
 // TODO: should this be locked?
 pub fn handle_external_interrupt(hart_id: u64) void {
     const claimed_interrupt_number = get_sclaim(hart_id).*;
-    ilog.debug("PLIC interrupt number: {}", .{claimed_interrupt_number});
+    //ilog.debug("PLIC interrupt number: {}", .{claimed_interrupt_number});
     if (claimed_interrupt_number == 0) @panic("PLIC handler is told an external interrupt has been received, but claim indicates otherwise");
     interrupt_handlers[claimed_interrupt_number]();
     get_sclaim(hart_id).* = claimed_interrupt_number;

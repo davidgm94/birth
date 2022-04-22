@@ -199,12 +199,6 @@ fn vmprint_walk(pagetable: pagetable_t, level: usize, prefix: []const u8) void {
         if (pte & arch.PTE_VALID == 0) {
             continue;
         }
-        //logger.debug("{s}{d}: pte 0x{x:0>16} pa 0x{x:0>16}", .{
-        //prefix[0 .. level * 3],
-        //i,
-        //pte,
-        //arch.PTE_TO_PA(pte),
-        //});
         if (pte & (arch.PTE_READ | arch.PTE_WRITE | arch.PTE_EXEC) == 0) {
             // points to a lower-level page table
             const child = arch.PTE_TO_PA(pte);
@@ -256,5 +250,10 @@ pub const AddressSpace = struct {
     // TODO:
     pub fn physical_to_virtual(physical: u64) u64 {
         return physical;
+    }
+
+    // TODO:
+    pub fn virtual_to_physical(virtual: u64) u64 {
+        return virtual;
     }
 };

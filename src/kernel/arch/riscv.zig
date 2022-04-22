@@ -22,6 +22,9 @@ const TODO = kernel.TODO;
 
 const UART = @import("riscv64/uart.zig").UART;
 
+const file_size = 5312;
+var file_buffer: [kernel.align_forward(file_size, 512)]u8 align(kernel.arch.page_size) = undefined;
+
 export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     current_cpu = boot_hart_id;
     init_logger();
@@ -36,7 +39,16 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
-    virtio.block.perform_block_operation(.read, 0);
+    var bytes_asked: u64 = 0;
+    var sector_i: u64 = 0;
+    while (bytes_asked < file_size) : ({
+        bytes_asked += 512;
+        sector_i += 1;
+    }) {
+        const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&file_buffer[bytes_asked]));
+        virtio.block.perform_block_operation(.read, sector_i, sector_physical);
+    }
+    log.debug("Bytes read: {}", .{virtio.read});
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
 }
@@ -125,7 +137,8 @@ export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: 
     defer Writer.should_lock = true;
 
     _ = context;
-    ilog.debug("Interrupt. SCAUSE: {}. STVAL: 0x{x}", .{ scause, stval });
+    _ = stval;
+    //ilog.debug("Interrupt. SCAUSE: {}. STVAL: 0x{x}", .{ scause, stval });
     const hart_id = local_storage[current_cpu].context.hart_id;
     switch (scause) {
         .supervisor_external_interrupt => Interrupts.handle_external_interrupt(hart_id),
@@ -136,7 +149,9 @@ export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: 
 }
 
 pub fn spinloop() noreturn {
-    while (true) {}
+    while (true) {
+        asm volatile ("wfi");
+    }
 }
 
 pub const UART0 = 0x1000_0000;
