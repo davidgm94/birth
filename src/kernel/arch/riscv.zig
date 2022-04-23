@@ -36,7 +36,7 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) void {
         const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
         virtio.block.perform_block_operation(.read, sector_i, sector_physical);
         while (virtio.read != bytes_asked + 512) {
-            asm volatile ("wfi" ::: "memory");
+            log.debug("I am busy waiting", .{});
         }
     }
 
