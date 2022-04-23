@@ -35,7 +35,7 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
         sector_i += 1;
     }) {
         const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
-        virtio.block.perform_block_operation(.read, sector_i, sector_physical);
+        virtio.block.operate(.read, sector_i, sector_physical);
         bytes_asked += sector_size;
         while (virtio.block.read != bytes_asked) {
             asm volatile ("" ::: "memory");
@@ -68,6 +68,7 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     virtio.block.init(0x10008000);
     const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
     _ = file;
+    virtio.gpu.init(0x10007000);
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();

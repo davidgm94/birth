@@ -60,3 +60,5 @@ pub inline fn bytes_to_sector(bytes: u64) u64 {
 }
 
 pub const maxInt = std.math.maxInt;
+
+pub const as_bytes = std.mem.asBytes;

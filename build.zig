@@ -163,7 +163,7 @@ const qemu_command_str = [_][]const u8 {
     "-d", "guest_errors,int",
     //"-D", "logfile",
 
-    //"-trace", "virtio*",
+    "-trace", "virtio*",
     //"-S", "-s",
 };
 // zig fmt: on

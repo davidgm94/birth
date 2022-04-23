@@ -8,6 +8,7 @@ pub const arch = @import("arch/riscv.zig");
 pub const Memory = @import("memory.zig");
 pub usingnamespace @import("assertion.zig");
 pub usingnamespace @import("data_manipulation.zig");
+pub usingnamespace @import("meta.zig");
 const panic_file = @import("panic.zig");
 pub const panic = panic_file.panic;
 pub const TODO = panic_file.TODO;

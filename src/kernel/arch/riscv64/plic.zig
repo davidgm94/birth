@@ -17,7 +17,7 @@ const virtio = kernel.arch.virtio;
 
 const uart_irq = 10;
 
-const logger = std.log.scoped(.PLIC);
+const log = std.log.scoped(.PLIC);
 
 pub fn set_threshold(asked_threshold: u3) void {
     threshold.* = asked_threshold;
@@ -63,7 +63,7 @@ pub fn init() void {
     //}
     //set_threshold(0);
 
-    logger.info("PLIC initialized", .{});
+    log.info("PLIC initialized", .{});
 }
 
 fn get_next() ?u32 {
@@ -76,8 +76,9 @@ fn complete(interrupt_number: u32) void {
 }
 
 pub fn handle_interrupt() void {
-    if (get_next()) |interrupt| {
-        //logger.debug("External interrupt {}\n", .{interrupt});
+    var interrupts_processed: u64 = 0;
+    while (get_next()) |interrupt| {
+        //log.debug("External interrupt {}\n", .{interrupt});
         switch (interrupt) {
             1...8 => virtio.handle_interrupt(interrupt),
             10 => uart.handle_interrupt(),
@@ -85,5 +86,8 @@ pub fn handle_interrupt() void {
         }
 
         complete(interrupt);
-    } else @panic("not an interrupt in the queue");
+        interrupts_processed += 1;
+    }
+
+    if (interrupts_processed == 0) @panic("not an interrupt in the queue");
 }
