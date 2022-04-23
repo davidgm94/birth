@@ -37,15 +37,15 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
         const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
         virtio.block.perform_block_operation(.read, sector_i, sector_physical);
         bytes_asked += sector_size;
-        while (virtio.read != bytes_asked) {
+        while (virtio.block.read != bytes_asked) {
             asm volatile ("" ::: "memory");
         }
     }
 
-    kernel.assert(@src(), bytes_asked == virtio.read);
+    kernel.assert(@src(), bytes_asked == virtio.block.read);
 
-    const read_bytes = virtio.read;
-    virtio.read = 0;
+    const read_bytes = virtio.block.read;
+    virtio.block.read = 0;
     log.debug("Block device read {} bytes", .{read_bytes});
     kernel.assert(@src(), sector_count * sector_size == read_bytes);
 

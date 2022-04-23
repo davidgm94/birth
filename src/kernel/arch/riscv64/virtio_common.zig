@@ -211,6 +211,7 @@ const Queue = struct {
 pub const block = struct {
     var queue: *volatile Queue = undefined;
     var mmio: *volatile MMIO = undefined;
+    pub var read: u64 = 0;
 
     const log = kernel.log.scoped(.VirtioBlock);
 
@@ -314,5 +315,3 @@ pub const block = struct {
         lock.release();
     }
 };
-
-pub var read: u64 = 0;
