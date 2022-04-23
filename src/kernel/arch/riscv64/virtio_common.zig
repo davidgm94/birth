@@ -211,7 +211,6 @@ const Queue = struct {
 pub const block = struct {
     var queue: *volatile Queue = undefined;
     var mmio: *volatile MMIO = undefined;
-    const sector_size = 512;
 
     const log = kernel.log.scoped(.VirtioBlock);
 
@@ -248,7 +247,7 @@ pub const block = struct {
         log.debug("Block driver initialized", .{});
     }
 
-    /// The sector buffer address needs to be physical and have at least 512 bytes available
+    /// The sector buffer address needs to be physical and have at least 512 (sector_size) bytes available
     pub fn perform_block_operation(comptime operation: Operation, sector_index: u64, sector_buffer_physical_address: u64) void {
         const status_size = 1;
         const header_size = @sizeOf(Request.Header);
@@ -277,7 +276,7 @@ pub const block = struct {
         queue.push_descriptor(&descriptor2).* = Descriptor{
             .address = sector_buffer_physical_address,
             .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
-            .length = 512,
+            .length = kernel.arch.sector_size,
             .next = descriptor3,
         };
 
@@ -311,7 +310,7 @@ pub const block = struct {
         //log.debug("Disk operation status: {}", .{status});
         if (status != 0) @panic("Disk operation failed");
 
-        read += 512;
+        read += kernel.arch.sector_size;
         lock.release();
     }
 };

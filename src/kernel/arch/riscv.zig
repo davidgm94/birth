@@ -24,7 +24,7 @@ const TODO = kernel.TODO;
 const UART = @import("riscv64/uart.zig").UART;
 
 const file_size = 5312;
-var file_buffer: [kernel.align_forward(file_size, 512)]u8 align(kernel.arch.page_size) = undefined;
+var file_buffer: [kernel.align_forward(file_size, sector_size)]u8 align(kernel.arch.page_size) = undefined;
 
 fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     const total_size = sector_count * sector_size;
@@ -32,12 +32,12 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     var bytes_asked: u64 = 0;
     var sector_i: u64 = start_sector;
     while (sector_i < sector_count) : ({
-        bytes_asked += 512;
         sector_i += 1;
     }) {
         const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
         virtio.block.perform_block_operation(.read, sector_i, sector_physical);
-        while (virtio.read != bytes_asked + 512) {
+        bytes_asked += sector_size;
+        while (virtio.read != bytes_asked) {
             asm volatile ("" ::: "memory");
         }
     }
@@ -47,7 +47,7 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     const read_bytes = virtio.read;
     virtio.read = 0;
     log.debug("Block device read {} bytes", .{read_bytes});
-    kernel.assert(@src(), sector_count * 512 == read_bytes);
+    kernel.assert(@src(), sector_count * sector_size == read_bytes);
 
     return buffer[0..read_bytes];
 }
@@ -66,8 +66,8 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
-    read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
-    kernel.arch.write("\n");
+    const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
+    _ = file;
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
