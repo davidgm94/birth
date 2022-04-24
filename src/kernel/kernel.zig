@@ -24,5 +24,6 @@ pub var address_space: arch.Virtual.AddressSpace = undefined;
 pub var heap: Heap = undefined;
 pub var framebuffer: graphics.Framebuffer = undefined;
 pub var font: PSF1.Font = undefined;
+pub var framebuffer_initialized = false;
 
 pub const Writer = std.io.Writer;

@@ -69,8 +69,14 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     virtio.gpu.init(0x10007000);
     const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
     kernel.font = kernel.PSF1.Font.parse(file);
-    kernel.graphics.draw_char(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, kernel.graphics.Point{ .x = 10, .y = 10 }, 'D');
+    kernel.graphics.draw_horizontal_line(kernel.graphics.Line{ .start = kernel.graphics.Point{ .x = 10, .y = 10 }, .end = kernel.graphics.Point{ .x = 100, .y = 10 } }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
+    //kernel.graphics.draw_rect(kernel.graphics.Rect{ .x = 10, .y = 10, .width = 10, .height = 10 }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
+    //var i: u64 = 0;
+    //while (i < 100) : (i += 1) {
+    //kernel.graphics.draw_string(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, "Hello Mariana");
+    //}
     virtio.gpu.send_and_flush_framebuffer();
+    kernel.framebuffer_initialized = true;
     log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });

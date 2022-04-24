@@ -538,7 +538,7 @@ pub const gpu = struct {
             pixel.* = 0xffffffff;
         }
 
-        //send_and_flush_framebuffer();
+        send_and_flush_framebuffer();
 
         log.debug("GPU driver initialized", .{});
     }
