@@ -453,6 +453,8 @@ pub const gpu = struct {
     var mmio: *volatile MMIO = undefined;
     var control_queue: *volatile Queue = undefined;
     var cursor_queue: *volatile Queue = undefined;
+    var transfered = false;
+    var flushed = false;
 
     const log = kernel.log.scoped(.VirtioGPU);
 
@@ -494,7 +496,12 @@ pub const gpu = struct {
         const framebuffer_pixel_count = pmode.rect.width * pmode.rect.height;
         const framebuffer_size = @sizeOf(u32) * framebuffer_pixel_count;
         const framebuffer_allocation = kernel.heap.allocate(framebuffer_size, true, true) orelse @panic("unable to allocate framebuffer");
-        _ = framebuffer_allocation;
+
+        // Fill the kernel framebuffer object outside the driver
+        kernel.framebuffer.buffer = @intToPtr([*]u32, framebuffer_allocation.virtual);
+        kernel.framebuffer.width = pmode.rect.width;
+        kernel.framebuffer.height = pmode.rect.height;
+
         const backing_size = @sizeOf(ResourceAttachBacking) + @sizeOf(MemoryEntry);
 
         const backing_allocation = kernel.heap.allocate(backing_size, true, true) orelse @panic("unable to allocate backing");
@@ -531,25 +538,31 @@ pub const gpu = struct {
             pixel.* = 0xffffffff;
         }
 
-        send_and_flush_framebuffer();
+        //send_and_flush_framebuffer();
 
         log.debug("GPU driver initialized", .{});
     }
 
-    fn send_and_flush_framebuffer() void {
+    pub fn send_and_flush_framebuffer() void {
         var transfer_to_host = kernel.zeroes(TransferControlToHost2D);
         transfer_to_host.header.type = ControlType.cmd_transfer_to_host_2d;
         transfer_to_host.rect = pmode.rect;
         transfer_to_host.resource_id = 1;
 
+        log.debug("Sending transfer", .{});
+        transfered = false;
         operate(kernel.as_bytes(&transfer_to_host), @sizeOf(ControlHeader));
+        while (!transfered) {}
 
         var flush = kernel.zeroes(ResourceFlush);
         flush.header.type = ControlType.cmd_resource_flush;
         flush.rect = pmode.rect;
         flush.resource_id = 1;
 
+        log.debug("Sending flush", .{});
+        flushed = false;
         operate(kernel.as_bytes(&flush), @sizeOf(ControlHeader));
+        while (!flushed) {}
     }
 
     pub fn operate(request_bytes: []const u8, response_size: u32) void {
@@ -613,6 +626,9 @@ pub const gpu = struct {
             },
             else => kernel.panic("Header not implemented: {s}", .{@tagName(header.type)}),
         }
+
+        if (header.type == ControlType.cmd_transfer_to_host_2d) transfered = true;
+        if (header.type == ControlType.cmd_resource_flush) flushed = true;
     }
 };
 

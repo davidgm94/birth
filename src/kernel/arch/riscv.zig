@@ -66,9 +66,12 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
     virtio.block.init(0x10008000);
-    const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
-    _ = file;
     virtio.gpu.init(0x10007000);
+    const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
+    kernel.font = kernel.PSF1.Font.parse(file);
+    kernel.graphics.draw_char(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, kernel.graphics.Point{ .x = 10, .y = 10 }, 'D');
+    virtio.gpu.send_and_flush_framebuffer();
+    log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();

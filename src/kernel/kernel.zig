@@ -17,8 +17,12 @@ pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("avl.zig");
 pub const Heap = @import("heap.zig");
+pub const PSF1 = @import("psf1.zig");
+pub const graphics = @import("graphics.zig");
 
 pub var address_space: arch.Virtual.AddressSpace = undefined;
 pub var heap: Heap = undefined;
+pub var framebuffer: graphics.Framebuffer = undefined;
+pub var font: PSF1.Font = undefined;
 
 pub const Writer = std.io.Writer;
