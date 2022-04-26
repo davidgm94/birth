@@ -473,7 +473,9 @@ pub const gpu = struct {
         var header = kernel.zeroes(ControlHeader);
         header.type = ControlType.cmd_get_display_info;
         operate(kernel.as_bytes(&header), @sizeOf(ResponseDisplayInfo));
-        while (!received_display_info) {}
+        while (!received_display_info) {
+            kernel.spinloop_hint();
+        }
         if (display_info.header.type != ControlType.resp_ok_display_info) {
             @panic("display info corrupted");
         }
@@ -552,7 +554,9 @@ pub const gpu = struct {
         log.debug("Sending transfer", .{});
         transfered = false;
         operate(kernel.as_bytes(&transfer_to_host), @sizeOf(ControlHeader));
-        while (!transfered) {}
+        while (!transfered) {
+            kernel.spinloop_hint();
+        }
 
         var flush = kernel.zeroes(ResourceFlush);
         flush.header.type = ControlType.cmd_resource_flush;
@@ -562,7 +566,9 @@ pub const gpu = struct {
         log.debug("Sending flush", .{});
         flushed = false;
         operate(kernel.as_bytes(&flush), @sizeOf(ControlHeader));
-        while (!flushed) {}
+        while (!flushed) {
+            kernel.spinloop_hint();
+        }
     }
 
     pub fn operate(request_bytes: []const u8, response_size: u32) void {

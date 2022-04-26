@@ -38,7 +38,7 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
         virtio.block.operate(.read, sector_i, sector_physical);
         bytes_asked += sector_size;
         while (virtio.block.read != bytes_asked) {
-            asm volatile ("" ::: "memory");
+            kernel.spinloop_hint();
         }
     }
 
@@ -75,9 +75,9 @@ export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     //while (i < 100) : (i += 1) {
     //kernel.graphics.draw_string(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, "Hello Mariana");
     //}
+    log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
     virtio.gpu.send_and_flush_framebuffer();
     kernel.framebuffer_initialized = true;
-    log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
