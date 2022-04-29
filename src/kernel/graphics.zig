@@ -66,6 +66,20 @@ pub const Rect = struct {
 pub const Line = struct {
     start: Point,
     end: Point,
+
+    fn straight_horizontal(x_start: u32, y: u32, width: u32) Line {
+        return Line{
+            .start = Point{ .x = x_start, .y = y },
+            .end = Point{ .x = x_start + width, .y = y },
+        };
+    }
+
+    fn straight_vertical(x: u32, y_start: u32, height: u32) Line {
+        return Line{
+            .start = Point{ .x = x, .y = y_start },
+            .end = Point{ .x = x, .y = y_start + height },
+        };
+    }
 };
 
 pub fn draw_horizontal_line(line: Line, color: Color) void {
@@ -76,4 +90,32 @@ pub fn draw_horizontal_line(line: Line, color: Color) void {
     for (kernel.framebuffer.buffer[start_i .. start_i + length]) |*pixel| {
         pixel.* = @bitCast(u32, color);
     }
+}
+
+/// This assumes they are all the same height (start.y and end.y are the same for all of them)
+pub fn draw_parallel_vertical_lines(x_coordinates: []u32, height_start: u32, height_end: u32, color: Color) void {
+    var y_offset = height_start * kernel.framebuffer.width;
+    const y_max_offset = height_end * kernel.framebuffer.width;
+
+    while (y_offset < y_max_offset) : (y_offset += kernel.framebuffer.width) {
+        for (x_coordinates) |x| {
+            const index = x + y_offset;
+            kernel.framebuffer.buffer[index] = @bitCast(u32, color);
+        }
+    }
+}
+
+pub fn draw_rect(rect: Rect, color: Color) void {
+    draw_horizontal_line(Line.straight_horizontal(rect.x, rect.y, rect.width), color);
+    draw_parallel_vertical_lines(&[_]u32{ rect.x, rect.x + rect.width }, rect.y, rect.y + rect.height, color);
+    draw_horizontal_line(Line.straight_horizontal(rect.x, rect.y + rect.height, rect.width), color);
+}
+
+pub fn test_draw_rect() void {
+    draw_rect(Rect{
+        .x = 600,
+        .y = 600,
+        .width = 30,
+        .height = 60,
+    }, Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
 }
