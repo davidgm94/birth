@@ -8,7 +8,7 @@ pub const Physical = @import("riscv64/physical.zig");
 pub const Virtual = @import("riscv64/virtual.zig");
 pub const Interrupts = @import("riscv64/interrupts.zig");
 pub const SBI = @import("riscv64/opensbi.zig");
-pub const virtio = @import("riscv64/virtio_common.zig");
+pub const virtio = @import("riscv64/virtio.zig");
 
 pub const page_size = 0x1000;
 pub const sector_size = 0x200;
