@@ -24,6 +24,7 @@ fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
                 .cpu_features_add = enabled_features,
                 .cpu_features_sub = disabled_features,
             };
+            kernel_exe.entry_symbol_name = "_start";
             kernel_exe.code_model = .medium;
             kernel_exe.setTarget(target);
             kernel_exe.setLinkerScriptPath(std.build.FileSource.relative("src/kernel/arch/riscv64/linker.ld"));

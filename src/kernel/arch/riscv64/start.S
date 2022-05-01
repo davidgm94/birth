@@ -30,4 +30,4 @@ _start:
     csrw stvec, t0
 
     // Architecture-specific routine
-    call init
+    call start

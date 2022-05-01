@@ -1,14 +1,17 @@
-const kernel = @import("../kernel.zig");
-pub const Spinlock = @import("riscv64/spinlock.zig");
-pub const sync = @import("riscv64/sync.zig");
-pub const DeviceTree = @import("riscv64/device_tree.zig");
-pub const Timer = @import("riscv64/timer.zig");
-pub const Paging = @import("riscv64/paging.zig");
-pub const Physical = @import("riscv64/physical.zig");
-pub const Virtual = @import("riscv64/virtual.zig");
-pub const Interrupts = @import("riscv64/interrupts.zig");
-pub const SBI = @import("riscv64/opensbi.zig");
-pub const virtio = @import("riscv64/virtio.zig");
+const kernel = @import("../../kernel.zig");
+pub const Start = @import("start.zig");
+pub const EntryPoint = Start.start;
+pub const Spinlock = @import("spinlock.zig");
+pub const sync = @import("sync.zig");
+pub const DeviceTree = @import("device_tree.zig");
+pub const Timer = @import("timer.zig");
+pub const Paging = @import("paging.zig");
+pub const Physical = @import("physical.zig");
+pub const Virtual = @import("virtual.zig");
+pub const Interrupts = @import("interrupts.zig");
+pub const SBI = @import("opensbi.zig");
+pub const virtio = @import("virtio.zig");
+const UART = @import("uart.zig").UART;
 
 pub const page_size = 0x1000;
 pub const sector_size = 0x200;
@@ -21,12 +24,11 @@ const log = kernel.log.scoped(.RISCV64);
 
 const TODO = kernel.TODO;
 
-const UART = @import("riscv64/uart.zig").UART;
+export fn start(hart_id: u64, fdt: u64) void {
+    Start.start(hart_id, fdt);
+}
 
-const file_size = 5312;
-var file_buffer: [kernel.align_forward(file_size, sector_size)]u8 align(kernel.arch.page_size) = undefined;
-
-fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
+pub fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     const total_size = sector_count * sector_size;
     kernel.assert(@src(), buffer.len >= total_size);
     var bytes_asked: u64 = 0;
@@ -52,44 +54,6 @@ fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     return buffer[0..read_bytes];
 }
 
-export fn init(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
-    current_cpu = boot_hart_id;
-    init_logger();
-    log.debug("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address });
-    device_tree.base_address = fdt_address;
-    device_tree.parse();
-    init_cpu_count();
-    Timer.init();
-    const start = Timer.get_timestamp();
-    Paging.init();
-    Interrupts.init(boot_hart_id);
-    local_storage[boot_hart_id].init(boot_hart_id, true);
-    const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - start);
-    virtio.block.init(0x10008000);
-    virtio.gpu.init(0x10007000);
-    const file = read_disk_raw(&file_buffer, 0, kernel.bytes_to_sector(file_size));
-    kernel.font = kernel.PSF1.Font.parse(file);
-    kernel.graphics.draw_horizontal_line(kernel.graphics.Line{ .start = kernel.graphics.Point{ .x = 10, .y = 10 }, .end = kernel.graphics.Point{ .x = 100, .y = 10 } }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
-    kernel.graphics.test_draw_rect();
-    //kernel.graphics.draw_rect(kernel.graphics.Rect{ .x = 10, .y = 10, .width = 10, .height = 10 }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
-    //var i: u64 = 0;
-    //while (i < 100) : (i += 1) {
-    //kernel.graphics.draw_string(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, "Hello Mariana");
-    //}
-    log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
-    virtio.gpu.send_and_flush_framebuffer();
-    kernel.framebuffer_initialized = true;
-
-    log.debug("Initialized in {} s {} us", .{ time.s, time.us });
-    spinloop();
-}
-
-fn init_cpu_count() void {
-    log.debug("CPU count initialized with 1. Is it correct?", .{});
-    // TODO: take from the device tree
-    cpu_count = 1;
-}
-
 const Context = struct {
     integer: [32]u64,
     pc: u64,
@@ -110,7 +74,7 @@ pub const LocalStorage = struct {
         kernel.assert_unsafe(@sizeOf(LocalStorage) == page_size);
     }
 
-    fn init(self: *@This(), hart_id: u64, boot_hart: bool) void {
+    pub fn init(self: *@This(), hart_id: u64, boot_hart: bool) void {
         self.context.hart_id = hart_id;
         self.context.interrupt_stack = @ptrToInt(&stack_top) - hart_stack_size * hart_id;
         log.debug("Interrupt stack: 0x{x}", .{self.context.interrupt_stack});
@@ -132,7 +96,7 @@ pub const LocalStorage = struct {
     }
 };
 
-var local_storage: [max_cpu]LocalStorage = undefined;
+pub var local_storage: [max_cpu]LocalStorage = undefined;
 
 pub const OldContext = struct {
     reg: [32]usize,
@@ -192,10 +156,6 @@ pub var uart = UART(UART0){
 };
 
 pub var device_tree: DeviceTree = undefined;
-
-pub fn init_logger() void {
-    uart.init(false);
-}
 
 fn CSR(comptime reg_name: []const u8, comptime BitT: type) type {
     return struct {
