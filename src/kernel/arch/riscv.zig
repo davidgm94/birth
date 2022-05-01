@@ -236,6 +236,8 @@ const sstatus = CSR("sstatus", enum(u32) {
     SPIE = 5,
     UBE = 6,
     SPP = 8,
+    SUM = 18,
+    MXR = 19,
 });
 const sie = CSR("sie", enum(u32) {
     SSIE = 1,
