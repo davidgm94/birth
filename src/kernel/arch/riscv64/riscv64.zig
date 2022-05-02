@@ -88,6 +88,7 @@ pub const LocalStorage = struct {
         sstatus.write(sstatus_value);
 
         sie.write(0x220);
+        sync.set_hart_id(@ptrToInt(self));
 
         if (!boot_hart) {
             TODO(@src());
@@ -127,7 +128,6 @@ const Scause = enum(u64) {
 const ilog = kernel.log.scoped(.Interrupt);
 
 export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
-    disable_interrupts();
     Writer.should_lock = false;
     defer Writer.should_lock = true;
 
@@ -139,8 +139,6 @@ export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: 
         .supervisor_external_interrupt => Interrupts.handle_external_interrupt(hart_id),
         else => spinloop(),
     }
-
-    enable_interrupts();
 }
 
 pub fn spinloop() noreturn {

@@ -15,7 +15,14 @@ pub inline fn lock_release(a: *usize) void {
     );
 }
 
-pub fn hart_id() usize {
+pub inline fn set_hart_id(address: u64) void {
+    asm volatile ("mv tp, %[address]"
+        :
+        : [address] "r" (address),
+    );
+}
+
+pub inline fn get_hart_id() usize {
     return asm volatile ("mv %[result], tp"
         : [result] "=r" (-> usize),
     );

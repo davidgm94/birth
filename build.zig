@@ -9,21 +9,33 @@ const cache_dir = "zig-cache";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
 
+fn get_target_base(arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
+    var enabled_features = std.Target.Cpu.Feature.Set.empty;
+    var disabled_features = std.Target.Cpu.Feature.Set.empty;
+
+    switch (arch) {
+        .riscv64 => {
+            const features = std.Target.riscv.Feature;
+            enabled_features.addFeature(@enumToInt(features.a));
+        },
+        else => unreachable,
+    }
+
+    return std.zig.CrossTarget{
+        .cpu_arch = arch,
+        .os_tag = .freestanding,
+        .abi = .none,
+        .cpu_features_add = enabled_features,
+        .cpu_features_sub = disabled_features,
+    };
+}
+
 fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
     switch (current_arch) {
         .riscv64 => {
-            var enabled_features = std.Target.Cpu.Feature.Set.empty;
-            const features = std.Target.riscv.Feature;
-            enabled_features.addFeature(@enumToInt(features.a));
-            var disabled_features = std.Target.Cpu.Feature.Set.empty;
-            disabled_features.addFeature(@enumToInt(features.d));
-            const target = std.zig.CrossTarget{
-                .cpu_arch = .riscv64,
-                .os_tag = .freestanding,
-                .abi = .none,
-                .cpu_features_add = enabled_features,
-                .cpu_features_sub = disabled_features,
-            };
+            var target = get_target_base(.riscv64);
+            target.cpu_features_sub.addFeature(@enumToInt(std.Target.riscv.Feature.d));
+
             kernel_exe.entry_symbol_name = "_start";
             kernel_exe.code_model = .medium;
             kernel_exe.setTarget(target);
@@ -42,19 +54,25 @@ fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
 }
 
 pub fn build(b: *Builder) void {
-    const exe = b.addExecutable(kernel_name, "src/kernel/root.zig");
-    set_target_specific_parameters(exe);
-    exe.setBuildMode(b.standardReleaseOptions());
-    exe.setOutputDir(cache_dir);
-    b.default_step.dependOn(&exe.step);
+    const kernel = b.addExecutable(kernel_name, "src/kernel/root.zig");
+    set_target_specific_parameters(kernel);
+    kernel.setBuildMode(b.standardReleaseOptions());
+    kernel.setOutputDir(cache_dir);
+    b.default_step.dependOn(&kernel.step);
+
+    const minimal = b.addExecutable("minimal.elf", "src/user/minimal/main.zig");
+    minimal.setTarget(get_target_base(current_arch));
+    minimal.setOutputDir(cache_dir);
+    b.default_step.dependOn(&minimal.step);
 
     const disk = HDD.create(b);
+    disk.step.dependOn(&minimal.step);
     const qemu = qemu_command(b);
-    qemu.step.dependOn(&exe.step);
+    qemu.step.dependOn(&kernel.step);
     qemu.step.dependOn(&disk.step);
 
     const debug = Debug.create(b);
-    debug.step.dependOn(&exe.step);
+    debug.step.dependOn(&kernel.step);
     debug.step.dependOn(&disk.step);
 }
 
@@ -126,10 +144,11 @@ const Debug = struct {
                 // zig fmt: off
                 const process = std.ChildProcess.init(&.{
                     "kitty", "--start-as=maximized",
-                    "riscv64-unknown-elf-gdb",
+                    "gdb-multiarch",
+                    "-tui",
                     "-ex", "symbol-file zig-cache/kernel.elf",
                     "-ex", "target remote :1234",
-                    "-ex", "b main",
+                    "-ex", "b start",
                     "-ex", "b panic",
                     "-ex", "c",
                 }, b.allocator) catch unreachable;
@@ -164,7 +183,7 @@ const qemu_command_str = [_][]const u8 {
     "-d", "guest_errors,int",
     //"-D", "logfile",
 
-    "-trace", "virtio*",
+    //"-trace", "virtio*",
     //"-S", "-s",
 };
 // zig fmt: on

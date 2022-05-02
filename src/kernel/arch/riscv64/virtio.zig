@@ -569,6 +569,8 @@ pub const gpu = struct {
         while (!flushed) {
             kernel.spinloop_hint();
         }
+        kernel.assert(@src(), transfered);
+        kernel.assert(@src(), flushed);
     }
 
     pub fn operate(request_bytes: []const u8, response_size: u32) void {
