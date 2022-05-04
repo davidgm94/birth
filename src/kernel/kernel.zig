@@ -19,6 +19,7 @@ pub const AVL = @import("avl.zig");
 pub const Heap = @import("heap.zig");
 pub const PSF1 = @import("psf1.zig");
 pub const graphics = @import("graphics.zig");
+pub const scheduler = @import("scheduler.zig");
 
 pub var address_space: arch.Virtual.AddressSpace = undefined;
 pub var heap: Heap = undefined;

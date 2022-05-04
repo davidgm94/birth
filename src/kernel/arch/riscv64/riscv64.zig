@@ -63,6 +63,10 @@ const Context = struct {
     pid: u64,
 };
 
+pub fn get_indexed_stack(index: u64) u64 {
+    return @ptrToInt(&stack_top) - (hart_stack_size * index);
+}
+
 extern var stack_top: u64;
 const hart_stack_size = 0x8000;
 
@@ -78,7 +82,7 @@ pub const LocalStorage = struct {
         self.context.hart_id = hart_id;
         self.context.interrupt_stack = @ptrToInt(&stack_top) - hart_stack_size * hart_id;
         log.debug("Interrupt stack: 0x{x}", .{self.context.interrupt_stack});
-        self.context.pid = 0xffff_ffff_ffff_ffff;
+        self.context.pid = 0;
 
         sscratch.write(@ptrToInt(&self.context));
 
@@ -88,12 +92,17 @@ pub const LocalStorage = struct {
         sstatus.write(sstatus_value);
 
         sie.write(0x220);
+        // TODO: correct names
         sync.set_hart_id(@ptrToInt(self));
 
         if (!boot_hart) {
             TODO(@src());
         }
         //SBI.set_timer(0);
+    }
+
+    pub fn get() *LocalStorage {
+        return @intToPtr(*LocalStorage, tp.read());
     }
 };
 
@@ -299,3 +308,63 @@ pub fn get_context(hart_id: u64, machine: u64) u64 {
 }
 
 pub const AddressSpace = struct {};
+
+pub const tp = CommonRegister("tp");
+
+pub fn CommonRegister(comptime reg_name: []const u8) type {
+    return struct {
+        pub inline fn write(value: u64) void {
+            asm volatile ("mv " ++ reg_name ++ ", %[arg1]"
+                :
+                : [arg1] "r" (value),
+            );
+        }
+
+        pub inline fn read() u64 {
+            return asm volatile ("mv %[ret], " ++ reg_name
+                : [ret] "=r" (-> u64),
+            );
+        }
+    };
+}
+
+pub extern fn switch_context(old: *kernel.scheduler.Context, new: *kernel.scheduler.Context) callconv(.C) void;
+
+comptime {
+    asm (
+        \\.section .text
+        \\.align 16
+        \\.global switch_context
+        \\switch_context:
+        \\        sd ra, 0(a0)
+        \\sd sp, 8(a0)
+        \\sd s0, 16(a0)
+        \\sd s1, 24(a0)
+        \\sd s2, 32(a0)
+        \\sd s3, 40(a0)
+        \\sd s4, 48(a0)
+        \\sd s5, 56(a0)
+        \\sd s6, 64(a0)
+        \\sd s7, 72(a0)
+        \\sd s8, 80(a0)
+        \\sd s9, 88(a0)
+        \\sd s10, 96(a0)
+        \\sd s11, 104(a0)
+        \\ld ra, 0(a1)
+        \\ld sp, 8(a1)
+        \\ld s0, 16(a1)
+        \\ld s1, 24(a1)
+        \\ld s2, 32(a1)
+        \\ld s3, 40(a1)
+        \\ld s4, 48(a1)
+        \\ld s5, 56(a1)
+        \\ld s6, 64(a1)
+        \\ld s7, 72(a1)
+        \\ld s8, 80(a1)
+        \\ld s9, 88(a1)
+        \\ld s10, 96(a1)
+        \\ld s11, 104(a1)
+        \\
+        \\ret
+    );
+}

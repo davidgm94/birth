@@ -32,7 +32,7 @@ pub fn start(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     kernel.framebuffer_initialized = true;
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
-    arch.spinloop();
+    kernel.scheduler.schedule();
 }
 
 fn init_logger() void {
