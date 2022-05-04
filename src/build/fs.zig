@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fs = @import("../common/fs.zig");
 
+const log = std.log.scoped(.build_fs);
+
 pub const MemoryDisk = struct {
     bytes: []u8,
 };
@@ -28,4 +30,13 @@ pub fn add_file(disk: MemoryDisk, name: []const u8, content: []const u8) void {
     const left = it[sector_size..];
     assert(left.len > content.len);
     std.mem.copy(u8, left, content);
+}
+
+pub fn read(disk: MemoryDisk) void {
+    var node = @ptrCast(*fs.Node, @alignCast(@alignOf(fs.Node), disk.bytes.ptr));
+    log.debug("Node size: {}. Node name: {s}", .{ node.size, node.name });
+    log.debug("First bytes:", .{});
+    for (disk.bytes[sector_size .. sector_size + 0x20]) |byte, i| {
+        log.debug("[{}]: 0x{x}", .{ i, byte });
+    }
 }

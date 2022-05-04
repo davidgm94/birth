@@ -107,7 +107,8 @@ const HDD = struct {
             .bytes = buffer[0..],
         };
         fs.add_file(disk, "font.psf", font_file);
-        std.mem.copy(u8, &buffer, font_file);
+        fs.read(disk);
+        //std.mem.copy(u8, &buffer, font_file);
 
         try std.fs.cwd().writeFile(HDD.path, &HDD.buffer);
     }
