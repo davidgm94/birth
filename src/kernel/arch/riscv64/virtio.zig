@@ -301,6 +301,7 @@ pub const block = struct {
     }
 
     var lock: kernel.Spinlock = undefined;
+
     pub fn handler() void {
         const descriptor = queue.pop_used() orelse @panic("descriptor corrupted");
         // TODO Get virtual of this physical address @Virtual @Physical
@@ -316,7 +317,7 @@ pub const block = struct {
         const status_descriptor = queue.get_descriptor(sector_descriptor.next) orelse @panic("unable to get descriptor");
         const status = @intToPtr([*]u8, kernel.arch.Virtual.AddressSpace.physical_to_virtual(status_descriptor.address))[0];
         //log.debug("Disk operation status: {}", .{status});
-        if (status != 0) @panic("Disk operation failed");
+        if (status != 0) kernel.panic("Disk operation failed: {}", .{status});
 
         read += kernel.arch.sector_size;
     }

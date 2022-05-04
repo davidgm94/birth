@@ -32,9 +32,9 @@ const Superblock = struct {
     const offset = 0x400;
     const size = 0x400;
 
-    pub fn get_block_group_count(self: @This()) u64 {
-        const block_group_count = (self.block_count / self.block_group_block_count) + @boolToInt(self.block_count % self.block_group_block_count != 0);
-        const inode_group_count = (self.inode_count / self.block_group_inode_count) + @boolToInt(self.inode_count % self.block_group_inode_count != 0);
+    pub fn get_block_group_count(superblock: *Superblock) u64 {
+        const block_group_count = (superblock.block_count / superblock.block_group_block_count) + @boolToInt(superblock.block_count % superblock.block_group_block_count != 0);
+        const inode_group_count = (superblock.inode_count / superblock.block_group_inode_count) + @boolToInt(superblock.inode_count % superblock.block_group_inode_count != 0);
         return block_group_count + inode_group_count;
     }
 
@@ -43,13 +43,13 @@ const Superblock = struct {
     }
 
     // TODO: handle corruption
-    pub fn get_filesystem_state(self: @This()) FilesystemState {
-        return @intToEnum(FilesystemState, self.filesystem_state);
+    pub fn get_filesystem_state(superblock: *Superblock) FilesystemState {
+        return @intToEnum(FilesystemState, superblock.filesystem_state);
     }
 
     // TODO: handle corruption
-    pub fn get_error_handling_method(self: @This()) ErrorHandlingMethod {
-        return @intToEnum(ErrorHandlingMethod, self.error_handling_method);
+    pub fn get_error_handling_method(superblock: *Superblock) ErrorHandlingMethod {
+        return @intToEnum(ErrorHandlingMethod, superblock.error_handling_method);
     }
 };
 

@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
+const fs = @import("src/build/fs.zig");
 const Builder = std.build.Builder;
 
 const building_os = builtin.target.os.tag;
@@ -56,6 +58,7 @@ fn set_target_specific_parameters(kernel_exe: *std.build.LibExeObjStep) void {
 pub fn build(b: *Builder) void {
     const kernel = b.addExecutable(kernel_name, "src/kernel/root.zig");
     set_target_specific_parameters(kernel);
+    kernel.setMainPkgPath("src");
     kernel.setBuildMode(b.standardReleaseOptions());
     kernel.setOutputDir(cache_dir);
     b.default_step.dependOn(&kernel.step);
@@ -100,7 +103,12 @@ const HDD = struct {
         const allocator = parent.b.allocator;
         const font_file = try std.fs.cwd().readFileAlloc(allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
         std.debug.print("Font file size: {} bytes\n", .{font_file.len});
+        var disk = fs.MemoryDisk{
+            .bytes = buffer[0..],
+        };
+        fs.add_file(disk, "font.psf", font_file);
         std.mem.copy(u8, &buffer, font_file);
+
         try std.fs.cwd().writeFile(HDD.path, &HDD.buffer);
     }
 };

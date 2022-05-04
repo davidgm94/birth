@@ -28,15 +28,17 @@ export fn start(hart_id: u64, fdt: u64) void {
     Start.start(hart_id, fdt);
 }
 
-pub fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
+pub fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) u64 {
+    log.debug("Asked {} sectors from sector {}", .{ sector_count, start_sector });
     const total_size = sector_count * sector_size;
     kernel.assert(@src(), buffer.len >= total_size);
     var bytes_asked: u64 = 0;
     var sector_i: u64 = start_sector;
-    while (sector_i < sector_count) : ({
+    while (sector_i < sector_count + start_sector) : ({
         sector_i += 1;
     }) {
         const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
+        log.debug("Sending request for sector {}", .{sector_i});
         virtio.block.operate(.read, sector_i, sector_physical);
         bytes_asked += sector_size;
         while (virtio.block.read != bytes_asked) {
@@ -49,9 +51,10 @@ pub fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) []u8 {
     const read_bytes = virtio.block.read;
     virtio.block.read = 0;
     log.debug("Block device read {} bytes", .{read_bytes});
+    log.debug("Asked sector count: {}", .{sector_count});
     kernel.assert(@src(), sector_count * sector_size == read_bytes);
 
-    return buffer[0..read_bytes];
+    return sector_count;
 }
 
 const Context = struct {
