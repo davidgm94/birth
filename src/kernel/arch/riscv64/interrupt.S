@@ -1,6 +1,6 @@
 .section .text
-.global kernel_raw_interrupt_handler
-kernel_raw_interrupt_handler:
+.global trap
+trap:
 // Store all register values on the stack
 addi sp, sp, -8 * 34
 sd x1, 0(sp)

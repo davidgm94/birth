@@ -9,25 +9,18 @@
 // a0: current HART ID
 // a1: pointer to flattened device tree
 _start:
-    // Disable interrupts
-    csrw sie, zero
-    csrci sstatus, 2
-
-    // Set up the stack
+    // Set up the stack and the frame pointers
     la sp, stack_top
     li t0, hart_stack_size
     mul t0, t0, a0
     sub sp, sp, t0
     mv fp, sp
 
+    // Setup the global pointer
     .option push
     .option norelax
     lla gp, __global_pointer$
     .option pop
 
-    // TODO: initialize global pointers
-    la t0, kernel_raw_interrupt_handler
-    csrw stvec, t0
-
-    // Architecture-specific routine
-    call start
+    // Architecture-specific initialization
+    call riscv_start
