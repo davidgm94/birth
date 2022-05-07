@@ -23,35 +23,6 @@ const log = kernel.log.scoped(.RISCV64);
 
 const TODO = kernel.TODO;
 
-pub fn read_disk_raw(buffer: []u8, start_sector: u64, sector_count: u64) u64 {
-    log.debug("Asked {} sectors from sector {}", .{ sector_count, start_sector });
-    const total_size = sector_count * sector_size;
-    kernel.assert(@src(), buffer.len >= total_size);
-    var bytes_asked: u64 = 0;
-    var sector_i: u64 = start_sector;
-    while (sector_i < sector_count + start_sector) : ({
-        sector_i += 1;
-    }) {
-        const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
-        log.debug("Sending request for sector {}", .{sector_i});
-        virtio.block.operate(.read, sector_i, sector_physical);
-        bytes_asked += sector_size;
-        while (virtio.block.read != bytes_asked) {
-            kernel.spinloop_hint();
-        }
-    }
-
-    kernel.assert(@src(), bytes_asked == virtio.block.read);
-
-    const read_bytes = virtio.block.read;
-    virtio.block.read = 0;
-    log.debug("Block device read {} bytes", .{read_bytes});
-    log.debug("Asked sector count: {}", .{sector_count});
-    kernel.assert(@src(), sector_count * sector_size == read_bytes);
-
-    return sector_count;
-}
-
 const Context = struct {
     integer: [32]u64,
     pc: u64,
@@ -386,23 +357,17 @@ export fn riscv_start(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn
     Interrupts.init(boot_hart_id);
     local_storage[boot_hart_id].init(boot_hart_id, true);
     const time = Timer.get_time_from_timestamp(Timer.get_timestamp() - time_start);
-    virtio.block.init(0x10008000);
-    virtio.gpu.init(0x10007000);
-    var disk_driver = kernel.fs.Driver{
-        .read = read_disk_raw,
-    };
-    const file = kernel.fs.read_file(disk_driver, "font.psf");
-    kernel.font = kernel.PSF1.Font.parse(file);
-    kernel.graphics.draw_horizontal_line(kernel.graphics.Line{ .start = kernel.graphics.Point{ .x = 10, .y = 10 }, .end = kernel.graphics.Point{ .x = 100, .y = 10 } }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
-    kernel.graphics.test_draw_rect();
-    //kernel.graphics.draw_rect(kernel.graphics.Rect{ .x = 10, .y = 10, .width = 10, .height = 10 }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
+    init_persistent_storage();
+    init_graphics();
+
+    kernel.graphics.drivers[0].draw_horizontal_line(kernel.graphics.Line{ .start = kernel.graphics.Point{ .x = 10, .y = 10 }, .end = kernel.graphics.Point{ .x = 100, .y = 10 } }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
+    kernel.graphics.drivers[0].test_draw_rect();
+    kernel.graphics.drivers[0].draw_rect(kernel.graphics.Rect{ .x = 10, .y = 10, .width = 10, .height = 10 }, kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
     var i: u64 = 0;
     while (i < 100) : (i += 1) {
-        kernel.graphics.draw_string(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, "Hello Mariana");
+        kernel.graphics.drivers[0].draw_string(kernel.graphics.Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 }, "Hello Mariana");
     }
-    log.debug("F W: {}. F H: {}", .{ kernel.framebuffer.width, kernel.framebuffer.height });
-    virtio.gpu.send_and_flush_framebuffer();
-    kernel.framebuffer_initialized = true;
+    @ptrCast(*virtio.GPU, kernel.graphics.drivers[0]).send_and_flush_framebuffer();
 
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
@@ -417,4 +382,22 @@ fn init_cpu_count() void {
     log.debug("CPU count initialized with 1. Is it correct?", .{});
     // TODO: take from the device tree
     cpu_count = 1;
+}
+
+fn init_persistent_storage() void {
+    log.debug("Initializing persistent storage...", .{});
+    // TODO: use the device tree
+    kernel.Driver(kernel.Disk, virtio.Block).init(0x10008000) catch @panic("Failed to initialize block driver");
+    kernel.Driver(kernel.Filesystem, kernel.RNUFS).init(kernel.Disk.drivers[kernel.Disk.drivers.len - 1]) catch @panic("Failed to initialize filesystem driver");
+}
+
+fn init_graphics() void {
+    log.debug("Initializing graphics...", .{});
+    const driver = kernel.Filesystem.drivers[0];
+    const file = driver.read_file_callback(driver, "font.psf");
+    log.debug("Font read from disk", .{});
+    kernel.font = kernel.PSF1.Font.parse(file);
+    log.debug("Font parsed", .{});
+    // TODO: use the device tree
+    kernel.Driver(kernel.graphics, virtio.GPU).init(0x10007000) catch @panic("error initializating graphics driver");
 }

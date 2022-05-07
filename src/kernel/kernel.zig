@@ -20,12 +20,15 @@ pub const Heap = @import("heap.zig");
 pub const PSF1 = @import("psf1.zig");
 pub const graphics = @import("graphics.zig");
 pub const scheduler = @import("scheduler.zig");
-pub const fs = @import("fs.zig");
+pub const Filesystem = @import("filesystem.zig");
+pub const Disk = @import("disk.zig");
+// TODO: move this to drivers
+pub const RNUFS = @import("rnu_fs.zig");
+pub const driver = @import("driver.zig");
+pub const Driver = driver.Driver;
 
 pub var address_space: arch.Virtual.AddressSpace = undefined;
 pub var heap: Heap = undefined;
-pub var framebuffer: graphics.Framebuffer = undefined;
 pub var font: PSF1.Font = undefined;
-pub var framebuffer_initialized = false;
 
 pub const Writer = std.io.Writer;

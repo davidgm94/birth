@@ -157,7 +157,7 @@ const Debug = struct {
                     "-tui",
                     "-ex", "symbol-file zig-cache/kernel.elf",
                     "-ex", "target remote :1234",
-                    "-ex", "b start",
+                    "-ex", "b riscv_start",
                     "-ex", "b panic",
                     "-ex", "c",
                 }, b.allocator) catch unreachable;

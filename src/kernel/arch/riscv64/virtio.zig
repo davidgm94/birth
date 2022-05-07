@@ -1,9 +1,14 @@
 const kernel = @import("../../kernel.zig");
 const TODO = kernel.TODO;
 
+// TODO: make possible to instantiate more than one same-class virtio driver
+
 const page_size = kernel.arch.page_size;
 
 const ring_size = 128;
+
+pub const Block = @import("virtio_block.zig");
+pub const GPU = @import("virtio_gpu.zig");
 
 pub const MMIO = struct {
     magic_value: u32,
@@ -35,7 +40,7 @@ pub const MMIO = struct {
     interrupt_ack: u32,
     reserved7: [8]u8,
 
-    status: u32,
+    device_status: u32,
     reserved8: [12]u8,
 
     queue_descriptor_low: u32,
@@ -62,35 +67,37 @@ pub const MMIO = struct {
         if (self.device_id == 0) @panic("invalid device");
 
         // 1. Reset
-        self.status = 0;
+        self.device_status = @enumToInt(DeviceStatus.reset_device);
+        if (self.device_status != 0) @panic("Device status should be 0");
 
         // 2. Ack the device
-        self.status |= @enumToInt(Status.acknowledge);
+        self.device_status |= @enumToInt(DeviceStatus.acknowledge);
 
         // 3. The driver knows how to use the device
-        self.status |= @enumToInt(Status.driver);
+        self.device_status |= @enumToInt(DeviceStatus.driver);
 
         // 4. Read device feature bits and write (a subset of) them
         var features = self.device_features;
+        log.debug("Features: {b}", .{features});
         // Disable VIRTIO F RING EVENT INDEX
         features &= ~@as(u32, 1 << 29);
         self.driver_features = features;
 
         // 5. Set features ok status bit
-        self.status |= @enumToInt(Status.features_ok);
+        self.device_status |= @enumToInt(DeviceStatus.features_ok);
 
-        if (self.status & @enumToInt(Status.features_ok) == 0) @panic("unsupported features");
+        if (self.device_status & @enumToInt(DeviceStatus.features_ok) == 0) @panic("unsupported features");
     }
 
     pub inline fn set_driver_initialized(self: *volatile @This()) void {
-        self.status |= @enumToInt(MMIO.Status.driver);
+        self.device_status |= @enumToInt(DeviceStatus.driver_ok);
     }
 
     pub inline fn notify_queue(self: *volatile @This()) void {
         self.queue_notify = 0;
     }
 
-    pub fn add_queue_to_device(self: *volatile @This(), selected_queue: u32) *volatile Queue {
+    pub fn add_queue_to_device(self: *volatile @This(), selected_queue: u32) *volatile SplitQueue {
         if (self.queue_num_max < ring_size) {
             @panic("foooo");
         }
@@ -99,24 +106,24 @@ pub const MMIO = struct {
 
         if (self.queue_ready != 0) @panic("queue ready");
 
-        const total_size = @sizeOf(Queue) + (@sizeOf(Descriptor) * ring_size) + @sizeOf(Available) + @sizeOf(Used);
+        const total_size = @sizeOf(SplitQueue) + (@sizeOf(Descriptor) * ring_size) + @sizeOf(Available) + @sizeOf(Used);
         const page_count = total_size / page_size + @boolToInt(total_size % page_size != 0);
         // All physical address space is identity-mapped so mapping is not needed here
         const queue_physical = kernel.arch.Physical.allocate1(page_count) orelse @panic("unable to allocate memory for virtio block device queue");
-        const queue = @intToPtr(*volatile Queue, kernel.arch.Virtual.AddressSpace.physical_to_virtual(queue_physical));
+        const queue = @intToPtr(*volatile SplitQueue, kernel.arch.Virtual.AddressSpace.physical_to_virtual(queue_physical));
         // TODO: distinguist between physical and virtual
         queue.num = 0;
         queue.last_seen_used = 0;
-        queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), @ptrToInt(queue) + @sizeOf(Queue));
+        queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), @ptrToInt(queue) + @sizeOf(SplitQueue));
         // identity-mapped
         const physical = @ptrToInt(queue);
-        const descriptor = physical + @sizeOf(Queue);
-        queue.available = @intToPtr(@TypeOf(queue.available), @ptrToInt(queue) + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)));
-        const available = physical + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor));
+        const descriptor = physical + @sizeOf(SplitQueue);
+        queue.available = @intToPtr(@TypeOf(queue.available), @ptrToInt(queue) + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)));
+        const available = physical + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor));
         queue.available.flags = 0;
         queue.available.index = 0;
-        queue.used = @intToPtr(@TypeOf(queue.used), @ptrToInt(queue) + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available));
-        const used = physical + @sizeOf(Queue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available);
+        queue.used = @intToPtr(@TypeOf(queue.used), @ptrToInt(queue) + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available));
+        const used = physical + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available);
         queue.used.flags = 0;
         queue.used.index = 0;
 
@@ -136,10 +143,26 @@ pub const MMIO = struct {
         return queue;
     }
 
-    const Status = enum(u32) {
+    const DeviceStatus = enum(u32) {
+        reset_device = 0,
         acknowledge = 1 << 0,
         driver = 1 << 1,
-        features_ok = 1 << 7,
+        driver_ok = 1 << 2,
+        features_ok = 1 << 3,
+        device_needs_reset = 1 << 6,
+        failed = 1 << 7,
+    };
+
+    const Features = enum(u32) {
+        ring_indirect_descriptors = 28,
+        ring_event_index = 29,
+        version_1 = 32,
+        access_platform = 33,
+        ring_packed = 34,
+        in_order = 35,
+        order_platform = 36,
+        single_root_io_virtualization = 37,
+        notification_data = 38,
     };
 
     const log = kernel.log.scoped(.MMIO);
@@ -178,469 +201,40 @@ const Used = struct {
     };
 };
 
-const Queue = struct {
+pub const SplitQueue = struct {
     num: u32,
     last_seen_used: u32,
     descriptors: [*]volatile Descriptor,
     available: *volatile Available,
     used: *volatile Used,
 
-    fn push_descriptor(self: *volatile @This(), p_descriptor_index: *u16) *volatile Descriptor {
+    pub fn push_descriptor(queue: *volatile SplitQueue, p_descriptor_index: *u16) *volatile Descriptor {
         // TODO Cause for a bug
-        p_descriptor_index.* = @intCast(u16, self.num);
-        const descriptor = &self.descriptors[self.num];
-        self.num += 1;
+        p_descriptor_index.* = @intCast(u16, queue.num);
+        const descriptor = &queue.descriptors[queue.num];
+        queue.num += 1;
 
-        while (self.num >= ring_size) : (self.num -= ring_size) {}
+        while (queue.num >= ring_size) : (queue.num -= ring_size) {}
 
         return descriptor;
     }
 
-    fn push_available(self: *volatile @This(), descriptor: u16) void {
-        self.available.ring[self.available.index % ring_size] = descriptor;
-        self.available.index += 1;
+    pub fn push_available(queue: *volatile SplitQueue, descriptor: u16) void {
+        queue.available.ring[queue.available.index % ring_size] = descriptor;
+        queue.available.index += 1;
     }
 
-    pub fn pop_used(self: *volatile @This()) ?*volatile Descriptor {
-        if (self.last_seen_used == self.used.index) return null;
+    pub fn pop_used(queue: *volatile SplitQueue) ?*volatile Descriptor {
+        if (queue.last_seen_used == queue.used.index) return null;
 
-        const id = self.used.ring[self.last_seen_used % ring_size].id;
-        self.last_seen_used += 1;
-        const used = &self.descriptors[id];
+        const id = queue.used.ring[queue.last_seen_used % ring_size].id;
+        queue.last_seen_used += 1;
+        const used = &queue.descriptors[id];
 
         return used;
     }
 
-    pub fn get_descriptor(self: *volatile @This(), descriptor_id: u16) ?*volatile Descriptor {
-        if (descriptor_id < ring_size) return &self.descriptors[descriptor_id] else return null;
+    pub fn get_descriptor(queue: *volatile SplitQueue, descriptor_id: u16) ?*volatile Descriptor {
+        if (descriptor_id < ring_size) return &queue.descriptors[descriptor_id] else return null;
     }
 };
-
-pub const block = struct {
-    var queue: *volatile Queue = undefined;
-    var mmio: *volatile MMIO = undefined;
-    pub var read: u64 = 0;
-
-    const log = kernel.log.scoped(.VirtioBlock);
-
-    const BlockType = enum(u32) {
-        in = 0,
-        out = 1,
-        flush = 4,
-        discard = 11,
-        write_zeroes = 13,
-    };
-
-    const Request = struct {
-        const Header = struct {
-            block_type: BlockType,
-            reserved: u32,
-            sector: u64,
-        };
-    };
-
-    const Operation = enum {
-        read,
-        write,
-    };
-
-    pub fn init(mmio_address: u64) void {
-        kernel.arch.Virtual.map(mmio_address, 1);
-        mmio = @intToPtr(*volatile MMIO, mmio_address);
-        mmio.init();
-        queue = mmio.add_queue_to_device(0);
-        // TODO: stop hardcoding interrupt number
-        kernel.arch.Interrupts.register_external_interrupt_handler(8, handler);
-        mmio.set_driver_initialized();
-
-        log.debug("Block driver initialized", .{});
-    }
-
-    /// The sector buffer address needs to be physical and have at least 512 (sector_size) bytes available
-    pub fn operate(comptime operation: Operation, sector_index: u64, sector_buffer_physical_address: u64) void {
-        const status_size = 1;
-        const header_size = @sizeOf(Request.Header);
-
-        const status_buffer = kernel.heap.allocate(status_size, true, true) orelse @panic("status buffer unable to be allocated");
-        const header_buffer = kernel.heap.allocate(header_size, true, true) orelse @panic("header buffer unable to be allocated");
-        // TODO: Here we should distinguish between virtual and physical addresses
-        const header = @intToPtr(*Request.Header, header_buffer.virtual);
-        header.block_type = switch (operation) {
-            .read => BlockType.in,
-            .write => BlockType.out,
-        };
-        header.sector = sector_index;
-
-        var descriptor1: u16 = 0;
-        var descriptor2: u16 = 0;
-        var descriptor3: u16 = 0;
-
-        queue.push_descriptor(&descriptor3).* = Descriptor{
-            .address = status_buffer.physical,
-            .flags = @enumToInt(Descriptor.Flag.write_only),
-            .length = 1,
-            .next = 0,
-        };
-
-        queue.push_descriptor(&descriptor2).* = Descriptor{
-            .address = sector_buffer_physical_address,
-            .flags = @enumToInt(Descriptor.Flag.next) | if (operation == Operation.read) @enumToInt(Descriptor.Flag.write_only) else 0,
-            .length = kernel.arch.sector_size,
-            .next = descriptor3,
-        };
-
-        queue.push_descriptor(&descriptor1).* = Descriptor{
-            .address = header_buffer.physical,
-            .flags = @enumToInt(Descriptor.Flag.next),
-            .length = @sizeOf(Request.Header),
-            .next = descriptor2,
-        };
-
-        queue.push_available(descriptor1);
-        mmio.notify_queue();
-    }
-
-    var lock: kernel.Spinlock = undefined;
-
-    pub fn handler() void {
-        const descriptor = queue.pop_used() orelse @panic("descriptor corrupted");
-        // TODO Get virtual of this physical address @Virtual @Physical
-        const header = @intToPtr(*volatile Request.Header, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
-        const operation: Operation = switch (header.block_type) {
-            .in => .read,
-            .out => .write,
-            else => unreachable,
-        };
-        _ = operation;
-        const sector_descriptor = queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
-
-        const status_descriptor = queue.get_descriptor(sector_descriptor.next) orelse @panic("unable to get descriptor");
-        const status = @intToPtr([*]u8, kernel.arch.Virtual.AddressSpace.physical_to_virtual(status_descriptor.address))[0];
-        //log.debug("Disk operation status: {}", .{status});
-        if (status != 0) kernel.panic("Disk operation failed: {}", .{status});
-
-        read += kernel.arch.sector_size;
-    }
-};
-
-pub const gpu = struct {
-    const ControlType = enum(u32) {
-        // 2D
-        cmd_get_display_info = 0x0100,
-        cmd_resource_create_2d,
-        cmd_resource_unref,
-        cmd_set_scanout,
-        cmd_resource_flush,
-        cmd_transfer_to_host_2d,
-        cmd_resource_attach_backing,
-        cmd_resource_detach_backing,
-        cmd_get_capset_info,
-        cmd_get_capset,
-        cmd_get_edid,
-
-        // cursor
-        cmd_update_cursor = 0x0300,
-        cmd_move_cursor,
-
-        // success responses
-        resp_ok_nodata = 0x1100,
-        resp_ok_display_info,
-        resp_ok_capset_info,
-        resp_ok_capset,
-        resp_ok_edid,
-
-        // error responses
-        resp_err_unspec = 0x1200,
-        resp_err_out_of_memory,
-        resp_err_invalid_scanout_id,
-        resp_err_invalid_resource_id,
-        resp_err_invalid_context_id,
-        resp_err_invalid_parameter,
-    };
-
-    const Flag = enum(u32) {
-        fence = 1 << 0,
-    };
-
-    const ControlHeader = struct {
-        type: ControlType,
-        flags: u32,
-        fence_id: u64,
-        context_id: u32,
-        padding: u32,
-    };
-
-    const max_scanouts = 16;
-
-    const Rect = struct {
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-    };
-
-    const ResponseDisplayInfo = struct {
-        header: ControlHeader,
-        pmodes: [max_scanouts]Display,
-
-        const Display = struct {
-            rect: Rect,
-            enabled: u32,
-            flags: u32,
-        };
-    };
-
-    const Format = enum(u32) {
-        B8G8R8A8_UNORM = 1,
-        B8G8R8X8_UNORM = 2,
-        A8R8G8B8_UNORM = 3,
-        X8R8G8B8_UNORM = 4,
-
-        R8G8B8A8_UNORM = 67,
-        X8B8G8R8_UNORM = 68,
-
-        A8B8G8R8_UNORM = 121,
-        R8G8B8X8_UNORM = 134,
-    };
-
-    const ResourceCreate2D = struct {
-        header: ControlHeader,
-        resource_id: u32,
-        format: Format,
-        width: u32,
-        height: u32,
-    };
-
-    const MemoryEntry = struct {
-        address: u64,
-        length: u32,
-        padding: u32,
-    };
-
-    const ResourceAttachBacking = struct {
-        header: ControlHeader,
-        resource_id: u32,
-        entry_count: u32,
-        // TODO: variable-length array afterwards
-
-        inline fn set_entry(self: *volatile @This(), index: u64, entry: MemoryEntry) void {
-            const entry_ptr = @intToPtr(*MemoryEntry, @ptrToInt(self) + @sizeOf(@This()) + (@sizeOf(MemoryEntry) * index));
-            entry_ptr.* = entry;
-        }
-    };
-
-    const SetScanout = struct {
-        header: ControlHeader,
-        rect: Rect,
-        scanout_id: u32,
-        resource_id: u32,
-    };
-
-    const TransferControlToHost2D = struct {
-        header: ControlHeader,
-        rect: Rect,
-        offset: u64,
-        resource_id: u32,
-        padding: u32,
-    };
-
-    const ResourceFlush = struct {
-        header: ControlHeader,
-        rect: Rect,
-        resource_id: u32,
-        padding: u32,
-    };
-
-    var mmio: *volatile MMIO = undefined;
-    var control_queue: *volatile Queue = undefined;
-    var cursor_queue: *volatile Queue = undefined;
-    var transfered = false;
-    var flushed = false;
-
-    const log = kernel.log.scoped(.VirtioGPU);
-
-    pub fn init(mmio_address: u64) void {
-        kernel.arch.Virtual.map(mmio_address, 1);
-        mmio = @intToPtr(*volatile MMIO, mmio_address);
-        mmio.init();
-
-        control_queue = mmio.add_queue_to_device(0);
-        cursor_queue = mmio.add_queue_to_device(1);
-
-        // TODO: stop hardcoding interrupt number
-        kernel.arch.Interrupts.register_external_interrupt_handler(7, handler);
-        mmio.set_driver_initialized();
-
-        var header = kernel.zeroes(ControlHeader);
-        header.type = ControlType.cmd_get_display_info;
-        operate(kernel.as_bytes(&header), @sizeOf(ResponseDisplayInfo));
-        while (!received_display_info) {
-            kernel.spinloop_hint();
-        }
-        if (display_info.header.type != ControlType.resp_ok_display_info) {
-            @panic("display info corrupted");
-        }
-
-        log.debug("Display info", .{});
-        for (display_info.pmodes) |pmode_it, i| {
-            if (pmode_it.enabled != 0) log.debug("[{}] pmode: {}", .{ i, pmode_it });
-        }
-        pmode = display_info.pmodes[0];
-
-        var create = kernel.zeroes(ResourceCreate2D);
-        create.header.type = ControlType.cmd_resource_create_2d;
-        create.format = Format.R8G8B8A8_UNORM;
-        create.resource_id = 1;
-        create.width = pmode.rect.width;
-        create.height = pmode.rect.height;
-
-        operate(kernel.as_bytes(&create), @sizeOf(ControlHeader));
-
-        const framebuffer_pixel_count = pmode.rect.width * pmode.rect.height;
-        const framebuffer_size = @sizeOf(u32) * framebuffer_pixel_count;
-        const framebuffer_allocation = kernel.heap.allocate(framebuffer_size, true, true) orelse @panic("unable to allocate framebuffer");
-
-        // Fill the kernel framebuffer object outside the driver
-        kernel.framebuffer.buffer = @intToPtr([*]u32, framebuffer_allocation.virtual);
-        kernel.framebuffer.width = pmode.rect.width;
-        kernel.framebuffer.height = pmode.rect.height;
-
-        const backing_size = @sizeOf(ResourceAttachBacking) + @sizeOf(MemoryEntry);
-
-        const backing_allocation = kernel.heap.allocate(backing_size, true, true) orelse @panic("unable to allocate backing");
-        const backing = @intToPtr(*volatile ResourceAttachBacking, backing_allocation.virtual);
-        backing.* = ResourceAttachBacking{
-            .header = ControlHeader{
-                .type = ControlType.cmd_resource_attach_backing,
-                .flags = 0,
-                .fence_id = 0,
-                .context_id = 0,
-                .padding = 0,
-            },
-            .resource_id = 1,
-            .entry_count = 1,
-        };
-        backing.set_entry(0, MemoryEntry{
-            .address = framebuffer_allocation.physical,
-            .length = framebuffer_size,
-            .padding = 0,
-        });
-
-        // TODO: fix double allocation
-        operate(@intToPtr([*]u8, backing_allocation.virtual)[0..backing_size], @sizeOf(ControlHeader));
-
-        var set_scanout = kernel.zeroes(SetScanout);
-        set_scanout.header.type = ControlType.cmd_set_scanout;
-        set_scanout.rect = pmode.rect;
-        set_scanout.resource_id = 1;
-
-        operate(kernel.as_bytes(&set_scanout), @sizeOf(ControlHeader));
-
-        const framebuffer = @intToPtr([*]u32, framebuffer_allocation.virtual)[0..framebuffer_pixel_count];
-        for (framebuffer) |*pixel| {
-            pixel.* = 0xffffffff;
-        }
-
-        send_and_flush_framebuffer();
-
-        log.debug("GPU driver initialized", .{});
-    }
-
-    pub fn send_and_flush_framebuffer() void {
-        var transfer_to_host = kernel.zeroes(TransferControlToHost2D);
-        transfer_to_host.header.type = ControlType.cmd_transfer_to_host_2d;
-        transfer_to_host.rect = pmode.rect;
-        transfer_to_host.resource_id = 1;
-
-        log.debug("Sending transfer", .{});
-        transfered = false;
-        operate(kernel.as_bytes(&transfer_to_host), @sizeOf(ControlHeader));
-        while (!transfered) {
-            kernel.spinloop_hint();
-        }
-
-        var flush = kernel.zeroes(ResourceFlush);
-        flush.header.type = ControlType.cmd_resource_flush;
-        flush.rect = pmode.rect;
-        flush.resource_id = 1;
-
-        log.debug("Sending flush", .{});
-        flushed = false;
-        operate(kernel.as_bytes(&flush), @sizeOf(ControlHeader));
-        while (!flushed) {
-            kernel.spinloop_hint();
-        }
-        kernel.assert(@src(), transfered);
-        kernel.assert(@src(), flushed);
-    }
-
-    pub fn operate(request_bytes: []const u8, response_size: u32) void {
-        const request = kernel.heap.allocate(request_bytes.len, true, true) orelse @panic("unable to allocate memory for gpu request");
-        kernel.copy(u8, @intToPtr([*]u8, request.virtual)[0..request_bytes.len], request_bytes);
-
-        var descriptor1: u16 = 0;
-        var descriptor2: u16 = 0;
-
-        control_queue.push_descriptor(&descriptor2).* = Descriptor{
-            .address = (kernel.heap.allocate(response_size, true, true) orelse @panic("unable to get memory for gpu response")).physical,
-            .flags = @enumToInt(Descriptor.Flag.write_only),
-            .length = response_size,
-            .next = 0,
-        };
-
-        control_queue.push_descriptor(&descriptor1).* = Descriptor{
-            .address = request.physical,
-            .flags = @enumToInt(Descriptor.Flag.next),
-            .length = @intCast(u32, request_bytes.len),
-            .next = descriptor2,
-        };
-
-        control_queue.push_available(descriptor1);
-        mmio.notify_queue();
-    }
-
-    var display_info: ResponseDisplayInfo = undefined;
-    var received_display_info = false;
-    var pmode: ResponseDisplayInfo.Display = undefined;
-    var initialized = false;
-
-    fn handler() void {
-        const descriptor = control_queue.pop_used() orelse @panic("descriptor corrupted");
-        const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
-        const request_descriptor = control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
-
-        if (initialized) {
-            TODO(@src());
-        } else {
-            handle_ex(header, request_descriptor, true);
-        }
-    }
-
-    fn handle_ex(header: *volatile ControlHeader, request_descriptor: *volatile Descriptor, comptime initializing: bool) void {
-        const control_header = @intToPtr(*ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(request_descriptor.address));
-        switch (header.type) {
-            .cmd_get_display_info => {
-                defer {
-                    if (initializing) received_display_info = true;
-                }
-
-                display_info = @ptrCast(*ResponseDisplayInfo, control_header).*;
-            },
-            .cmd_resource_create_2d, .cmd_resource_attach_backing, .cmd_set_scanout, .cmd_transfer_to_host_2d, .cmd_resource_flush => {
-                if (control_header.type != ControlType.resp_ok_nodata) {
-                    kernel.panic("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
-                }
-
-                log.debug("Processed {s} successfully", .{@tagName(header.type)});
-            },
-            else => kernel.panic("Header not implemented: {s}", .{@tagName(header.type)}),
-        }
-
-        if (header.type == ControlType.cmd_transfer_to_host_2d) transfered = true;
-        if (header.type == ControlType.cmd_resource_flush) flushed = true;
-    }
-};
-
-comptime {
-    kernel.reference_all_declarations(@This());
-}
