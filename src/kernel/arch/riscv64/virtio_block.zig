@@ -109,7 +109,7 @@ pub fn handler() void {
     kernel.assert(@src(), kernel.Disk.drivers.len > 0);
     // TODO: can use more than one driver:
     const driver = @ptrCast(*Driver, kernel.Disk.drivers[0]);
-    const descriptor = driver.queue.pop_used() orelse @panic("descriptor corrupted");
+    const descriptor = driver.queue.pop_used() orelse @panic("virtio block descriptor corrupted");
     // TODO Get virtual of this physical address @Virtual @Physical
     const header = @intToPtr(*volatile Request.Header, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
     const operation: Operation = switch (header.block_type) {
