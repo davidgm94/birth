@@ -153,12 +153,12 @@ const Debug = struct {
                 // zig fmt: off
                 const process = std.ChildProcess.init(&.{
                     "kitty", "--start-as=maximized",
-                    "gdb-multiarch",
+                    "riscv64-elf-gdb",
                     "-tui",
                     "-ex", "symbol-file zig-cache/kernel.elf",
                     "-ex", "target remote :1234",
                     "-ex", "b riscv_start",
-                    "-ex", "b panic",
+                    "-ex", "b kernel.panic.panic",
                     "-ex", "c",
                 }, b.allocator) catch unreachable;
                 // zig fmt: on

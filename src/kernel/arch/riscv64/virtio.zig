@@ -40,7 +40,7 @@ pub const MMIO = struct {
     interrupt_ack: u32,
     reserved7: [8]u8,
 
-    device_status: u32,
+    device_status: DeviceStatus,
     reserved8: [12]u8,
 
     queue_descriptor_low: u32,
@@ -67,14 +67,14 @@ pub const MMIO = struct {
         if (self.device_id == 0) @panic("invalid device");
 
         // 1. Reset
-        self.device_status = @enumToInt(DeviceStatus.reset_device);
-        if (self.device_status != 0) @panic("Device status should be 0");
+        self.device_status = DeviceStatus.empty();
+        if (self.device_status.bits != 0) @panic("Device status should be 0");
 
         // 2. Ack the device
-        self.device_status |= @enumToInt(DeviceStatus.acknowledge);
+        self.device_status.or_flag(.acknowledge);
 
         // 3. The driver knows how to use the device
-        self.device_status |= @enumToInt(DeviceStatus.driver);
+        self.device_status.or_flag(.driver);
 
         // 4. Read device feature bits and write (a subset of) them
         var features = self.device_features;
@@ -84,13 +84,13 @@ pub const MMIO = struct {
         self.driver_features = features;
 
         // 5. Set features ok status bit
-        self.device_status |= @enumToInt(DeviceStatus.features_ok);
+        self.device_status.or_flag(.features_ok);
 
-        if (self.device_status & @enumToInt(DeviceStatus.features_ok) == 0) @panic("unsupported features");
+        if (!self.device_status.contains(.features_ok)) @panic("unsupported features");
     }
 
     pub inline fn set_driver_initialized(self: *volatile @This()) void {
-        self.device_status |= @enumToInt(DeviceStatus.driver_ok);
+        self.device_status.or_flag(.driver_ok);
     }
 
     pub inline fn notify_queue(self: *volatile @This()) void {
@@ -143,15 +143,14 @@ pub const MMIO = struct {
         return queue;
     }
 
-    const DeviceStatus = enum(u32) {
-        reset_device = 0,
-        acknowledge = 1 << 0,
-        driver = 1 << 1,
-        driver_ok = 1 << 2,
-        features_ok = 1 << 3,
-        device_needs_reset = 1 << 6,
-        failed = 1 << 7,
-    };
+    pub const DeviceStatus = kernel.Bitflag(true, enum(u32) {
+        acknowledge = 0,
+        driver = 1,
+        driver_ok = 2,
+        features_ok = 3,
+        device_needs_reset = 6,
+        failed = 7,
+    });
 
     const Features = enum(u32) {
         ring_indirect_descriptors = 28,
@@ -166,6 +165,16 @@ pub const MMIO = struct {
     };
 
     const log = kernel.log.scoped(.MMIO);
+
+    pub fn debug_device_status(mmio: *volatile MMIO) void {
+        log.debug("Reading device status...", .{});
+        const device_status = mmio.device_status;
+        for (kernel.enum_values(DeviceStatus)) |flag| {
+            if (device_status & @enumToInt(flag) != 0) {
+                log.debug("Flag set: {}", .{flag});
+            }
+        }
+    }
 };
 
 pub const Descriptor = struct {

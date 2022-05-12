@@ -311,7 +311,17 @@ pub fn operate(driver: *Driver, request_bytes: []const u8, response_size: u32) v
 fn handler() void {
     // TODO: use more than one driver
     const driver = if (Graphics.drivers.len > 0) @ptrCast(*Driver, Graphics.drivers[0]) else initialization_driver;
-    const descriptor = driver.control_queue.pop_used() orelse @panic("virtio GPU descriptor corrupted");
+    var device_status = driver.mmio.device_status;
+    if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
+        kernel.panic("Unrecoverable device status: {}", .{device_status});
+    }
+    const descriptor = driver.control_queue.pop_used() orelse {
+        if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
+            kernel.panic("Unrecoverable device status: {}", .{device_status});
+        }
+        log.err("virtio GPU descriptor corrupted", .{});
+        return;
+    };
     const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
     const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
 

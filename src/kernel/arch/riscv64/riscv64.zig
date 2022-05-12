@@ -343,6 +343,34 @@ comptime {
     );
 }
 
+fn init_logger() void {
+    uart.init(false);
+}
+
+fn init_cpu_count() void {
+    log.debug("CPU count initialized with 1. Is it correct?", .{});
+    // TODO: take from the device tree
+    cpu_count = 1;
+}
+
+fn init_persistent_storage() void {
+    log.debug("Initializing persistent storage...", .{});
+    // TODO: use the device tree
+    kernel.Driver(kernel.Disk, virtio.Block).init(0x10008000) catch @panic("Failed to initialize block driver");
+    kernel.Driver(kernel.Filesystem, kernel.RNUFS).init(kernel.Disk.drivers[kernel.Disk.drivers.len - 1]) catch @panic("Failed to initialize filesystem driver");
+}
+
+fn init_graphics() void {
+    log.debug("Initializing graphics...", .{});
+    const driver = kernel.Filesystem.drivers[0];
+    const file = driver.read_file_callback(driver, "font.psf");
+    log.debug("Font read from disk", .{});
+    kernel.font = kernel.PSF1.Font.parse(file);
+    log.debug("Font parsed", .{});
+    // TODO: use the device tree
+    kernel.Driver(kernel.graphics, virtio.GPU).init(0x10007000) catch @panic("error initializating graphics driver");
+}
+
 export fn riscv_start(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn {
     current_cpu = boot_hart_id;
     register_trap_handler(@ptrToInt(trap));
@@ -372,32 +400,4 @@ export fn riscv_start(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn
     log.debug("Initialized in {} s {} us", .{ time.s, time.us });
     spinloop();
     //kernel.scheduler.schedule();
-}
-
-fn init_logger() void {
-    uart.init(false);
-}
-
-fn init_cpu_count() void {
-    log.debug("CPU count initialized with 1. Is it correct?", .{});
-    // TODO: take from the device tree
-    cpu_count = 1;
-}
-
-fn init_persistent_storage() void {
-    log.debug("Initializing persistent storage...", .{});
-    // TODO: use the device tree
-    kernel.Driver(kernel.Disk, virtio.Block).init(0x10008000) catch @panic("Failed to initialize block driver");
-    kernel.Driver(kernel.Filesystem, kernel.RNUFS).init(kernel.Disk.drivers[kernel.Disk.drivers.len - 1]) catch @panic("Failed to initialize filesystem driver");
-}
-
-fn init_graphics() void {
-    log.debug("Initializing graphics...", .{});
-    const driver = kernel.Filesystem.drivers[0];
-    const file = driver.read_file_callback(driver, "font.psf");
-    log.debug("Font read from disk", .{});
-    kernel.font = kernel.PSF1.Font.parse(file);
-    log.debug("Font parsed", .{});
-    // TODO: use the device tree
-    kernel.Driver(kernel.graphics, virtio.GPU).init(0x10007000) catch @panic("error initializating graphics driver");
 }

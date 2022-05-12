@@ -70,3 +70,80 @@ pub fn cstr_len(cstr: [*:0]const u8) u64 {
     while (cstr[length] != 0) : (length += 1) {}
     return length;
 }
+
+pub const enum_values = std.enums.values;
+
+pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
+    return struct {
+        const IntType = std.meta.Int(.unsigned, @bitSizeOf(EnumT));
+        const Enum = EnumT;
+        const Ptr = if (is_volatile) *volatile @This() else *@This();
+
+        bits: IntType,
+
+        pub inline fn from_flags(flags: anytype) @This() {
+            const flags_type = @TypeOf(flags);
+            const result = comptime blk: {
+                const fields = std.meta.fields(flags_type);
+                if (fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
+
+                var bits: IntType = 0;
+
+                var field_i: u64 = 0;
+                inline while (field_i < fields.len) : (field_i += 1) {
+                    const field = fields[field_i];
+                    const enum_value: EnumT = field.default_value.?;
+                    bits |= 1 << @enumToInt(enum_value);
+                }
+                break :blk bits;
+            };
+            return @This(){ .bits = result };
+        }
+
+        pub fn from_bits(bits: IntType) @This() {
+            return @This(){ .bits = bits };
+        }
+
+        pub inline fn from_flag(comptime flag: EnumT) @This() {
+            const bits = 1 << @enumToInt(flag);
+            return @This(){ .bits = bits };
+        }
+
+        pub inline fn empty() @This() {
+            return @This(){
+                .bits = 0,
+            };
+        }
+
+        pub inline fn all() @This() {
+            var result = comptime blk: {
+                var bits: IntType = 0;
+                inline for (@typeInfo(EnumT).Enum.fields) |field| {
+                    bits |= 1 << field.value;
+                }
+                break :blk @This(){
+                    .bits = bits,
+                };
+            };
+            return result;
+        }
+
+        pub inline fn is_empty(self: @This()) bool {
+            return self.bits == 0;
+        }
+
+        /// This assumes invalid values in the flags can't be set.
+        pub inline fn is_all(self: @This()) bool {
+            return all().bits == self.bits;
+        }
+
+        pub inline fn contains(self: @This(), comptime flag: EnumT) bool {
+            return ((self.bits & (1 << @enumToInt(flag))) >> @enumToInt(flag)) != 0;
+        }
+
+        // TODO: create a mutable version of this
+        pub inline fn or_flag(self: Ptr, comptime flag: EnumT) void {
+            self.bits |= 1 << @enumToInt(flag);
+        }
+    };
+}
