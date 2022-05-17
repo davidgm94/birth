@@ -5,6 +5,41 @@ const TODO = kernel.TODO;
 
 const page_size = kernel.arch.page_size;
 
+// **** VIRTIO DRIVER CONFORMANCE ****
+// A driver MUST conform to three conformance clauses:
+// - Clause 7.2 [ ]
+// - One of clauses:
+//     - 7.2.1 [ ]
+//     - 7.2.2 [ ]
+//     - 7.2.3 [ ]
+//
+// - One of clauses:
+//     - 7.2.4  [ ]
+//     - 7.2.5  [ ]
+//     - 7.2.6  [ ]
+//     - 7.2.7  [ ]
+//     - 7.2.8  [ ]
+//     - 7.2.9  [ ]
+//     - 7.2.12 [ ]
+//
+// CLAUSE 7.2
+// A driver must conform to the following normative statements:
+//     - 2.1.1      [x] We panic on failure
+//     - 2.2.1      [x] We go with the features the virtio driver produces
+//     - 2.4.1      [ ]
+//     - 2.6.1      [ ]
+//     - 2.6.4.2    [ ]
+//     - 2.6.5.3.1  [ ]
+//     - 2.6.7.1    [ ]
+//     - 2.6.6.1    [ ]
+//     - 2.6.8.3    [ ]
+//     - 2.6.10.1   [ ]
+//     - 2.6.13.3.1 [ ]
+//     - 2.6.13.4.1 [ ]
+//     - 3.1.1      [ ]
+//     - 3.3.1      [ ]
+//     - 6.1        [ ]
+
 const ring_size = 128;
 
 pub const Block = @import("virtio_block.zig");
@@ -67,8 +102,8 @@ pub const MMIO = struct {
         if (self.device_id == 0) @panic("invalid device");
 
         // 1. Reset
-        self.device_status = DeviceStatus.empty();
-        if (self.device_status.bits != 0) @panic("Device status should be 0");
+        self.reset_device();
+        if (self.device_status.bits != 0) @panic("Device status should be reset and cleared");
 
         // 2. Ack the device
         self.device_status.or_flag(.acknowledge);
@@ -78,6 +113,7 @@ pub const MMIO = struct {
 
         // 4. Read device feature bits and write (a subset of) them
         var features = self.device_features;
+        self.debug_device_features();
         log.debug("Features: {b}", .{features});
         // Disable VIRTIO F RING EVENT INDEX
         features &= ~@as(u32, 1 << 29);
@@ -87,6 +123,10 @@ pub const MMIO = struct {
         self.device_status.or_flag(.features_ok);
 
         if (!self.device_status.contains(.features_ok)) @panic("unsupported features");
+    }
+
+    pub inline fn reset_device(self: *volatile @This()) void {
+        self.device_status = DeviceStatus.empty();
     }
 
     pub inline fn set_driver_initialized(self: *volatile @This()) void {
@@ -152,7 +192,7 @@ pub const MMIO = struct {
         failed = 7,
     });
 
-    const Features = enum(u32) {
+    const Features = enum(u6) {
         ring_indirect_descriptors = 28,
         ring_event_index = 29,
         version_1 = 32,
@@ -172,6 +212,21 @@ pub const MMIO = struct {
         for (kernel.enum_values(DeviceStatus)) |flag| {
             if (device_status & @enumToInt(flag) != 0) {
                 log.debug("Flag set: {}", .{flag});
+            }
+        }
+    }
+
+    pub fn debug_device_features(mmio: *volatile MMIO) void {
+        mmio.device_feature_selector = 0;
+        const low = mmio.device_features;
+        mmio.device_feature_selector = 1;
+        const high = mmio.device_features;
+        mmio.device_feature_selector = 0;
+
+        const features: u64 = (@intCast(u64, high) << 32) | low;
+        for (kernel.enum_values(Features)) |feature| {
+            if (features & (@intCast(u64, 1) << @enumToInt(feature)) != 0) {
+                log.debug("Device has feature: {s}, bit {}", .{ @tagName(feature), @enumToInt(feature) });
             }
         }
     }

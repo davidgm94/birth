@@ -72,7 +72,8 @@ pub fn build(b: *Builder) void {
     disk.step.dependOn(&minimal.step);
     const qemu = qemu_command(b);
     qemu.step.dependOn(&kernel.step);
-    qemu.step.dependOn(&disk.step);
+    // TODO: as disk is not written, this dependency doesn't need to be executed for every time the run step is executed
+    //qemu.step.dependOn(&disk.step);
 
     const debug = Debug.create(b);
     debug.step.dependOn(&kernel.step);
