@@ -26,9 +26,10 @@ const page_size = kernel.arch.page_size;
 // A driver must conform to the following normative statements:
 //     - 2.1.1      [x] We panic on failure
 //     - 2.2.1      [x] We go with the features the virtio driver produces
-//     - 2.4.1      [ ]
-//     - 2.6.1      [ ]
-//     - 2.6.4.2    [ ]
+//     - 2.4.1      [ ] ???
+//     - 2.6.1      [x]
+//     - 2.6.4.2    [ ] ???
+//     - 2.6.5.2    [ ] ???
 //     - 2.6.5.3.1  [ ]
 //     - 2.6.7.1    [ ]
 //     - 2.6.6.1    [ ]
@@ -71,7 +72,7 @@ pub const MMIO = struct {
     queue_notify: u32,
     reserved6: [12]u8,
 
-    interrupt_status: u32,
+    interrupt_status: InterruptStatus,
     interrupt_ack: u32,
     reserved7: [8]u8,
 
@@ -93,58 +94,61 @@ pub const MMIO = struct {
     reserved12: [0x4c]u8,
     config_gen: u32,
 
-    const magic = 0x74726976;
-    const version = 2;
+    pub const magic = 0x74726976;
+    pub const version = 2;
 
-    pub fn init(self: *volatile @This(), comptime FeaturesEnumT: type) void {
-        if (self.magic_value != magic) @panic("virtio magic corrupted");
-        if (self.version != version) @panic("outdated virtio spec");
-        if (self.device_id == 0) @panic("invalid device");
+    pub const configuration_offset = 0x100;
+
+    pub fn init(mmio: *volatile @This(), comptime FeaturesEnumT: type) void {
+        if (mmio.magic_value != magic) @panic("virtio magic corrupted");
+        if (mmio.version != version) @panic("outdated virtio spec");
+        if (mmio.device_id == 0) @panic("invalid device");
 
         // 1. Reset
-        self.reset_device();
-        if (self.device_status.bits != 0) @panic("Device status should be reset and cleared");
+        mmio.reset_device();
+        if (mmio.device_status.bits != 0) @panic("Device status should be reset and cleared");
 
         // 2. Ack the device
-        self.device_status.or_flag(.acknowledge);
+        mmio.device_status.or_flag(.acknowledge);
 
         // 3. The driver knows how to use the device
-        self.device_status.or_flag(.driver);
+        mmio.device_status.or_flag(.driver);
 
         // 4. Read device feature bits and write (a subset of) them
-        var features = self.device_features;
-        self.debug_device_features(FeaturesEnumT);
+        var features = mmio.device_features;
+        mmio.debug_device_features(FeaturesEnumT);
         log.debug("Features: {b}", .{features});
         // Disable VIRTIO F RING EVENT INDEX
         features &= ~@as(u32, 1 << 29);
-        self.driver_features = features;
+        mmio.driver_features = features;
 
         // 5. Set features ok status bit
-        self.device_status.or_flag(.features_ok);
+        mmio.device_status.or_flag(.features_ok);
 
-        if (!self.device_status.contains(.features_ok)) @panic("unsupported features");
+        if (!mmio.device_status.contains(.features_ok)) @panic("unsupported features");
     }
 
-    pub inline fn reset_device(self: *volatile @This()) void {
-        self.device_status = DeviceStatus.empty();
+    pub inline fn reset_device(mmio: *volatile @This()) void {
+        mmio.device_status = DeviceStatus.empty();
     }
 
-    pub inline fn set_driver_initialized(self: *volatile @This()) void {
-        self.device_status.or_flag(.driver_ok);
+    pub inline fn set_driver_initialized(mmio: *volatile @This()) void {
+        mmio.device_status.or_flag(.driver_ok);
     }
 
-    pub inline fn notify_queue(self: *volatile @This()) void {
-        self.queue_notify = 0;
+    pub inline fn notify_queue(mmio: *volatile @This()) void {
+        mmio.queue_notify = 0;
     }
 
-    pub fn add_queue_to_device(self: *volatile @This(), selected_queue: u32) *volatile SplitQueue {
-        if (self.queue_num_max < ring_size) {
+    pub fn add_queue_to_device(mmio: *volatile @This(), selected_queue: u32) *volatile SplitQueue {
+        if (mmio.queue_num_max < ring_size) {
             @panic("foooo");
         }
-        self.queue_selector = selected_queue;
-        self.queue_num = ring_size;
 
-        if (self.queue_ready != 0) @panic("queue ready");
+        mmio.queue_selector = selected_queue;
+        mmio.queue_num = ring_size;
+
+        if (mmio.queue_ready != 0) @panic("queue ready");
 
         const total_size = @sizeOf(SplitQueue) + (@sizeOf(Descriptor) * ring_size) + @sizeOf(Available) + @sizeOf(Used);
         const page_count = total_size / page_size + @boolToInt(total_size % page_size != 0);
@@ -154,31 +158,36 @@ pub const MMIO = struct {
         // TODO: distinguist between physical and virtual
         queue.num = 0;
         queue.last_seen_used = 0;
-        queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), @ptrToInt(queue) + @sizeOf(SplitQueue));
+        var ptr: u64 = kernel.align_forward(queue_physical + @sizeOf(SplitQueue), SplitQueue.descriptor_table_alignment);
+        queue.descriptors = @intToPtr(@TypeOf(queue.descriptors), ptr);
         // identity-mapped
         const physical = @ptrToInt(queue);
         const descriptor = physical + @sizeOf(SplitQueue);
-        queue.available = @intToPtr(@TypeOf(queue.available), @ptrToInt(queue) + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)));
-        const available = physical + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor));
+        ptr += ring_size * @sizeOf(Descriptor);
+        ptr = kernel.align_forward(ptr, SplitQueue.available_ring_alignment);
+        const available = ptr;
+        queue.available = @intToPtr(@TypeOf(queue.available), available);
         queue.available.flags = 0;
         queue.available.index = 0;
-        queue.used = @intToPtr(@TypeOf(queue.used), @ptrToInt(queue) + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available));
-        const used = physical + @sizeOf(SplitQueue) + (ring_size * @sizeOf(Descriptor)) + @sizeOf(Available);
+        ptr += @sizeOf(Available);
+        ptr = kernel.align_forward(ptr, SplitQueue.used_ring_alignment);
+        const used = ptr;
+        queue.used = @intToPtr(@TypeOf(queue.used), used);
         queue.used.flags = 0;
         queue.used.index = 0;
 
         // notify device of queue
-        self.queue_num = ring_size;
+        mmio.queue_num = ring_size;
 
         // specify queue structs
-        self.queue_descriptor_low = @truncate(u32, descriptor);
-        self.queue_descriptor_high = @truncate(u32, descriptor >> 32);
-        self.queue_available_low = @truncate(u32, available);
-        self.queue_available_high = @truncate(u32, available >> 32);
-        self.queue_used_low = @truncate(u32, used);
-        self.queue_used_high = @truncate(u32, used >> 32);
+        mmio.queue_descriptor_low = @truncate(u32, descriptor);
+        mmio.queue_descriptor_high = @truncate(u32, descriptor >> 32);
+        mmio.queue_available_low = @truncate(u32, available);
+        mmio.queue_available_high = @truncate(u32, available >> 32);
+        mmio.queue_used_low = @truncate(u32, used);
+        mmio.queue_used_high = @truncate(u32, used >> 32);
 
-        self.queue_ready = 1;
+        mmio.queue_ready = 1;
 
         return queue;
     }
@@ -274,9 +283,13 @@ const Used = struct {
 pub const SplitQueue = struct {
     num: u32,
     last_seen_used: u32,
-    descriptors: [*]volatile Descriptor,
-    available: *volatile Available,
-    used: *volatile Used,
+    descriptors: [*]align(descriptor_table_alignment) volatile Descriptor,
+    available: *align(available_ring_alignment) volatile Available,
+    used: *align(used_ring_alignment) volatile Used,
+
+    const descriptor_table_alignment = 16;
+    const available_ring_alignment = 2;
+    const used_ring_alignment = 4;
 
     pub fn push_descriptor(queue: *volatile SplitQueue, p_descriptor_index: *u16) *volatile Descriptor {
         // TODO Cause for a bug
@@ -308,3 +321,8 @@ pub const SplitQueue = struct {
         if (descriptor_id < ring_size) return &queue.descriptors[descriptor_id] else return null;
     }
 };
+
+const InterruptStatus = kernel.Bitflag(true, enum(u32) {
+    used_buffer = 0,
+    configuration_change = 1,
+});

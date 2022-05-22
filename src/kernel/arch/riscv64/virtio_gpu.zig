@@ -128,6 +128,17 @@ pub const Initialization = struct {
     }
 };
 
+const Configuration = struct {
+    events_read: Event,
+    events_clear: Event,
+    scanout_count: u32,
+    reserved: u32,
+};
+
+const Event = kernel.Bitflag(true, enum(u32) {
+    display = 0,
+});
+
 const GPUFeature = enum(u6) {
     virgl_3d_mode = 0,
     edid = 1,
@@ -317,24 +328,41 @@ fn handler() void {
     // TODO: use more than one driver
     const driver = if (Graphics.drivers.len > 0) @ptrCast(*Driver, Graphics.drivers[0]) else initialization_driver;
     var device_status = driver.mmio.device_status;
+    log.debug("Device status: {}", .{device_status});
     if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
         kernel.panic("Unrecoverable device status: {}", .{device_status});
     }
-    const descriptor = driver.control_queue.pop_used() orelse {
-        if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
-            kernel.panic("Unrecoverable device status: {}", .{device_status});
-        }
-        log.err("virtio GPU descriptor corrupted", .{});
-        return;
-    };
-    const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
-    const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
+    const interrupt_status = driver.mmio.interrupt_status;
+    log.debug("Interrupt status: {}", .{interrupt_status});
 
-    if (driver.initialized) {
-        TODO(@src());
+    if (interrupt_status.contains(.configuration_change)) {
+        const configuration = @intToPtr(*volatile Configuration, @ptrToInt(driver.mmio) + MMIO.configuration_offset);
+        const events_read = configuration.events_read;
+        if (events_read.contains(.display)) {
+            @panic("we need to handle display resize");
+        } else {
+            @panic("unreachable");
+        }
     } else {
-        handle_ex(driver, header, request_descriptor, true);
+        const descriptor = driver.control_queue.pop_used() orelse {
+            if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
+                kernel.panic("Unrecoverable device status: {}", .{device_status});
+            }
+            log.err("virtio GPU descriptor corrupted", .{});
+            return;
+        };
+        const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
+        const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
+
+        if (driver.initialized) {
+            TODO(@src());
+        } else {
+            handle_ex(driver, header, request_descriptor, true);
+        }
     }
+
+    // TODO: check if all events are handled to write the proper bitmask
+    driver.mmio.interrupt_ack = interrupt_status.bits;
 }
 
 fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descriptor: *volatile Descriptor, comptime initializing: bool) void {
