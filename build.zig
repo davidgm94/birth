@@ -90,13 +90,15 @@ const HDD = struct {
     b: *std.build.Builder,
 
     fn create(b: *Builder) *HDD {
-        const step = b.allocator.create(HDD) catch @panic("out of memory\n");
-        step.* = .{
+        const self = b.allocator.create(HDD) catch @panic("out of memory\n");
+        self.* = .{
             .step = std.build.Step.init(.custom, "hdd_create", b.allocator, make),
             .b = b,
         };
 
-        return step;
+        const named_step = b.step("disk", "Create a disk blob to use with QEMU");
+        named_step.dependOn(&self.step);
+        return self;
     }
 
     fn make(step: *std.build.Step) !void {
