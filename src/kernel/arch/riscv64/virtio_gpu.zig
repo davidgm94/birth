@@ -38,7 +38,7 @@ pub const Initialization = struct {
         // Have to manually set the initialization driver here to get it from the interrupt
         initialization_driver = driver;
         driver.mmio = @intToPtr(*volatile MMIO, mmio_address);
-        driver.mmio.init();
+        driver.mmio.init(GPUFeature);
 
         driver.control_queue = driver.mmio.add_queue_to_device(0);
         driver.cursor_queue = driver.mmio.add_queue_to_device(1);
@@ -126,6 +126,11 @@ pub const Initialization = struct {
 
         return driver;
     }
+};
+
+const GPUFeature = enum(u6) {
+    virgl_3d_mode = 0,
+    edid = 1,
 };
 
 const ControlType = enum(u32) {

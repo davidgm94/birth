@@ -26,7 +26,7 @@ pub const Initialization = struct {
         const driver = @intToPtr(*Driver, driver_allocation);
         kernel.arch.Virtual.map(mmio_address, 1);
         driver.mmio = @intToPtr(*volatile MMIO, mmio_address);
-        driver.mmio.init();
+        driver.mmio.init(BlockFeature);
         driver.queue = driver.mmio.add_queue_to_device(0);
         driver.disk.read_callback = read_callback;
 
@@ -38,6 +38,19 @@ pub const Initialization = struct {
 
         return driver;
     }
+};
+
+const BlockFeature = enum(u6) {
+    size_max = 1,
+    seg_max = 2,
+    geometry = 4,
+    read_only = 5,
+    blk_size = 6,
+    flush = 9,
+    topology = 10,
+    config_wce = 11,
+    discard = 13,
+    write_zeroes = 14,
 };
 
 const BlockType = enum(u32) {

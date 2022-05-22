@@ -96,7 +96,7 @@ pub const MMIO = struct {
     const magic = 0x74726976;
     const version = 2;
 
-    pub fn init(self: *volatile @This()) void {
+    pub fn init(self: *volatile @This(), comptime FeaturesEnumT: type) void {
         if (self.magic_value != magic) @panic("virtio magic corrupted");
         if (self.version != version) @panic("outdated virtio spec");
         if (self.device_id == 0) @panic("invalid device");
@@ -113,7 +113,7 @@ pub const MMIO = struct {
 
         // 4. Read device feature bits and write (a subset of) them
         var features = self.device_features;
-        self.debug_device_features();
+        self.debug_device_features(FeaturesEnumT);
         log.debug("Features: {b}", .{features});
         // Disable VIRTIO F RING EVENT INDEX
         features &= ~@as(u32, 1 << 29);
@@ -216,7 +216,7 @@ pub const MMIO = struct {
         }
     }
 
-    pub fn debug_device_features(mmio: *volatile MMIO) void {
+    pub fn debug_device_features(mmio: *volatile MMIO, comptime FeaturesEnum: type) void {
         mmio.device_feature_selector = 0;
         const low = mmio.device_features;
         mmio.device_feature_selector = 1;
@@ -227,6 +227,12 @@ pub const MMIO = struct {
         for (kernel.enum_values(Features)) |feature| {
             if (features & (@intCast(u64, 1) << @enumToInt(feature)) != 0) {
                 log.debug("Device has feature: {s}, bit {}", .{ @tagName(feature), @enumToInt(feature) });
+            }
+        }
+
+        for (kernel.enum_values(FeaturesEnum)) |feature| {
+            if (features & (@intCast(u64, 1) << @enumToInt(feature)) != 0) {
+                log.debug("Device has {}: {s}, bit {}", .{ FeaturesEnum, @tagName(feature), @enumToInt(feature) });
             }
         }
     }
