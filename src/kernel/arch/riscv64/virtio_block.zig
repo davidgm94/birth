@@ -31,7 +31,11 @@ pub const Initialization = struct {
         driver.disk.read_callback = read_callback;
 
         // TODO: stop hardcoding interrupt number
-        kernel.arch.Interrupts.register_external_interrupt_handler(8, handler);
+        const interrupt = kernel.arch.Interrupts.Interrupt{
+            .handler = handler,
+            .pending_operations_handler = foo,
+        };
+        interrupt.register(8);
         driver.mmio.set_driver_initialized();
 
         log.debug("Block driver initialized", .{});
@@ -39,6 +43,10 @@ pub const Initialization = struct {
         return driver;
     }
 };
+
+fn foo() void {
+    @panic("reached here");
+}
 
 const BlockFeature = enum(u6) {
     size_max = 1,
@@ -118,7 +126,7 @@ pub fn operate(driver: *Driver, comptime operation: Operation, sector_index: u64
     driver.mmio.notify_queue();
 }
 
-pub fn handler() void {
+pub fn handler() u64 {
     kernel.assert(@src(), kernel.Disk.drivers.len > 0);
     // TODO: can use more than one driver:
     const driver = @ptrCast(*Driver, kernel.Disk.drivers[0]);
@@ -139,6 +147,8 @@ pub fn handler() void {
     if (status != 0) kernel.panic("Disk operation failed: {}", .{status});
 
     driver.batch_read_byte_count += sector_size;
+
+    return 0;
 }
 
 pub fn read_callback(disk_driver: *Disk, buffer: []u8, start_sector: u64, sector_count: u64) u64 {

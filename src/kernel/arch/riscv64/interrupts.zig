@@ -5,8 +5,16 @@ var plic_base: u64 = 0;
 var plic_size: u64 = 0;
 const max_interrupt = 32;
 
-pub const InterruptHandler = fn () void;
-var interrupt_handlers: [max_interrupt]InterruptHandler = undefined;
+pub const Interrupt = struct {
+    handler: fn () u64,
+    pending_operations_handler: fn () void,
+
+    pub fn register(interrupt: Interrupt, index: u64) void {
+        interrupt_handlers[index] = interrupt;
+    }
+};
+
+var interrupt_handlers: [max_interrupt]Interrupt = undefined;
 
 inline fn get_priority() [*]volatile u32 {
     return @intToPtr([*]volatile u32, plic_base + 0);
@@ -60,10 +68,10 @@ pub fn handle_external_interrupt(hart_id: u64) void {
     const claimed_interrupt_number = get_sclaim(hart_id).*;
     //ilog.debug("PLIC interrupt number: {}", .{claimed_interrupt_number});
     if (claimed_interrupt_number == 0) @panic("PLIC handler is told an external interrupt has been received, but claim indicates otherwise");
-    interrupt_handlers[claimed_interrupt_number]();
+    const operations_to_be_handled = interrupt_handlers[claimed_interrupt_number].handler();
     get_sclaim(hart_id).* = claimed_interrupt_number;
-}
 
-pub inline fn register_external_interrupt_handler(interrupt_number: u64, handler: InterruptHandler) void {
-    interrupt_handlers[interrupt_number] = handler;
+    if (operations_to_be_handled > 0) {
+        interrupt_handlers[claimed_interrupt_number].pending_operations_handler();
+    }
 }

@@ -19,10 +19,8 @@ control_queue: *volatile SplitQueue,
 cursor_queue: *volatile SplitQueue,
 display_info: ResponseDisplayInfo,
 pmode: ResponseDisplayInfo.Display,
-initialized: bool,
-received_display_info: bool,
-transfered: bool,
-flushed: bool,
+request_counters: [11]u64,
+pending_display_info_request: bool,
 
 pub const Initialization = struct {
     pub const Context = u64;
@@ -44,81 +42,24 @@ pub const Initialization = struct {
         driver.cursor_queue = driver.mmio.add_queue_to_device(1);
 
         // TODO: stop hardcoding interrupt number
-        kernel.arch.Interrupts.register_external_interrupt_handler(7, handler);
+        const interrupt = kernel.arch.Interrupts.Interrupt{
+            .handler = handler,
+            .pending_operations_handler = pending_operations_handler,
+        };
+        interrupt.register(7);
         driver.mmio.set_driver_initialized();
 
-        var header = kernel.zeroes(ControlHeader);
-        header.type = ControlType.cmd_get_display_info;
-        driver.operate(kernel.as_bytes(&header), @sizeOf(ResponseDisplayInfo));
-        while (!driver.received_display_info) {
-            kernel.spinloop_hint();
-        }
+        driver.pending_display_info_request = true;
+        driver.request_display_info();
 
-        if (driver.display_info.header.type != ControlType.resp_ok_display_info) {
-            @panic("display info corrupted");
-        }
+        driver.create_resource_2d();
 
-        log.debug("Display info", .{});
-        for (driver.display_info.pmodes) |pmode_it, i| {
-            if (pmode_it.enabled != 0) log.debug("[{}] pmode: {}", .{ i, pmode_it });
-        }
-        driver.pmode = driver.display_info.pmodes[0];
+        driver.attach_backing();
 
-        var create = kernel.zeroes(ResourceCreate2D);
-        create.header.type = ControlType.cmd_resource_create_2d;
-        create.format = Format.R8G8B8A8_UNORM;
-        create.resource_id = 1;
-        create.width = driver.pmode.rect.width;
-        create.height = driver.pmode.rect.height;
-
-        driver.operate(kernel.as_bytes(&create), @sizeOf(ControlHeader));
-
-        const framebuffer_pixel_count = driver.pmode.rect.width * driver.pmode.rect.height;
-        const framebuffer_size = @sizeOf(u32) * framebuffer_pixel_count;
-        const framebuffer_allocation = kernel.heap.allocate(framebuffer_size, true, true) orelse @panic("unable to allocate framebuffer");
-
-        driver.graphics.framebuffer = Graphics.Framebuffer{
-            .buffer = @intToPtr([*]u32, framebuffer_allocation.virtual),
-            .width = driver.pmode.rect.width,
-            .height = driver.pmode.rect.height,
-            .cursor = Graphics.Point{ .x = 0, .y = 0 },
-        };
-
-        const backing_size = @sizeOf(ResourceAttachBacking) + @sizeOf(MemoryEntry);
-
-        const backing_allocation = kernel.heap.allocate(backing_size, true, true) orelse @panic("unable to allocate backing");
-        const backing = @intToPtr(*volatile ResourceAttachBacking, backing_allocation.virtual);
-        backing.* = ResourceAttachBacking{
-            .header = ControlHeader{
-                .type = ControlType.cmd_resource_attach_backing,
-                .flags = 0,
-                .fence_id = 0,
-                .context_id = 0,
-                .padding = 0,
-            },
-            .resource_id = 1,
-            .entry_count = 1,
-        };
-        backing.set_entry(0, MemoryEntry{
-            .address = framebuffer_allocation.physical,
-            .length = framebuffer_size,
-            .padding = 0,
-        });
-
-        // TODO: fix double allocation
-        driver.operate(@intToPtr([*]u8, backing_allocation.virtual)[0..backing_size], @sizeOf(ControlHeader));
-
-        var set_scanout = kernel.zeroes(SetScanout);
-        set_scanout.header.type = ControlType.cmd_set_scanout;
-        set_scanout.rect = driver.pmode.rect;
-        set_scanout.resource_id = 1;
-
-        driver.operate(kernel.as_bytes(&set_scanout), @sizeOf(ControlHeader));
-
-        const framebuffer = @intToPtr([*]u32, framebuffer_allocation.virtual)[0..framebuffer_pixel_count];
-        for (framebuffer) |*pixel| {
-            pixel.* = 0xffffffff;
-        }
+        //const framebuffer = @intToPtr([*]u32, framebuffer_allocation.virtual)[0..framebuffer_pixel_count];
+        //for (framebuffer) |*pixel| {
+        //pixel.* = 0xffffffff;
+        //}
 
         driver.send_and_flush_framebuffer();
 
@@ -127,6 +68,128 @@ pub const Initialization = struct {
         return driver;
     }
 };
+
+fn set_scanout(driver: *Driver) void {
+    var set_scanout_descriptor = kernel.zeroes(SetScanout);
+    set_scanout_descriptor.header.type = ControlType.cmd_set_scanout;
+    set_scanout_descriptor.rect = driver.pmode.rect;
+    set_scanout_descriptor.resource_id = 1;
+
+    driver.operate(kernel.as_bytes(&set_scanout_descriptor), @sizeOf(ControlHeader));
+}
+
+fn create_resource_2d(driver: *Driver) void {
+    var create = kernel.zeroes(ResourceCreate2D);
+    create.header.type = ControlType.cmd_resource_create_2d;
+    create.format = Format.R8G8B8A8_UNORM;
+    create.resource_id = 1;
+    create.width = driver.pmode.rect.width;
+    create.height = driver.pmode.rect.height;
+
+    driver.send_request_and_wait(create, null);
+}
+
+fn attach_backing(driver: *Driver) void {
+    const framebuffer_pixel_count = driver.pmode.rect.width * driver.pmode.rect.height;
+    const framebuffer_size = @sizeOf(u32) * framebuffer_pixel_count;
+    const framebuffer_allocation = kernel.heap.allocate(framebuffer_size, true, true) orelse @panic("unable to allocate framebuffer");
+
+    driver.graphics.framebuffer = Graphics.Framebuffer{
+        .buffer = @intToPtr([*]u32, framebuffer_allocation.virtual),
+        .width = driver.pmode.rect.width,
+        .height = driver.pmode.rect.height,
+        .cursor = Graphics.Point{ .x = 0, .y = 0 },
+    };
+
+    const backing_size = @sizeOf(ResourceAttachBacking) + @sizeOf(MemoryEntry);
+
+    const backing_allocation = kernel.heap.allocate(backing_size, true, true) orelse @panic("unable to allocate backing");
+    const backing = @intToPtr(*volatile ResourceAttachBacking, backing_allocation.virtual);
+    backing.* = ResourceAttachBacking{
+        .header = ControlHeader{
+            .type = ControlType.cmd_resource_attach_backing,
+            .flags = 0,
+            .fence_id = 0,
+            .context_id = 0,
+            .padding = 0,
+        },
+        .resource_id = 1,
+        .entry_count = 1,
+    };
+    backing.set_entry(0, MemoryEntry{
+        .address = framebuffer_allocation.physical,
+        .length = framebuffer_size,
+        .padding = 0,
+    });
+
+    // TODO: fix double allocation
+    driver.send_request_and_wait(backing, null);
+}
+
+fn pending_operations_handler() void {
+    const driver = if (Graphics.drivers.len > 0) @ptrCast(*Driver, Graphics.drivers[0]) else initialization_driver;
+    var device_status = driver.mmio.device_status;
+    log.debug("Device status: {}", .{device_status});
+    if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
+        kernel.panic("Unrecoverable device status: {}", .{device_status});
+    }
+    const interrupt_status = driver.mmio.interrupt_status;
+    log.debug("Interrupt status: {}", .{interrupt_status});
+    const old = driver.display_info.pmodes[0];
+    kernel.assert(@src(), old.rect.width == driver.graphics.framebuffer.width);
+    kernel.assert(@src(), old.rect.height == driver.graphics.framebuffer.height);
+    driver.request_display_info();
+    const new = driver.display_info.pmodes[0];
+    log.debug("Old: {}, {}. New: {}, {}", .{ old.rect.width, old.rect.height, new.rect.width, new.rect.height });
+    if (old.rect.width != new.rect.width or old.rect.height != new.rect.height) {
+        if (old.rect.width > new.rect.width and old.rect.height > new.rect.height) {
+            // In this case we don't need to reallocate
+            driver.graphics.framebuffer.width = new.rect.width;
+            driver.graphics.framebuffer.height = new.rect.height;
+            @panic("here");
+        } else {
+            @panic("need to allocate");
+        }
+        @panic("we need to resize");
+    } else {
+        @panic("what");
+    }
+}
+
+fn request_display_info(driver: *Driver) void {
+    kernel.assert(@src(), driver.pending_display_info_request);
+    var header = kernel.zeroes(ControlHeader);
+    header.type = ControlType.cmd_get_display_info;
+
+    driver.send_request_and_wait(header, ResponseDisplayInfo);
+
+    log.debug("Display info changed", .{});
+    for (driver.display_info.pmodes) |pmode_it, i| {
+        if (pmode_it.enabled != 0) log.debug("[{}] pmode: {}", .{ i, pmode_it });
+    }
+    driver.pmode = driver.display_info.pmodes[0];
+    driver.pending_display_info_request = false;
+}
+
+fn tranfer_to_host(driver: *Driver) void {
+    var transfer_to_host = kernel.zeroes(TransferControlToHost2D);
+    transfer_to_host.header.type = ControlType.cmd_transfer_to_host_2d;
+    transfer_to_host.rect = driver.pmode.rect;
+    transfer_to_host.resource_id = 1;
+
+    driver.send_request_and_wait(transfer_to_host, null);
+}
+
+fn flush(driver: *Driver) void {
+    var flush_operation = kernel.zeroes(ResourceFlush);
+    flush_operation.header.type = ControlType.cmd_resource_flush;
+    flush_operation.rect = driver.pmode.rect;
+    flush_operation.resource_id = 1;
+
+    driver.send_request_and_wait(flush_operation, null);
+
+    log.debug("Flush processed successfully", .{});
+}
 
 const Configuration = struct {
     events_read: Event,
@@ -176,6 +239,11 @@ const ControlType = enum(u32) {
     resp_err_invalid_resource_id,
     resp_err_invalid_context_id,
     resp_err_invalid_parameter,
+
+    fn get_request_counter_index(control_type: ControlType) u64 {
+        kernel.assert(@src(), @enumToInt(control_type) < @enumToInt(ControlType.cmd_update_cursor));
+        return @enumToInt(control_type) - @enumToInt(ControlType.cmd_get_display_info);
+    }
 };
 
 const Flag = enum(u32) {
@@ -272,31 +340,8 @@ const ResourceFlush = struct {
 };
 
 pub fn send_and_flush_framebuffer(driver: *Driver) void {
-    var transfer_to_host = kernel.zeroes(TransferControlToHost2D);
-    transfer_to_host.header.type = ControlType.cmd_transfer_to_host_2d;
-    transfer_to_host.rect = driver.pmode.rect;
-    transfer_to_host.resource_id = 1;
-
-    log.debug("Sending transfer", .{});
-    driver.transfered = false;
-    driver.operate(kernel.as_bytes(&transfer_to_host), @sizeOf(ControlHeader));
-    while (!driver.transfered) {
-        kernel.spinloop_hint();
-    }
-
-    var flush = kernel.zeroes(ResourceFlush);
-    flush.header.type = ControlType.cmd_resource_flush;
-    flush.rect = driver.pmode.rect;
-    flush.resource_id = 1;
-
-    log.debug("Sending flush", .{});
-    driver.flushed = false;
-    driver.operate(kernel.as_bytes(&flush), @sizeOf(ControlHeader));
-    while (!driver.flushed) {
-        kernel.spinloop_hint();
-    }
-    kernel.assert(@src(), driver.transfered);
-    kernel.assert(@src(), driver.flushed);
+    driver.tranfer_to_host();
+    driver.flush();
 }
 
 pub fn operate(driver: *Driver, request_bytes: []const u8, response_size: u32) void {
@@ -324,7 +369,7 @@ pub fn operate(driver: *Driver, request_bytes: []const u8, response_size: u32) v
     driver.mmio.notify_queue();
 }
 
-fn handler() void {
+fn handler() u64 {
     // TODO: use more than one driver
     const driver = if (Graphics.drivers.len > 0) @ptrCast(*Driver, Graphics.drivers[0]) else initialization_driver;
     var device_status = driver.mmio.device_status;
@@ -335,58 +380,86 @@ fn handler() void {
     const interrupt_status = driver.mmio.interrupt_status;
     log.debug("Interrupt status: {}", .{interrupt_status});
 
+    var operations_pending: u64 = 0;
+
     if (interrupt_status.contains(.configuration_change)) {
         const configuration = @intToPtr(*volatile Configuration, @ptrToInt(driver.mmio) + MMIO.configuration_offset);
         const events_read = configuration.events_read;
         if (events_read.contains(.display)) {
-            @panic("we need to handle display resize");
+            // TODO: check if all events are handled to write the proper bitmask
+            configuration.events_clear = events_read;
+
+            operations_pending += 1;
+            driver.pending_display_info_request = true;
         } else {
-            @panic("unreachable");
+            @panic("corrupted notification");
         }
     } else {
         const descriptor = driver.control_queue.pop_used() orelse {
             if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
                 kernel.panic("Unrecoverable device status: {}", .{device_status});
             }
-            log.err("virtio GPU descriptor corrupted", .{});
-            return;
+            kernel.panic("virtio GPU descriptor corrupted", .{});
         };
         const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
         const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
 
-        if (driver.initialized) {
-            TODO(@src());
-        } else {
-            handle_ex(driver, header, request_descriptor, true);
-        }
+        handle_ex(driver, header, request_descriptor);
     }
 
     // TODO: check if all events are handled to write the proper bitmask
     driver.mmio.interrupt_ack = interrupt_status.bits;
+
+    return operations_pending;
 }
 
-fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descriptor: *volatile Descriptor, comptime initializing: bool) void {
+fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descriptor: *volatile Descriptor) void {
     const control_header = @intToPtr(*ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(request_descriptor.address));
+
     switch (header.type) {
         .cmd_get_display_info => {
-            defer {
-                if (initializing) driver.received_display_info = true;
+            if (control_header.type != ControlType.resp_ok_display_info) {
+                kernel.panic("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
             }
-
             driver.display_info = @ptrCast(*ResponseDisplayInfo, control_header).*;
         },
-        .cmd_resource_create_2d, .cmd_resource_attach_backing, .cmd_set_scanout, .cmd_transfer_to_host_2d, .cmd_resource_flush => {
+        else => {
             if (control_header.type != ControlType.resp_ok_nodata) {
                 kernel.panic("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
             }
-
-            log.debug("Processed {s} successfully", .{@tagName(header.type)});
         },
-        else => kernel.panic("Header not implemented: {s}", .{@tagName(header.type)}),
     }
 
-    if (header.type == ControlType.cmd_transfer_to_host_2d) driver.transfered = true;
-    if (header.type == ControlType.cmd_resource_flush) driver.flushed = true;
+    const request_counter_index = header.type.get_request_counter_index();
+    driver.request_counters[request_counter_index] +%= 1;
+}
+
+fn send_request_and_wait(driver: *Driver, request_descriptor: anytype, comptime ResponseType: ?type) void {
+    var request_bytes: []const u8 = undefined;
+    var control_header_type: ControlType = undefined;
+
+    switch (@typeInfo(@TypeOf(request_descriptor))) {
+        .Pointer => {
+            control_header_type = @ptrCast(*const ControlHeader, request_descriptor).type;
+            request_bytes = kernel.as_bytes(request_descriptor);
+        },
+        else => {
+            control_header_type = @ptrCast(*const ControlHeader, &request_descriptor).type;
+            request_bytes = kernel.as_bytes(&request_descriptor);
+        },
+    }
+
+    log.debug("Sending {s}", .{@tagName(control_header_type)});
+    const response_size = if (ResponseType) |RpType| @sizeOf(RpType) else @sizeOf(ControlHeader);
+    const request_counter_index = control_header_type.get_request_counter_index();
+    const request_counter = driver.request_counters[request_counter_index] +% 1;
+    driver.operate(kernel.as_bytes(&request_descriptor), response_size);
+
+    while (driver.request_counters[request_counter_index] != request_counter) {
+        kernel.spinloop_hint();
+    }
+
+    log.debug("{s} #{} processed successfully", .{ @tagName(control_header_type), request_counter });
 }
 
 var initialization_driver: *Driver = undefined;
