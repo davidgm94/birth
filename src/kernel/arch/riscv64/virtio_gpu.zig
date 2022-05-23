@@ -73,8 +73,7 @@ fn resize_display(driver: *Driver) void {
     for (driver.graphics.framebuffer.buffer[0 .. driver.graphics.framebuffer.width * driver.graphics.framebuffer.height]) |*p| {
         p.* = 0xffffffff;
     }
-    driver.tranfer_to_host();
-    driver.flush();
+    driver.send_and_flush_framebuffer();
 }
 
 const AttachBackingDescriptor = struct {
@@ -93,6 +92,8 @@ fn attach_backing(driver: *Driver) void {
         .height = driver.pmode.rect.height,
         .cursor = Graphics.Point{ .x = 0, .y = 0 },
     };
+
+    log.debug("New framebuffer address: 0x{x}", .{@ptrToInt(driver.graphics.framebuffer.buffer)});
 
     const backing_allocation = kernel.heap.allocate(@sizeOf(AttachBackingDescriptor), true, true) orelse @panic("unable to allocate backing");
     const backing_descriptor = @intToPtr(*volatile AttachBackingDescriptor, backing_allocation.virtual);
@@ -120,7 +121,7 @@ fn set_scanout(driver: *Driver) void {
     var set_scanout_descriptor = kernel.zeroes(SetScanout);
     set_scanout_descriptor.header.type = ControlType.cmd_set_scanout;
     set_scanout_descriptor.rect = driver.pmode.rect;
-    set_scanout_descriptor.resource_id = 1;
+    set_scanout_descriptor.resource_id = driver.framebuffer_id;
 
     driver.send_request_and_wait(set_scanout_descriptor, null);
 }
@@ -129,8 +130,9 @@ fn create_resource_2d(driver: *Driver) void {
     var create = kernel.zeroes(ResourceCreate2D);
     create.header.type = ControlType.cmd_resource_create_2d;
     create.format = Format.R8G8B8A8_UNORM;
-    driver.framebuffer_id += 1;
+    driver.framebuffer_id +%= 1;
     create.resource_id = driver.framebuffer_id;
+    log.debug("Resource id: {}", .{create.resource_id});
     create.width = driver.pmode.rect.width;
     create.height = driver.pmode.rect.height;
 
@@ -155,8 +157,6 @@ fn pending_operations_handler() void {
 
     if (old.rect.width != new.rect.width or old.rect.height != new.rect.height) {
         driver.resize_display();
-    } else {
-        @panic("what");
     }
 }
 
@@ -170,14 +170,13 @@ fn request_display_info(driver: *Driver) void {
     driver.pending_display_info_request = false;
 }
 
-fn tranfer_to_host(driver: *Driver) void {
-    var transfer_to_host = kernel.zeroes(TransferControlToHost2D);
-    transfer_to_host.header.type = ControlType.cmd_transfer_to_host_2d;
-    transfer_to_host.rect = driver.pmode.rect;
-    transfer_to_host.resource_id = driver.framebuffer_id;
-    log.debug("Transfering {}", .{transfer_to_host});
+fn transfer_to_host(driver: *Driver) void {
+    var transfer_to_host_descriptor = kernel.zeroes(TransferControlToHost2D);
+    transfer_to_host_descriptor.header.type = ControlType.cmd_transfer_to_host_2d;
+    transfer_to_host_descriptor.rect = driver.pmode.rect;
+    transfer_to_host_descriptor.resource_id = driver.framebuffer_id;
 
-    driver.send_request_and_wait(transfer_to_host, null);
+    driver.send_request_and_wait(transfer_to_host_descriptor, null);
 }
 
 fn flush(driver: *Driver) void {
@@ -186,7 +185,6 @@ fn flush(driver: *Driver) void {
     flush_operation.rect = driver.pmode.rect;
     flush_operation.resource_id = driver.framebuffer_id;
 
-    log.debug("Flushing {}", .{flush_operation});
     driver.send_request_and_wait(flush_operation, null);
 
     log.debug("Flush processed successfully", .{});
@@ -341,7 +339,7 @@ const ResourceFlush = struct {
 };
 
 pub fn send_and_flush_framebuffer(driver: *Driver) void {
-    driver.tranfer_to_host();
+    driver.transfer_to_host();
     driver.flush();
 }
 
