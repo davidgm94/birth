@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-
 const log = std.log;
 
 const fs = @import("src/build/fs.zig");
@@ -72,6 +71,8 @@ fn get_target_base(arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
 fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjStep) void {
     var target = get_target_base(current_arch);
 
+    var linker_path = arch_source_dir ++ "linker.ld";
+
     switch (current_arch) {
         .riscv64 => {
             target.cpu_features_sub.addFeature(@enumToInt(std.Target.riscv.Feature.d));
@@ -95,12 +96,15 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             kernel_exe.code_model = .kernel;
             kernel_exe.red_zone = false;
             kernel_exe.omit_frame_pointer = false;
+            if (LimineImage.version == 3) {
+                linker_path = arch_source_dir ++ "linker_limine3.ld";
+            }
         },
         else => @compileError("CPU architecture not supported"),
     }
     kernel_exe.setTarget(target);
     kernel_exe.entry_symbol_name = "_start";
-    kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(arch_source_dir ++ "linker.ld"));
+    kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_path));
 }
 
 pub fn build(b: *Builder) void {
@@ -284,6 +288,8 @@ const LimineImage = struct {
     step: std.build.Step,
     b: *Builder,
 
+    const version = 2;
+
     fn build(step: *std.build.Step) !void {
         const self = @fieldParentPtr(@This(), "step", step);
         const img_dir_path = self.b.fmt("{s}/img_dir", .{self.b.cache_root});
@@ -291,13 +297,24 @@ const LimineImage = struct {
         cwd.deleteFile(image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-        const limine_dir = try cwd.openDir("src/kernel/arch/x86_64/limine3", .{});
+        const limine_dir_path = switch (version) {
+            2 => "src/kernel/arch/x86_64/limine",
+            3 => "src/kernel/arch/x86_64/limine3",
+            else => unreachable,
+        };
+        const limine_dir = try cwd.openDir(limine_dir_path, .{});
+
+        const limine_efi_bin_file = switch (version) {
+            2 => "limine-eltorito-efi.bin",
+            3 => "limine-cd-efi.bin",
+            else => unreachable,
+        };
 
         const files_to_copy_from_limine_dir = [_][]const u8{
             "limine.cfg",
             "limine.sys",
             "limine-cd.bin",
-            "limine-cd-efi.bin",
+            limine_efi_bin_file,
         };
 
         for (files_to_copy_from_limine_dir) |filename| {
@@ -307,7 +324,7 @@ const LimineImage = struct {
         try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
         try std.fs.Dir.copyFile(cwd, kernel_path, img_dir, std.fs.path.basename(kernel_path), .{});
 
-        const xorriso_process = try std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", "limine-cd-efi.bin", "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, self.b.allocator);
+        const xorriso_process = try std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, self.b.allocator);
         // Ignore stderr and stdout
         xorriso_process.stdin_behavior = std.ChildProcess.StdIo.Ignore;
         xorriso_process.stdout_behavior = std.ChildProcess.StdIo.Ignore;
