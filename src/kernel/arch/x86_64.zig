@@ -1,6 +1,5 @@
 const kernel = @import("../kernel.zig");
 
-const limine = @import("x86_64/limine3/limine.zig");
 // TODO
 pub fn disable_interrupts() void {}
 
@@ -19,5 +18,3 @@ pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} 
 pub export fn _start() noreturn {
     while (true) {}
 }
-
-pub export var terminal_request = limine.limine_terminal_request{ .id = limine.limine_terminal_request_id, .revision = 0, .callback = undefined, .response = undefined };

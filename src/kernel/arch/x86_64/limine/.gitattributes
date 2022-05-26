@@ -1,5 +1,9 @@
-limine.sys binary merge
-limine-cd.bin binary merge
-limine-hdd.bin binary merge
-limine-eltorito-efi.bin binary merge
-BOOTX64.EFI binary merge
+BOOTIA32.EFI
+BOOTX64.EFI
+limine-cd-efi.bin 
+limine-cd.bin
+limine-deploy.c
+limine-hdd.h
+limine-pxe.bin
+limine.h
+limine.sys

@@ -96,8 +96,8 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             kernel_exe.code_model = .kernel;
             kernel_exe.red_zone = false;
             kernel_exe.omit_frame_pointer = false;
-            if (LimineImage.version == 3) {
-                linker_path = arch_source_dir ++ "linker_limine3.ld";
+            if (Limine.protocol == .limine) {
+                linker_path = arch_source_dir ++ "linker_limine.ld";
             }
         },
         else => @compileError("CPU architecture not supported"),
@@ -125,7 +125,7 @@ pub fn build(b: *Builder) void {
     const qemu = qemu_command(b);
     switch (current_arch) {
         .x86_64 => {
-            const image_step = LimineImage.create(b, kernel);
+            const image_step = Limine.create_image_step(b, kernel);
             qemu.step.dependOn(image_step);
         },
         else => {
@@ -170,7 +170,7 @@ const HDD = struct {
             .bytes = buffer[0..],
         };
         fs.add_file(disk, "font.psf", font_file);
-        fs.read(disk);
+        fs.read_debug(disk);
         //std.mem.copy(u8, &buffer, font_file);
 
         try std.fs.cwd().writeFile(HDD.path, &HDD.buffer);
@@ -185,7 +185,7 @@ fn qemu_command(b: *Builder) *std.build.RunStep {
 }
 
 fn get_qemu_command(arch: std.Target.Cpu.Arch) []const []const u8 {
-    log.debug("Arch: {}", .{arch});
+    log.debug("Running: {s}", .{@tagName(arch)});
     return switch (arch) {
         .riscv64 => &riscv_qemu_command_str,
         .x86_64 => &x86_bios_qemu_cmd,
@@ -282,13 +282,18 @@ const riscv_qemu_command_str = [_][]const u8 {
 // zig fmt: on
 
 const image_path = "zig-cache/universal.iso";
-const limine_installer = @import("src/kernel/arch/x86_64/limine3/installer.zig");
 
-const LimineImage = struct {
+const Limine = struct {
     step: std.build.Step,
     b: *Builder,
 
-    const version = 2;
+    const Protocol = enum(u32) {
+        stivale2,
+        limine,
+    };
+    const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
+
+    const protocol = Protocol.stivale2;
 
     fn build(step: *std.build.Step) !void {
         const self = @fieldParentPtr(@This(), "step", step);
@@ -297,19 +302,10 @@ const LimineImage = struct {
         cwd.deleteFile(image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-        const limine_dir_path = switch (version) {
-            2 => "src/kernel/arch/x86_64/limine",
-            3 => "src/kernel/arch/x86_64/limine3",
-            else => unreachable,
-        };
+        const limine_dir_path = "src/kernel/arch/x86_64/limine";
         const limine_dir = try cwd.openDir(limine_dir_path, .{});
 
-        const limine_efi_bin_file = switch (version) {
-            2 => "limine-eltorito-efi.bin",
-            3 => "limine-cd-efi.bin",
-            else => unreachable,
-        };
-
+        const limine_efi_bin_file = "limine-cd-efi.bin";
         const files_to_copy_from_limine_dir = [_][]const u8{
             "limine.cfg",
             "limine.sys",
@@ -331,10 +327,10 @@ const LimineImage = struct {
         xorriso_process.stderr_behavior = std.ChildProcess.StdIo.Ignore;
         _ = try xorriso_process.spawnAndWait();
 
-        try limine_installer.install(image_path, false, null);
+        try Limine.installer.install(image_path, false, null);
     }
 
-    fn create(b: *Builder, kernel: *std.build.LibExeObjStep) *std.build.Step {
+    fn create_image_step(b: *Builder, kernel: *std.build.LibExeObjStep) *std.build.Step {
         var self = b.allocator.create(@This()) catch @panic("out of memory");
 
         self.* = @This(){

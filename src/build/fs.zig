@@ -32,7 +32,7 @@ pub fn add_file(disk: MemoryDisk, name: []const u8, content: []const u8) void {
     std.mem.copy(u8, left, content);
 }
 
-pub fn read(disk: MemoryDisk) void {
+pub fn read_debug(disk: MemoryDisk) void {
     var node = @ptrCast(*fs.Node, @alignCast(@alignOf(fs.Node), disk.bytes.ptr));
     log.debug("Node size: {}. Node name: {s}", .{ node.size, node.name });
     log.debug("First bytes:", .{});

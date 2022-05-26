@@ -1,9 +1,0 @@
-BOOTIA32.EFI
-BOOTX64.EFI
-limine-cd-efi.bin 
-limine-cd.bin
-limine-deploy.c
-limine-hdd.h
-limine-pxe.bin
-limine.h
-limine.sys
