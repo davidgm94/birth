@@ -4,7 +4,11 @@ const builtin = @import("builtin");
 pub const log = std.log;
 pub const current_arch = builtin.cpu.arch;
 pub const build_mode = builtin.mode;
-pub const arch = @import("arch/x86_64.zig");
+pub const arch = switch (current_arch) {
+    .riscv64 => @import("arch/riscv64/riscv64.zig"),
+    .x86_64 => @import("arch/x86_64.zig"),
+    else => @compileError("CPU architecture not supported"),
+};
 pub const Memory = @import("memory.zig");
 pub usingnamespace @import("assertion.zig");
 pub usingnamespace @import("data_manipulation.zig");

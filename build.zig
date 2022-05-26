@@ -47,7 +47,7 @@ fn get_x86_base_features() CPUFeatures {
     return features;
 }
 
-fn get_target_base(arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
+fn get_target_base(comptime arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
     const cpu_features = switch (current_arch) {
         .riscv64 => blk: {
             break :blk get_riscv_base_features();
@@ -103,7 +103,7 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
         else => @compileError("CPU architecture not supported"),
     }
     kernel_exe.setTarget(target);
-    kernel_exe.entry_symbol_name = "_start";
+    kernel_exe.entry_symbol_name = "start";
     kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_path));
 }
 
@@ -183,9 +183,7 @@ fn qemu_command(b: *Builder) *std.build.RunStep {
     step.dependOn(&run_step.step);
     return run_step;
 }
-
-fn get_qemu_command(arch: std.Target.Cpu.Arch) []const []const u8 {
-    log.debug("Running: {s}", .{@tagName(arch)});
+fn get_qemu_command(comptime arch: std.Target.Cpu.Arch) []const []const u8 {
     return switch (arch) {
         .riscv64 => &riscv_qemu_command_str,
         .x86_64 => &x86_bios_qemu_cmd,
@@ -201,7 +199,6 @@ const x86_bios_qemu_cmd = [_][]const u8{
     "-vga", "std",
     "-m", "4G",
     "-machine", "q35",
-    "-S", "-s",
     // zig fmt: on
 };
 
@@ -224,38 +221,51 @@ const Debug = struct {
     fn make(step: *std.build.Step) !void {
         const self = @fieldParentPtr(Debug, "step", step);
         const b = self.b;
-        const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
-        const process = std.ChildProcess.init(&riscv_qemu_command_str ++ [_][]const u8{ "-S", "-s" }, b.allocator) catch unreachable;
-        _ = process.spawnAndWait() catch unreachable;
+        const qemu = get_qemu_command(current_arch) ++ [_][]const u8{ "-S", "-s" };
+        if (building_os != .windows) {
 
-        terminal_thread.join();
-    }
+        } else {
+            const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
+            const process = try std.ChildProcess.init(qemu, b.allocator);
+            _ = try process.spawnAndWait();
 
-    fn terminal_and_gdb_thread(b: *std.build.Builder) void {
-        switch (building_os) {
-            .linux, .macos => {
-                // zig fmt: off
-                const process = std.ChildProcess.init(&.{
-                    "kitty", "--start-as=maximized",
-                    "riscv64-elf-gdb",
-                    "-tui",
-                    "-ex", "symbol-file zig-cache/kernel.elf",
-                    "-ex", "target remote :1234",
-                    "-ex", "b riscv_start",
-                    "-ex", "b kernel.panic.panic",
-                    "-ex", "c",
-                }, b.allocator) catch unreachable;
-                // zig fmt: on
-                _ = process.spawnAndWait() catch unreachable;
-            },
-            else => unreachable,
+            terminal_thread.join();
+            _ = try process.kill();
         }
     }
 
-    fn get_terminal_name() []const []const u8 {
-        if (builtin.target.os.tag == .linux) {
-            return "kitty";
-        } else unreachable;
+    fn terminal_and_gdb_thread(b: *std.build.Builder) void {
+        _ = b;
+        //zig fmt: off
+        var kernel_elf = std.fs.realpathAlloc(b.allocator, "zig-cache/kernel.elf") catch unreachable;
+        if (builtin.os.tag == .windows) {
+            const buffer = b.allocator.create([512]u8) catch unreachable;
+            var counter: u64 = 0;
+            for (kernel_elf) |ch| {
+                const is_separator = ch == '\\';
+                buffer[counter] = ch;
+                buffer[counter + @boolToInt(is_separator)] = ch;
+                counter += @as(u64, 1) + @boolToInt(is_separator);
+            }
+            kernel_elf = buffer[0..counter];
+        }
+        const symbol_file = b.fmt("symbol-file {s}", .{kernel_elf});
+        const process_name = [_][]const u8{
+            "alacritty", "-e",
+            get_gdb_name(current_arch),
+            "-tui",
+            "-ex", symbol_file,
+            "-ex", "target remote :1234",
+            "-ex", "b start",
+            "-ex", "c",
+        };
+
+        for (process_name) |arg, arg_i| {
+            log.debug("Process[{}]: {s}", .{arg_i, arg});
+        }
+        const process = std.ChildProcess.init(&process_name, b.allocator) catch unreachable;
+        // zig fmt: on
+        _ = process.spawnAndWait() catch unreachable;
     }
 };
 
@@ -346,3 +356,11 @@ const Limine = struct {
         return image_step;
     }
 };
+
+fn get_gdb_name(comptime arch: std.Target.Cpu.Arch) []const u8 {
+    return switch (arch) {
+        .riscv64 => "riscv64-elf-gdb",
+        .x86_64 => "C:\\Users\\David\\programs\\gdb\\bin\\gdb", // TODO
+        else => @compileError("CPU architecture not supported"),
+    };
+}

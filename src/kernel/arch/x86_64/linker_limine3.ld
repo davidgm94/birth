@@ -3,7 +3,7 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
  
 /* We want the symbol _start to be our entry point */
-ENTRY(_start)
+ENTRY(start)
  
 /* Define the program headers we want so the bootloader gives us the right */
 /* MMU permissions */

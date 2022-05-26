@@ -1,4 +1,4 @@
-ENTRY(_start)
+ENTRY(start)
 
 PHDRS {
   none   PT_NULL FLAGS(0);
@@ -11,7 +11,7 @@ SECTIONS {
   . = 0xFFFFFFFF80100000;
 
   .stivale2hdr . : {
-    QUAD(_start) /* Entry point */
+    QUAD(start) /* Entry point */
     QUAD(__stack_high) /* Stack */
     QUAD(0) /* Flags */
     QUAD(__stivale2_tags) /* Tags */

@@ -2,7 +2,7 @@ OUTPUT_ARCH(riscv)
 OUTPUT_FORMAT("elf64-littleriscv")
 
 /* Entry Point */
-ENTRY(_start)
+ENTRY(start)
 
 /* OpenSBI transfer control to this address */
 BASE_ADDRESS = 0x80200000;
