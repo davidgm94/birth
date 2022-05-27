@@ -71,8 +71,6 @@ fn get_target_base(comptime arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
 fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjStep) void {
     var target = get_target_base(current_arch);
 
-    var linker_path = arch_source_dir ++ "linker.ld";
-
     switch (current_arch) {
         .riscv64 => {
             target.cpu_features_sub.addFeature(@enumToInt(std.Target.riscv.Feature.d));
@@ -86,6 +84,9 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             for (asssembly_files) |asm_file| {
                 kernel_exe.addAssemblyFile(asm_file);
             }
+
+            const linker_path = arch_source_dir ++ "linker.ld";
+            kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_path));
         },
         .x86_64 => {
             kernel_exe.code_model = .kernel;
@@ -96,15 +97,15 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             kernel_exe.code_model = .kernel;
             kernel_exe.red_zone = false;
             kernel_exe.omit_frame_pointer = false;
-            if (Limine.protocol == .limine) {
-                linker_path = arch_source_dir ++ "linker_limine.ld";
-            }
+            const linker_script_file = @tagName(Limine.protocol) ++ ".ld";
+            const linker_script_path = Limine.base_path ++ linker_script_file;
+            log.debug("Linker script path: {s}", .{linker_script_path});
+            kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_script_path));
         },
         else => @compileError("CPU architecture not supported"),
     }
+
     kernel_exe.setTarget(target);
-    kernel_exe.entry_symbol_name = "start";
-    kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_path));
 }
 
 pub fn build(b: *Builder) void {
@@ -304,6 +305,8 @@ const Limine = struct {
     const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
 
     const protocol = Protocol.stivale2;
+    const base_path = "src/kernel/arch/x86_64/limine/";
+    const to_install_path = base_path ++ "to_install/";
 
     fn build(step: *std.build.Step) !void {
         const self = @fieldParentPtr(@This(), "step", step);
@@ -312,8 +315,7 @@ const Limine = struct {
         cwd.deleteFile(image_path) catch {};
         const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-        const limine_dir_path = "src/kernel/arch/x86_64/limine";
-        const limine_dir = try cwd.openDir(limine_dir_path, .{});
+        const limine_dir = try cwd.openDir(to_install_path, .{});
 
         const limine_efi_bin_file = "limine-cd-efi.bin";
         const files_to_copy_from_limine_dir = [_][]const u8{

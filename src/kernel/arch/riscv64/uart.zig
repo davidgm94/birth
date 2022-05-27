@@ -21,7 +21,6 @@ const LSR = 5; // line status register
 pub fn UART(comptime base_address: u64) type {
     return struct {
         const ptr = @intToPtr([*c]volatile u8, base_address);
-        lock: Spinlock,
 
         /// Return an uninitialized Uart instance
         /// init set baud rate and enable UART

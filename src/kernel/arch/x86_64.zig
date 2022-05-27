@@ -1,23 +1,15 @@
 const kernel = @import("../kernel.zig");
 const TODO = kernel.TODO;
 
+const log = kernel.log.scoped(.x86_64);
+
+pub const Spinlock = @import("x86_64/spinlock.zig");
+
 // TODO
 pub fn disable_interrupts() void {}
 
-pub const Writer = struct {
-    const Error = error{};
-    pub var should_lock = false;
-    // TODO
-    fn write(_: void, bytes: []const u8) Error!usize {
-        _ = bytes;
-        return 0;
-    }
-};
-
-pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} };
-
 pub export fn start() noreturn {
-    write_to_debug_port("Hello kernel");
+    log.debug("Hello kernel!", .{});
     while (true) {}
 }
 
@@ -96,8 +88,10 @@ inline fn in8(comptime port: u16) u8 {
     );
 }
 
-pub inline fn write_to_debug_port(str: []const u8) void {
+pub inline fn writer_function(str: []const u8) usize {
     for (str) |c| {
         out8(IOPort.E9_hack, c);
     }
+
+    return str.len;
 }

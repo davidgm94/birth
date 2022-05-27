@@ -106,8 +106,8 @@ const Scause = enum(u64) {
 const ilog = kernel.log.scoped(.Interrupt);
 
 export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
-    Writer.should_lock = false;
-    defer Writer.should_lock = true;
+    kernel.arch.writer.should_lock = false;
+    defer kernel.arch.writer.should_lock = true;
 
     _ = context;
     _ = stval;
@@ -199,24 +199,18 @@ pub fn disable_interrupts() void {
     sstatus.clear(.SIE);
 }
 
-pub const Writer = struct {
-    const Error = error{};
-    pub var should_lock = false;
-    fn write(_: void, bytes: []const u8) Error!usize {
-        if (should_lock) uart.write_bytes(bytes, true) else uart.write_bytes(bytes, false);
-        return bytes.len;
-    }
-};
-
-pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} };
-
-pub inline fn print(comptime format: []const u8, args: anytype) void {
-    writer.print(format, args) catch unreachable;
+pub fn write_function(bytes: []const u8) u64 {
+    const bytes_written = uart.write_bytes(bytes);
+    return bytes_written;
 }
 
-pub inline fn write(bytes: []const u8) void {
-    _ = writer.write(bytes) catch unreachable;
-}
+//pub inline fn print(comptime format: []const u8, args: anytype) void {
+//writer.print(format, args) catch unreachable;
+//}
+
+//pub inline fn write(bytes: []const u8) void {
+//_ = writer.write(bytes) catch unreachable;
+//}
 
 pub const Bounds = struct {
     extern const kernel_start: u8;
