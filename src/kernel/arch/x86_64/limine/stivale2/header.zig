@@ -1,5 +1,5 @@
 const std = @import("std");
-const u64_max = 0xffff_ffff_ffff_ffff;
+const u64_max = std.math.maxInt(u64);
 
 pub const Tag = extern struct {
     identifier: u64,
@@ -81,7 +81,7 @@ pub const Struct = extern struct {
 
     pub const MemoryMap = extern struct {
         tag: Tag align(1),
-        entries: u64,
+        entry_count: u64,
         pub fn memmap(self: anytype) @import("std").zig.c_translation.FlexibleArrayType(@TypeOf(self), Entry) {
             const Intermediate = @import("std").zig.c_translation.FlexibleArrayType(@TypeOf(self), u8);
             const ReturnType = @import("std").zig.c_translation.FlexibleArrayType(@TypeOf(self), Entry);
@@ -89,8 +89,8 @@ pub const Struct = extern struct {
         }
 
         pub const Entry = extern struct {
-            base: u64,
-            length: u64,
+            address: u64,
+            size: u64,
             type: Type,
             unused: u32,
 

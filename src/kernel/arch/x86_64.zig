@@ -3,14 +3,26 @@ const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
 
+const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
+
+pub const page_size = 0x1000;
 pub const Spinlock = @import("x86_64/spinlock.zig");
 
 // TODO
-pub fn disable_interrupts() void {}
+pub inline fn enable_interrupts() void {}
+pub inline fn disable_interrupts() void {}
 
-pub export fn start() noreturn {
+pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     log.debug("Hello kernel!", .{});
-    while (true) {}
+    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale_struct) orelse @panic("Stivale had no memory map struct");
+    const memory_map = Stivale2.process_memory_map(memory_map_struct);
+    for (memory_map) |map_entry| {
+        log.debug("(0x{x}, {}, {})", .{ map_entry.region.address, map_entry.region.size, map_entry.type });
+    }
+
+    while (true) {
+        kernel.spinloop_hint();
+    }
 }
 
 const IOPort = struct {

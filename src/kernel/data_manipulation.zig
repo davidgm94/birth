@@ -49,14 +49,22 @@ pub inline fn zero_a_page(page_address: u64) void {
     zero(@intToPtr([*]u8, page_address)[0..kernel.arch.page_size]);
 }
 
-pub inline fn bytes_to_pages(bytes: u64) u64 {
-    const pages = (bytes / page_size) + @boolToInt(bytes % page_size != 0);
-    return pages;
+pub inline fn bytes_to_pages(bytes: u64, comptime must_be_exact: bool) u64 {
+    return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
 }
 
-pub inline fn bytes_to_sector(bytes: u64) u64 {
-    const pages = (bytes / sector_size) + @boolToInt(bytes % sector_size != 0);
-    return pages;
+pub inline fn bytes_to_sector(bytes: u64, comptime must_be_exact: bool) u64 {
+    return remainder_division_maybe_exact(bytes, sector_size, must_be_exact);
+}
+
+pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: bool) u64 {
+    if (divisor == 0) unreachable;
+    const quotient = dividend / divisor;
+    const remainder = dividend % divisor;
+    const remainder_not_zero = remainder != 0;
+    if (must_be_exact and remainder_not_zero) @panic("remainder not exact when asked to be exact");
+
+    return quotient + @boolToInt(remainder_not_zero);
 }
 
 pub const maxInt = std.math.maxInt;

@@ -7,6 +7,8 @@ const arch = switch (current_arch) {
     else => @compileError("CPU architecture not supported"),
 };
 
+pub const page_size = arch.page_size;
+
 pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;
 

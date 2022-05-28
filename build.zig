@@ -99,7 +99,6 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             kernel_exe.omit_frame_pointer = false;
             const linker_script_file = @tagName(Limine.protocol) ++ ".ld";
             const linker_script_path = Limine.base_path ++ linker_script_file;
-            log.debug("Linker script path: {s}", .{linker_script_path});
             kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_script_path));
         },
         else => @compileError("CPU architecture not supported"),
@@ -184,6 +183,7 @@ fn qemu_command(b: *Builder) *std.build.RunStep {
     step.dependOn(&run_step.step);
     return run_step;
 }
+
 fn get_qemu_command(comptime arch: std.Target.Cpu.Arch) []const []const u8 {
     return switch (arch) {
         .riscv64 => &riscv_qemu_command_str,
@@ -362,7 +362,12 @@ const Limine = struct {
 fn get_gdb_name(comptime arch: std.Target.Cpu.Arch) []const u8 {
     return switch (arch) {
         .riscv64 => "riscv64-elf-gdb",
-        .x86_64 => "C:\\Users\\David\\programs\\gdb\\bin\\gdb", // TODO
+        .x86_64 => blk: {
+            switch (building_os) {
+                .windows => break :blk "C:\\Users\\David\\programs\\gdb\\bin\\gdb",
+                else => break :blk "gdb",
+            }
+        },
         else => @compileError("CPU architecture not supported"),
     };
 }

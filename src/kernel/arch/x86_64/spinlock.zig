@@ -19,8 +19,8 @@ pub fn release(spinlock: *Spinlock) void {
     kernel.assert(@src(), result == expected);
 }
 
-inline fn assert_lock_status(spinlock: *Spinlock, status: bool) void {
-    if (status != spinlock.status) {
+inline fn assert_lock_status(spinlock: *Spinlock, expected_status: bool) void {
+    if (expected_status != spinlock.status) {
         kernel.panic("Spinlock not in a desired state", .{});
     }
 }
