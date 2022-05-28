@@ -9,12 +9,27 @@ pub const page_size = 0x1000;
 pub const Spinlock = @import("x86_64/spinlock.zig");
 
 // TODO
-pub inline fn enable_interrupts() void {}
-pub inline fn disable_interrupts() void {}
+pub inline fn enable_interrupts() void {
+    asm volatile ("sti");
+}
+pub inline fn disable_interrupts() void {
+    asm volatile ("cli");
+}
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     log.debug("Hello kernel!", .{});
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale_struct) orelse @panic("Stivale had no memory map struct");
+    const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
+    const framebuffer_struct = Stivale2.find(Stivale2.Struct.Framebuffer, stivale_struct) orelse @panic("Stivale had no framebuffer struct");
+    const kernel_struct = Stivale2.find(Stivale2.Struct.KernelFileV2, stivale_struct) orelse @panic("Stivale had no kernel struct");
+    const modules_struct = Stivale2.find(Stivale2.Struct.Modules, stivale_struct) orelse @panic("Stivale had no modules struct");
+    const epoch_struct = Stivale2.find(Stivale2.Struct.Epoch, stivale_struct) orelse @panic("Stivale had no epoch struct");
+    _ = rsdp_struct;
+    _ = framebuffer_struct;
+    _ = kernel_struct;
+    _ = modules_struct;
+    _ = epoch_struct;
+
     const memory_map = Stivale2.process_memory_map(memory_map_struct);
     for (memory_map) |map_entry| {
         log.debug("(0x{x}, {}, {})", .{ map_entry.region.address, map_entry.region.size, map_entry.type });

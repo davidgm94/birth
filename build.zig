@@ -223,8 +223,8 @@ const Debug = struct {
         const self = @fieldParentPtr(Debug, "step", step);
         const b = self.b;
         const qemu = get_qemu_command(current_arch) ++ [_][]const u8{ "-S", "-s" };
-        if (building_os != .windows) {
-
+        if (building_os == .windows) {
+            unreachable;
         } else {
             const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
             const process = try std.ChildProcess.init(qemu, b.allocator);
@@ -252,7 +252,7 @@ const Debug = struct {
         }
         const symbol_file = b.fmt("symbol-file {s}", .{kernel_elf});
         const process_name = [_][]const u8{
-            "alacritty", "-e",
+            "wezterm", "start", "--",
             get_gdb_name(current_arch),
             "-tui",
             "-ex", symbol_file,
@@ -365,6 +365,7 @@ fn get_gdb_name(comptime arch: std.Target.Cpu.Arch) []const u8 {
         .x86_64 => blk: {
             switch (building_os) {
                 .windows => break :blk "C:\\Users\\David\\programs\\gdb\\bin\\gdb",
+                .macos => break :blk "x86_64-elf-gdb",
                 else => break :blk "gdb",
             }
         },

@@ -12,6 +12,8 @@ pub fn find(comptime StructT: type, info: *align(1) stivale.Struct) ?*align(1) S
         if (tag.identifier == StructT.id) {
             return @ptrCast(*align(1) StructT, tag);
         }
+
+        tag_opt = @intToPtr(?*align(1) stivale.Tag, tag.next);
     }
 
     return null;
