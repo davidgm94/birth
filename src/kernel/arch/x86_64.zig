@@ -8,10 +8,10 @@ const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const page_size = 0x1000;
 pub const Spinlock = @import("x86_64/spinlock.zig");
 
-// TODO
 pub inline fn enable_interrupts() void {
     asm volatile ("sti");
 }
+
 pub inline fn disable_interrupts() void {
     asm volatile ("cli");
 }
@@ -121,4 +121,98 @@ pub inline fn writer_function(str: []const u8) usize {
     }
 
     return str.len;
+}
+
+pub const rax = SimpleR64("rax");
+pub const rbx = SimpleR64("rbx");
+pub const rcx = SimpleR64("rcx");
+pub const rdx = SimpleR64("rdx");
+pub const rbp = SimpleR64("rbp");
+pub const rsp = SimpleR64("rsp");
+pub const rsi = SimpleR64("rsi");
+pub const rdi = SimpleR64("rdi");
+pub const r8 = SimpleR64("r8");
+pub const r9 = SimpleR64("r9");
+pub const r10 = SimpleR64("r10");
+pub const r11 = SimpleR64("r11");
+pub const r12 = SimpleR64("r12");
+pub const r13 = SimpleR64("r13");
+pub const r14 = SimpleR64("r14");
+pub const r15 = SimpleR64("r15");
+
+pub fn SimpleR64(comptime name: []const u8) type {
+    return struct {
+        pub inline fn read() u64 {
+            return asm volatile ("mov %%" ++ name ++ ", %[result]"
+                : [result] "={rax}" (-> u64),
+            );
+        }
+
+        pub inline fn write(value: u64) void {
+            asm volatile ("mov %[in], %%" ++ name
+                :
+                : [in] "r" (value),
+            );
+        }
+    };
+}
+
+pub fn ComplexR64(comptime name: []const u8, comptime BitEnum: type) type {
+    return struct {
+        pub inline fn read_raw() u64 {
+            return asm volatile ("mov %%" ++ name ++ ", %[result]"
+                : [result] "={rax}" (-> u64),
+            );
+        }
+
+        pub inline fn write_raw(value: u64) void {
+            asm volatile ("mov %[in], %%" ++ name
+                :
+                : [in] "r" (value),
+            );
+        }
+
+        pub inline fn read() u64 {
+            return Value{
+                .value = read_raw(),
+            };
+        }
+
+        pub inline fn write(value: Value) void {
+            write_raw(value.value);
+        }
+
+        pub inline fn get_bit(comptime bit: BitEnum) bool {
+            return read().get_bit(bit);
+        }
+
+        pub inline fn set_bit(comptime bit: BitEnum) void {
+            var value = read();
+            value.set_bit(bit);
+            write(value);
+        }
+
+        pub inline fn clear_bit(comptime bit: BitEnum) void {
+            var value = read();
+            value.clear_bit(bit);
+            write(value);
+        }
+
+        pub const Value = struct {
+            value: u64,
+
+            pub inline fn get_bit(value: Value, comptime bit: BitEnum) bool {
+                return value.value & (1 << @enumToInt(bit)) != 0;
+            }
+
+            pub inline fn set_bit(value: *Value, comptime bit: BitEnum) void {
+                value.value |= 1 << @enumToInt(bit);
+            }
+
+            pub inline fn clear_bit(value: *Value, comptime bit: BitEnum) void {
+                const mask = ~(1 << @enumToInt(bit));
+                value.value &= mask;
+            }
+        };
+    };
 }
