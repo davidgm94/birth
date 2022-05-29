@@ -33,7 +33,6 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
     const host_entry = blk: {
         for (memory_map_entries) |*entry| {
             if (entry.type == .usable) {
-                log.debug("Size: {}", .{entry.size});
                 const bitset = kernel.Memory.Map.Entry.get_bitset_from_address_and_size(entry.address, entry.size);
                 const bitset_size = bitset.len * @sizeOf(kernel.Memory.Map.Entry.BitsetBaseType);
                 // INFO: this is separated since the bitset needs to be in a different page than the memory map
@@ -47,7 +46,7 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
                 result.usable = @intToPtr([*]kernel.Memory.Map.Entry, entry.address + kernel.align_forward(bitset_size, kernel.arch.page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = kernel.Memory.Map.Entry{
-                    .region = kernel.Memory.Region.Descriptor{
+                    .descriptor = kernel.Memory.Region.Descriptor{
                         .address = entry.address,
                         .size = entry.size,
                     },
@@ -67,14 +66,13 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
     // The counter starts with one because we have already filled the memory map with the host entry
     for (memory_map_entries) |*entry| {
         if (entry.type == .usable) {
-            if (entry.address == host_entry.region.address) continue;
+            if (entry.address == host_entry.descriptor.address) continue;
 
-            log.debug("Entry type: {}. Entry size: {}", .{ entry.type, entry.size });
             const index = result.usable.len;
             result.usable.len += 1;
             var result_entry = &result.usable[index];
             result_entry.* = kernel.Memory.Map.Entry{
-                .region = kernel.Memory.Region.Descriptor{
+                .descriptor = kernel.Memory.Region.Descriptor{
                     .address = entry.address,
                     .size = entry.size,
                 },
@@ -90,13 +88,11 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
 
     for (memory_map_entries) |*entry| {
         if (entry.type == .bootloader_reclaimable) {
-            log.debug("Entry type: {}. Entry size: {}", .{ entry.type, entry.size });
             const index = result.reclaimable.len;
-            log.debug("index: {}", .{index});
             result.reclaimable.len += 1;
             var result_entry = &result.reclaimable[index];
             result_entry.* = kernel.Memory.Map.Entry{
-                .region = kernel.Memory.Region.Descriptor{
+                .descriptor = kernel.Memory.Region.Descriptor{
                     .address = entry.address,
                     .size = entry.size,
                 },
@@ -112,9 +108,7 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
 
     for (memory_map_entries) |*entry| {
         if (entry.type == .framebuffer) {
-            log.debug("Entry type: {}. Entry size: {}", .{ entry.type, entry.size });
             const index = result.framebuffer.len;
-            log.debug("index: {}", .{index});
             result.framebuffer.len += 1;
             var result_entry = &result.framebuffer[index];
             result_entry.* = kernel.Memory.Region.Descriptor{
@@ -130,9 +124,7 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
 
     for (memory_map_entries) |*entry| {
         if (entry.type == .kernel_and_modules) {
-            log.debug("Entry type: {}. Entry size: {}", .{ entry.type, entry.size });
             const index = result.kernel_and_modules.len;
-            log.debug("index: {}", .{index});
             result.kernel_and_modules.len += 1;
             var result_entry = &result.kernel_and_modules[index];
             result_entry.* = kernel.Memory.Region.Descriptor{
@@ -148,9 +140,7 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
 
     for (memory_map_entries) |*entry| {
         if (entry.type == .reserved) {
-            log.debug("Entry type: {}. Entry size: {}", .{ entry.type, entry.size });
             const index = result.reserved.len;
-            log.debug("index: {}", .{index});
             result.reserved.len += 1;
             var result_entry = &result.reserved[index];
             result_entry.* = kernel.Memory.Region.Descriptor{

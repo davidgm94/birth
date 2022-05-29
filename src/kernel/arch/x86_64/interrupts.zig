@@ -280,7 +280,6 @@ pub fn init() void {
     // Initialize interrupts
     log.debug("Initializing interrupts", .{});
     PIC.disable();
-    log.debug("Reached to the goal", .{});
     install_interrupt_handlers();
     log.debug("Installed interrupt handlers", .{});
     idt.load();

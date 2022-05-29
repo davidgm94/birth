@@ -1,6 +1,8 @@
 const kernel = @import("kernel.zig");
 const std = @import("std");
 
+const log = kernel.log.scoped(.Memory);
+
 pub const Region = struct {
     pub const Descriptor = struct {
         address: u64,
@@ -16,7 +18,7 @@ pub const Map = struct {
     reserved: []Region.Descriptor,
 
     pub const Entry = struct {
-        region: Region.Descriptor,
+        descriptor: Region.Descriptor,
         allocated_size: u64,
         type: Type,
 
@@ -31,7 +33,7 @@ pub const Map = struct {
         };
 
         pub fn get_bitset(entry: *Entry) []BitsetBaseType {
-            return get_bitset_from_address_and_size(entry.region.address, entry.region.size);
+            return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
         }
 
         pub fn get_bitset_from_address_and_size(address: u64, size: u64) []BitsetBaseType {
@@ -69,5 +71,15 @@ pub const Map = struct {
             const bitset_page_count = kernel.bytes_to_pages(bitset_size, false);
             entry.setup_bitset(bitset_page_count);
         }
+
+        fn debug(entry: *Entry) void {
+            log.debug("(0x{x},\t{})", .{ entry.descriptor.address, entry.descriptor.size });
+        }
     };
+
+    pub fn debug(map: *Map) void {
+        for (map.usable) |region| {
+            region.debug();
+        }
+    }
 };
