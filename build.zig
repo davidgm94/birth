@@ -49,14 +49,11 @@ fn get_x86_base_features() CPUFeatures {
 
 fn get_target_base(comptime arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
     const cpu_features = switch (current_arch) {
-        .riscv64 => blk: {
-            break :blk get_riscv_base_features();
-        },
-        .x86_64 => blk: {
-            break :blk get_x86_base_features();
-        },
+        .riscv64 => get_riscv_base_features(),
+        .x86_64 => get_x86_base_features(),
         else => @compileError("CPU architecture notFeatureed\n"),
     };
+
     const target = std.zig.CrossTarget{
         .cpu_arch = arch,
         .os_tag = .freestanding,
