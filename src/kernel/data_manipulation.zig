@@ -2,6 +2,8 @@ const std = @import("std");
 const kernel = @import("kernel.zig");
 const page_size = kernel.arch.page_size;
 const sector_size = kernel.arch.sector_size;
+
+const log = kernel.log.scoped(.data_manipulation);
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
@@ -61,6 +63,7 @@ pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, compti
     if (divisor == 0) unreachable;
     const quotient = dividend / divisor;
     const remainder = dividend % divisor;
+    log.debug("{} % {} = {}", .{ dividend, divisor, remainder });
     const remainder_not_zero = remainder != 0;
     if (must_be_exact and remainder_not_zero) @panic("remainder not exact when asked to be exact");
 

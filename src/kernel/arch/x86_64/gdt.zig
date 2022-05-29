@@ -15,13 +15,29 @@ pub const Table = packed struct {
     tss: TSS.Descriptor, // 0x48
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS));
+        kernel.assert_unsafe(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
         kernel.assert_unsafe(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
     }
+
     pub fn initial_setup(gdt: *Table) void {
-        gdt.tss =
+        gdt.tss = tss.get_descriptor();
+    }
+
+    pub inline fn load(gdt: *Table) void {
+        const register = DescriptorTable.Register{
+            .limit = @sizeOf(Table) - 1,
+            .address = @ptrToInt(gdt),
+        };
+
+        asm volatile (
+            \\  lgdt %[gdt_register]
+            :
+            : [gdt_register] "*p" (&register),
+        );
     }
 };
+
+var tss: TSS.Struct = undefined;
 
 const Entry = u64;
 
@@ -34,4 +50,3 @@ pub fn save() DescriptorTable.Register {
 
     return register;
 }
-

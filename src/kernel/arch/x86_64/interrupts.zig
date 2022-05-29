@@ -1,6 +1,7 @@
 const kernel = @import("../../kernel.zig");
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
+const GDT = @import("gdt.zig");
 
 const log = kernel.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;
@@ -383,9 +384,9 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
         .offset_low = @truncate(u16, handler_address),
         .offset_mid = @truncate(u16, handler_address >> 16),
         .offset_high = @truncate(u32, handler_address >> 32),
-        .segment_selector = 0x08, // @TODO: this should change as the GDT selector changes
+        .segment_selector = @offsetOf(GDT.Table, "code_64"), // @TODO: this should change as the GDT selector changes
         .interrupt_stack_table = 0,
-        .type = 0xe,
+        .type = .interrupt,
         .descriptor_privilege_level = 0,
         .present = 1,
     };

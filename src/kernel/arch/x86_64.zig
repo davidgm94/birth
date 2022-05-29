@@ -1,4 +1,5 @@
 const kernel = @import("../kernel.zig");
+const PhysicalMemory = kernel.PhysicalMemory;
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -11,32 +12,38 @@ pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 
-pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
+var gdt = GDT.Table{
+    .tss = undefined,
+};
+
+var stivale2_struct: *Stivale2.Struct = undefined;
+pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
+    stivale2_struct = _stivale_struct;
     const limine_gdt = GDT.save();
     log.debug("Limine GDT: {}", .{limine_gdt});
     log.debug("Hello kernel!", .{});
-    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale_struct) orelse @panic("Stivale had no memory map struct");
-    const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
-    const framebuffer_struct = Stivale2.find(Stivale2.Struct.Framebuffer, stivale_struct) orelse @panic("Stivale had no framebuffer struct");
-    const kernel_struct = Stivale2.find(Stivale2.Struct.KernelFileV2, stivale_struct) orelse @panic("Stivale had no kernel struct");
-    const modules_struct = Stivale2.find(Stivale2.Struct.Modules, stivale_struct) orelse @panic("Stivale had no modules struct");
-    const epoch_struct = Stivale2.find(Stivale2.Struct.Epoch, stivale_struct) orelse @panic("Stivale had no epoch struct");
-    _ = memory_map_struct;
-    _ = rsdp_struct;
-    _ = framebuffer_struct;
-    _ = kernel_struct;
-    _ = modules_struct;
-    _ = epoch_struct;
+    log.debug("Trying to load GDT", .{});
+    gdt.initial_setup();
+    gdt.load();
+    log.debug("GDT loaded", .{});
+    //const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
+    //const framebuffer_struct = Stivale2.find(Stivale2.Struct.Framebuffer, stivale_struct) orelse @panic("Stivale had no framebuffer struct");
+    //const kernel_struct = Stivale2.find(Stivale2.Struct.KernelFileV2, stivale_struct) orelse @panic("Stivale had no kernel struct");
+    //const modules_struct = Stivale2.find(Stivale2.Struct.Modules, stivale_struct) orelse @panic("Stivale had no modules struct");
+    //const epoch_struct = Stivale2.find(Stivale2.Struct.Epoch, stivale_struct) orelse @panic("Stivale had no epoch struct");
+    //_ = memory_map_struct;
+    //_ = rsdp_struct;
+    //_ = framebuffer_struct;
+    //_ = kernel_struct;
+    //_ = modules_struct;
+    //_ = epoch_struct;
 
     enable_cpu_features();
 
     interrupts.init();
 
-    const memory_map = Stivale2.process_memory_map(memory_map_struct);
-    for (memory_map) |map_entry| {
-        log.debug("(0x{x}, {}, {})", .{ map_entry.region.address, map_entry.region.size, map_entry.type });
-    }
+    PhysicalMemory.init();
 
     while (true) {
         kernel.spinloop_hint();
@@ -721,3 +728,8 @@ pub inline fn cpuid(leaf: u32) CPUID {
 //return null;
 //}
 //};
+
+pub fn get_memory_map() kernel.Memory.Map {
+    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale2_struct) orelse @panic("Stivale had no RSDP struct");
+    return Stivale2.process_memory_map(memory_map_struct);
+}

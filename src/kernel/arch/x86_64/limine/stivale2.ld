@@ -73,4 +73,6 @@ SECTIONS {
     __stack_high = .;
     *(.bss*)
   }
+  
+  . = ALIGN(64K);
 }

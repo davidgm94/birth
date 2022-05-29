@@ -1,5 +1,6 @@
 const kernel = @import("kernel.zig");
 const std = @import("std");
+
 pub const Region = struct {
     pub const Descriptor = struct {
         address: u64,
@@ -8,18 +9,24 @@ pub const Region = struct {
 };
 
 pub const Map = struct {
+    usable: []Entry,
+    reclaimable: []Entry,
+    framebuffer: []Region.Descriptor,
+    kernel_and_modules: []Region.Descriptor,
+    reserved: []Region.Descriptor,
+
     pub const Entry = struct {
         region: Region.Descriptor,
-        allocated_page_count: u64,
+        allocated_size: u64,
         type: Type,
 
         pub const BitsetBaseType = u64;
 
         pub const Type = enum(u64) {
             usable = 0,
-            framebuffer = 1,
-            kernel_and_modules = 2,
-            bootloader_reclaimable = 3,
+            reclaimable = 1,
+            framebuffer = 2,
+            kernel_and_modules = 3,
             reserved = 4,
         };
 
@@ -34,7 +41,7 @@ pub const Map = struct {
         }
 
         pub fn setup_bitset(entry: *Entry, page_count: u64) void {
-            entry.allocated_page_count += page_count;
+            entry.allocated_size += page_count * kernel.arch.page_size;
 
             const bitsize = @bitSizeOf(kernel.Memory.Map.Entry.BitsetBaseType);
             const quotient = page_count / bitsize;
@@ -52,6 +59,15 @@ pub const Map = struct {
             while (remainder_i < remainder) : (remainder_i += 1) {
                 bitset[quotient] |= @as(u64, 1) << remainder_i;
             }
+        }
+
+        pub fn setup_bitset_alone(entry: *Entry) void {
+            // Setup the bitset
+            const bitset = entry.get_bitset();
+            const bitset_size = bitset.len * @sizeOf(kernel.Memory.Map.Entry.BitsetBaseType);
+            // INFO: this is separated since the bitset needs to be in a different page than the memory map
+            const bitset_page_count = kernel.bytes_to_pages(bitset_size, false);
+            entry.setup_bitset(bitset_page_count);
         }
     };
 };

@@ -25,6 +25,7 @@ pub const Disk = @import("disk.zig");
 pub const RNUFS = @import("rnu_fs.zig");
 pub const driver = @import("driver.zig");
 pub const Driver = driver.Driver;
+pub const PhysicalMemory = @import("physical_memory.zig");
 
 pub var address_space: arch.Virtual.AddressSpace = undefined;
 pub var heap: Heap = undefined;
