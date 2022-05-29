@@ -8,17 +8,10 @@ pub const page_size = 0x1000;
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const PIC = @import("x86_64/pic.zig");
-
-pub inline fn enable_interrupts() void {
-    asm volatile ("sti");
-}
-
-pub inline fn disable_interrupts() void {
-    asm volatile ("cli");
-}
+pub const interrupts = @import("x86_64/interrupts.zig");
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
-    disable_interrupts();
+    interrupts.disable();
     log.debug("Hello kernel!", .{});
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale_struct) orelse @panic("Stivale had no memory map struct");
     const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
@@ -34,6 +27,8 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     _ = epoch_struct;
 
     enable_cpu_features();
+
+    interrupts.init();
 
     const memory_map = Stivale2.process_memory_map(memory_map_struct);
     for (memory_map) |map_entry| {
@@ -565,22 +560,6 @@ fn enable_cpu_features() void {
     log.debug("Making sure the cache is initialized properly", .{});
     kernel.assert(@src(), !cr0.get_bit(.CD));
     kernel.assert(@src(), !cr0.get_bit(.NW));
-
-    // Initialize interrupts
-    log.debug("Initializing interrupts", .{});
-    PIC.disable();
-    log.debug("Reached to the goal", .{});
-    if (true) unreachable;
-    //interrupts.IDT.fill();
-    //const idtr = interrupts.IDT.Register{
-    //.address = &interrupts.IDT.table,
-    //};
-    //asm volatile (
-    //\\lidt (%[idt_address])
-    //:
-    //: [idt_address] "r" (&idtr),
-    //);
-    //paging.init();
 }
 
 pub fn SimpleMSR(comptime msr: u32) type {

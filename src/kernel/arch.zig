@@ -9,8 +9,8 @@ const arch = switch (current_arch) {
 
 pub const page_size = arch.page_size;
 
-pub const enable_interrupts = arch.enable_interrupts;
-pub const disable_interrupts = arch.disable_interrupts;
+pub const enable_interrupts = arch.interrupts.enable;
+pub const disable_interrupts = arch.interrupts.disable;
 
 pub const Writer = struct {
     const Error = error{};
