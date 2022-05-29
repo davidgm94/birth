@@ -1,304 +1,273 @@
 const kernel = @import("../../kernel.zig");
 const PIC = @import("pic.zig");
+const IDT = @import("idt.zig");
 
 const log = kernel.log.scoped(.interrupts);
-const IDTEntry = u128;
-export var idt: [256]Descriptor align(0x1000) = undefined;
+const Handler = fn () callconv(.Naked) void;
 
-const Descriptor = packed struct {
-    offset_low: u16,
-    segment_selector: u16,
-    interrupt_stack_table: u3,
-    reserved: u5 = 0,
-    type: u4,
-    reserved1: u1 = 0,
-    descriptor_privilege_level: u2,
-    present: u1,
-    offset_mid: u16,
-    offset_high: u32,
-    reserved2: u32 = 0,
-};
-
-const InterruptHandler = fn () callconv(.Naked) void;
+export var idt: IDT = undefined;
 
 pub fn install_interrupt_handlers() void {
-    install_interrupt_handler(0, comptime make_interrupt_handler(0, false));
-    install_interrupt_handler(1, comptime make_interrupt_handler(1, false));
-    install_interrupt_handler(2, comptime make_interrupt_handler(2, false));
-    install_interrupt_handler(3, comptime make_interrupt_handler(3, false));
-    install_interrupt_handler(4, comptime make_interrupt_handler(4, false));
-    install_interrupt_handler(5, comptime make_interrupt_handler(5, false));
-    install_interrupt_handler(6, comptime make_interrupt_handler(6, false));
-    install_interrupt_handler(7, comptime make_interrupt_handler(7, false));
-    install_interrupt_handler(8, comptime make_interrupt_handler(8, true));
-    install_interrupt_handler(9, comptime make_interrupt_handler(9, false));
-    install_interrupt_handler(10, comptime make_interrupt_handler(10, true));
-    install_interrupt_handler(11, comptime make_interrupt_handler(11, true));
-    install_interrupt_handler(12, comptime make_interrupt_handler(12, true));
-    install_interrupt_handler(13, comptime make_interrupt_handler(13, true));
-    install_interrupt_handler(14, comptime make_interrupt_handler(14, true));
-    install_interrupt_handler(15, comptime make_interrupt_handler(15, false));
-    install_interrupt_handler(16, comptime make_interrupt_handler(16, false));
-    install_interrupt_handler(17, comptime make_interrupt_handler(17, true));
-    install_interrupt_handler(18, comptime make_interrupt_handler(18, false));
-    install_interrupt_handler(19, comptime make_interrupt_handler(19, false));
-    install_interrupt_handler(20, comptime make_interrupt_handler(20, false));
-    install_interrupt_handler(21, comptime make_interrupt_handler(21, false));
-    install_interrupt_handler(22, comptime make_interrupt_handler(22, false));
-    install_interrupt_handler(23, comptime make_interrupt_handler(23, false));
-    install_interrupt_handler(24, comptime make_interrupt_handler(24, false));
-    install_interrupt_handler(25, comptime make_interrupt_handler(25, false));
-    install_interrupt_handler(26, comptime make_interrupt_handler(26, false));
-    install_interrupt_handler(27, comptime make_interrupt_handler(27, false));
-    install_interrupt_handler(28, comptime make_interrupt_handler(28, false));
-    install_interrupt_handler(29, comptime make_interrupt_handler(29, false));
-    install_interrupt_handler(30, comptime make_interrupt_handler(30, false));
-    install_interrupt_handler(31, comptime make_interrupt_handler(31, false));
-    install_interrupt_handler(32, comptime make_interrupt_handler(32, false));
-    install_interrupt_handler(33, comptime make_interrupt_handler(33, false));
-    install_interrupt_handler(34, comptime make_interrupt_handler(34, false));
-    install_interrupt_handler(35, comptime make_interrupt_handler(35, false));
-    install_interrupt_handler(36, comptime make_interrupt_handler(36, false));
-    install_interrupt_handler(37, comptime make_interrupt_handler(37, false));
-    install_interrupt_handler(38, comptime make_interrupt_handler(38, false));
-    install_interrupt_handler(39, comptime make_interrupt_handler(39, false));
-    install_interrupt_handler(40, comptime make_interrupt_handler(40, false));
-    install_interrupt_handler(41, comptime make_interrupt_handler(41, false));
-    install_interrupt_handler(42, comptime make_interrupt_handler(42, false));
-    install_interrupt_handler(43, comptime make_interrupt_handler(43, false));
-    install_interrupt_handler(44, comptime make_interrupt_handler(44, false));
-    install_interrupt_handler(45, comptime make_interrupt_handler(45, false));
-    install_interrupt_handler(46, comptime make_interrupt_handler(46, false));
-    install_interrupt_handler(47, comptime make_interrupt_handler(47, false));
-    install_interrupt_handler(48, comptime make_interrupt_handler(48, false));
-    install_interrupt_handler(49, comptime make_interrupt_handler(49, false));
-    install_interrupt_handler(50, comptime make_interrupt_handler(50, false));
-    install_interrupt_handler(51, comptime make_interrupt_handler(51, false));
-    install_interrupt_handler(52, comptime make_interrupt_handler(52, false));
-    install_interrupt_handler(53, comptime make_interrupt_handler(53, false));
-    install_interrupt_handler(54, comptime make_interrupt_handler(54, false));
-    install_interrupt_handler(55, comptime make_interrupt_handler(55, false));
-    install_interrupt_handler(56, comptime make_interrupt_handler(56, false));
-    install_interrupt_handler(57, comptime make_interrupt_handler(57, false));
-    install_interrupt_handler(58, comptime make_interrupt_handler(58, false));
-    install_interrupt_handler(59, comptime make_interrupt_handler(59, false));
-    install_interrupt_handler(60, comptime make_interrupt_handler(60, false));
-    install_interrupt_handler(61, comptime make_interrupt_handler(61, false));
-    install_interrupt_handler(62, comptime make_interrupt_handler(62, false));
-    install_interrupt_handler(63, comptime make_interrupt_handler(63, false));
-    install_interrupt_handler(64, comptime make_interrupt_handler(64, false));
-    install_interrupt_handler(65, comptime make_interrupt_handler(65, false));
-    install_interrupt_handler(66, comptime make_interrupt_handler(66, false));
-    install_interrupt_handler(67, comptime make_interrupt_handler(67, false));
-    install_interrupt_handler(68, comptime make_interrupt_handler(68, false));
-    install_interrupt_handler(69, comptime make_interrupt_handler(69, false));
-    install_interrupt_handler(70, comptime make_interrupt_handler(70, false));
-    install_interrupt_handler(71, comptime make_interrupt_handler(71, false));
-    install_interrupt_handler(72, comptime make_interrupt_handler(72, false));
-    install_interrupt_handler(73, comptime make_interrupt_handler(73, false));
-    install_interrupt_handler(74, comptime make_interrupt_handler(74, false));
-    install_interrupt_handler(75, comptime make_interrupt_handler(75, false));
-    install_interrupt_handler(76, comptime make_interrupt_handler(76, false));
-    install_interrupt_handler(77, comptime make_interrupt_handler(77, false));
-    install_interrupt_handler(78, comptime make_interrupt_handler(78, false));
-    install_interrupt_handler(79, comptime make_interrupt_handler(79, false));
-    install_interrupt_handler(80, comptime make_interrupt_handler(80, false));
-    install_interrupt_handler(81, comptime make_interrupt_handler(81, false));
-    install_interrupt_handler(82, comptime make_interrupt_handler(82, false));
-    install_interrupt_handler(83, comptime make_interrupt_handler(83, false));
-    install_interrupt_handler(84, comptime make_interrupt_handler(84, false));
-    install_interrupt_handler(85, comptime make_interrupt_handler(85, false));
-    install_interrupt_handler(86, comptime make_interrupt_handler(86, false));
-    install_interrupt_handler(87, comptime make_interrupt_handler(87, false));
-    install_interrupt_handler(88, comptime make_interrupt_handler(88, false));
-    install_interrupt_handler(89, comptime make_interrupt_handler(89, false));
-    install_interrupt_handler(90, comptime make_interrupt_handler(90, false));
-    install_interrupt_handler(91, comptime make_interrupt_handler(91, false));
-    install_interrupt_handler(92, comptime make_interrupt_handler(92, false));
-    install_interrupt_handler(93, comptime make_interrupt_handler(93, false));
-    install_interrupt_handler(94, comptime make_interrupt_handler(94, false));
-    install_interrupt_handler(95, comptime make_interrupt_handler(95, false));
-    install_interrupt_handler(96, comptime make_interrupt_handler(96, false));
-    install_interrupt_handler(97, comptime make_interrupt_handler(97, false));
-    install_interrupt_handler(98, comptime make_interrupt_handler(98, false));
-    install_interrupt_handler(99, comptime make_interrupt_handler(99, false));
+    idt.add_interrupt_handler(get_handler_descriptor(0, false));
+    idt.add_interrupt_handler(get_handler_descriptor(1, false));
+    idt.add_interrupt_handler(get_handler_descriptor(2, false));
+    idt.add_interrupt_handler(get_handler_descriptor(3, false));
+    idt.add_interrupt_handler(get_handler_descriptor(4, false));
+    idt.add_interrupt_handler(get_handler_descriptor(5, false));
+    idt.add_interrupt_handler(get_handler_descriptor(6, false));
+    idt.add_interrupt_handler(get_handler_descriptor(7, false));
+    idt.add_interrupt_handler(get_handler_descriptor(8, true));
+    idt.add_interrupt_handler(get_handler_descriptor(9, false));
+    idt.add_interrupt_handler(get_handler_descriptor(10, true));
+    idt.add_interrupt_handler(get_handler_descriptor(11, true));
+    idt.add_interrupt_handler(get_handler_descriptor(12, true));
+    idt.add_interrupt_handler(get_handler_descriptor(13, true));
+    idt.add_interrupt_handler(get_handler_descriptor(14, true));
+    idt.add_interrupt_handler(get_handler_descriptor(15, false));
+    idt.add_interrupt_handler(get_handler_descriptor(16, false));
+    idt.add_interrupt_handler(get_handler_descriptor(17, true));
+    idt.add_interrupt_handler(get_handler_descriptor(18, false));
+    idt.add_interrupt_handler(get_handler_descriptor(19, false));
+    idt.add_interrupt_handler(get_handler_descriptor(20, false));
+    idt.add_interrupt_handler(get_handler_descriptor(21, false));
+    idt.add_interrupt_handler(get_handler_descriptor(22, false));
+    idt.add_interrupt_handler(get_handler_descriptor(23, false));
+    idt.add_interrupt_handler(get_handler_descriptor(24, false));
+    idt.add_interrupt_handler(get_handler_descriptor(25, false));
+    idt.add_interrupt_handler(get_handler_descriptor(26, false));
+    idt.add_interrupt_handler(get_handler_descriptor(27, false));
+    idt.add_interrupt_handler(get_handler_descriptor(28, false));
+    idt.add_interrupt_handler(get_handler_descriptor(29, false));
+    idt.add_interrupt_handler(get_handler_descriptor(30, false));
+    idt.add_interrupt_handler(get_handler_descriptor(31, false));
+    idt.add_interrupt_handler(get_handler_descriptor(32, false));
+    idt.add_interrupt_handler(get_handler_descriptor(33, false));
+    idt.add_interrupt_handler(get_handler_descriptor(34, false));
+    idt.add_interrupt_handler(get_handler_descriptor(35, false));
+    idt.add_interrupt_handler(get_handler_descriptor(36, false));
+    idt.add_interrupt_handler(get_handler_descriptor(37, false));
+    idt.add_interrupt_handler(get_handler_descriptor(38, false));
+    idt.add_interrupt_handler(get_handler_descriptor(39, false));
+    idt.add_interrupt_handler(get_handler_descriptor(40, false));
+    idt.add_interrupt_handler(get_handler_descriptor(41, false));
+    idt.add_interrupt_handler(get_handler_descriptor(42, false));
+    idt.add_interrupt_handler(get_handler_descriptor(43, false));
+    idt.add_interrupt_handler(get_handler_descriptor(44, false));
+    idt.add_interrupt_handler(get_handler_descriptor(45, false));
+    idt.add_interrupt_handler(get_handler_descriptor(46, false));
+    idt.add_interrupt_handler(get_handler_descriptor(47, false));
+    idt.add_interrupt_handler(get_handler_descriptor(48, false));
+    idt.add_interrupt_handler(get_handler_descriptor(49, false));
+    idt.add_interrupt_handler(get_handler_descriptor(50, false));
+    idt.add_interrupt_handler(get_handler_descriptor(51, false));
+    idt.add_interrupt_handler(get_handler_descriptor(52, false));
+    idt.add_interrupt_handler(get_handler_descriptor(53, false));
+    idt.add_interrupt_handler(get_handler_descriptor(54, false));
+    idt.add_interrupt_handler(get_handler_descriptor(55, false));
+    idt.add_interrupt_handler(get_handler_descriptor(56, false));
+    idt.add_interrupt_handler(get_handler_descriptor(57, false));
+    idt.add_interrupt_handler(get_handler_descriptor(58, false));
+    idt.add_interrupt_handler(get_handler_descriptor(59, false));
+    idt.add_interrupt_handler(get_handler_descriptor(60, false));
+    idt.add_interrupt_handler(get_handler_descriptor(61, false));
+    idt.add_interrupt_handler(get_handler_descriptor(62, false));
+    idt.add_interrupt_handler(get_handler_descriptor(63, false));
+    idt.add_interrupt_handler(get_handler_descriptor(64, false));
+    idt.add_interrupt_handler(get_handler_descriptor(65, false));
+    idt.add_interrupt_handler(get_handler_descriptor(66, false));
+    idt.add_interrupt_handler(get_handler_descriptor(67, false));
+    idt.add_interrupt_handler(get_handler_descriptor(68, false));
+    idt.add_interrupt_handler(get_handler_descriptor(69, false));
+    idt.add_interrupt_handler(get_handler_descriptor(70, false));
+    idt.add_interrupt_handler(get_handler_descriptor(71, false));
+    idt.add_interrupt_handler(get_handler_descriptor(72, false));
+    idt.add_interrupt_handler(get_handler_descriptor(73, false));
+    idt.add_interrupt_handler(get_handler_descriptor(74, false));
+    idt.add_interrupt_handler(get_handler_descriptor(75, false));
+    idt.add_interrupt_handler(get_handler_descriptor(76, false));
+    idt.add_interrupt_handler(get_handler_descriptor(77, false));
+    idt.add_interrupt_handler(get_handler_descriptor(78, false));
+    idt.add_interrupt_handler(get_handler_descriptor(79, false));
+    idt.add_interrupt_handler(get_handler_descriptor(80, false));
+    idt.add_interrupt_handler(get_handler_descriptor(81, false));
+    idt.add_interrupt_handler(get_handler_descriptor(82, false));
+    idt.add_interrupt_handler(get_handler_descriptor(83, false));
+    idt.add_interrupt_handler(get_handler_descriptor(84, false));
+    idt.add_interrupt_handler(get_handler_descriptor(85, false));
+    idt.add_interrupt_handler(get_handler_descriptor(86, false));
+    idt.add_interrupt_handler(get_handler_descriptor(87, false));
+    idt.add_interrupt_handler(get_handler_descriptor(88, false));
+    idt.add_interrupt_handler(get_handler_descriptor(89, false));
+    idt.add_interrupt_handler(get_handler_descriptor(90, false));
+    idt.add_interrupt_handler(get_handler_descriptor(91, false));
+    idt.add_interrupt_handler(get_handler_descriptor(92, false));
+    idt.add_interrupt_handler(get_handler_descriptor(93, false));
+    idt.add_interrupt_handler(get_handler_descriptor(94, false));
+    idt.add_interrupt_handler(get_handler_descriptor(95, false));
+    idt.add_interrupt_handler(get_handler_descriptor(96, false));
+    idt.add_interrupt_handler(get_handler_descriptor(97, false));
+    idt.add_interrupt_handler(get_handler_descriptor(98, false));
+    idt.add_interrupt_handler(get_handler_descriptor(99, false));
 
-    install_interrupt_handler(100, comptime make_interrupt_handler(100, false));
-    install_interrupt_handler(101, comptime make_interrupt_handler(101, false));
-    install_interrupt_handler(102, comptime make_interrupt_handler(102, false));
-    install_interrupt_handler(103, comptime make_interrupt_handler(103, false));
-    install_interrupt_handler(104, comptime make_interrupt_handler(104, false));
-    install_interrupt_handler(105, comptime make_interrupt_handler(105, false));
-    install_interrupt_handler(106, comptime make_interrupt_handler(106, false));
-    install_interrupt_handler(107, comptime make_interrupt_handler(107, false));
-    install_interrupt_handler(108, comptime make_interrupt_handler(108, false));
-    install_interrupt_handler(109, comptime make_interrupt_handler(109, false));
-    install_interrupt_handler(110, comptime make_interrupt_handler(110, false));
-    install_interrupt_handler(111, comptime make_interrupt_handler(111, false));
-    install_interrupt_handler(112, comptime make_interrupt_handler(112, false));
-    install_interrupt_handler(113, comptime make_interrupt_handler(113, false));
-    install_interrupt_handler(114, comptime make_interrupt_handler(114, false));
-    install_interrupt_handler(115, comptime make_interrupt_handler(115, false));
-    install_interrupt_handler(116, comptime make_interrupt_handler(116, false));
-    install_interrupt_handler(117, comptime make_interrupt_handler(117, false));
-    install_interrupt_handler(118, comptime make_interrupt_handler(118, false));
-    install_interrupt_handler(119, comptime make_interrupt_handler(119, false));
-    install_interrupt_handler(120, comptime make_interrupt_handler(120, false));
-    install_interrupt_handler(121, comptime make_interrupt_handler(121, false));
-    install_interrupt_handler(122, comptime make_interrupt_handler(122, false));
-    install_interrupt_handler(123, comptime make_interrupt_handler(123, false));
-    install_interrupt_handler(124, comptime make_interrupt_handler(124, false));
-    install_interrupt_handler(125, comptime make_interrupt_handler(125, false));
-    install_interrupt_handler(126, comptime make_interrupt_handler(126, false));
-    install_interrupt_handler(127, comptime make_interrupt_handler(127, false));
-    install_interrupt_handler(128, comptime make_interrupt_handler(128, false));
-    install_interrupt_handler(129, comptime make_interrupt_handler(129, false));
-    install_interrupt_handler(130, comptime make_interrupt_handler(130, false));
-    install_interrupt_handler(131, comptime make_interrupt_handler(131, false));
-    install_interrupt_handler(132, comptime make_interrupt_handler(132, false));
-    install_interrupt_handler(133, comptime make_interrupt_handler(133, false));
-    install_interrupt_handler(134, comptime make_interrupt_handler(134, false));
-    install_interrupt_handler(135, comptime make_interrupt_handler(135, false));
-    install_interrupt_handler(136, comptime make_interrupt_handler(136, false));
-    install_interrupt_handler(137, comptime make_interrupt_handler(137, false));
-    install_interrupt_handler(138, comptime make_interrupt_handler(138, false));
-    install_interrupt_handler(139, comptime make_interrupt_handler(139, false));
-    install_interrupt_handler(140, comptime make_interrupt_handler(140, false));
-    install_interrupt_handler(141, comptime make_interrupt_handler(141, false));
-    install_interrupt_handler(142, comptime make_interrupt_handler(142, false));
-    install_interrupt_handler(143, comptime make_interrupt_handler(143, false));
-    install_interrupt_handler(144, comptime make_interrupt_handler(144, false));
-    install_interrupt_handler(145, comptime make_interrupt_handler(145, false));
-    install_interrupt_handler(146, comptime make_interrupt_handler(146, false));
-    install_interrupt_handler(147, comptime make_interrupt_handler(147, false));
-    install_interrupt_handler(148, comptime make_interrupt_handler(148, false));
-    install_interrupt_handler(149, comptime make_interrupt_handler(149, false));
-    install_interrupt_handler(150, comptime make_interrupt_handler(150, false));
-    install_interrupt_handler(151, comptime make_interrupt_handler(151, false));
-    install_interrupt_handler(152, comptime make_interrupt_handler(152, false));
-    install_interrupt_handler(153, comptime make_interrupt_handler(153, false));
-    install_interrupt_handler(154, comptime make_interrupt_handler(154, false));
-    install_interrupt_handler(155, comptime make_interrupt_handler(155, false));
-    install_interrupt_handler(156, comptime make_interrupt_handler(156, false));
-    install_interrupt_handler(157, comptime make_interrupt_handler(157, false));
-    install_interrupt_handler(158, comptime make_interrupt_handler(158, false));
-    install_interrupt_handler(159, comptime make_interrupt_handler(159, false));
-    install_interrupt_handler(160, comptime make_interrupt_handler(160, false));
-    install_interrupt_handler(161, comptime make_interrupt_handler(161, false));
-    install_interrupt_handler(162, comptime make_interrupt_handler(162, false));
-    install_interrupt_handler(163, comptime make_interrupt_handler(163, false));
-    install_interrupt_handler(164, comptime make_interrupt_handler(164, false));
-    install_interrupt_handler(165, comptime make_interrupt_handler(165, false));
-    install_interrupt_handler(166, comptime make_interrupt_handler(166, false));
-    install_interrupt_handler(167, comptime make_interrupt_handler(167, false));
-    install_interrupt_handler(168, comptime make_interrupt_handler(168, false));
-    install_interrupt_handler(169, comptime make_interrupt_handler(169, false));
-    install_interrupt_handler(170, comptime make_interrupt_handler(170, false));
-    install_interrupt_handler(171, comptime make_interrupt_handler(171, false));
-    install_interrupt_handler(172, comptime make_interrupt_handler(172, false));
-    install_interrupt_handler(173, comptime make_interrupt_handler(173, false));
-    install_interrupt_handler(174, comptime make_interrupt_handler(174, false));
-    install_interrupt_handler(175, comptime make_interrupt_handler(175, false));
-    install_interrupt_handler(176, comptime make_interrupt_handler(176, false));
-    install_interrupt_handler(177, comptime make_interrupt_handler(177, false));
-    install_interrupt_handler(178, comptime make_interrupt_handler(178, false));
-    install_interrupt_handler(179, comptime make_interrupt_handler(179, false));
-    install_interrupt_handler(180, comptime make_interrupt_handler(180, false));
-    install_interrupt_handler(181, comptime make_interrupt_handler(181, false));
-    install_interrupt_handler(182, comptime make_interrupt_handler(182, false));
-    install_interrupt_handler(183, comptime make_interrupt_handler(183, false));
-    install_interrupt_handler(184, comptime make_interrupt_handler(184, false));
-    install_interrupt_handler(185, comptime make_interrupt_handler(185, false));
-    install_interrupt_handler(186, comptime make_interrupt_handler(186, false));
-    install_interrupt_handler(187, comptime make_interrupt_handler(187, false));
-    install_interrupt_handler(188, comptime make_interrupt_handler(188, false));
-    install_interrupt_handler(189, comptime make_interrupt_handler(189, false));
-    install_interrupt_handler(190, comptime make_interrupt_handler(190, false));
-    install_interrupt_handler(191, comptime make_interrupt_handler(191, false));
-    install_interrupt_handler(192, comptime make_interrupt_handler(192, false));
-    install_interrupt_handler(193, comptime make_interrupt_handler(193, false));
-    install_interrupt_handler(194, comptime make_interrupt_handler(194, false));
-    install_interrupt_handler(195, comptime make_interrupt_handler(195, false));
-    install_interrupt_handler(196, comptime make_interrupt_handler(196, false));
-    install_interrupt_handler(197, comptime make_interrupt_handler(197, false));
-    install_interrupt_handler(198, comptime make_interrupt_handler(198, false));
-    install_interrupt_handler(199, comptime make_interrupt_handler(199, false));
-    install_interrupt_handler(200, comptime make_interrupt_handler(200, false));
+    idt.add_interrupt_handler(get_handler_descriptor(100, false));
+    idt.add_interrupt_handler(get_handler_descriptor(101, false));
+    idt.add_interrupt_handler(get_handler_descriptor(102, false));
+    idt.add_interrupt_handler(get_handler_descriptor(103, false));
+    idt.add_interrupt_handler(get_handler_descriptor(104, false));
+    idt.add_interrupt_handler(get_handler_descriptor(105, false));
+    idt.add_interrupt_handler(get_handler_descriptor(106, false));
+    idt.add_interrupt_handler(get_handler_descriptor(107, false));
+    idt.add_interrupt_handler(get_handler_descriptor(108, false));
+    idt.add_interrupt_handler(get_handler_descriptor(109, false));
+    idt.add_interrupt_handler(get_handler_descriptor(110, false));
+    idt.add_interrupt_handler(get_handler_descriptor(111, false));
+    idt.add_interrupt_handler(get_handler_descriptor(112, false));
+    idt.add_interrupt_handler(get_handler_descriptor(113, false));
+    idt.add_interrupt_handler(get_handler_descriptor(114, false));
+    idt.add_interrupt_handler(get_handler_descriptor(115, false));
+    idt.add_interrupt_handler(get_handler_descriptor(116, false));
+    idt.add_interrupt_handler(get_handler_descriptor(117, false));
+    idt.add_interrupt_handler(get_handler_descriptor(118, false));
+    idt.add_interrupt_handler(get_handler_descriptor(119, false));
+    idt.add_interrupt_handler(get_handler_descriptor(120, false));
+    idt.add_interrupt_handler(get_handler_descriptor(121, false));
+    idt.add_interrupt_handler(get_handler_descriptor(122, false));
+    idt.add_interrupt_handler(get_handler_descriptor(123, false));
+    idt.add_interrupt_handler(get_handler_descriptor(124, false));
+    idt.add_interrupt_handler(get_handler_descriptor(125, false));
+    idt.add_interrupt_handler(get_handler_descriptor(126, false));
+    idt.add_interrupt_handler(get_handler_descriptor(127, false));
+    idt.add_interrupt_handler(get_handler_descriptor(128, false));
+    idt.add_interrupt_handler(get_handler_descriptor(129, false));
+    idt.add_interrupt_handler(get_handler_descriptor(130, false));
+    idt.add_interrupt_handler(get_handler_descriptor(131, false));
+    idt.add_interrupt_handler(get_handler_descriptor(132, false));
+    idt.add_interrupt_handler(get_handler_descriptor(133, false));
+    idt.add_interrupt_handler(get_handler_descriptor(134, false));
+    idt.add_interrupt_handler(get_handler_descriptor(135, false));
+    idt.add_interrupt_handler(get_handler_descriptor(136, false));
+    idt.add_interrupt_handler(get_handler_descriptor(137, false));
+    idt.add_interrupt_handler(get_handler_descriptor(138, false));
+    idt.add_interrupt_handler(get_handler_descriptor(139, false));
+    idt.add_interrupt_handler(get_handler_descriptor(140, false));
+    idt.add_interrupt_handler(get_handler_descriptor(141, false));
+    idt.add_interrupt_handler(get_handler_descriptor(142, false));
+    idt.add_interrupt_handler(get_handler_descriptor(143, false));
+    idt.add_interrupt_handler(get_handler_descriptor(144, false));
+    idt.add_interrupt_handler(get_handler_descriptor(145, false));
+    idt.add_interrupt_handler(get_handler_descriptor(146, false));
+    idt.add_interrupt_handler(get_handler_descriptor(147, false));
+    idt.add_interrupt_handler(get_handler_descriptor(148, false));
+    idt.add_interrupt_handler(get_handler_descriptor(149, false));
+    idt.add_interrupt_handler(get_handler_descriptor(150, false));
+    idt.add_interrupt_handler(get_handler_descriptor(151, false));
+    idt.add_interrupt_handler(get_handler_descriptor(152, false));
+    idt.add_interrupt_handler(get_handler_descriptor(153, false));
+    idt.add_interrupt_handler(get_handler_descriptor(154, false));
+    idt.add_interrupt_handler(get_handler_descriptor(155, false));
+    idt.add_interrupt_handler(get_handler_descriptor(156, false));
+    idt.add_interrupt_handler(get_handler_descriptor(157, false));
+    idt.add_interrupt_handler(get_handler_descriptor(158, false));
+    idt.add_interrupt_handler(get_handler_descriptor(159, false));
+    idt.add_interrupt_handler(get_handler_descriptor(160, false));
+    idt.add_interrupt_handler(get_handler_descriptor(161, false));
+    idt.add_interrupt_handler(get_handler_descriptor(162, false));
+    idt.add_interrupt_handler(get_handler_descriptor(163, false));
+    idt.add_interrupt_handler(get_handler_descriptor(164, false));
+    idt.add_interrupt_handler(get_handler_descriptor(165, false));
+    idt.add_interrupt_handler(get_handler_descriptor(166, false));
+    idt.add_interrupt_handler(get_handler_descriptor(167, false));
+    idt.add_interrupt_handler(get_handler_descriptor(168, false));
+    idt.add_interrupt_handler(get_handler_descriptor(169, false));
+    idt.add_interrupt_handler(get_handler_descriptor(170, false));
+    idt.add_interrupt_handler(get_handler_descriptor(171, false));
+    idt.add_interrupt_handler(get_handler_descriptor(172, false));
+    idt.add_interrupt_handler(get_handler_descriptor(173, false));
+    idt.add_interrupt_handler(get_handler_descriptor(174, false));
+    idt.add_interrupt_handler(get_handler_descriptor(175, false));
+    idt.add_interrupt_handler(get_handler_descriptor(176, false));
+    idt.add_interrupt_handler(get_handler_descriptor(177, false));
+    idt.add_interrupt_handler(get_handler_descriptor(178, false));
+    idt.add_interrupt_handler(get_handler_descriptor(179, false));
+    idt.add_interrupt_handler(get_handler_descriptor(180, false));
+    idt.add_interrupt_handler(get_handler_descriptor(181, false));
+    idt.add_interrupt_handler(get_handler_descriptor(182, false));
+    idt.add_interrupt_handler(get_handler_descriptor(183, false));
+    idt.add_interrupt_handler(get_handler_descriptor(184, false));
+    idt.add_interrupt_handler(get_handler_descriptor(185, false));
+    idt.add_interrupt_handler(get_handler_descriptor(186, false));
+    idt.add_interrupt_handler(get_handler_descriptor(187, false));
+    idt.add_interrupt_handler(get_handler_descriptor(188, false));
+    idt.add_interrupt_handler(get_handler_descriptor(189, false));
+    idt.add_interrupt_handler(get_handler_descriptor(190, false));
+    idt.add_interrupt_handler(get_handler_descriptor(191, false));
+    idt.add_interrupt_handler(get_handler_descriptor(192, false));
+    idt.add_interrupt_handler(get_handler_descriptor(193, false));
+    idt.add_interrupt_handler(get_handler_descriptor(194, false));
+    idt.add_interrupt_handler(get_handler_descriptor(195, false));
+    idt.add_interrupt_handler(get_handler_descriptor(196, false));
+    idt.add_interrupt_handler(get_handler_descriptor(197, false));
+    idt.add_interrupt_handler(get_handler_descriptor(198, false));
+    idt.add_interrupt_handler(get_handler_descriptor(199, false));
+    idt.add_interrupt_handler(get_handler_descriptor(200, false));
 
-    install_interrupt_handler(200, comptime make_interrupt_handler(200, false));
-    install_interrupt_handler(201, comptime make_interrupt_handler(201, false));
-    install_interrupt_handler(202, comptime make_interrupt_handler(202, false));
-    install_interrupt_handler(203, comptime make_interrupt_handler(203, false));
-    install_interrupt_handler(204, comptime make_interrupt_handler(204, false));
-    install_interrupt_handler(205, comptime make_interrupt_handler(205, false));
-    install_interrupt_handler(206, comptime make_interrupt_handler(206, false));
-    install_interrupt_handler(207, comptime make_interrupt_handler(207, false));
-    install_interrupt_handler(208, comptime make_interrupt_handler(208, false));
-    install_interrupt_handler(209, comptime make_interrupt_handler(209, false));
-    install_interrupt_handler(210, comptime make_interrupt_handler(210, false));
-    install_interrupt_handler(211, comptime make_interrupt_handler(211, false));
-    install_interrupt_handler(212, comptime make_interrupt_handler(212, false));
-    install_interrupt_handler(213, comptime make_interrupt_handler(213, false));
-    install_interrupt_handler(214, comptime make_interrupt_handler(214, false));
-    install_interrupt_handler(215, comptime make_interrupt_handler(215, false));
-    install_interrupt_handler(216, comptime make_interrupt_handler(216, false));
-    install_interrupt_handler(217, comptime make_interrupt_handler(217, false));
-    install_interrupt_handler(218, comptime make_interrupt_handler(218, false));
-    install_interrupt_handler(219, comptime make_interrupt_handler(219, false));
-    install_interrupt_handler(220, comptime make_interrupt_handler(220, false));
-    install_interrupt_handler(221, comptime make_interrupt_handler(221, false));
-    install_interrupt_handler(222, comptime make_interrupt_handler(222, false));
-    install_interrupt_handler(223, comptime make_interrupt_handler(223, false));
-    install_interrupt_handler(224, comptime make_interrupt_handler(224, false));
-    install_interrupt_handler(225, comptime make_interrupt_handler(225, false));
-    install_interrupt_handler(226, comptime make_interrupt_handler(226, false));
-    install_interrupt_handler(227, comptime make_interrupt_handler(227, false));
-    install_interrupt_handler(228, comptime make_interrupt_handler(228, false));
-    install_interrupt_handler(229, comptime make_interrupt_handler(229, false));
-    install_interrupt_handler(230, comptime make_interrupt_handler(230, false));
-    install_interrupt_handler(231, comptime make_interrupt_handler(231, false));
-    install_interrupt_handler(232, comptime make_interrupt_handler(232, false));
-    install_interrupt_handler(233, comptime make_interrupt_handler(233, false));
-    install_interrupt_handler(234, comptime make_interrupt_handler(234, false));
-    install_interrupt_handler(235, comptime make_interrupt_handler(235, false));
-    install_interrupt_handler(236, comptime make_interrupt_handler(236, false));
-    install_interrupt_handler(237, comptime make_interrupt_handler(237, false));
-    install_interrupt_handler(238, comptime make_interrupt_handler(238, false));
-    install_interrupt_handler(239, comptime make_interrupt_handler(239, false));
-    install_interrupt_handler(240, comptime make_interrupt_handler(240, false));
-    install_interrupt_handler(241, comptime make_interrupt_handler(241, false));
-    install_interrupt_handler(242, comptime make_interrupt_handler(242, false));
-    install_interrupt_handler(243, comptime make_interrupt_handler(243, false));
-    install_interrupt_handler(244, comptime make_interrupt_handler(244, false));
-    install_interrupt_handler(245, comptime make_interrupt_handler(245, false));
-    install_interrupt_handler(246, comptime make_interrupt_handler(246, false));
-    install_interrupt_handler(247, comptime make_interrupt_handler(247, false));
-    install_interrupt_handler(248, comptime make_interrupt_handler(248, false));
-    install_interrupt_handler(249, comptime make_interrupt_handler(249, false));
-    install_interrupt_handler(250, comptime make_interrupt_handler(250, false));
-    install_interrupt_handler(251, comptime make_interrupt_handler(251, false));
-    install_interrupt_handler(252, comptime make_interrupt_handler(252, false));
-    install_interrupt_handler(253, comptime make_interrupt_handler(253, false));
-    install_interrupt_handler(254, comptime make_interrupt_handler(254, false));
-    install_interrupt_handler(255, comptime make_interrupt_handler(255, false));
+    idt.add_interrupt_handler(get_handler_descriptor(201, false));
+    idt.add_interrupt_handler(get_handler_descriptor(202, false));
+    idt.add_interrupt_handler(get_handler_descriptor(203, false));
+    idt.add_interrupt_handler(get_handler_descriptor(204, false));
+    idt.add_interrupt_handler(get_handler_descriptor(205, false));
+    idt.add_interrupt_handler(get_handler_descriptor(206, false));
+    idt.add_interrupt_handler(get_handler_descriptor(207, false));
+    idt.add_interrupt_handler(get_handler_descriptor(208, false));
+    idt.add_interrupt_handler(get_handler_descriptor(209, false));
+    idt.add_interrupt_handler(get_handler_descriptor(210, false));
+    idt.add_interrupt_handler(get_handler_descriptor(211, false));
+    idt.add_interrupt_handler(get_handler_descriptor(212, false));
+    idt.add_interrupt_handler(get_handler_descriptor(213, false));
+    idt.add_interrupt_handler(get_handler_descriptor(214, false));
+    idt.add_interrupt_handler(get_handler_descriptor(215, false));
+    idt.add_interrupt_handler(get_handler_descriptor(216, false));
+    idt.add_interrupt_handler(get_handler_descriptor(217, false));
+    idt.add_interrupt_handler(get_handler_descriptor(218, false));
+    idt.add_interrupt_handler(get_handler_descriptor(219, false));
+    idt.add_interrupt_handler(get_handler_descriptor(220, false));
+    idt.add_interrupt_handler(get_handler_descriptor(221, false));
+    idt.add_interrupt_handler(get_handler_descriptor(222, false));
+    idt.add_interrupt_handler(get_handler_descriptor(223, false));
+    idt.add_interrupt_handler(get_handler_descriptor(224, false));
+    idt.add_interrupt_handler(get_handler_descriptor(225, false));
+    idt.add_interrupt_handler(get_handler_descriptor(226, false));
+    idt.add_interrupt_handler(get_handler_descriptor(227, false));
+    idt.add_interrupt_handler(get_handler_descriptor(228, false));
+    idt.add_interrupt_handler(get_handler_descriptor(229, false));
+    idt.add_interrupt_handler(get_handler_descriptor(230, false));
+    idt.add_interrupt_handler(get_handler_descriptor(231, false));
+    idt.add_interrupt_handler(get_handler_descriptor(232, false));
+    idt.add_interrupt_handler(get_handler_descriptor(233, false));
+    idt.add_interrupt_handler(get_handler_descriptor(234, false));
+    idt.add_interrupt_handler(get_handler_descriptor(235, false));
+    idt.add_interrupt_handler(get_handler_descriptor(236, false));
+    idt.add_interrupt_handler(get_handler_descriptor(237, false));
+    idt.add_interrupt_handler(get_handler_descriptor(238, false));
+    idt.add_interrupt_handler(get_handler_descriptor(239, false));
+    idt.add_interrupt_handler(get_handler_descriptor(240, false));
+    idt.add_interrupt_handler(get_handler_descriptor(241, false));
+    idt.add_interrupt_handler(get_handler_descriptor(242, false));
+    idt.add_interrupt_handler(get_handler_descriptor(243, false));
+    idt.add_interrupt_handler(get_handler_descriptor(244, false));
+    idt.add_interrupt_handler(get_handler_descriptor(245, false));
+    idt.add_interrupt_handler(get_handler_descriptor(246, false));
+    idt.add_interrupt_handler(get_handler_descriptor(247, false));
+    idt.add_interrupt_handler(get_handler_descriptor(248, false));
+    idt.add_interrupt_handler(get_handler_descriptor(249, false));
+    idt.add_interrupt_handler(get_handler_descriptor(250, false));
+    idt.add_interrupt_handler(get_handler_descriptor(251, false));
+    idt.add_interrupt_handler(get_handler_descriptor(252, false));
+    idt.add_interrupt_handler(get_handler_descriptor(253, false));
+    idt.add_interrupt_handler(get_handler_descriptor(254, false));
+    idt.add_interrupt_handler(get_handler_descriptor(255, false));
 }
 
-pub const Register = packed struct {
-    limit: u16 = @sizeOf(@TypeOf(idt)) - 1,
-    address: u64,
-};
-
-pub inline fn load_idt() void {
-    const idtr = Register{
-        .address = @ptrToInt(&idt),
-    };
-
-    asm volatile (
-        \\lidt (%[idt_address])
-        :
-        : [idt_address] "r" (&idtr),
-    );
-}
 pub inline fn enable() void {
     asm volatile ("sti");
 }
@@ -313,35 +282,22 @@ pub fn init() void {
     log.debug("Reached to the goal", .{});
     install_interrupt_handlers();
     log.debug("Installed interrupt handlers", .{});
-    load_idt();
+    idt.load();
     log.debug("Loaded IDT", .{});
-}
-
-fn install_interrupt_handler(comptime number: u64, comptime handler: InterruptHandler) void {
-    const handler_address = @ptrToInt(handler);
-    idt[number] = Descriptor{
-        .offset_low = @truncate(u16, handler_address),
-        .offset_mid = @truncate(u16, handler_address >> 16),
-        .offset_high = @truncate(u32, handler_address >> 32),
-        .segment_selector = 0x08, // @TODO: this should change as the GDT selector changes
-        .interrupt_stack_table = 0,
-        .type = 0xe,
-        .descriptor_privilege_level = 0,
-        .present = 1,
-    };
 }
 
 export fn interrupt_handler() callconv(.C) void {
     while (true) {}
 }
 
-pub fn make_interrupt_handler(comptime number: u64, comptime has_error_code: bool) InterruptHandler {
-    return struct {
+pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
+    kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
+    const handler_function = struct {
         pub fn handler() callconv(.Naked) void {
             if (comptime !has_error_code) asm volatile ("push $0");
             asm volatile ("push %[interrupt_number]"
                 :
-                : [interrupt_number] "i" (number),
+                : [interrupt_number] "i" (interrupt_number),
             );
 
             asm volatile (
@@ -421,6 +377,18 @@ pub fn make_interrupt_handler(comptime number: u64, comptime has_error_code: boo
             unreachable;
         }
     }.handler;
+
+    const handler_address = @ptrToInt(handler_function);
+    return IDT.Descriptor{
+        .offset_low = @truncate(u16, handler_address),
+        .offset_mid = @truncate(u16, handler_address >> 16),
+        .offset_high = @truncate(u32, handler_address >> 32),
+        .segment_selector = 0x08, // @TODO: this should change as the GDT selector changes
+        .interrupt_stack_table = 0,
+        .type = 0xe,
+        .descriptor_privilege_level = 0,
+        .present = 1,
+    };
 }
 
 //pub const Context = extern struct {

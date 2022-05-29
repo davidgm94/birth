@@ -8,10 +8,13 @@ pub const page_size = 0x1000;
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const PIC = @import("x86_64/pic.zig");
+pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
+    const limine_gdt = GDT.save();
+    log.debug("Limine GDT: {}", .{limine_gdt});
     log.debug("Hello kernel!", .{});
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale_struct) orelse @panic("Stivale had no memory map struct");
     const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
