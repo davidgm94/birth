@@ -8,6 +8,7 @@ const arch = switch (current_arch) {
 };
 
 pub const page_size = arch.page_size;
+pub const page_shifter = @ctz(u64, page_size);
 
 pub const enable_interrupts = arch.interrupts.enable;
 pub const disable_interrupts = arch.interrupts.disable;
@@ -33,3 +34,11 @@ pub const Writer = struct {
 };
 
 pub var writer = std.io.Writer(void, Writer.Error, Writer.write){ .context = {} };
+
+pub fn check_page_size(asked_page_size: u64) u64 {
+    for (arch.valid_page_sizes) |valid_page_size| {
+        if (asked_page_size == valid_page_size) return asked_page_size;
+    }
+
+    unreachable;
+}

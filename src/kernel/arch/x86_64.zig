@@ -4,7 +4,7 @@ const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
 
-pub const page_size = 0x1000;
+pub const page_size = kernel.arch.check_page_size(0x1000);
 
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
@@ -20,6 +20,7 @@ var stivale2_struct: *Stivale2.Struct = undefined;
 pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
     stivale2_struct = _stivale_struct;
+
     const limine_gdt = GDT.save();
     log.debug("Limine GDT: {}", .{limine_gdt});
     log.debug("Hello kernel!", .{});
@@ -27,23 +28,13 @@ pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     gdt.initial_setup();
     gdt.load();
     log.debug("GDT loaded", .{});
-    //const rsdp_struct = Stivale2.find(Stivale2.Struct.RSDP, stivale_struct) orelse @panic("Stivale had no RSDP struct");
-    //const framebuffer_struct = Stivale2.find(Stivale2.Struct.Framebuffer, stivale_struct) orelse @panic("Stivale had no framebuffer struct");
-    //const kernel_struct = Stivale2.find(Stivale2.Struct.KernelFileV2, stivale_struct) orelse @panic("Stivale had no kernel struct");
-    //const modules_struct = Stivale2.find(Stivale2.Struct.Modules, stivale_struct) orelse @panic("Stivale had no modules struct");
-    //const epoch_struct = Stivale2.find(Stivale2.Struct.Epoch, stivale_struct) orelse @panic("Stivale had no epoch struct");
-    //_ = memory_map_struct;
-    //_ = rsdp_struct;
-    //_ = framebuffer_struct;
-    //_ = kernel_struct;
-    //_ = modules_struct;
-    //_ = epoch_struct;
 
     enable_cpu_features();
 
     interrupts.init();
 
     PhysicalMemory.init();
+    log.debug("0x{x}", .{@ptrToInt(&limine_gdt)});
 
     while (true) {
         kernel.spinloop_hint();
@@ -733,3 +724,5 @@ pub fn get_memory_map() kernel.Memory.Map {
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale2_struct) orelse @panic("Stivale had no RSDP struct");
     return Stivale2.process_memory_map(memory_map_struct);
 }
+
+pub const valid_page_sizes = [3]u64{ 0x1000, 0x1000 * 512, 0x1000 * 512 * 512 };
