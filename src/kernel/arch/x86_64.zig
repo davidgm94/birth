@@ -11,6 +11,7 @@ pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
+pub const Paging = @import("x86_64/paging.zig");
 
 var gdt = GDT.Table{
     .tss = undefined,
@@ -35,6 +36,8 @@ pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
 
     PhysicalMemory.init();
     log.debug("0x{x}", .{@ptrToInt(&limine_gdt)});
+
+    Paging.init();
 
     while (true) {
         kernel.spinloop_hint();
@@ -537,7 +540,9 @@ fn get_task_priority_level() u4 {
 }
 
 fn enable_cpu_features() void {
+    // TODO: this should go way before this
     //set_cpu_local_storage(0);
+
     // Initialize FPU
     var cr0_value = cr0.read();
     cr0_value.set_bit(.MP);
@@ -726,3 +731,43 @@ pub fn get_memory_map() kernel.Memory.Map {
 }
 
 pub const valid_page_sizes = [3]u64{ 0x1000, 0x1000 * 512, 0x1000 * 512 * 512 };
+
+fn is_canonical_address(address: u64) bool {
+    const sign_bit = address & (1 << 63) != 0;
+    const significant_bit_count = page_table_level_count_to_bit_map(page_table_level_count);
+    var i: u8 = 63;
+    while (i >= significant_bit_count) : (i -= 1) {
+        const bit = address & (1 << i) != 0;
+        if (bit != sign_bit) return false;
+    }
+
+    return true;
+}
+
+pub var max_physical_address: u6 = 0;
+pub const page_table_level_count = 4;
+
+fn page_table_level_count_to_bit_map(level: u8) u8 {
+    return switch (level) {
+        4 => 48,
+        5 => 57,
+        else => @panic("invalid page table level count\n"),
+    };
+}
+
+pub const PhysicalAddress = struct {
+    value: u64,
+
+    pub inline fn check(self: *const @This()) void {
+        if (self.value > max_physical_address) @panic("invalid physical address\n");
+    }
+    //pub fn get_writeback_virtual_address(self: *const @This()) u64 {
+    //self.check();
+    //return paging.write_back_virtual_base + self.value;
+    //}
+};
+// /// This sets the address of the CPU local storage
+// /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
+//pub fn set_cpu_local_storage(index: u64) void {
+//GS_base.write(@ptrToInt(&cpu_local_storages[index]));
+//}
