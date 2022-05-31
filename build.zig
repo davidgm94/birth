@@ -197,7 +197,7 @@ const x86_bios_qemu_cmd = [_][]const u8{
     "-vga", "std",
     "-m", "4G",
     "-machine", "q35",
-    "-d", "guest_errors,int",
+    //"-d", "guest_errors,int",
     // zig fmt: on
 };
 
