@@ -6,7 +6,12 @@ pub fn init() void {
     map = kernel.arch.get_memory_map();
 }
 
-pub fn allocate(page_count: u64) ?u64 {
+pub fn allocate_assuming_identity_mapping(comptime T: type) ?*T {
+    const page_count = kernel.bytes_to_pages(@sizeOf(T), false);
+    return @intToPtr(*T, allocate_pages(page_count) orelse return null);
+}
+
+pub fn allocate_pages(page_count: u64) ?u64 {
     const take_hint = true;
     const size = page_count * kernel.arch.page_size;
     // TODO: don't allocate if they are different regions (this can cause issues?)

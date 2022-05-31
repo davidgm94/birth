@@ -6,8 +6,81 @@
 // • The “enable HLAT” VM-execution control (tertiary processor-based VM-execution control bit 1; see Section 24.6.2, “Processor-Based VM-Execution Controls,” in the Intel® 64 and IA-32 Architectures Software Developer’s Manual, Volume 3C).
 
 const kernel = @import("../../kernel.zig");
+const x86_64 = @import("../x86_64.zig");
 const TODO = kernel.TODO;
-pub fn init() void {}
+const log = kernel.log.scoped(.Paging_x86_64);
+pub fn init() void {
+    const max_pa = x86_64.CPUID.get_max_physical_address();
+    log.debug("Max physical address: {}", .{max_pa});
+    const pml4e = kernel.PhysicalMemory.allocate_assuming_identity_mapping([512]PML4E) orelse @panic("unable to allocate memory for PML4E");
+    log.debug("PMLE: {any}", .{pml4e});
+}
+
+const PML4E = struct {
+    value: Flags,
+
+    const Flags = kernel.Bitflag(true, enum(u64) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PDPTE = struct {
+    value: Flags,
+
+    const Flags = kernel.Bitflag(true, enum(u64) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        page_size = 7, // must be 0
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PDE = struct {
+    value: Flags,
+
+    const Flags = kernel.Bitflag(true, enum(u64) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        page_size = 7, // must be 0
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PTE = struct {
+    value: Flags,
+
+    const Flags = kernel.Bitflag(true, enum(u64) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        dirty = 6,
+        pat = 7, // must be 0
+        global = 8,
+        hlat_restart = 11,
+        // TODO: protection key
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
 
 //const Paging = struct {
 //pat: PAT,

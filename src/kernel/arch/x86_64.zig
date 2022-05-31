@@ -758,8 +758,8 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
 pub const PhysicalAddress = struct {
     value: u64,
 
-    pub inline fn check(self: *const @This()) void {
-        if (self.value > max_physical_address) @panic("invalid physical address\n");
+    pub inline fn check(physical_address: @This()) void {
+        if (physical_address.value > max_physical_address) @panic("invalid physical address\n");
     }
     //pub fn get_writeback_virtual_address(self: *const @This()) u64 {
     //self.check();
