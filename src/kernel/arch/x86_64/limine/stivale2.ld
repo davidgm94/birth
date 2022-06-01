@@ -9,11 +9,12 @@ PHDRS {
 
 SECTIONS {
   . = 0xFFFFFFFF80100000;
+  kernel_start = .;
 
   .stivale2hdr . : {
     QUAD(start) /* Entry point */
     QUAD(__stack_high) /* Stack */
-    QUAD(0) /* Flags */
+    QUAD(1 << 2 | 1 << 3) /* Flags */
     QUAD(__stivale2_tags) /* Tags */
   }:none
 

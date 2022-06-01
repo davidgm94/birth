@@ -6,6 +6,34 @@ pub const Tag = extern struct {
     next: u64,
 };
 
+pub const StructTagID = enum(u64) {
+    command_line = 0xe5e76a1b4597a781,
+    fb_mtrr = 0x6bc1a78ebe871172,
+    memory_map = 0x2187f79e8612de07,
+    framebuffer = 0x506461d2950408fa,
+    boot_volume = 0x9b4358364c19ee62,
+    pmrs = 0x5df266a64047b6bd,
+    text_mode = 0x38d74c23e0dca893,
+    hhdm = 0xb0ed257db18cb58f,
+    dtb = 0xabb29bd49a2833fa,
+    mmio32uart = 0xb813f9b8dbc78797,
+    pxe = 0x29d1e96239247032,
+    smp = 0x34d1d96339647025,
+    smbios = 0x274bd246c62bf7d1,
+    kernel_base_address = 0x060d78874a2a8af0,
+    kernel_slide = 0xee80847d01506c57,
+    kernel_file = 0xe599d90c2975584a,
+
+    kernel_filev2 = 0x37c13018a02c6ea2,
+    efi_system_table = 0x4bc5ec15845b558e,
+    firmware = 0x359d837855e3858c,
+    epoch = 0x566a7bed888e1407,
+    rsdp = 0x9e1786930a375e78,
+    modules = 0x4b6fe466aade04ce,
+    terminal = 0xc2b3f4c3233b0974,
+    edid = 0x968609d7af96b845,
+};
+
 pub const Header = extern struct {
     entry_point: u64,
     stack: u64,
@@ -309,17 +337,17 @@ pub const Struct = extern struct {
             return @ptrCast(ReturnType, @alignCast(@alignOf(PMR), @ptrCast(Intermediate, self) + 24));
         }
 
-        const PMR = extern struct {
-            base: u64,
-            length: u64,
+        pub const PMR = extern struct {
+            address: u64,
+            size: u64,
             permissions: u64,
 
-            const executable = 1 << 0;
-            const writable = 1 << 1;
-            const readable = 1 << 2;
+            pub const executable = 1 << 0;
+            pub const writable = 1 << 1;
+            pub const readable = 1 << 2;
         };
 
-        const id = 0x5df266a64047b6bd;
+        pub const id = 0x5df266a64047b6bd;
     };
 
     pub const BootVolume = extern struct {

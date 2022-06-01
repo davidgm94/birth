@@ -136,6 +136,8 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
         }
     }
 
+    kernel.assert(@src(), result.kernel_and_modules.len == 1);
+
     result.reserved.ptr = @intToPtr(@TypeOf(result.reserved.ptr), @ptrToInt(result.kernel_and_modules.ptr) + (@sizeOf(kernel.Memory.Region.Descriptor) * result.kernel_and_modules.len));
 
     for (memory_map_entries) |*entry| {
@@ -153,4 +155,124 @@ pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap)
     }
 
     return result;
+}
+
+pub fn print_all_tags(info: *align(1) stivale.Struct) void {
+    var tag_opt = @intToPtr(?*align(1) stivale.Tag, info.tags);
+
+    while (tag_opt) |tag| {
+        const tag_identifier = @intToEnum(stivale.StructTagID, tag.identifier);
+        switch (tag_identifier) {
+            .command_line,
+            .fb_mtrr,
+            .memory_map,
+            .framebuffer,
+            .boot_volume,
+            .text_mode,
+            .dtb,
+            .mmio32uart,
+            .pxe,
+            .smp,
+            .smbios,
+            .efi_system_table,
+            .firmware,
+            .epoch,
+            .rsdp,
+            .terminal,
+            .edid,
+            => {},
+
+            //.pmrs => {},
+            //.kernel_file => {},
+            //.kernel_filev2 => {},
+            //.kernel_base_address => {},
+            //.kernel_slide => {},
+            //.modules => {},
+            //.hhdm => {},
+
+            .pmrs,
+            .kernel_file,
+            .kernel_filev2,
+            .kernel_base_address,
+            .kernel_slide,
+            .modules,
+            .hhdm,
+            => {
+                log.debug("Found {s}", .{@tagName(tag_identifier)});
+                switch (tag_identifier) {
+                    .pmrs => {
+                        const pmrs_struct = @ptrCast(*align(1) stivale.Struct.PMRs, tag);
+                        const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
+                        for (pmrs) |pmr| {
+                            log.debug("PMR {}", .{pmr});
+                        }
+                    },
+                    .kernel_file => {},
+                    .kernel_base_address => {},
+                    .kernel_filev2 => {
+                        const kernel_file = @ptrCast(*align(1) stivale.Struct.KernelFileV2, tag);
+                        kernel.file_physical_address = kernel_file.kernel_file;
+                        kernel.file_size = kernel_file.kernel_size;
+                        log.debug("Kernel file: (0x{x}, {})", .{ kernel_file.kernel_file, kernel_file.kernel_size });
+                    },
+                    .kernel_slide => {
+                        const kernel_slide = @ptrCast(*align(1) stivale.Struct.KernelSlide, tag);
+                        log.debug("Kernel slide: {}", .{kernel_slide});
+                    },
+                    .modules => {
+                        const modules = @ptrCast(*align(1) stivale.Struct.Modules, tag);
+                        log.debug("Kernel modules: {}", .{modules});
+                    },
+                    .hhdm => {
+                        const hhdm = @ptrCast(*align(1) stivale.Struct.HHDM, tag);
+                        log.debug("HHDM: 0x{x}", .{hhdm.addr});
+                    },
+                    else => unreachable,
+                }
+            },
+        }
+        tag_opt = @intToPtr(?*align(1) stivale.Tag, tag.next);
+    }
+}
+
+pub fn process_pmrs(stivale2_struct: *stivale.Struct) void {
+    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse @panic("PMRs are required for RNU");
+    const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
+    const kernel_sections_ptr = kernel.PhysicalMemory.allocate_pages(1) orelse @panic("can't allocate memory for kernel sections");
+    const kernel_sections = @intToPtr([*]kernel.Memory.Region.DescriptorWithPermissions, kernel_sections_ptr)[0..pmrs.len];
+
+    for (pmrs) |pmr, i| {
+        const kernel_section = &kernel_sections[i];
+        kernel_section.descriptor.address = pmr.address;
+        kernel_section.descriptor.size = pmr.size;
+        const permissions = pmr.permissions;
+        kernel_section.read = permissions & (1 << stivale.Struct.PMRs.PMR.readable) != 0;
+        kernel_section.write = permissions & (1 << stivale.Struct.PMRs.PMR.writable) != 0;
+        kernel_section.execute = permissions & (1 << stivale.Struct.PMRs.PMR.executable) != 0;
+    }
+
+    kernel.sections_in_memory = kernel_sections;
+}
+pub fn process_kernel_file(stivale2_struct: *stivale.Struct) void {
+    const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse @panic("kernel file stivale struct is required for RNU");
+    const file_address = kernel_file.kernel_file;
+    const file_size = kernel_file.kernel_size;
+    for (kernel.PhysicalMemory.map.reclaimable) |*region| {
+        if (region.descriptor.address <= file_address and region.descriptor.address + region.descriptor.size > file_address) {
+            kernel.assert(@src(), region.descriptor.size > file_size);
+
+            const bitset_len = region.get_bitset().len;
+            if (bitset_len + file_size > region.descriptor.size) {
+                @panic("we should copy the file to a bigger region");
+            } else {
+                kernel.file_memory_region = region;
+                log.debug("kernel file region: (0x{x}, {})", .{ kernel.file_memory_region.descriptor.address, kernel.file_memory_region.descriptor.size });
+                // The kernel must be in charge of creating the bitset for this region and populating it with the pages used by the kernel file
+            }
+
+            return;
+        }
+    }
+
+    @panic("unable to find kernel file memory region");
 }

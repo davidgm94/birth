@@ -36,6 +36,16 @@ pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
 
 pub const copy = std.mem.copy;
 
+pub inline fn zero_typed_address(address: u64, comptime T: type) *T {
+    const result = @intToPtr(*T, address);
+    result.* = zeroes(T);
+    return result;
+}
+
+pub inline fn zero_range(address: u64, size: u64) void {
+    zero(@intToPtr([*]u8, address)[0..size]);
+}
+
 pub inline fn zero(bytes: []u8) void {
     for (bytes) |*byte| byte.* = 0;
 }

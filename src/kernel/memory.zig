@@ -7,6 +7,17 @@ pub const Region = struct {
     pub const Descriptor = struct {
         address: u64,
         size: u64,
+
+        fn debug(descriptor: *const Descriptor) void {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ descriptor.address, descriptor.address + descriptor.size, descriptor.size });
+        }
+    };
+
+    pub const DescriptorWithPermissions = struct {
+        descriptor: Descriptor,
+        read: bool,
+        write: bool,
+        execute: bool,
     };
 };
 
@@ -78,7 +89,24 @@ pub const Map = struct {
     };
 
     pub fn debug(map: *Map) void {
+        log.debug("Usable", .{});
         for (map.usable) |region| {
+            region.descriptor.debug();
+        }
+        log.debug("Reclaimable", .{});
+        for (map.reclaimable) |region| {
+            region.descriptor.debug();
+        }
+        log.debug("Framebuffer", .{});
+        for (map.framebuffer) |region| {
+            region.debug();
+        }
+        log.debug("Kernel and modules", .{});
+        for (map.kernel_and_modules) |region| {
+            region.debug();
+        }
+        log.debug("Reserved", .{});
+        for (map.reserved) |region| {
             region.debug();
         }
     }

@@ -287,6 +287,7 @@ pub fn init() void {
 }
 
 export fn interrupt_handler() callconv(.C) void {
+    asm volatile ("cli");
     while (true) {}
 }
 

@@ -21,6 +21,7 @@ var stivale2_struct: *Stivale2.Struct = undefined;
 pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
     stivale2_struct = _stivale_struct;
+    Stivale2.print_all_tags(stivale2_struct);
 
     const limine_gdt = GDT.save();
     log.debug("Limine GDT: {}", .{limine_gdt});
@@ -36,6 +37,9 @@ pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
 
     PhysicalMemory.init();
     log.debug("0x{x}", .{@ptrToInt(&limine_gdt)});
+
+    Stivale2.process_kernel_file(stivale2_struct);
+    Stivale2.process_pmrs(stivale2_struct);
 
     Paging.init();
 
@@ -354,7 +358,7 @@ const cr2 = SimpleR64("cr2");
 /// table and PML5 table, respectively. If PCIDs are enabled, CR3 has a format different from that illustrated in
 /// Figure 2-7. See Section 4.5, “4-Level Paging and 5-Level Paging.”
 /// See also: Chapter 4, “Paging.”
-const cr3 = ComplexR64("cr3", enum(u6) {
+pub const cr3 = ComplexR64("cr3", enum(u6) {
     /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
     /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
     /// is not used if paging is disabled, with PAE paging, or with 4-level paging or 5-level paging if CR4.PCIDE=1.

@@ -1,9 +1,10 @@
 const kernel = @import("kernel.zig");
 const log = kernel.log.scoped(.PhysicalMemory);
 const TODO = kernel.TODO;
-var map: kernel.Memory.Map = undefined;
+pub var map: kernel.Memory.Map = undefined;
 pub fn init() void {
     map = kernel.arch.get_memory_map();
+    map.debug();
 }
 
 pub fn allocate_assuming_identity_mapping(comptime T: type) ?*T {
