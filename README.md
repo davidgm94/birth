@@ -22,9 +22,9 @@ An experiment of RISC-V and x86_64 kernel which focuses on learning to build a b
 * Userspace
 
 ### x86_64
+* Make the kernel PIE (Position-Independent Executable)
 * ACPI
-* memory map
-* To consider: update to Limine 3.0 and forget about Stivale?
+* To consider: update to Limine protocol and forget about Stivale 2?
 * Catch up to the RISCV progress
 
 ## Task to be done in order to update Limine

@@ -88,7 +88,7 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
         .x86_64 => {
             kernel_exe.code_model = .kernel;
             //kernel_exe.pie = true;
-            //kernel_exe.force_pic = true;
+            kernel_exe.force_pic = true;
             kernel_exe.disable_stack_probing = true;
             kernel_exe.strip = false;
             kernel_exe.code_model = .kernel;
@@ -197,8 +197,7 @@ const x86_bios_qemu_cmd = [_][]const u8{
     "-vga", "std",
     "-m", "4G",
     "-machine", "q35",
-    "-d", "guest_errors,int",
-    "-D", "logfile",
+    //"-d", "guest_errors,int",
     // zig fmt: on
 };
 
