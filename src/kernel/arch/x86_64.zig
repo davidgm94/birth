@@ -32,6 +32,10 @@ pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     log.debug("GDT loaded", .{});
 
     enable_cpu_features();
+    const CR4 = cr4.read_raw();
+    log.debug("CR4: 0x{x}", .{CR4});
+    const efer = EFER.read();
+    log.debug("EFER: 0x{x}", .{efer});
 
     interrupts.init();
 

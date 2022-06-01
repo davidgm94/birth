@@ -288,7 +288,7 @@ pub fn init() void {
 
 export fn interrupt_handler() callconv(.C) void {
     asm volatile ("cli");
-    while (true) {}
+    unreachable;
 }
 
 pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {

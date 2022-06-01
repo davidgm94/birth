@@ -35,30 +35,13 @@ pub fn init() void {
         address_space.map_region(region, region.address);
     }
 
-    // TODO: assert that the kernel file regions actually correspond to real sections
-    kernel.assert(@src(), kernel.PhysicalMemory.map.kernel_and_modules.len == 1);
-    const kernel_physical_start = kernel.PhysicalMemory.map.kernel_and_modules[0].address;
-    const kernel_region_size = kernel.PhysicalMemory.map.kernel_and_modules[0].size;
-
-    var kernel_sections_size: u64 = 0;
-    for (kernel.sections_in_memory) |section| {
-        kernel_sections_size += kernel.align_forward(section.descriptor.size, kernel.arch.page_size);
-    }
-
-    log.debug("kernel sections size: {}. kernel region size: {}", .{ kernel_sections_size, kernel_region_size });
-    //kernel.assert(@src(), kernel_sections_size == kernel_region_size);
-    var section_physical_address: u64 = kernel_physical_start;
     var current_address_space = AddressSpace{
         .cr3 = x86_64.cr3.read_raw(),
     };
     for (kernel.sections_in_memory) |section| {
-        // TODO: assert that the kernel file regions actually correspond to real sections
+        const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
         address_space.map_region(section.descriptor, section_physical_address);
-        section_physical_address += section.descriptor.size;
-        const pa = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
-        log.debug("Section in mem: (0x{x},\t{}). Corresponding physical address: 0x{x}", .{ section.descriptor.address, section.descriptor.size, pa });
     }
-    _ = x86_64.cr3.read_raw();
     x86_64.cr3.write_raw(address_space.cr3);
 
     const pa = address_space.translate_address(0xffffffff80110000 + 401408 - kernel.arch.page_size) orelse @panic("address not translated");
