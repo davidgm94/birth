@@ -24,23 +24,36 @@ pub fn init() void {
     };
 
     for (kernel.PhysicalMemory.map.usable) |region| {
-        address_space.map_region(region.descriptor, region.descriptor.address);
+        address_space.map_physical_region_to_virtual_address(region.descriptor, region.descriptor.address);
     }
+    log.debug("Mapped usable", .{});
 
     for (kernel.PhysicalMemory.map.reclaimable) |region| {
-        address_space.map_region(region.descriptor, region.descriptor.address);
+        address_space.map_physical_region_to_virtual_address(region.descriptor, region.descriptor.address);
     }
+    log.debug("Mapped reclaimable", .{});
 
     for (kernel.PhysicalMemory.map.framebuffer) |region| {
-        address_space.map_region(region, region.address);
+        address_space.map_physical_region_to_virtual_address(region, region.address);
     }
+    log.debug("Mapped framebuffer", .{});
 
     var current_address_space = AddressSpace{
         .cr3 = x86_64.cr3.read_raw(),
     };
     for (kernel.sections_in_memory) |section| {
         const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
-        address_space.map_region(section.descriptor, section_physical_address);
+        address_space.map_virtual_region_to_physical_address(section.descriptor, section_physical_address);
+    }
+
+    var virtual: u64 = 0xffffffff80110000;
+    const top: u64 = 0xffffffff80120000;
+    while (virtual < top) : (virtual += kernel.arch.page_size) {
+        log.debug("Processing 0x{x}...", .{virtual});
+        const limine_address = current_address_space.translate_address(virtual) orelse @panic("address not translated");
+        const my_address = address_space.translate_address(virtual) orelse @panic("address not translated");
+        log.debug("Limine: 0x{x}\tMine: 0x{x}", .{ limine_address, my_address });
+        kernel.assert(@src(), limine_address == my_address);
     }
     x86_64.cr3.write_raw(address_space.cr3);
 
@@ -127,23 +140,26 @@ pub const AddressSpace = struct {
 
             break :blk pte;
         };
+
+        const checked_physical = address_space.translate_address(virtual) orelse @panic("mapping failed");
+        kernel.assert(@src(), checked_physical == physical);
     }
 
     pub fn translate_address(address_space: *AddressSpace, virtual: u64) ?u64 {
-        log.debug("Translating address 0x{x}", .{virtual});
+        //log.debug("Translating address 0x{x}", .{virtual});
         kernel.assert(@src(), kernel.is_aligned(virtual, kernel.arch.page_size));
 
         const indices = compute_indices(virtual);
 
         var pdp: *volatile [512]PDPTE = undefined;
         {
-            log.debug("CR3: 0x{x}", .{address_space.cr3});
+            //log.debug("CR3: 0x{x}", .{address_space.cr3});
             const pml4 = @intToPtr(*volatile [512]PML4E, address_space.cr3);
             const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
             var pml4_entry_value = pml4_entry.value;
 
             if (!pml4_entry_value.contains(.present)) return null;
-            log.debug("PML4 present", .{});
+            //log.debug("PML4 present", .{});
 
             pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits));
         }
@@ -154,7 +170,7 @@ pub const AddressSpace = struct {
             var pdp_entry_value = pdp_entry.value;
 
             if (!pdp_entry_value.contains(.present)) return null;
-            log.debug("PDP present", .{});
+            //log.debug("PDP present", .{});
 
             pd = @intToPtr(@TypeOf(pd), get_address_from_entry_bits(pdp_entry_value.bits));
         }
@@ -165,26 +181,40 @@ pub const AddressSpace = struct {
             var pd_entry_value = pd_entry.value;
 
             if (!pd_entry_value.contains(.present)) return null;
-            log.debug("PD present", .{});
+            //log.debug("PD present", .{});
 
             pt = @intToPtr(@TypeOf(pt), get_address_from_entry_bits(pd_entry_value.bits));
         }
 
         const pte = pt[indices[@enumToInt(PageIndex.PT)]];
         if (!pte.value.contains(.present)) return null;
-        log.debug("PT present", .{});
+        //log.debug("PT present", .{});
 
         return get_address_from_entry_bits(pte.value.bits);
     }
 
-    pub fn map_region(address_space: *AddressSpace, region: kernel.Memory.Region.Descriptor, virtual_base_address: u64) void {
-        kernel.assert(@src(), kernel.is_aligned(region.address, kernel.arch.page_size));
-        kernel.assert(@src(), kernel.is_aligned(region.size, kernel.arch.page_size));
+    pub fn map_physical_region_to_virtual_address(address_space: *AddressSpace, physical_region: kernel.Memory.Region.Descriptor, virtual_base_address: u64) void {
+        kernel.assert(@src(), kernel.is_aligned(physical_region.address, kernel.arch.page_size));
+        kernel.assert(@src(), kernel.is_aligned(physical_region.size, kernel.arch.page_size));
 
-        var physical = region.address;
+        var physical = physical_region.address;
+        log.debug("Mapping region physical 0x{x} to virtual 0x{x}", .{ physical, virtual_base_address });
         var offset: u64 = 0;
-        while (offset < region.size) : (offset += kernel.arch.page_size) {
+        while (offset < physical_region.size) : (offset += kernel.arch.page_size) {
             address_space.map(physical + offset, virtual_base_address + offset);
+        }
+        log.debug("Mapped region", .{});
+    }
+
+    pub fn map_virtual_region_to_physical_address(address_space: *AddressSpace, virtual_region: kernel.Memory.Region.Descriptor, physical_base_address: u64) void {
+        kernel.assert(@src(), kernel.is_aligned(virtual_region.address, kernel.arch.page_size));
+        kernel.assert(@src(), kernel.is_aligned(virtual_region.size, kernel.arch.page_size));
+
+        var virtual = virtual_region.address;
+        log.debug("Mapping region physical 0x{x} to virtual 0x{x}", .{ physical_base_address, virtual });
+        var offset: u64 = 0;
+        while (offset < virtual_region.size) : (offset += kernel.arch.page_size) {
+            address_space.map(physical_base_address + offset, virtual + offset);
         }
         log.debug("Mapped region", .{});
     }
