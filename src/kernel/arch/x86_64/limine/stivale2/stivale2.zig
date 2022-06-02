@@ -5,8 +5,17 @@ const log = std.log.scoped(.stivale2);
 const kernel = @import("../../../../kernel.zig");
 pub const Struct = stivale.Struct;
 
-pub fn find(comptime StructT: type, info: *align(1) stivale.Struct) ?*align(1) StructT {
-    var tag_opt = @intToPtr(?*align(1) stivale.Tag, info.tags);
+pub var boot_info: Struct = undefined;
+var bootloader_set = false;
+
+pub fn set_bootloader_info(stivale2_struct: *Struct) void {
+    boot_info = stivale2_struct.*;
+    bootloader_set = true;
+}
+
+pub fn find(comptime StructT: type) ?*align(1) StructT {
+    kernel.assert(@src(), bootloader_set);
+    var tag_opt = @intToPtr(?*align(1) stivale.Tag, boot_info.tags);
 
     while (tag_opt) |tag| {
         if (tag.identifier == StructT.id) {
@@ -235,8 +244,8 @@ pub fn print_all_tags(info: *align(1) stivale.Struct) void {
     }
 }
 
-pub fn process_pmrs(stivale2_struct: *stivale.Struct) void {
-    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse @panic("PMRs are required for RNU");
+pub fn process_pmrs() void {
+    const pmrs_struct = find(stivale.Struct.PMRs) orelse @panic("PMRs are required for RNU");
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     const kernel_sections_ptr = kernel.PhysicalMemory.allocate_pages(1) orelse @panic("can't allocate memory for kernel sections");
     const kernel_sections = @intToPtr([*]kernel.Memory.Region.DescriptorWithPermissions, kernel_sections_ptr)[0..pmrs.len];
@@ -253,12 +262,14 @@ pub fn process_pmrs(stivale2_struct: *stivale.Struct) void {
 
     kernel.sections_in_memory = kernel_sections;
 }
-pub fn process_kernel_file(stivale2_struct: *stivale.Struct) void {
-    const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse @panic("kernel file stivale struct is required for RNU");
+
+pub fn process_kernel_file() void {
+    const kernel_file = find(stivale.Struct.KernelFileV2) orelse @panic("kernel file stivale struct is required for RNU");
     const file_address = kernel_file.kernel_file;
     const file_size = kernel_file.kernel_size;
     for (kernel.PhysicalMemory.map.reclaimable) |*region| {
         if (region.descriptor.address <= file_address and region.descriptor.address + region.descriptor.size > file_address) {
+            log.debug("Region descriptor size: {}. File size: {}", .{ region.descriptor.size, file_size });
             kernel.assert(@src(), region.descriptor.size > file_size);
             var should_move_kernel_file = false;
 

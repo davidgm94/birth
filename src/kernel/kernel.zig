@@ -34,8 +34,9 @@ pub var font: PSF1.Font = undefined;
 
 pub const Writer = std.io.Writer;
 
+pub var higher_half_direct_map: u64 = 0;
+
 pub var file_physical_address: u64 = 0;
 pub var file_size: u64 = 0;
-pub var file_memory_region: *Memory.Map.Entry = undefined;
 
 pub var sections_in_memory: []Memory.Region.DescriptorWithPermissions = undefined;

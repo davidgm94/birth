@@ -17,11 +17,9 @@ var gdt = GDT.Table{
     .tss = undefined,
 };
 
-var stivale2_struct: *Stivale2.Struct = undefined;
-pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
+pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
+    Stivale2.set_bootloader_info(stivale_struct);
     interrupts.disable();
-    stivale2_struct = _stivale_struct;
-    Stivale2.print_all_tags(stivale2_struct);
 
     const limine_gdt = GDT.save();
     log.debug("Limine GDT: {}", .{limine_gdt});
@@ -42,8 +40,8 @@ pub export fn start(_stivale_struct: *Stivale2.Struct) noreturn {
     PhysicalMemory.init();
     log.debug("0x{x}", .{@ptrToInt(&limine_gdt)});
 
-    Stivale2.process_kernel_file(stivale2_struct);
-    Stivale2.process_pmrs(stivale2_struct);
+    Stivale2.process_kernel_file();
+    Stivale2.process_pmrs();
 
     Paging.init();
 
@@ -734,7 +732,7 @@ pub inline fn cpuid(leaf: u32) CPUID {
 //};
 
 pub fn get_memory_map() kernel.Memory.Map {
-    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap, stivale2_struct) orelse @panic("Stivale had no RSDP struct");
+    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap) orelse @panic("Stivale had no RSDP struct");
     return Stivale2.process_memory_map(memory_map_struct);
 }
 
