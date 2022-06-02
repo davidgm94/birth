@@ -23,6 +23,26 @@ pub fn init() void {
         .cr3 = pml4e,
     };
 
+    // Map the kernel and do some tests
+    {
+        var current_address_space = AddressSpace{
+            .cr3 = x86_64.cr3.read_raw(),
+        };
+        for (kernel.sections_in_memory) |section| {
+            const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
+            address_space.map_virtual_region_to_physical_address(section.descriptor, section_physical_address);
+        }
+        var virtual: u64 = 0xffffffff80110000;
+        const top: u64 = 0xffffffff80120000;
+        while (virtual < top) : (virtual += kernel.arch.page_size) {
+            log.debug("Processing 0x{x}...", .{virtual});
+            const limine_address = current_address_space.translate_address(virtual) orelse @panic("address not translated");
+            const my_address = address_space.translate_address(virtual) orelse @panic("address not translated");
+            log.debug("Limine: 0x{x}\tMine: 0x{x}", .{ limine_address, my_address });
+            kernel.assert(@src(), limine_address == my_address);
+        }
+    }
+
     for (kernel.PhysicalMemory.map.usable) |region| {
         address_space.map_physical_region_to_virtual_address(region.descriptor, region.descriptor.address);
     }
@@ -38,27 +58,8 @@ pub fn init() void {
     }
     log.debug("Mapped framebuffer", .{});
 
-    var current_address_space = AddressSpace{
-        .cr3 = x86_64.cr3.read_raw(),
-    };
-    for (kernel.sections_in_memory) |section| {
-        const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
-        address_space.map_virtual_region_to_physical_address(section.descriptor, section_physical_address);
-    }
-
-    var virtual: u64 = 0xffffffff80110000;
-    const top: u64 = 0xffffffff80120000;
-    while (virtual < top) : (virtual += kernel.arch.page_size) {
-        log.debug("Processing 0x{x}...", .{virtual});
-        const limine_address = current_address_space.translate_address(virtual) orelse @panic("address not translated");
-        const my_address = address_space.translate_address(virtual) orelse @panic("address not translated");
-        log.debug("Limine: 0x{x}\tMine: 0x{x}", .{ limine_address, my_address });
-        kernel.assert(@src(), limine_address == my_address);
-    }
     x86_64.cr3.write_raw(address_space.cr3);
-
-    const pa = address_space.translate_address(0xffffffff80110000 + 401408 - kernel.arch.page_size) orelse @panic("address not translated");
-    log.debug("PA 0x{x}", .{pa});
+    log.debug("Memory mapping initialized!", .{});
 }
 
 pub const AddressSpace = struct {

@@ -260,13 +260,31 @@ pub fn process_kernel_file(stivale2_struct: *stivale.Struct) void {
     for (kernel.PhysicalMemory.map.reclaimable) |*region| {
         if (region.descriptor.address <= file_address and region.descriptor.address + region.descriptor.size > file_address) {
             kernel.assert(@src(), region.descriptor.size > file_size);
+            var should_move_kernel_file = false;
 
-            const bitset_len = region.get_bitset().len;
-            if (bitset_len + file_size > region.descriptor.size) {
-                @panic("we should copy the file to a bigger region");
+            const bitset_size = region.get_bitset().len * @sizeOf(kernel.Memory.Map.Entry.BitsetBaseType);
+            const file_offset = file_address - region.descriptor.address;
+            if (bitset_size >= file_offset) {
+                should_move_kernel_file = true;
+            }
+            const space_after = region.descriptor.size - file_offset;
+            if (space_after < file_size) {
+                should_move_kernel_file = true;
+            }
+            if (bitset_size + file_size > region.descriptor.size) {
+                should_move_kernel_file = true;
+            }
+            if (should_move_kernel_file) {
+                const kernel_page_count = kernel.bytes_to_pages(file_size, false);
+                const allocation = kernel.PhysicalMemory.allocate_pages(kernel_page_count) orelse @panic("Couldn't allocate pages for kernel file move");
+                const dst = @intToPtr([*]u8, allocation)[0..file_size];
+                const src = @intToPtr([*]u8, file_address)[0..file_size];
+                log.debug("Copying kernel file...", .{});
+                kernel.copy(u8, dst, src);
+                kernel.file_physical_address = @ptrToInt(dst.ptr);
+                kernel.file_size = file_size;
             } else {
-                kernel.file_memory_region = region;
-                log.debug("kernel file region: (0x{x}, {})", .{ kernel.file_memory_region.descriptor.address, kernel.file_memory_region.descriptor.size });
+                @panic("ni");
                 // The kernel must be in charge of creating the bitset for this region and populating it with the pages used by the kernel file
             }
 
