@@ -11,7 +11,7 @@ An experiment of RISC-V and x86_64 kernel which focuses on learning to build a b
 ## Internal dependencies
 * Limine, which is the current bootloader of the kernel for x86_64
 
-## Tasks to be done
+## Next taks to be done
 
 ### General
 * Make the kernel PIE (Position-Independent Executable)

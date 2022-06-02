@@ -5,17 +5,22 @@ const log = std.log.scoped(.stivale2);
 const kernel = @import("../../../../kernel.zig");
 pub const Struct = stivale.Struct;
 
-pub var boot_info: Struct = undefined;
-var bootloader_set = false;
+pub const Error = error{
+    memory_map,
+    higher_half_direct_map,
+    kernel_file,
+    pmrs,
+};
 
-pub fn set_bootloader_info(stivale2_struct: *Struct) void {
-    boot_info = stivale2_struct.*;
-    bootloader_set = true;
+pub fn process_bootloader_information(stivale2_struct: *Struct) Error!void {
+    kernel.PhysicalMemory.map = try process_memory_map(stivale2_struct);
+    kernel.higher_half_direct_map = try process_higher_half_direct_map(stivale2_struct);
+    kernel.file = try process_kernel_file(stivale2_struct);
+    kernel.sections_in_memory = try process_pmrs(stivale2_struct);
 }
 
-pub fn find(comptime StructT: type) ?*align(1) StructT {
-    kernel.assert(@src(), bootloader_set);
-    var tag_opt = @intToPtr(?*align(1) stivale.Tag, boot_info.tags);
+pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
+    var tag_opt = @intToPtr(?*align(1) stivale.Tag, stivale2_struct.tags);
 
     while (tag_opt) |tag| {
         if (tag.identifier == StructT.id) {
@@ -28,7 +33,8 @@ pub fn find(comptime StructT: type) ?*align(1) StructT {
     return null;
 }
 
-pub fn process_memory_map(memory_map_struct: *align(1) stivale.Struct.MemoryMap) kernel.Memory.Map {
+pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Memory.Map {
+    const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
     var result = kernel.Memory.Map{
         .usable = &[_]kernel.Memory.Map.Entry{},
@@ -244,10 +250,16 @@ pub fn print_all_tags(info: *align(1) stivale.Struct) void {
     }
 }
 
-pub fn process_pmrs() void {
-    const pmrs_struct = find(stivale.Struct.PMRs) orelse @panic("PMRs are required for RNU");
+pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!kernel.VirtualAddress {
+    const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse return Error.higher_half_direct_map;
+    return kernel.VirtualAddress.new(hhdm_struct.addr);
+}
+
+pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Memory.Region.DescriptorWithPermissions {
+    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
-    const kernel_sections_ptr = kernel.PhysicalMemory.allocate_pages(1) orelse @panic("can't allocate memory for kernel sections");
+    if (pmrs.len == 0) return Error.pmrs;
+    const kernel_sections_ptr = kernel.PhysicalMemory.allocate_pages(1) orelse return Error.pmrs;
     const kernel_sections = @intToPtr([*]kernel.Memory.Region.DescriptorWithPermissions, kernel_sections_ptr)[0..pmrs.len];
 
     for (pmrs) |pmr, i| {
@@ -260,11 +272,11 @@ pub fn process_pmrs() void {
         kernel_section.execute = permissions & (1 << stivale.Struct.PMRs.PMR.executable) != 0;
     }
 
-    kernel.sections_in_memory = kernel_sections;
+    return kernel_sections;
 }
 
-pub fn process_kernel_file() void {
-    const kernel_file = find(stivale.Struct.KernelFileV2) orelse @panic("kernel file stivale struct is required for RNU");
+pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
+    const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
     const file_address = kernel_file.kernel_file;
     const file_size = kernel_file.kernel_size;
     for (kernel.PhysicalMemory.map.reclaimable) |*region| {
@@ -292,16 +304,18 @@ pub fn process_kernel_file() void {
                 const src = @intToPtr([*]u8, file_address)[0..file_size];
                 log.debug("Copying kernel file...", .{});
                 kernel.copy(u8, dst, src);
-                kernel.file_physical_address = @ptrToInt(dst.ptr);
-                kernel.file_size = file_size;
+                kernel.file.address = kernel.PhysicalAddress.new(@ptrToInt(dst.ptr));
+                kernel.file.size = file_size;
+                return kernel.File{
+                    .address = kernel.PhysicalAddress.new(@ptrToInt(dst.ptr)),
+                    .size = file_size,
+                };
             } else {
                 @panic("ni");
                 // The kernel must be in charge of creating the bitset for this region and populating it with the pages used by the kernel file
             }
-
-            return;
         }
     }
 
-    @panic("unable to find kernel file memory region");
+    return Error.kernel_file;
 }

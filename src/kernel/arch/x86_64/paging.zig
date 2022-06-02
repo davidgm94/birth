@@ -10,15 +10,10 @@ const x86_64 = @import("../x86_64.zig");
 const TODO = kernel.TODO;
 const log = kernel.log.scoped(.Paging_x86_64);
 
-var max_physical_address: u6 = 0;
-
-extern fn start() callconv(.C) void;
-
 pub fn init() void {
-    max_physical_address = x86_64.CPUID.get_max_physical_address();
-    log.debug("Max physical address: {}", .{max_physical_address});
     const pml4e = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PML4E), true)) orelse @panic("unable to allocate memory for PML4E");
     kernel.zero_a_page(pml4e);
+
     var address_space = AddressSpace{
         .cr3 = pml4e,
     };
@@ -28,7 +23,9 @@ pub fn init() void {
         var current_address_space = AddressSpace{
             .cr3 = x86_64.cr3.read_raw(),
         };
+        kernel.assert(@src(), kernel.sections_in_memory.len > 0);
         for (kernel.sections_in_memory) |section| {
+            log.debug("Address: 0x{x}", .{section.descriptor.address});
             const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
             address_space.map_virtual_region_to_physical_address(section.descriptor, section_physical_address);
         }
@@ -238,7 +235,7 @@ pub const AddressSpace = struct {
 
 const address_mask: u64 = 0x000000fffffff000;
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: u64) u64 {
-    kernel.assert(@src(), max_physical_address == 40);
+    kernel.assert(@src(), x86_64.max_physical_address_bit == 40);
     kernel.assert(@src(), kernel.is_aligned(new_address, kernel.arch.page_size));
     const address_masked = new_address & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
@@ -247,7 +244,7 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: u64) u64 {
 }
 
 fn get_address_from_entry_bits(entry_bits: u64) u64 {
-    kernel.assert(@src(), max_physical_address == 40);
+    kernel.assert(@src(), x86_64.max_physical_address_bit == 40);
     const address = entry_bits & address_mask;
     kernel.assert(@src(), kernel.is_aligned(address, kernel.arch.page_size));
 

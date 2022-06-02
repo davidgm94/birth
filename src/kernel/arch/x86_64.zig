@@ -18,8 +18,9 @@ var gdt = GDT.Table{
 };
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
-    Stivale2.set_bootloader_info(stivale_struct);
     interrupts.disable();
+    enable_cpu_features();
+    Stivale2.process_bootloader_information(stivale_struct) catch |bootloader_error| kernel.panic("Initialization from bootloader data failed: {}", .{bootloader_error});
 
     const limine_gdt = GDT.save();
     log.debug("Limine GDT: {}", .{limine_gdt});
@@ -36,12 +37,6 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     log.debug("EFER: 0x{x}", .{efer});
 
     interrupts.init();
-
-    PhysicalMemory.init();
-    log.debug("0x{x}", .{@ptrToInt(&limine_gdt)});
-
-    Stivale2.process_kernel_file();
-    Stivale2.process_pmrs();
 
     Paging.init();
 
@@ -545,7 +540,11 @@ fn get_task_priority_level() u4 {
     return @truncate(u4, cr8.read());
 }
 
+pub var max_physical_address_bit: u6 = 0;
+
 fn enable_cpu_features() void {
+    max_physical_address_bit = CPUID.get_max_physical_address_bit();
+    log.debug("max physical address bit: {}", .{max_physical_address_bit});
     // TODO: this should go way before this
     //set_cpu_local_storage(0);
 
@@ -655,7 +654,7 @@ pub const CPUID = struct {
     ecx: u32,
 
     /// Returns the maximum number bits a physical address is allowed to have in this CPU
-    pub inline fn get_max_physical_address() u6 {
+    pub inline fn get_max_physical_address_bit() u6 {
         return @truncate(u6, cpuid(0x80000008).eax);
     }
 };
@@ -750,7 +749,6 @@ fn is_canonical_address(address: u64) bool {
     return true;
 }
 
-pub var max_physical_address: u6 = 0;
 pub const page_table_level_count = 4;
 
 fn page_table_level_count_to_bit_map(level: u8) u8 {
@@ -761,17 +759,13 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
     };
 }
 
-pub const PhysicalAddress = struct {
-    value: u64,
+pub inline fn is_valid_physical_address(physical_address: u64) bool {
+    kernel.assert(@src(), max_physical_address_bit != 0);
+    const max = (@as(u64, 1) << max_physical_address_bit);
+    log.debug("Max: 0x{x}", .{max});
+    return physical_address <= max;
+}
 
-    pub inline fn check(physical_address: @This()) void {
-        if (physical_address.value > max_physical_address) @panic("invalid physical address\n");
-    }
-    //pub fn get_writeback_virtual_address(self: *const @This()) u64 {
-    //self.check();
-    //return paging.write_back_virtual_base + self.value;
-    //}
-};
 // /// This sets the address of the CPU local storage
 // /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
 //pub fn set_cpu_local_storage(index: u64) void {

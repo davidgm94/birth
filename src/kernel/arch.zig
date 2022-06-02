@@ -14,6 +14,7 @@ pub const enable_interrupts = arch.interrupts.enable;
 pub const disable_interrupts = arch.interrupts.disable;
 
 pub const get_memory_map = arch.get_memory_map;
+pub const is_valid_physical_address = arch.is_valid_physical_address;
 
 pub const Writer = struct {
     const Error = error{};
