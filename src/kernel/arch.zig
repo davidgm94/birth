@@ -7,6 +7,8 @@ const arch = switch (current_arch) {
     else => @compileError("CPU architecture not supported"),
 };
 
+/// Arch-specific part of the address space
+pub const AddressSpace = arch.AddressSpace;
 pub const page_size = arch.page_size;
 pub const page_shifter = @ctz(u64, page_size);
 
@@ -14,7 +16,6 @@ pub const enable_interrupts = arch.interrupts.enable;
 pub const disable_interrupts = arch.interrupts.disable;
 
 pub const get_memory_map = arch.get_memory_map;
-pub const is_valid_physical_address = arch.is_valid_physical_address;
 
 pub const Writer = struct {
     const Error = error{};

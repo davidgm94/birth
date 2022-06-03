@@ -4,9 +4,8 @@ const builtin = @import("builtin");
 pub const arch = @import("arch.zig");
 pub const log = std.log;
 pub const build_mode = builtin.mode;
-pub const PhysicalAddress = @import("physical_address.zig");
-pub const VirtualAddress = @import("virtual_address.zig");
-pub const Memory = @import("memory.zig");
+pub const Physical = @import("physical.zig");
+pub const Virtual = @import("virtual.zig");
 pub usingnamespace @import("assertion.zig");
 pub usingnamespace @import("data_manipulation.zig");
 pub usingnamespace @import("meta.zig");
@@ -36,13 +35,13 @@ pub var font: PSF1.Font = undefined;
 
 pub const Writer = std.io.Writer;
 
-pub var higher_half_direct_map: VirtualAddress = undefined;
+pub var higher_half_direct_map: Virtual.Address = undefined;
 
 pub var file: File = undefined;
 
-pub var sections_in_memory: []Memory.Region.DescriptorWithPermissions = undefined;
+pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;
 
 pub const File = struct {
-    address: PhysicalAddress,
+    address: Physical.Address,
     size: u64,
 };

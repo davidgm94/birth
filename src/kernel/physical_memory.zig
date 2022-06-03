@@ -1,25 +1,110 @@
 const kernel = @import("kernel.zig");
+const Physical = kernel.Physical;
+const Virtual = kernel.Virtual;
 const log = kernel.log.scoped(.PhysicalMemory);
 const TODO = kernel.TODO;
-pub var map: kernel.Memory.Map = undefined;
-pub fn init() void {
-    map = kernel.arch.get_memory_map();
-    map.debug();
-}
+pub var map: Map = undefined;
 
-pub fn allocate_assuming_identity_mapping(comptime T: type) ?*T {
-    const page_count = kernel.bytes_to_pages(@sizeOf(T), false);
-    return @intToPtr(*T, allocate_pages(page_count) orelse return null);
-}
+/// This contains physical memory regions
+pub const Map = struct {
+    usable: []Entry,
+    reclaimable: []Entry,
+    framebuffer: []Region,
+    kernel_and_modules: []Region,
+    reserved: []Region,
 
-pub fn allocate_pages(page_count: u64) ?u64 {
+    pub const Entry = struct {
+        descriptor: Region,
+        allocated_size: u64,
+        type: Type,
+
+        pub const BitsetBaseType = u64;
+
+        pub const Type = enum(u64) {
+            usable = 0,
+            reclaimable = 1,
+            framebuffer = 2,
+            kernel_and_modules = 3,
+            reserved = 4,
+        };
+
+        pub fn get_bitset(entry: *Entry) []BitsetBaseType {
+            return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
+        }
+
+        pub fn get_bitset_from_address_and_size(address: Physical.Address, size: u64) []BitsetBaseType {
+            const page_count = kernel.bytes_to_pages(size, true);
+            const bitset_len = kernel.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), false);
+            return address.access_identity([*]BitsetBaseType)[0..bitset_len];
+        }
+
+        pub fn setup_bitset(entry: *Entry, page_count: u64) void {
+            entry.allocated_size += page_count * kernel.arch.page_size;
+
+            const bitsize = @bitSizeOf(Map.Entry.BitsetBaseType);
+            const quotient = page_count / bitsize;
+            const remainder_bitsize_max: u64 = bitsize - 1;
+            const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
+            const remainder = @intCast(kernel.IntType(.unsigned, popcount), page_count % bitsize);
+
+            const bitset = entry.get_bitset();
+
+            for (bitset[0..quotient]) |*bitset_elem| {
+                bitset_elem.* = kernel.maxInt(Map.Entry.BitsetBaseType);
+            }
+
+            var remainder_i: @TypeOf(remainder) = 0;
+            while (remainder_i < remainder) : (remainder_i += 1) {
+                bitset[quotient] |= @as(u64, 1) << remainder_i;
+            }
+        }
+
+        pub fn setup_bitset_alone(entry: *Entry) void {
+            // Setup the bitset
+            const bitset = entry.get_bitset();
+            const bitset_size = bitset.len * @sizeOf(Map.Entry.BitsetBaseType);
+            // INFO: this is separated since the bitset needs to be in a different page than the memory map
+            const bitset_page_count = kernel.bytes_to_pages(bitset_size, false);
+            entry.setup_bitset(bitset_page_count);
+        }
+
+        fn debug(entry: *Entry) void {
+            log.debug("(0x{x},\t{})", .{ entry.descriptor.address, entry.descriptor.size });
+        }
+    };
+
+    pub fn debug(memory_map: *Map) void {
+        log.debug("Usable", .{});
+        for (memory_map.usable) |region| {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ region.address, region.address + region.size, region.size });
+        }
+        log.debug("Reclaimable", .{});
+        for (memory_map.reclaimable) |region| {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ region.address, region.address + region.size, region.size });
+        }
+        log.debug("Framebuffer", .{});
+        for (memory_map.framebuffer) |region| {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ region.address, region.address + region.size, region.size });
+        }
+        log.debug("Kernel and modules", .{});
+        for (memory_map.kernel_and_modules) |region| {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ region.address, region.address + region.size, region.size });
+        }
+        log.debug("Reserved", .{});
+        for (memory_map.reserved) |region| {
+            log.debug("(0x{x},\t0x{x},\t{})", .{ region.address, region.address + region.size, region.size });
+        }
+    }
+};
+
+pub fn allocate_pages(page_count: u64) ?Physical.Address {
     const take_hint = true;
     const size = page_count * kernel.arch.page_size;
     // TODO: don't allocate if they are different regions (this can cause issues?)
     for (map.usable) |*region| {
         if (region.descriptor.size - region.allocated_size >= size) {
             const region_page_count = region.descriptor.size / kernel.arch.page_size;
-            const supposed_bitset_size = region_page_count / @bitSizeOf(kernel.Memory.Map.Entry.BitsetBaseType);
+            const supposed_bitset_size = region_page_count / @bitSizeOf(Map.Entry.BitsetBaseType);
             const bitset = region.get_bitset();
             kernel.assert(@src(), bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
@@ -39,7 +124,7 @@ pub fn allocate_pages(page_count: u64) ?u64 {
                         if (!bit_set) {
                             if (first_address == 0) {
                                 const offset = (bit + (start_index * @bitSizeOf(u64))) * kernel.arch.page_size;
-                                first_address = region.descriptor.address + offset;
+                                first_address = region.descriptor.address.value + offset;
                             }
 
                             bitset_elem.* = bitset_elem.* | (1 << bit);
@@ -53,7 +138,7 @@ pub fn allocate_pages(page_count: u64) ?u64 {
                 const result = first_address;
                 region.allocated_size += region_allocated_page_count * kernel.arch.page_size;
                 kernel.assert(@src(), result != 0);
-                return result;
+                return Physical.Address.new(result);
             }
 
             kernel.assert(@src(), region.allocated_size + size > region.descriptor.size);
@@ -86,3 +171,19 @@ pub fn allocate_pages(page_count: u64) ?u64 {
 
     @panic("allocation failed, no memory");
 }
+
+pub const Region = struct {
+    address: Physical.Address,
+    size: u64,
+
+    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address) void {
+        var physical_address = region.address;
+        var virtual_address = base_virtual_address;
+        var size_it: u64 = 0;
+        while (size_it < region.size) : (size_it += kernel.arch.page_size) {
+            address_space.arch.map(physical_address, virtual_address);
+            physical_address.page_up();
+            virtual_address.page_up();
+        }
+    }
+};

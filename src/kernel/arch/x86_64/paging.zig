@@ -7,55 +7,52 @@
 
 const kernel = @import("../../kernel.zig");
 const x86_64 = @import("../x86_64.zig");
+
+const Physical = kernel.Physical;
+const Virtual = kernel.Virtual;
 const TODO = kernel.TODO;
 const log = kernel.log.scoped(.Paging_x86_64);
 
-pub fn init() void {
-    const pml4e = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PML4E), true)) orelse @panic("unable to allocate memory for PML4E");
-    kernel.zero_a_page(pml4e);
+const PML4Table = [512]PML4E;
+const PDPTable = [512]PDPTE;
+const PDTable = [512]PDE;
+const PTable = [512]PTE;
 
-    var address_space = AddressSpace{
-        .cr3 = pml4e,
-    };
+pub fn init() void {
+    const pml4e = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
+    kernel.zero(pml4e.access_identity([*]u8)[0..@sizeOf(PML4Table)]);
+
+    var address_space = kernel.Virtual.AddressSpace.new(pml4e.value);
 
     // Map the kernel and do some tests
     {
-        var current_address_space = AddressSpace{
-            .cr3 = x86_64.cr3.read_raw(),
-        };
+        var current_address_space = kernel.Virtual.AddressSpace.new(x86_64.cr3.read_raw());
         kernel.assert(@src(), kernel.sections_in_memory.len > 0);
         for (kernel.sections_in_memory) |section| {
-            log.debug("Address: 0x{x}", .{section.descriptor.address});
             const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
-            address_space.map_virtual_region_to_physical_address(section.descriptor, section_physical_address);
-        }
-        var virtual: u64 = 0xffffffff80110000;
-        const top: u64 = 0xffffffff80120000;
-        while (virtual < top) : (virtual += kernel.arch.page_size) {
-            log.debug("Processing 0x{x}...", .{virtual});
-            const limine_address = current_address_space.translate_address(virtual) orelse @panic("address not translated");
-            const my_address = address_space.translate_address(virtual) orelse @panic("address not translated");
-            log.debug("Limine: 0x{x}\tMine: 0x{x}", .{ limine_address, my_address });
-            kernel.assert(@src(), limine_address == my_address);
+            section.descriptor.map(&address_space, section_physical_address);
         }
     }
 
     for (kernel.PhysicalMemory.map.usable) |region| {
-        address_space.map_physical_region_to_virtual_address(region.descriptor, region.descriptor.address);
+        // Identity map it
+        region.descriptor.map(&address_space, region.descriptor.address.identity_virtual_address());
     }
     log.debug("Mapped usable", .{});
 
     for (kernel.PhysicalMemory.map.reclaimable) |region| {
-        address_space.map_physical_region_to_virtual_address(region.descriptor, region.descriptor.address);
+        // Identity map it
+        region.descriptor.map(&address_space, region.descriptor.address.identity_virtual_address());
     }
     log.debug("Mapped reclaimable", .{});
 
     for (kernel.PhysicalMemory.map.framebuffer) |region| {
-        address_space.map_physical_region_to_virtual_address(region, region.address);
+        // Identity map it
+        region.map(&address_space, region.address.identity_virtual_address());
     }
     log.debug("Mapped framebuffer", .{});
 
-    x86_64.cr3.write_raw(address_space.cr3);
+    x86_64.cr3.write_raw(address_space.arch.cr3);
     log.debug("Memory mapping initialized!", .{});
 }
 
@@ -64,23 +61,31 @@ pub const AddressSpace = struct {
 
     const Indices = [kernel.enum_values(PageIndex).len]u16;
 
-    pub fn map(address_space: *AddressSpace, physical: u64, virtual: u64) void {
-        kernel.assert(@src(), kernel.is_aligned(physical, kernel.arch.page_size));
-        kernel.assert(@src(), kernel.is_aligned(virtual, kernel.arch.page_size));
+    pub inline fn new(context: anytype) AddressSpace {
+        comptime kernel.assert_unsafe(@TypeOf(context) == u64);
+        const cr3 = context;
+        return AddressSpace{
+            .cr3 = cr3,
+        };
+    }
 
-        const indices = compute_indices(virtual);
+    pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address) void {
+        kernel.assert(@src(), physical_address.is_page_aligned());
+        kernel.assert(@src(), virtual_address.is_page_aligned());
+
+        const indices = compute_indices(virtual_address.value);
 
         var pdp: *volatile [512]PDPTE = undefined;
         {
-            const pml4 = @intToPtr(*volatile [512]PML4E, address_space.cr3);
+            const pml4 = @intToPtr(*volatile [512]PML4E, arch_address_space.cr3);
             const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
             var pml4_entry_value = pml4_entry.value;
 
             if (pml4_entry_value.contains(.present)) {
-                pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits));
+                pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits).value);
             } else {
                 const pdp_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PDPTE), true)) orelse @panic("unable to alloc pdp");
-                pdp = @intToPtr(@TypeOf(pdp), pdp_allocation);
+                pdp = pdp_allocation.access_identity(@TypeOf(pdp));
                 pdp.* = kernel.zeroes([512]PDPTE);
                 pml4_entry_value.or_flag(.present);
                 pml4_entry_value.or_flag(.read_write);
@@ -95,12 +100,11 @@ pub const AddressSpace = struct {
             var pdp_entry_value = pdp_entry.value;
 
             if (pdp_entry_value.contains(.present)) {
-                pd = @intToPtr(@TypeOf(pd), get_address_from_entry_bits(pdp_entry_value.bits));
+                pd = get_address_from_entry_bits(pdp_entry_value.bits).access_identity(@TypeOf(pd));
             } else {
                 const pd_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PDE), true)) orelse @panic("unable to alloc pd");
-                pd = @intToPtr(@TypeOf(pd), pd_allocation);
+                pd = pd_allocation.access_identity(@TypeOf(pd));
                 pd.* = kernel.zeroes([512]PDE);
-                kernel.zero_range(pd_allocation, @sizeOf([512]PDE));
                 pdp_entry_value.or_flag(.present);
                 pdp_entry_value.or_flag(.read_write);
                 pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation);
@@ -114,12 +118,11 @@ pub const AddressSpace = struct {
             var pd_entry_value = pd_entry.value;
 
             if (pd_entry_value.contains(.present)) {
-                pt = @intToPtr(@TypeOf(pt), get_address_from_entry_bits(pd_entry_value.bits));
+                pt = get_address_from_entry_bits(pd_entry_value.bits).access_identity(@TypeOf(pt));
             } else {
                 const pt_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PTE), true)) orelse @panic("unable to alloc pt");
-                pt = @intToPtr(@TypeOf(pt), pt_allocation);
+                pt = pt_allocation.access_identity(@TypeOf(pt));
                 pt.* = kernel.zeroes([512]PTE);
-                kernel.zero_range(pt_allocation, @sizeOf([512]PTE));
                 pd_entry_value.or_flag(.present);
                 pd_entry_value.or_flag(.read_write);
                 pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation);
@@ -134,20 +137,16 @@ pub const AddressSpace = struct {
 
             pte.value.or_flag(.present);
             pte.value.or_flag(.read_write);
-            pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical);
+            pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);
 
             break :blk pte;
         };
-
-        const checked_physical = address_space.translate_address(virtual) orelse @panic("mapping failed");
-        kernel.assert(@src(), checked_physical == physical);
     }
 
-    pub fn translate_address(address_space: *AddressSpace, virtual: u64) ?u64 {
-        //log.debug("Translating address 0x{x}", .{virtual});
-        kernel.assert(@src(), kernel.is_aligned(virtual, kernel.arch.page_size));
+    pub fn translate_address(address_space: *AddressSpace, virtual_address: Virtual.Address) ?Physical.Address {
+        kernel.assert(@src(), virtual_address.is_page_aligned());
 
-        const indices = compute_indices(virtual);
+        const indices = compute_indices(virtual_address.value);
 
         var pdp: *volatile [512]PDPTE = undefined;
         {
@@ -159,7 +158,7 @@ pub const AddressSpace = struct {
             if (!pml4_entry_value.contains(.present)) return null;
             //log.debug("PML4 present", .{});
 
-            pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits));
+            pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits).value);
         }
 
         var pd: *volatile [512]PDE = undefined;
@@ -170,7 +169,7 @@ pub const AddressSpace = struct {
             if (!pdp_entry_value.contains(.present)) return null;
             //log.debug("PDP present", .{});
 
-            pd = @intToPtr(@TypeOf(pd), get_address_from_entry_bits(pdp_entry_value.bits));
+            pd = @intToPtr(@TypeOf(pd), get_address_from_entry_bits(pdp_entry_value.bits).value);
         }
 
         var pt: *volatile [512]PTE = undefined;
@@ -181,7 +180,7 @@ pub const AddressSpace = struct {
             if (!pd_entry_value.contains(.present)) return null;
             //log.debug("PD present", .{});
 
-            pt = @intToPtr(@TypeOf(pt), get_address_from_entry_bits(pd_entry_value.bits));
+            pt = @intToPtr(@TypeOf(pt), get_address_from_entry_bits(pd_entry_value.bits).value);
         }
 
         const pte = pt[indices[@enumToInt(PageIndex.PT)]];
@@ -191,33 +190,7 @@ pub const AddressSpace = struct {
         return get_address_from_entry_bits(pte.value.bits);
     }
 
-    pub fn map_physical_region_to_virtual_address(address_space: *AddressSpace, physical_region: kernel.Memory.Region.Descriptor, virtual_base_address: u64) void {
-        kernel.assert(@src(), kernel.is_aligned(physical_region.address, kernel.arch.page_size));
-        kernel.assert(@src(), kernel.is_aligned(physical_region.size, kernel.arch.page_size));
-
-        var physical = physical_region.address;
-        log.debug("Mapping region physical 0x{x} to virtual 0x{x}", .{ physical, virtual_base_address });
-        var offset: u64 = 0;
-        while (offset < physical_region.size) : (offset += kernel.arch.page_size) {
-            address_space.map(physical + offset, virtual_base_address + offset);
-        }
-        log.debug("Mapped region", .{});
-    }
-
-    pub fn map_virtual_region_to_physical_address(address_space: *AddressSpace, virtual_region: kernel.Memory.Region.Descriptor, physical_base_address: u64) void {
-        kernel.assert(@src(), kernel.is_aligned(virtual_region.address, kernel.arch.page_size));
-        kernel.assert(@src(), kernel.is_aligned(virtual_region.size, kernel.arch.page_size));
-
-        var virtual = virtual_region.address;
-        log.debug("Mapping region physical 0x{x} to virtual 0x{x}", .{ physical_base_address, virtual });
-        var offset: u64 = 0;
-        while (offset < virtual_region.size) : (offset += kernel.arch.page_size) {
-            address_space.map(physical_base_address + offset, virtual + offset);
-        }
-        log.debug("Mapped region", .{});
-    }
-
-    pub fn compute_indices(virtual_address: u64) Indices {
+    fn compute_indices(virtual_address: u64) Indices {
         var indices: Indices = undefined;
         var va = virtual_address;
         va = va >> 12;
@@ -231,24 +204,28 @@ pub const AddressSpace = struct {
 
         return indices;
     }
+
+    pub fn make_current(address_space: *AddressSpace) void {
+        x86_64.cr3.write_raw(address_space.cr3);
+    }
 };
 
 const address_mask: u64 = 0x000000fffffff000;
-fn set_entry_in_address_bits(old_entry_value: u64, new_address: u64) u64 {
-    kernel.assert(@src(), x86_64.max_physical_address_bit == 40);
-    kernel.assert(@src(), kernel.is_aligned(new_address, kernel.arch.page_size));
-    const address_masked = new_address & address_mask;
+fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address) u64 {
+    kernel.assert(@src(), kernel.Physical.Address.max_bit == 40);
+    kernel.assert(@src(), new_address.is_page_aligned());
+    const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
     const result = address_masked | old_entry_value_masked;
     return result;
 }
 
-fn get_address_from_entry_bits(entry_bits: u64) u64 {
-    kernel.assert(@src(), x86_64.max_physical_address_bit == 40);
+fn get_address_from_entry_bits(entry_bits: u64) Physical.Address {
+    kernel.assert(@src(), kernel.Physical.Address.max_bit == 40);
     const address = entry_bits & address_mask;
     kernel.assert(@src(), kernel.is_aligned(address, kernel.arch.page_size));
 
-    return address;
+    return Physical.Address.new(address);
 }
 
 const PageIndex = enum(u3) {

@@ -12,6 +12,7 @@ pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const Paging = @import("x86_64/paging.zig");
+pub const AddressSpace = Paging.AddressSpace;
 
 var gdt = GDT.Table{
     .tss = undefined,
@@ -540,11 +541,9 @@ fn get_task_priority_level() u4 {
     return @truncate(u4, cr8.read());
 }
 
-pub var max_physical_address_bit: u6 = 0;
-
 fn enable_cpu_features() void {
-    max_physical_address_bit = CPUID.get_max_physical_address_bit();
-    log.debug("max physical address bit: {}", .{max_physical_address_bit});
+    kernel.Physical.Address.max_bit = CPUID.get_max_physical_address_bit();
+    kernel.Physical.Address.max = @as(u64, 1) << kernel.Physical.Address.max_bit;
     // TODO: this should go way before this
     //set_cpu_local_storage(0);
 
@@ -757,13 +756,6 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
         5 => 57,
         else => @panic("invalid page table level count\n"),
     };
-}
-
-pub inline fn is_valid_physical_address(physical_address: u64) bool {
-    kernel.assert(@src(), max_physical_address_bit != 0);
-    const max = (@as(u64, 1) << max_physical_address_bit);
-    log.debug("Max: 0x{x}", .{max});
-    return physical_address <= max;
 }
 
 // /// This sets the address of the CPU local storage

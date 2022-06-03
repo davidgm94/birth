@@ -92,14 +92,15 @@ pub fn cstr_len(cstr: [*:0]const u8) u64 {
 }
 
 pub const enum_values = std.enums.values;
+pub const IntType = std.meta.Int;
 
 pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
     return struct {
-        const IntType = std.meta.Int(.unsigned, @bitSizeOf(EnumT));
+        const BitFlagIntType = std.meta.Int(.unsigned, @bitSizeOf(EnumT));
         const Enum = EnumT;
         const Ptr = if (is_volatile) *volatile @This() else *@This();
 
-        bits: IntType,
+        bits: BitFlagIntType,
 
         pub inline fn from_flags(flags: anytype) @This() {
             const flags_type = @TypeOf(flags);
@@ -107,7 +108,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
                 const fields = std.meta.fields(flags_type);
                 if (fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
 
-                var bits: IntType = 0;
+                var bits: BitFlagIntType = 0;
 
                 var field_i: u64 = 0;
                 inline while (field_i < fields.len) : (field_i += 1) {
@@ -120,7 +121,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
             return @This(){ .bits = result };
         }
 
-        pub fn from_bits(bits: IntType) @This() {
+        pub fn from_bits(bits: BitFlagIntType) @This() {
             return @This(){ .bits = bits };
         }
 
@@ -137,7 +138,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
 
         pub inline fn all() @This() {
             var result = comptime blk: {
-                var bits: IntType = 0;
+                var bits: BitFlagIntType = 0;
                 inline for (@typeInfo(EnumT).Enum.fields) |field| {
                     bits |= 1 << field.value;
                 }
