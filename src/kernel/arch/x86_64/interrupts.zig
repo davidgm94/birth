@@ -374,6 +374,9 @@ export fn interrupt_handler(context: *Context) callconv(.C) void {
                     .page_fault => {
                         const error_code = PageFaultErrorCode.from_bits(@intCast(u16, context.error_code));
                         log.debug("Error code: {}", .{error_code});
+                        if (error_code.contains(.reserved_write)) {
+                            @panic("reserved write");
+                        }
                         unreachable;
                     },
                     else => @panic("ni"),
