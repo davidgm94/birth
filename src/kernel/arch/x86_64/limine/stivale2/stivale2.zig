@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const stivale = @import("header.zig");
 const log = std.log.scoped(.stivale2);
 const kernel = @import("../../../../kernel.zig");
+const x86_64 = @import("../../../x86_64.zig");
 pub const Struct = stivale.Struct;
 
 pub const Error = error{
@@ -10,18 +11,16 @@ pub const Error = error{
     higher_half_direct_map,
     kernel_file,
     pmrs,
+    rsdp,
 };
 
 pub fn process_bootloader_information(stivale2_struct: *Struct) Error!void {
-    log.debug("Foo", .{});
+    x86_64.rsdp = try process_rsdp(stivale2_struct);
     kernel.Physical.Memory.map = try process_memory_map(stivale2_struct);
-    log.debug("Fa", .{});
     kernel.higher_half_direct_map = try process_higher_half_direct_map(stivale2_struct);
-    log.debug("Fu", .{});
     kernel.file = try process_kernel_file(stivale2_struct);
-    log.debug("Fi", .{});
     kernel.sections_in_memory = try process_pmrs(stivale2_struct);
-    log.debug("Fe", .{});
+    x86_64.rsdp = try process_rsdp(stivale2_struct);
 }
 
 pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
@@ -214,7 +213,7 @@ pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
     const allocation = kernel.Physical.Memory.allocate_pages(kernel_page_count) orelse return Error.kernel_file;
     const dst = allocation.access_identity([*]u8)[0..file_size];
     const src = @intToPtr([*]u8, file_address)[0..file_size];
-    log.debug("Copying kernel file...", .{});
+    log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
     kernel.copy(u8, dst, src);
     kernel.file.address = kernel.Physical.Address.new(@ptrToInt(dst.ptr));
     kernel.file.size = file_size;
@@ -222,4 +221,12 @@ pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
         .address = kernel.Physical.Address.new(@ptrToInt(dst.ptr)),
         .size = file_size,
     };
+}
+
+pub fn process_rsdp(stivale2_struct: *Struct) Error!kernel.Physical.Address {
+    const rsdp_struct = find(stivale.Struct.RSDP, stivale2_struct) orelse return Error.rsdp;
+    const rsdp = rsdp_struct.rsdp;
+    log.debug("RSDP struct: 0x{x}", .{rsdp});
+    const rsdp_address = kernel.Physical.Address.new(rsdp);
+    return rsdp_address;
 }

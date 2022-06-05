@@ -87,6 +87,9 @@ pub fn init() void {
         kernel.address_space.integrate_mapped_physical_region(physical_region, physical_region.address.identity_virtual_address()) catch @panic("unable to integrate physical region into vmm");
     }
     log.debug("Finished the integration of framebuffer regions into the kernel address space successfully!", .{});
+    for (Physical.Memory.map.usable) |physical_entry| {
+        log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
+    }
 }
 
 pub const AddressSpace = struct {
@@ -104,7 +107,6 @@ pub const AddressSpace = struct {
     }
 
     pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address) void {
-        kernel.assert(@src(), physical_address.is_page_aligned());
         kernel.assert(@src(), virtual_address.is_page_aligned());
 
         const indices = compute_indices(virtual_address);

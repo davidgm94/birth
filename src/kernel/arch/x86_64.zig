@@ -1,5 +1,4 @@
 const kernel = @import("../kernel.zig");
-const PhysicalMemory = kernel.PhysicalMemory;
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -12,12 +11,15 @@ pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const Paging = @import("x86_64/paging.zig");
+pub const ACPI = @import("x86_64/acpi.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
 
 var gdt = GDT.Table{
     .tss = undefined,
 };
+
+pub var rsdp: kernel.Physical.Address = undefined;
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
@@ -30,6 +32,7 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     enable_cpu_features();
     interrupts.init();
     Paging.init();
+    ACPI.init(rsdp);
 
     while (true) {
         kernel.spinloop_hint();

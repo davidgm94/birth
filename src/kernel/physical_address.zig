@@ -27,13 +27,28 @@ pub inline fn access_identity(physical_address: PhysicalAddress, comptime Ptr: t
 }
 
 pub inline fn is_valid(physical_address: PhysicalAddress) bool {
+    kernel.assert(@src(), physical_address.value != 0);
     kernel.assert(@src(), max_bit != 0);
     kernel.assert(@src(), max > 1000);
     return physical_address.value <= max;
 }
 
 pub inline fn page_up(physical_address: *PhysicalAddress) void {
+    kernel.assert(@src(), physical_address.is_page_aligned());
     physical_address.value += kernel.arch.page_size;
+}
+
+pub inline fn page_down(physical_address: *PhysicalAddress) void {
+    kernel.assert(@src(), physical_address.is_page_aligned());
+    physical_address.value -= kernel.arch.page_size;
+}
+
+pub inline fn page_align_forward(physical_address: *PhysicalAddress) void {
+    physical_address.value = kernel.align_forward(physical_address.value, kernel.arch.page_size);
+}
+
+pub inline fn page_align_backward(physical_address: *PhysicalAddress) void {
+    physical_address.value = kernel.align_backward(physical_address.value, kernel.arch.page_size);
 }
 
 pub inline fn is_page_aligned(physical_address: PhysicalAddress) bool {
