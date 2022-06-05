@@ -12,6 +12,7 @@ pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const Paging = @import("x86_64/paging.zig");
+/// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
 
 var gdt = GDT.Table{
@@ -20,25 +21,14 @@ var gdt = GDT.Table{
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     interrupts.disable();
+    log.debug("Hello kernel!", .{});
     enable_cpu_features();
     Stivale2.process_bootloader_information(stivale_struct) catch |bootloader_error| kernel.panic("Initialization from bootloader data failed: {}", .{bootloader_error});
 
-    const limine_gdt = GDT.save();
-    log.debug("Limine GDT: {}", .{limine_gdt});
-    log.debug("Hello kernel!", .{});
-    log.debug("Trying to load GDT", .{});
     gdt.initial_setup();
-    gdt.load();
-    log.debug("GDT loaded", .{});
 
     enable_cpu_features();
-    const CR4 = cr4.read_raw();
-    log.debug("CR4: 0x{x}", .{CR4});
-    const efer = EFER.read();
-    log.debug("EFER: 0x{x}", .{efer});
-
     interrupts.init();
-
     Paging.init();
 
     while (true) {
@@ -643,6 +633,26 @@ pub const EFER = ComplexMSR(0xC0000080, enum(u6) {
     LMSLE = 13,
     FFXSR = 14,
     TCE = 15,
+});
+const RFLAGS = kernel.Bitflag(false, enum(u64) {
+    CF = 0,
+    PF = 2,
+    AF = 4,
+    ZF = 6,
+    SF = 7,
+    TF = 8,
+    IF = 9,
+    DF = 10,
+    OF = 11,
+    IOPL0 = 12,
+    IOPL1 = 13,
+    NT = 14,
+    RF = 16,
+    VM = 17,
+    AC = 18,
+    VIF = 19,
+    VIP = 20,
+    ID = 21,
 });
 pub const GS_base = SimpleMSR(0xc0000102);
 

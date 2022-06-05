@@ -6,6 +6,20 @@ pub const Region = struct {
     address: Virtual.Address,
     size: u64,
 
+    item_address: kernel.AVL.Tree(Region).Item,
+    item_size: kernel.AVL.Tree(Region).Item,
+    used: bool,
+
+    pub fn new(address: Virtual.Address, size: u64) Region {
+        return Region{
+            .address = address,
+            .size = size,
+            .item_address = kernel.AVL.Tree(Region).Item{},
+            .item_size = kernel.AVL.Tree(Region).Item{},
+            .used = false,
+        };
+    }
+
     pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_physical_address: Physical.Address) void {
         var physical_address = base_physical_address;
         var virtual_address = region.address;

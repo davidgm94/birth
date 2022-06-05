@@ -3,6 +3,11 @@ const kernel = @import("kernel.zig");
 const page_size = kernel.arch.page_size;
 const sector_size = kernel.arch.sector_size;
 
+pub const kb = 1024;
+pub const mb = kb * 1024;
+pub const gb = mb * 1024;
+pub const tb = gb * 1024;
+
 const log = kernel.log.scoped(.data_manipulation);
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
@@ -74,7 +79,7 @@ pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, compti
     const quotient = dividend / divisor;
     const remainder = dividend % divisor;
     const remainder_not_zero = remainder != 0;
-    if (must_be_exact and remainder_not_zero) @panic("remainder not exact when asked to be exact");
+    if (must_be_exact and remainder_not_zero) kernel.panic("remainder not exact when asked to be exact: {} / {}", .{ dividend, divisor });
 
     return quotient + @boolToInt(remainder_not_zero);
 }
@@ -165,6 +170,15 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
         // TODO: create a mutable version of this
         pub inline fn or_flag(self: Ptr, comptime flag: EnumT) void {
             self.bits |= 1 << @enumToInt(flag);
+        }
+
+        pub fn format(bitflag: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+            try writer.writeAll("{\n");
+            for (enum_values(Enum)) |enum_value| {
+                const bit_value = @boolToInt(bitflag.bits & (@as(BitFlagIntType, 1) << @intCast(u6, @enumToInt(enum_value))) != 0);
+                try std.fmt.format(writer, "\t{s}: {}\n", .{ @tagName(enum_value), bit_value });
+            }
+            try writer.writeAll("}");
         }
     };
 }

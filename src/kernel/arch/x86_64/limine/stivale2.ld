@@ -8,7 +8,7 @@ PHDRS {
 }
 
 SECTIONS {
-  . = 0xFFFFFFFF80100000;
+  . = 0xFFFFFFFF80000000;
   kernel_start = .;
 
   .stivale2hdr . : {

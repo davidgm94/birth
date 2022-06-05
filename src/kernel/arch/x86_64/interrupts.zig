@@ -2,6 +2,9 @@ const kernel = @import("../../kernel.zig");
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
 const GDT = @import("gdt.zig");
+const x86_64 = @import("../x86_64.zig");
+
+const interrupts = @This();
 
 const log = kernel.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;
@@ -276,6 +279,7 @@ pub inline fn enable() void {
 pub inline fn disable() void {
     asm volatile ("cli");
 }
+
 pub fn init() void {
     // Initialize interrupts
     log.debug("Initializing interrupts", .{});
@@ -284,12 +288,136 @@ pub fn init() void {
     log.debug("Installed interrupt handlers", .{});
     idt.load();
     log.debug("Loaded IDT", .{});
+    enable();
+    log.debug("Enabled interrupts", .{});
 }
 
-export fn interrupt_handler() callconv(.C) void {
-    asm volatile ("cli");
+pub const Context = struct {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rbp: u64,
+    rsi: u64,
+    rdi: u64,
+    rdx: u64,
+    rcx: u64,
+    rbx: u64,
+    rax: u64,
+    interrupt_number: u64,
+    error_code: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+};
+
+const Exception = enum(u5) {
+    divide_by_zero = 0x00,
+    debug = 0x01,
+    non_maskable_interrupt = 0x2,
+    breakpoint = 0x03,
+    overflow = 0x04,
+    bound_range_exceeded = 0x05,
+    invalid_opcode = 0x06,
+    device_not_available = 0x07,
+    double_fault = 0x08,
+    coprocessor_segment_overrun = 0x09,
+    invalid_tss = 0x0a,
+    segment_not_present = 0x0b,
+    stack_segment_fault = 0x0c,
+    general_protection_fault = 0x0d,
+    page_fault = 0x0e,
+    x87_floating_point_exception = 0x10,
+    alignment_check = 0x11,
+    machine_check = 0x12,
+    simd_floating_point_exception = 0x13,
+    virtualization_exception = 0x14,
+    control_protection_exception = 0x15,
+    hypervisor_injection_exception = 0x1c,
+    vmm_communication_exception = 0x1d,
+    security_exception = 0x1e,
+};
+
+const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
+    present = 0,
+    write = 1,
+    user = 2,
+    reserved_write = 3,
+    instruction_fetch = 4,
+    protection_key = 5,
+    shadow_stack = 6,
+    software_guard_extensions = 15,
+});
+
+export fn interrupt_handler(context: *Context) callconv(.C) void {
+    interrupts.disable();
+    log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
+    inline for (std.meta.fields(Context)) |field| {
+        log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
+    }
+
+    switch (context.interrupt_number) {
+        0x0...0x19 => {
+            const exception = @intToEnum(Exception, context.interrupt_number);
+            const usermode = context.cs & 3 != 0;
+            if (usermode) {
+                @panic("usermode not implemented yet");
+            } else {
+                if (context.cs != @offsetOf(GDT.Table, "code_64")) @panic("invalid cs");
+                switch (exception) {
+                    .page_fault => {
+                        const error_code = PageFaultErrorCode.from_bits(@intCast(u16, context.error_code));
+                        log.debug("Error code: {}", .{error_code});
+                        unreachable;
+                    },
+                    else => @panic("ni"),
+                }
+                log.debug("Exception: {s}", .{@tagName(exception)});
+            }
+        },
+        else => unreachable,
+    }
+
     unreachable;
 }
+
+const std = @import("std");
+
+//pub const Context = struct {
+//cr2: u64,
+//ds: u64,
+//fxsave: [512 + 16]u8,
+//_check: u64,
+//cr8: u64,
+//r15: u64,
+//r14: u64,
+//r13: u64,
+//r12: u64,
+//r11: u64,
+//r10: u64,
+//r9: u64,
+//r8: u64,
+//rbp: u64,
+//rdi: u64,
+//rsi: u64,
+//rdx: u64,
+//rcx: u64,
+//rbx: u64,
+//rax: u64,
+//interrupt_number: u64,
+//error_code: u64,
+//rip: u64,
+//cs: u64,
+//flags: u64,
+//rsp: u64,
+//ss: u64,
+//};
 
 pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
     kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
@@ -307,9 +435,9 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
                 \\push %%rbx
                 \\push %%rcx
                 \\push %%rdx
-                \\push %%rbp
-                \\push %%rsi
                 \\push %%rdi
+                \\push %%rsi
+                \\push %%rbp
                 \\push %%r8
                 \\push %%r9
                 \\push %%r10
@@ -318,25 +446,8 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
                 \\push %%r13
                 \\push %%r14
                 \\push %%r15
-                \\mov $0x123456789ABCDEF, %%rax
-                \\push %%rax
-                \\mov %%rsp, %%rbx
-                \\and $~0xf, %%rsp 
-                \\fxsave -0x200(%%rsp)
-                \\mov %%rbx, %%rsp
-                \\sub $0x210, %%rsp
-                \\xor %%rax, %%rax
-                \\mov %%ds, %%ax
-                \\push %%rax
-                \\xor %%rax, %%rax
-                \\mov %%es, %%rax
-                \\push %%rax
                 \\mov %%rsp, %%rdi
-                \\mov $0x10, %%ax
-                \\mov %%ax, %%ds
-                \\mov %%ax, %%es
-                \\mov %%rsp, %%rbx
-                \\and $~0xf, %%rsp 
+                \\and $~0xf, %%rsp
             );
 
             asm volatile (
@@ -419,4 +530,4 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
 //eflags: u64,
 //rsp: u64,
 //ss: u64,
-//};
+//}context;

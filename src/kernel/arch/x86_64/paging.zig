@@ -19,41 +19,74 @@ const PDTable = [512]PDE;
 const PTable = [512]PTE;
 
 pub fn init() void {
-    const pml4e = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
+    log.debug("About to dereference memory regions", .{});
+    const pml4e = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
     kernel.zero(pml4e.access_identity([*]u8)[0..@sizeOf(PML4Table)]);
 
-    var address_space = kernel.Virtual.AddressSpace.new(pml4e.value);
+    kernel.address_space = kernel.Virtual.AddressSpace.new(pml4e.value);
 
     // Map the kernel and do some tests
     {
-        var current_address_space = kernel.Virtual.AddressSpace.new(x86_64.cr3.read_raw());
+        var bootloader_address_space = kernel.Virtual.AddressSpace.new(x86_64.cr3.read_raw());
         kernel.assert(@src(), kernel.sections_in_memory.len > 0);
         for (kernel.sections_in_memory) |section| {
-            const section_physical_address = current_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
-            section.descriptor.map(&address_space, section_physical_address);
+            const section_physical_address = bootloader_address_space.translate_address(section.descriptor.address) orelse @panic("address not translated");
+            section.descriptor.map(&kernel.address_space, section_physical_address);
         }
     }
 
-    for (kernel.PhysicalMemory.map.usable) |region| {
+    for (kernel.Physical.Memory.map.usable) |region| {
         // Identity map it
-        region.descriptor.map(&address_space, region.descriptor.address.identity_virtual_address());
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.identity_virtual_address());
     }
     log.debug("Mapped usable", .{});
 
-    for (kernel.PhysicalMemory.map.reclaimable) |region| {
+    for (kernel.Physical.Memory.map.reclaimable) |region| {
         // Identity map it
-        region.descriptor.map(&address_space, region.descriptor.address.identity_virtual_address());
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.identity_virtual_address());
     }
     log.debug("Mapped reclaimable", .{});
 
-    for (kernel.PhysicalMemory.map.framebuffer) |region| {
+    for (kernel.Physical.Memory.map.framebuffer) |region| {
         // Identity map it
-        region.map(&address_space, region.address.identity_virtual_address());
+        region.map(&kernel.address_space, region.address.identity_virtual_address());
     }
     log.debug("Mapped framebuffer", .{});
 
-    x86_64.cr3.write_raw(address_space.arch.cr3);
+    kernel.address_space.make_current();
     log.debug("Memory mapping initialized!", .{});
+
+    for (kernel.Physical.Memory.map.reclaimable) |*region| {
+        const bitset = region.get_bitset();
+        const bitset_size = bitset.len * @sizeOf(kernel.Physical.Memory.Map.Entry.BitsetBaseType);
+        region.allocated_size = kernel.align_forward(bitset_size, kernel.arch.page_size);
+        region.setup_bitset();
+    }
+
+    const old_reclaimable = kernel.Physical.Memory.map.reclaimable.len;
+    kernel.Physical.Memory.map.usable.len += old_reclaimable;
+    kernel.Physical.Memory.map.reclaimable.len = 0;
+
+    log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
+
+    var insertion_result = false;
+    insertion_result = kernel.address_space.free_regions_by_address.insert(&kernel.memory_region.item_address, &kernel.memory_region, kernel.memory_region.address.value, .panic);
+    kernel.assert(@src(), insertion_result);
+    insertion_result = kernel.address_space.free_regions_by_size.insert(&kernel.memory_region.item_size, &kernel.memory_region, kernel.memory_region.size, .allow);
+    kernel.assert(@src(), insertion_result);
+    log.debug("Set root for Virtual Memory Manager tree", .{});
+    log.debug("Tree address (free/addr): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_address)});
+    log.debug("Tree address (free/size): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_size)});
+    log.debug("Tree address (used): 0x{x}", .{@ptrToInt(&kernel.address_space.used_regions)});
+
+    for (Physical.Memory.map.usable) |physical_entry| {
+        kernel.address_space.integrate_mapped_physical_entry(physical_entry, physical_entry.descriptor.address.identity_virtual_address()) catch @panic("unable to integrate physical region into vmm");
+    }
+    log.debug("Finished the integration of usable regions into the kernel address space successfully!", .{});
+    for (Physical.Memory.map.framebuffer) |physical_region| {
+        kernel.address_space.integrate_mapped_physical_region(physical_region, physical_region.address.identity_virtual_address()) catch @panic("unable to integrate physical region into vmm");
+    }
+    log.debug("Finished the integration of framebuffer regions into the kernel address space successfully!", .{});
 }
 
 pub const AddressSpace = struct {
@@ -62,6 +95,7 @@ pub const AddressSpace = struct {
     const Indices = [kernel.enum_values(PageIndex).len]u16;
 
     pub inline fn new(context: anytype) AddressSpace {
+        // This is taking a u64 instead of a physical address to easily put here the value of the CR3 register
         comptime kernel.assert_unsafe(@TypeOf(context) == u64);
         const cr3 = context;
         return AddressSpace{
@@ -73,20 +107,20 @@ pub const AddressSpace = struct {
         kernel.assert(@src(), physical_address.is_page_aligned());
         kernel.assert(@src(), virtual_address.is_page_aligned());
 
-        const indices = compute_indices(virtual_address.value);
+        const indices = compute_indices(virtual_address);
 
-        var pdp: *volatile [512]PDPTE = undefined;
+        var pdp: *volatile PDPTable = undefined;
         {
-            const pml4 = @intToPtr(*volatile [512]PML4E, arch_address_space.cr3);
+            const pml4 = @intToPtr(*volatile PML4Table, arch_address_space.cr3);
             const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
             var pml4_entry_value = pml4_entry.value;
 
             if (pml4_entry_value.contains(.present)) {
                 pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits).value);
             } else {
-                const pdp_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PDPTE), true)) orelse @panic("unable to alloc pdp");
+                const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), true)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access_identity(@TypeOf(pdp));
-                pdp.* = kernel.zeroes([512]PDPTE);
+                pdp.* = kernel.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
                 pml4_entry_value.or_flag(.read_write);
                 pml4_entry_value.bits = set_entry_in_address_bits(pml4_entry_value.bits, pdp_allocation);
@@ -94,7 +128,7 @@ pub const AddressSpace = struct {
             }
         }
 
-        var pd: *volatile [512]PDE = undefined;
+        var pd: *volatile PDTable = undefined;
         {
             var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
             var pdp_entry_value = pdp_entry.value;
@@ -102,9 +136,9 @@ pub const AddressSpace = struct {
             if (pdp_entry_value.contains(.present)) {
                 pd = get_address_from_entry_bits(pdp_entry_value.bits).access_identity(@TypeOf(pd));
             } else {
-                const pd_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PDE), true)) orelse @panic("unable to alloc pd");
+                const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), true)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access_identity(@TypeOf(pd));
-                pd.* = kernel.zeroes([512]PDE);
+                pd.* = kernel.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
                 pdp_entry_value.or_flag(.read_write);
                 pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation);
@@ -112,7 +146,7 @@ pub const AddressSpace = struct {
             }
         }
 
-        var pt: *volatile [512]PTE = undefined;
+        var pt: *volatile PTable = undefined;
         {
             var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
             var pd_entry_value = pd_entry.value;
@@ -120,9 +154,9 @@ pub const AddressSpace = struct {
             if (pd_entry_value.contains(.present)) {
                 pt = get_address_from_entry_bits(pd_entry_value.bits).access_identity(@TypeOf(pt));
             } else {
-                const pt_allocation = kernel.PhysicalMemory.allocate_pages(kernel.bytes_to_pages(@sizeOf([512]PTE), true)) orelse @panic("unable to alloc pt");
+                const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), true)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access_identity(@TypeOf(pt));
-                pt.* = kernel.zeroes([512]PTE);
+                pt.* = kernel.zeroes(PTable);
                 pd_entry_value.or_flag(.present);
                 pd_entry_value.or_flag(.read_write);
                 pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation);
@@ -146,12 +180,12 @@ pub const AddressSpace = struct {
     pub fn translate_address(address_space: *AddressSpace, virtual_address: Virtual.Address) ?Physical.Address {
         kernel.assert(@src(), virtual_address.is_page_aligned());
 
-        const indices = compute_indices(virtual_address.value);
+        const indices = compute_indices(virtual_address);
 
-        var pdp: *volatile [512]PDPTE = undefined;
+        var pdp: *volatile PDPTable = undefined;
         {
             //log.debug("CR3: 0x{x}", .{address_space.cr3});
-            const pml4 = @intToPtr(*volatile [512]PML4E, address_space.cr3);
+            const pml4 = @intToPtr(*volatile PML4Table, address_space.cr3);
             const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
             var pml4_entry_value = pml4_entry.value;
 
@@ -161,7 +195,7 @@ pub const AddressSpace = struct {
             pdp = @intToPtr(@TypeOf(pdp), get_address_from_entry_bits(pml4_entry_value.bits).value);
         }
 
-        var pd: *volatile [512]PDE = undefined;
+        var pd: *volatile PDTable = undefined;
         {
             var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
             var pdp_entry_value = pdp_entry.value;
@@ -172,7 +206,7 @@ pub const AddressSpace = struct {
             pd = @intToPtr(@TypeOf(pd), get_address_from_entry_bits(pdp_entry_value.bits).value);
         }
 
-        var pt: *volatile [512]PTE = undefined;
+        var pt: *volatile PTable = undefined;
         {
             var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
             var pd_entry_value = pd_entry.value;
@@ -185,14 +219,13 @@ pub const AddressSpace = struct {
 
         const pte = pt[indices[@enumToInt(PageIndex.PT)]];
         if (!pte.value.contains(.present)) return null;
-        //log.debug("PT present", .{});
 
         return get_address_from_entry_bits(pte.value.bits);
     }
 
-    fn compute_indices(virtual_address: u64) Indices {
+    fn compute_indices(virtual_address: Virtual.Address) Indices {
         var indices: Indices = undefined;
-        var va = virtual_address;
+        var va = virtual_address.value;
         va = va >> 12;
         indices[3] = @truncate(u9, va);
         va = va >> 9;
@@ -301,81 +334,19 @@ const PTE = struct {
     });
 };
 
-//const Paging = struct {
-//pat: PAT,
-//cr3: u64,
-//level_5_paging: bool,
+pub const HandlePageFaultFlags = kernel.Bitflag(false, enum(u32) {
+    write = 0,
+    supervisor = 1,
+});
 
-//write_back_virtual_base: u64 = 0,
-//write_cache_virtual_base: u64 = 0,
-//uncacheable_virtual_base: u64 = 0,
-//max_physical_address: u64 = 0,
-
-//pub fn init(self: *@This()) void {
-//kernel.log("Initializing paging...\n");
-//defer kernel.log("Paging initialized\n");
-//CR0.write(CR0.read() | (1 << @enumToInt(CR0.Bit.WP)));
-//CR4.write(CR4.read() | (1 << @enumToInt(CR4.Bit.PCIDE)) | (1 << @enumToInt(CR4.Bit.SMEP)));
-//EFER.write(EFER.read() | (1 << @enumToInt(EFER.Bit.NXE)) | (1 << @enumToInt(EFER.Bit.SCE)) | (1 << @enumToInt(EFER.Bit.TCE)));
-//const pae = CR4.get_flag(.PAE);
-//kernel.assert(pae, @src());
-//max_physical_address = CPUID.get_max_physical_address();
-//kernel.logf("Max physical addresss: {}\n", .{max_physical_address});
-//self.pat = PAT.init();
-//kernel.logf("{}\n", .{self.pat});
-//self.cr3 = CR3.read();
-//self.level_5_paging = false;
-
-//if (!self.level_5_paging) {
-//const base = 0xFFFF800000000000;
-//self.write_back_virtual_base = base;
-//self.write_cache_virtual_base = base;
-//self.uncacheable_virtual_base = base;
-//self.max_physical_address = 0x7F0000000000;
-//} else {
-//TODO();
-//}
-
-//{
-//kernel.log("Consuming bootloader memory map...\n");
-//defer kernel.log("Memory map consumed!\n");
-//for (kernel.bootloader.info.memory_map_entries[0..kernel.bootloader.info.memory_map_entry_count]) |*entry| {
-//var region_address = entry.address;
-//var region_size = entry.size;
-
-//outer: while (region_size != 0) {
-//for (kernel.PhysicalAllocator.reverse_sizes) |pmm_size, reverse_i| {
-//const i = kernel.PhysicalAllocator.sizes.len - reverse_i - 1;
-//if (region_size >= pmm_size and kernel.is_aligned(region_address, pmm_size)) {
-//kernel.PhysicalAllocator.free(region_address, i);
-//region_size -= pmm_size;
-//region_address += pmm_size;
-//continue :outer;
-//}
-//}
-
-//@panic("unreachable");
-//}
-//}
-//}
-
-//const last_entry = kernel.bootloader.info.memory_map_entries[kernel.bootloader.info.memory_map_entry_count - 1];
-//const physical_high = kernel.align_forward(last_entry.address + last_entry.size, page_size);
-//_ = physical_high;
-
-//TODO();
-//}
-
-//pub fn make_page_table() !u64 {
-//const page_table = try kernel.PhysicalAllocator.allocate_physical(page_size);
-//std.mem.set(u8, @intToPtr([*]u8, page_table.get_writeback_virtual_address())[0..page_size], 0);
-//return page_table;
-//}
-
-//const LevelType = u3;
-//const PTE = struct {
-//physical_address: PhysicalAddress,
-//current_level: LevelType,
-//context: *Paging,
-//};
-//};
+pub const HandlePageFaultError = error{};
+pub fn handle_page_fault(virtual_address: Virtual.Address, flags: HandlePageFaultFlags) !void {
+    if (flags.contains(.supervisor)) {
+        if (virtual_address.belongs_to_region(kernel.memory_region)) {} else {
+            @panic("can't map to unknown region");
+        }
+    } else {
+        @panic("can't handle page fault for user mode");
+    }
+    unreachable;
+}

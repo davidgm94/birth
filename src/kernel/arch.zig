@@ -9,6 +9,7 @@ const arch = switch (current_arch) {
 
 /// Arch-specific part of the address space
 pub const AddressSpace = arch.AddressSpace;
+pub const Spinlock = arch.Spinlock;
 pub const page_size = arch.page_size;
 pub const page_shifter = @ctz(u64, page_size);
 

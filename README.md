@@ -21,6 +21,7 @@ An experiment of RISC-V and x86_64 kernel which focuses on learning to build a b
 * Memory mapping other than identity
 * Memory permissions
 * Userspace
+* Make bitflag take the proper type and determine bitsize properly
 
 ### RISC-V
 * Perfectionate the Virtio GPU driver

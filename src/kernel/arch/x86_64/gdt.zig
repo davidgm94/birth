@@ -1,6 +1,7 @@
 const kernel = @import("../../kernel.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
+const log = kernel.log.scoped(.GDT);
 
 pub const Table = packed struct {
     null_entry: Entry = 0, // 0x00
@@ -21,6 +22,8 @@ pub const Table = packed struct {
 
     pub fn initial_setup(gdt: *Table) void {
         gdt.tss = tss.get_descriptor();
+        gdt.load();
+        log.debug("GDT loaded", .{});
     }
 
     pub inline fn load(gdt: *Table) void {

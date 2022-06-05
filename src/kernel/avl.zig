@@ -1,8 +1,9 @@
 const kernel = @import("kernel.zig");
+const log = kernel.log.scoped(.AVL);
 
 pub fn Tree(comptime T: type) type {
     return struct {
-        root: ?*Item,
+        root: ?*Item = null,
 
         /// This is always refering to the tree
         const Self = @This();
@@ -22,16 +23,17 @@ pub fn Tree(comptime T: type) type {
         };
 
         pub fn insert(self: *@This(), item: *Item, item_value: ?*T, key: Key, duplicate_key_policy: DuplicateKeyPolicy) bool {
+            log.debug("Validating before insertion of {*} with key 0x{x}", .{ item, key });
             self.validate();
+            log.debug("Validated before insertion of {*} with key 0x{x}", .{ item, key });
 
             if (item.tree != null) {
-                kernel.panic("item already in a tree\n");
+                kernel.panic("item with key 0x{x} already in tree {*}", .{ key, item.tree });
             }
 
             item.tree = self;
 
-            item.key = kernel.zeroes(Key);
-            item.key.short_key = key;
+            item.key = key;
             item.children[0] = null;
             item.children[1] = null;
             item.value = item_value;
@@ -43,7 +45,7 @@ pub fn Tree(comptime T: type) type {
             while (true) {
                 if (link.*) |node| {
                     if (item.compare(node) == 0) {
-                        if (duplicate_key_policy == .panic) kernel.panic("avl duplicate panic") else if (duplicate_key_policy == .fail) return false;
+                        if (duplicate_key_policy == .panic) @panic("avl duplicate panic") else if (duplicate_key_policy == .fail) return false;
                     }
 
                     const child_index = @boolToInt(item.compare(node) > 0);
@@ -71,24 +73,24 @@ pub fn Tree(comptime T: type) type {
                 var new_root: ?*Item = null;
                 var old_parent = item_it.parent.?;
 
-                if (balance > 1 and Item.compare_keys(key, item_it.children[0].?.key.short_key) <= 0) {
+                if (balance > 1 and Item.compare_keys(key, item_it.children[0].?.key) <= 0) {
                     const right_rotation = item_it.rotate_right();
                     new_root = right_rotation;
                     const old_parent_child_index = @boolToInt(old_parent.children[1] == item_it);
                     old_parent.children[old_parent_child_index] = right_rotation;
-                } else if (balance > 1 and Item.compare_keys(key, item_it.children[0].?.key.short_key) > 0 and item_it.children[0].?.children[1] != null) {
+                } else if (balance > 1 and Item.compare_keys(key, item_it.children[0].?.key) > 0 and item_it.children[0].?.children[1] != null) {
                     item_it.children[0] = item_it.children[0].?.rotate_left();
                     item_it.children[0].?.parent = item_it;
                     const right_rotation = item_it.rotate_right();
                     new_root = right_rotation;
                     const old_parent_child_index = @boolToInt(old_parent.children[1] == item_it);
                     old_parent.children[old_parent_child_index] = right_rotation;
-                } else if (balance < -1 and Item.compare_keys(key, item_it.children[1].?.key.short_key) > 0) {
+                } else if (balance < -1 and Item.compare_keys(key, item_it.children[1].?.key) > 0) {
                     const left_rotation = item_it.rotate_left();
                     new_root = left_rotation;
                     const old_parent_child_index = @boolToInt(old_parent.children[1] == item_it);
                     old_parent.children[old_parent_child_index] = left_rotation;
-                } else if (balance < -1 and Item.compare_keys(key, item_it.children[1].?.key.short_key) <= 0 and item_it.children[1].?.children[0] != null) {
+                } else if (balance < -1 and Item.compare_keys(key, item_it.children[1].?.key) <= 0 and item_it.children[1].?.children[0] != null) {
                     item_it.children[1] = item_it.children[1].?.rotate_right();
                     item_it.children[1].?.parent = item_it;
                     const left_rotation = item_it.rotate_left();
@@ -109,24 +111,24 @@ pub fn Tree(comptime T: type) type {
         }
 
         pub fn find(self: *@This(), key: Key, search_mode: SearchMode) ?*Item {
-            if (self.modcheck) kernel.panic("concurrent access\n");
+            if (self.modcheck) @panic("concurrent access");
             self.validate();
             return self.find_recursive(self.root, key, search_mode);
         }
 
         pub fn find_recursive(self: *@This(), maybe_root: ?*Item, key: Key, search_mode: SearchMode) ?*Item {
             if (maybe_root) |root| {
-                if (Item.compare_keys(root.key.short_key, key) == 0) return root;
+                if (Item.compare_keys(root.key, key) == 0) return root;
 
                 switch (search_mode) {
                     .exact => return self.find_recursive(root.children[0], key, search_mode),
                     .smallest_above_or_equal => {
-                        if (Item.compare_keys(root.key.short_key, key) > 0) {
+                        if (Item.compare_keys(root.key, key) > 0) {
                             if (self.find_recursive(root.children[0], key, search_mode)) |item| return item else return root;
                         } else return self.find_recursive(root.children[1], key, search_mode);
                     },
                     .largest_below_or_equal => {
-                        if (Item.compare_keys(root.key.short_key, key) < 0) {
+                        if (Item.compare_keys(root.key, key) < 0) {
                             if (self.find_recursive(root.children[1], key, search_mode)) |item| return item else return root;
                         } else return self.find_recursive(root.children[0], key, search_mode);
                     },
@@ -137,12 +139,12 @@ pub fn Tree(comptime T: type) type {
         }
 
         pub fn remove(self: *@This(), item: *Item) void {
-            if (self.modcheck) kernel.panic("concurrent modification");
+            if (self.modcheck) @panic("concurrent modification");
             self.modcheck = true;
             defer self.modcheck = false;
 
             self.validate();
-            if (item.tree != self) kernel.panic("item not in tree");
+            if (item.tree != self) @panic("item not in tree");
 
             var fake_root = kernel.zeroes(Item);
             self.root.?.parent = &fake_root;
@@ -214,7 +216,7 @@ pub fn Tree(comptime T: type) type {
 
             self.root = fake_root.children[0];
             if (self.root) |root| {
-                if (root.parent != &fake_root) kernel.panic("incorrect root parent");
+                if (root.parent != &fake_root) @panic("incorrect root parent");
                 root.parent = null;
             }
 
@@ -222,20 +224,21 @@ pub fn Tree(comptime T: type) type {
         }
 
         fn validate(self: *@This()) void {
+            log.debug("Validating tree: {*}", .{self});
             if (self.root) |root| {
+                log.debug("Root: {*}", .{root});
                 _ = root.validate(self, null);
-            } else {
-                return;
             }
+            log.debug("Validated tree: {*}", .{self});
         }
 
         pub const Item = struct {
-            value: ?*T,
-            children: [2]?*Item,
-            parent: ?*Item,
-            tree: ?*Self,
-            key: Key,
-            height: i32,
+            value: ?*T = null,
+            children: [2]?*Item = [_]?*Item{ null, null },
+            parent: ?*Item = null,
+            tree: ?*Self = null,
+            key: Key = 0,
+            height: i32 = 0,
 
             fn rotate_left(self: *@This()) *Item {
                 const x = self;
@@ -316,13 +319,14 @@ pub fn Tree(comptime T: type) type {
                 return left_height - right_height;
             }
 
-            fn validate(self: *@This(), tree: *Tree, parent: ?*@This()) i32 {
-                if (self.parent != parent) kernel.panic("tree panic");
-                if (self.tree != tree) kernel.panic("tree panic");
+            fn validate(self: *@This(), tree: *Self, parent: ?*@This()) i32 {
+                log.debug("Validating node with key 0x{x}", .{self.key});
+                if (self.parent != parent) kernel.panic("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
+                if (self.tree != tree) kernel.panic("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
 
                 const left_height = blk: {
                     if (self.children[0]) |left| {
-                        if (left.compare(self) > 0) kernel.panic("invalid tree");
+                        if (left.compare(self) > 0) @panic("invalid tree");
                         break :blk left.validate(tree, self);
                     } else {
                         break :blk @as(i32, 0);
@@ -331,7 +335,7 @@ pub fn Tree(comptime T: type) type {
 
                 const right_height = blk: {
                     if (self.children[1]) |right| {
-                        if (right.compare(self) < 0) kernel.panic("invalid tree");
+                        if (right.compare(self) < 0) @panic("invalid tree");
                         break :blk right.validate(tree, self);
                     } else {
                         break :blk @as(i32, 0);
@@ -339,13 +343,15 @@ pub fn Tree(comptime T: type) type {
                 };
 
                 const height = 1 + if (left_height > right_height) left_height else right_height;
-                if (height != self.height) kernel.panic("invalid tree");
+                if (height != self.height) @panic("invalid tree");
+
+                log.debug("Validated node {*}", .{self});
 
                 return height;
             }
 
             fn compare(self: *@This(), other: *@This()) i32 {
-                return compare_keys(self.key.short_key, other.key.short_key);
+                return compare_keys(self.key, other.key);
             }
 
             fn compare_keys(key1: u64, key2: u64) i32 {

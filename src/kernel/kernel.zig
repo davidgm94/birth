@@ -17,6 +17,7 @@ pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("avl.zig");
 pub const Heap = @import("heap.zig");
+pub const CoreHeap = @import("core_heap.zig");
 pub const PSF1 = @import("psf1.zig");
 pub const graphics = @import("graphics.zig");
 pub const scheduler = @import("scheduler.zig");
@@ -26,19 +27,18 @@ pub const Disk = @import("disk.zig");
 pub const RNUFS = @import("rnu_fs.zig");
 pub const driver = @import("driver.zig");
 pub const Driver = driver.Driver;
-pub const PhysicalMemory = @import("physical_memory.zig");
 pub const ELF = @import("elf.zig");
 
-pub var address_space: arch.Virtual.AddressSpace = undefined;
+pub var address_space = Virtual.AddressSpace.new(@as(u64, 0));
+pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
+pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
+
 pub var heap: Heap = undefined;
+pub var core_heap: CoreHeap = undefined;
 pub var font: PSF1.Font = undefined;
-
 pub const Writer = std.io.Writer;
-
 pub var higher_half_direct_map: Virtual.Address = undefined;
-
 pub var file: File = undefined;
-
 pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;
 
 pub const File = struct {

@@ -3,11 +3,13 @@ const TODO = kernel.TODO;
 const AddresPair = kernel.Memory.AddressPair;
 const Physical = kernel.arch.Physical;
 
+const Heap = @This();
+
 pub const AllocationResult = struct {
     physical: u64,
     virtual: u64,
-    asked_size: u32,
-    given_size: u32,
+    asked_size: u64,
+    given_size: u64,
 };
 
 const Region = struct {
@@ -22,7 +24,7 @@ lock: kernel.Spinlock,
 
 const region_default_size = 0x10000;
 
-pub fn allocate(self: *@This(), size: u64, zero: bool, separate_page: bool) ?AllocationResult {
+pub fn allocate(self: *Heap, size: u64, zero: bool, separate_page: bool) ?AllocationResult {
     _ = zero;
     self.lock.acquire();
     defer self.lock.release();

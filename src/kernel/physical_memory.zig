@@ -38,9 +38,10 @@ pub const Map = struct {
             return address.access_identity([*]BitsetBaseType)[0..bitset_len];
         }
 
-        pub fn setup_bitset(entry: *Entry, page_count: u64) void {
-            entry.allocated_size += page_count * kernel.arch.page_size;
-
+        pub fn setup_bitset(entry: *Entry) void {
+            log.debug("Setting up bitset", .{});
+            const page_count = kernel.bytes_to_pages(entry.allocated_size, true);
+            log.debug("Set up bitset", .{});
             const bitsize = @bitSizeOf(Map.Entry.BitsetBaseType);
             const quotient = page_count / bitsize;
             const remainder_bitsize_max: u64 = bitsize - 1;
@@ -57,15 +58,6 @@ pub const Map = struct {
             while (remainder_i < remainder) : (remainder_i += 1) {
                 bitset[quotient] |= @as(u64, 1) << remainder_i;
             }
-        }
-
-        pub fn setup_bitset_alone(entry: *Entry) void {
-            // Setup the bitset
-            const bitset = entry.get_bitset();
-            const bitset_size = bitset.len * @sizeOf(Map.Entry.BitsetBaseType);
-            // INFO: this is separated since the bitset needs to be in a different page than the memory map
-            const bitset_page_count = kernel.bytes_to_pages(bitset_size, false);
-            entry.setup_bitset(bitset_page_count);
         }
 
         fn debug(entry: *Entry) void {
