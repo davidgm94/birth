@@ -45,3 +45,5 @@ pub const File = struct {
     address: Physical.Address,
     size: u64,
 };
+
+pub var cpus: []arch.CPU = undefined;

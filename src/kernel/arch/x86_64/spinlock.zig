@@ -4,22 +4,30 @@ const kernel = @import("../../kernel.zig");
 const builtin = @import("builtin");
 const AtomicRmwOp = builtin.AtomicRmwOp;
 status: bool,
+were_interrupts_enabled: bool,
 
-pub fn acquire(spinlock: *Spinlock) void {
+pub fn acquire(spinlock: *volatile Spinlock) void {
+    const are_interrupts_enabled = kernel.arch.are_interrupts_enabled();
+    kernel.arch.disable_interrupts();
     const expected = false;
     spinlock.assert_lock_status(expected);
-    const result = @atomicRmw(@TypeOf(spinlock.status), &spinlock.status, .Xchg, !expected, .Acquire);
+    const result = @atomicRmw(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), .Xchg, !expected, .Acquire);
+    spinlock.were_interrupts_enabled = are_interrupts_enabled;
     kernel.assert(@src(), result == expected);
 }
 
-pub fn release(spinlock: *Spinlock) void {
+pub fn release(spinlock: *volatile Spinlock) void {
     const expected = true;
     spinlock.assert_lock_status(expected);
-    const result = @atomicRmw(@TypeOf(spinlock.status), &spinlock.status, .Xchg, !expected, .Release);
+    const were_interrupts_enabled = spinlock.were_interrupts_enabled;
+    const result = @atomicRmw(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), .Xchg, !expected, .Release);
+    if (were_interrupts_enabled) {
+        kernel.arch.enable_interrupts();
+    }
     kernel.assert(@src(), result == expected);
 }
 
-inline fn assert_lock_status(spinlock: *Spinlock, expected_status: bool) void {
+inline fn assert_lock_status(spinlock: *volatile Spinlock, expected_status: bool) void {
     if (expected_status != spinlock.status) {
         kernel.panic("Spinlock not in a desired state", .{});
     }

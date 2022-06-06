@@ -3,9 +3,39 @@ const log = kernel.log.scoped(.ACPI);
 const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
+
+pub const LAPIC = struct {
+    var ticks_per_ms: u64 = 0;
+    var address: u32 = 0;
+
+    const timer_interrupt = 0x40;
+
+    pub inline fn read(register: u32) u32 {
+        kernel.assert(@src(), LAPIC.address != 0);
+        const result = @intToPtr([*]u32, address)[register];
+        return result;
+    }
+
+    pub inline fn write(register: u32, value: u32) u32 {
+        kernel.assert(@src(), LAPIC.address != 0);
+        @intToPtr([*]u32, address)[register] = value;
+    }
+
+    pub inline fn next_timer(ms: u64) void {
+        kernel.assert(@src(), LAPIC.ticks_per_ms != 0);
+        kernel.assert(@src(), LAPIC.address != 0);
+        LAPIC.write(0x320 >> 2, timer_interrupt | (1 << 17));
+        LAPIC.write(0x380 >> 2, ms * ticks_per_ms);
+    }
+
+    pub inline fn end_of_interrupt() void {
+        LAPIC.write(0xb0 >> 2, 0);
+    }
+};
 /// ACPI initialization. We should have a page mapper ready before executing this function
 pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
     var rsdp_physical_page = rsdp_physical_address;
+    log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     rsdp_physical_page.page_align_backward();
     kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.identity_virtual_address());
     const rsdp1 = rsdp_physical_address.access_identity(*align(1) RSDP1);
@@ -24,7 +54,62 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const header = @intToPtr(*align(1) Header, table_address);
-            log.debug("Table: {s}", .{header.signature});
+
+            if (kernel.string_eq(&header.signature, "APIC")) {
+                const madt = @ptrCast(*align(1) MADT, header);
+                log.debug("MADT: {}", .{madt});
+                log.debug("LAPIC address: 0x{x}", .{madt.LAPIC_address});
+
+                LAPIC.address = madt.LAPIC_address;
+
+                const madt_top = @ptrToInt(madt) + madt.header.length;
+                var offset = @ptrToInt(madt) + @sizeOf(MADT);
+
+                var processor_count: u64 = 0;
+                var entry_length: u64 = undefined;
+
+                while (offset != madt_top) : (offset += entry_length) {
+                    const entry_type = @intToPtr(*MADT.Type, offset).*;
+                    entry_length = @intToPtr(*u8, offset + 1).*;
+                    processor_count += @boolToInt(entry_type == .LAPIC);
+                }
+
+                //kernel.cpus = kernel.core_heap.allocate_many(kernel.arch.CPU, processor_count);
+                processor_count = 0;
+
+                offset = @ptrToInt(madt) + @sizeOf(MADT);
+
+                while (offset != madt_top) : (offset += entry_length) {
+                    const entry_type = @intToPtr(*MADT.Type, offset).*;
+                    entry_length = @intToPtr(*u8, offset + 1).*;
+
+                    switch (entry_type) {
+                        .LAPIC => {
+                            const lapic = @intToPtr(*align(1) MADT.LAPIC, offset);
+                            log.debug("LAPIC: {}", .{lapic});
+                            kernel.assert(@src(), @sizeOf(MADT.LAPIC) == entry_length);
+                        },
+                        .IO_APIC => {
+                            const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
+                            log.debug("IO_APIC: {}", .{ioapic});
+                            kernel.assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
+                        },
+                        .ISO => {
+                            const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
+                            log.debug("ISO: {}", .{iso});
+                            kernel.assert(@src(), @sizeOf(MADT.InterruptSourceOverride) == entry_length);
+                        },
+                        .LAPIC_NMI => {
+                            const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
+                            log.debug("LAPIC_NMI: {}", .{lapic_nmi});
+                            kernel.assert(@src(), @sizeOf(MADT.LAPIC_NMI) == entry_length);
+                        },
+                        else => kernel.panic("ni: {}", .{entry_type}),
+                    }
+                }
+            } else {
+                log.debug("Ignored table: {s}", .{header.signature});
+            }
         }
     } else {
         kernel.assert(@src(), rsdp1.revision == 2);
@@ -96,4 +181,63 @@ const Header = extern struct {
     comptime {
         kernel.assert_unsafe(@sizeOf(Header) == 36);
     }
+};
+
+const MADT = extern struct {
+    header: Header,
+    LAPIC_address: u32,
+    flags: u32,
+
+    const Type = enum(u8) {
+        LAPIC = 0,
+        IO_APIC = 1,
+        ISO = 2,
+        NMI_source = 3,
+        LAPIC_NMI = 4,
+        LAPIC_address_override = 5,
+        IO_SAPIC = 6,
+        LSAPIC = 7,
+        platform_interrupt_sources = 8,
+        Lx2APIC = 9,
+        Lx2APIC_NMI = 0xa,
+        GIC_CPU_interface = 0xb,
+        GIC_distributor = 0xc,
+        GIC_MSI_frame = 0xd,
+        GIC_redistributor = 0xe,
+        GIC_interrupt_translation_service = 0xf,
+    };
+
+    const LAPIC = struct {
+        type: Type,
+        length: u8,
+        ACPI_processor_UID: u8,
+        APIC_ID: u8,
+        flags: u32,
+    };
+
+    const IO_APIC = struct {
+        type: Type,
+        length: u8,
+        IO_APIC_ID: u8,
+        reserved: u8,
+        IO_APIC_address: u32,
+        global_system_interrupt_base: u32,
+    };
+
+    const InterruptSourceOverride = packed struct {
+        type: Type,
+        length: u8,
+        bus: u8,
+        source: u8,
+        global_system_interrupt: u32,
+        flags: u16,
+    };
+
+    const LAPIC_NMI = packed struct {
+        type: Type,
+        length: u8,
+        ACPI_processor_UID: u8,
+        flags: u16,
+        LAPIC_lint: u8,
+    };
 };

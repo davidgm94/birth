@@ -12,15 +12,16 @@ pub const Error = error{
     kernel_file,
     pmrs,
     rsdp,
+    smp,
 };
 
 pub fn process_bootloader_information(stivale2_struct: *Struct) Error!void {
-    x86_64.rsdp = try process_rsdp(stivale2_struct);
     kernel.Physical.Memory.map = try process_memory_map(stivale2_struct);
     kernel.higher_half_direct_map = try process_higher_half_direct_map(stivale2_struct);
     kernel.file = try process_kernel_file(stivale2_struct);
     kernel.sections_in_memory = try process_pmrs(stivale2_struct);
     x86_64.rsdp = try process_rsdp(stivale2_struct);
+    kernel.cpus = try process_smp(stivale2_struct);
 }
 
 pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
@@ -188,6 +189,7 @@ pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Virtual.Memory.Regi
     const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
+
     const kernel_section_allocation = kernel.Physical.Memory.allocate_pages(1) orelse return Error.pmrs;
     const kernel_sections = kernel_section_allocation.access_identity([*]kernel.Virtual.Memory.RegionWithPermissions)[0..pmrs.len];
 
@@ -229,4 +231,23 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!kernel.Physical.Address {
     log.debug("RSDP struct: 0x{x}", .{rsdp});
     const rsdp_address = kernel.Physical.Address.new(rsdp);
     return rsdp_address;
+}
+
+pub fn process_smp(stivale2_struct: *Struct) Error![]kernel.arch.CPU {
+    const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
+    log.debug("SMP struct: {}", .{smp_struct});
+
+    const page_count = kernel.bytes_to_pages(smp_struct.cpu_count * @sizeOf(kernel.arch.CPU), false);
+    const allocation = kernel.Physical.Memory.allocate_pages(page_count) orelse return Error.smp;
+    const cpus = allocation.access_identity([*]kernel.arch.CPU)[0..smp_struct.cpu_count];
+    const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];
+    kernel.assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
+    cpus[0].is_bootstrap = true;
+
+    for (smps) |smp, cpu_index| {
+        const cpu = &cpus[cpu_index];
+        cpu.lapic_id = smp.lapic_id;
+    }
+
+    return cpus;
 }

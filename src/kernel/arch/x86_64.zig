@@ -15,14 +15,7 @@ pub const ACPI = @import("x86_64/acpi.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
 
-var gdt = GDT.Table{
-    .tss = undefined,
-};
-
-pub var rsdp: kernel.Physical.Address = undefined;
-
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
-    interrupts.disable();
     log.debug("Hello kernel!", .{});
     enable_cpu_features();
     Stivale2.process_bootloader_information(stivale_struct) catch |bootloader_error| kernel.panic("Initialization from bootloader data failed: {}", .{bootloader_error});
@@ -30,14 +23,41 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     gdt.initial_setup();
 
     enable_cpu_features();
-    interrupts.init();
     Paging.init();
-    ACPI.init(rsdp);
+    init_scheduler();
+    init_all_cores();
+    // ACPI.init(rsdp);
 
+    log.debug("Everything OK", .{});
     while (true) {
         kernel.spinloop_hint();
     }
 }
+
+pub fn set_local_storage(cpu: *kernel.arch.CPU) void {
+    GS_base.write(@ptrToInt(cpu));
+}
+
+pub fn enable_apic() void {
+    const ia32_apic = IA32_APIC_base.read().bits;
+    const apic_physical_address = get_apic_base(ia32_apic);
+}
+pub fn init_scheduler() void {
+    set_local_storage(&kernel.cpus[0]);
+    interrupts.init();
+    enable_apic();
+}
+
+pub fn init_all_cores() void {
+    //const all_stacks_size = kernel.arch.bootstrap_stack_size * kernel.cpus.len;
+    //kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(
+}
+
+var gdt = GDT.Table{
+    .tss = undefined,
+};
+
+pub var rsdp: kernel.Physical.Address = undefined;
 
 pub const IOPort = struct {
     pub const DMA1 = 0x0000;
@@ -596,7 +616,9 @@ pub fn SimpleMSR(comptime msr: u32) type {
 pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     return struct {
         pub const BitEnum = _BitEnum;
-        pub inline fn read() u64 {
+
+        pub const Flags = kernel.Bitflag(false, BitEnum);
+        pub inline fn read() Flags {
             var low: u32 = undefined;
             var high: u32 = undefined;
 
@@ -605,10 +627,11 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
                   [_] "={edx}" (high),
                 : [_] "{ecx}" (msr),
             );
-            return (@as(u64, high) << 32) | low;
+            return Flags.from_bits((@as(u64, high) << 32) | low);
         }
 
-        pub inline fn write(value: u64) void {
+        pub inline fn write(flags: Flags) void {
+            const value = flags.bits;
             const low = @truncate(u32, value);
             const high = @truncate(u32, value >> 32);
 
@@ -622,6 +645,14 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     };
 }
 
+pub const IA32_APIC_base = ComplexMSR(0x0000001B, enum(u64) {
+    bsp = 8,
+    global_enable = 11,
+});
+
+fn get_apic_base(ia32_apic_base: IA32_APIC_base.Flags) u32 {
+    return @truncate(u32, ia32_apic_base.bits & 0xfffff000);
+}
 pub const PAT = SimpleMSR(0x277);
 pub const EFER = ComplexMSR(0xC0000080, enum(u6) {
     /// Syscall Enable - syscall, sysret
@@ -637,26 +668,39 @@ pub const EFER = ComplexMSR(0xC0000080, enum(u6) {
     FFXSR = 14,
     TCE = 15,
 });
-const RFLAGS = kernel.Bitflag(false, enum(u64) {
-    CF = 0,
-    PF = 2,
-    AF = 4,
-    ZF = 6,
-    SF = 7,
-    TF = 8,
-    IF = 9,
-    DF = 10,
-    OF = 11,
-    IOPL0 = 12,
-    IOPL1 = 13,
-    NT = 14,
-    RF = 16,
-    VM = 17,
-    AC = 18,
-    VIF = 19,
-    VIP = 20,
-    ID = 21,
-});
+
+pub const RFLAGS = struct {
+    pub const Flags = kernel.Bitflag(false, enum(u64) {
+        CF = 0,
+        PF = 2,
+        AF = 4,
+        ZF = 6,
+        SF = 7,
+        TF = 8,
+        IF = 9,
+        DF = 10,
+        OF = 11,
+        IOPL0 = 12,
+        IOPL1 = 13,
+        NT = 14,
+        RF = 16,
+        VM = 17,
+        AC = 18,
+        VIF = 19,
+        VIP = 20,
+        ID = 21,
+    });
+
+    pub inline fn read() Flags {
+        return Flags{
+            .bits = asm volatile (
+                \\pushfq
+                \\pop %[flags]
+                : [flags] "=r" (-> u64),
+            ),
+        };
+    }
+};
 pub const GS_base = SimpleMSR(0xc0000102);
 
 pub const CPUID = struct {
@@ -770,6 +814,49 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
         else => @panic("invalid page table level count\n"),
     };
 }
+
+pub inline fn enable_interrupts() void {
+    cr8.write(0);
+    asm volatile ("sti");
+}
+
+pub inline fn disable_interrupts() void {
+    cr8.write(0xe);
+    asm volatile ("sti");
+}
+
+pub inline fn are_interrupts_enabled() bool {
+    return RFLAGS.read().contains(.IF) and cr8.read() == 0;
+}
+
+pub const LAPIC = struct {
+    var ticks_per_ms: u64 = 0;
+    var address: u32 = 0;
+
+    const timer_interrupt = 0x40;
+
+    pub inline fn read(register: u32) u32 {
+        kernel.assert(@src(), LAPIC.address != 0);
+        const result = @intToPtr([*]u32, address)[register];
+        return result;
+    }
+
+    pub inline fn write(register: u32, value: u32) u32 {
+        kernel.assert(@src(), LAPIC.address != 0);
+        @intToPtr([*]u32, address)[register] = value;
+    }
+
+    pub inline fn next_timer(ms: u64) void {
+        kernel.assert(@src(), LAPIC.ticks_per_ms != 0);
+        kernel.assert(@src(), LAPIC.address != 0);
+        LAPIC.write(0x320 >> 2, timer_interrupt | (1 << 17));
+        LAPIC.write(0x380 >> 2, ms * ticks_per_ms);
+    }
+
+    pub inline fn end_of_interrupt() void {
+        LAPIC.write(0xb0 >> 2, 0);
+    }
+};
 
 // /// This sets the address of the CPU local storage
 // /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset

@@ -30,7 +30,7 @@ pub inline fn allocate(heap: *Heap, comptime T: type) ?*T {
     return @intToPtr(*T, (heap.allocate_extended(@sizeOf(T), @alignOf(T)) orelse return null).value);
 }
 
-pub inline fn allocate_many(heap: *Heap, comptime T: type, count: u64) []T {
+pub inline fn allocate_many(heap: *Heap, comptime T: type, count: u64) ?[]T {
     return @intToPtr([*]T, (heap.allocate_extended(@sizeOf(T) * count, @alignOf(T)) orelse return null).value)[0..count];
 }
 

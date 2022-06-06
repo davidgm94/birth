@@ -272,14 +272,6 @@ pub fn install_interrupt_handlers() void {
     idt.add_interrupt_handler(get_handler_descriptor(255, false));
 }
 
-pub inline fn enable() void {
-    asm volatile ("sti");
-}
-
-pub inline fn disable() void {
-    asm volatile ("cli");
-}
-
 pub fn init() void {
     // Initialize interrupts
     log.debug("Initializing interrupts", .{});
@@ -288,7 +280,7 @@ pub fn init() void {
     log.debug("Installed interrupt handlers", .{});
     idt.load();
     log.debug("Loaded IDT", .{});
-    enable();
+    x86_64.enable_interrupts();
     log.debug("Enabled interrupts", .{});
 }
 
@@ -356,7 +348,6 @@ const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
 });
 
 export fn interrupt_handler(context: *Context) callconv(.C) void {
-    interrupts.disable();
     log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
     inline for (std.meta.fields(Context)) |field| {
         log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
@@ -377,7 +368,10 @@ export fn interrupt_handler(context: *Context) callconv(.C) void {
                         if (error_code.contains(.reserved_write)) {
                             @panic("reserved write");
                         }
-                        unreachable;
+
+                        if (true) unreachable;
+
+                        x86_64.disable_interrupts();
                     },
                     else => @panic("ni"),
                 }
@@ -457,37 +451,39 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
                 \\ call interrupt_handler
             );
 
-            asm volatile (
-                \\mov %%rbx, %%rsp
-                \\pop %%rbx
-                \\mov %%bx, %%es
-                \\pop %%rbx
-                \\mov %%bx, %%ds
-                \\add $0x210, %%rsp
-                \\mov %%rsp, %%rbx
-                \\and $~0xf, %%rbx
-                \\and $~0xf, %%rbx
-                \\fxrstor -0x200(%%rbx)
-                // @TODO: if this is a new thread, we must initialize the FPU
-                \\pop %%rax
-                \\pop %%r15
-                \\pop %%r14
-                \\pop %%r13
-                \\pop %%r12
-                \\pop %%r11
-                \\pop %%r10
-                \\pop %%r9
-                \\pop %%r8
-                \\pop %%rbp
-                \\pop %%rdi
-                \\pop %%rsi
-                \\pop %%rdx
-                \\pop %%rcx
-                \\pop %%rbx
-                \\pop %%rax
-                \\add $0x10, %%rsp
-                \\iretq
-            );
+            if (true) unreachable;
+
+            //asm volatile (
+            //\\mov %%rbx, %%rsp
+            //\\pop %%rbx
+            //\\mov %%bx, %%es
+            //\\pop %%rbx
+            //\\mov %%bx, %%ds
+            //\\add $0x210, %%rsp
+            //\\mov %%rsp, %%rbx
+            //\\and $~0xf, %%rbx
+            //\\and $~0xf, %%rbx
+            //\\fxrstor -0x200(%%rbx)
+            //// @TODO: if this is a new thread, we must initialize the FPU
+            //\\pop %%rax
+            //\\pop %%r15
+            //\\pop %%r14
+            //\\pop %%r13
+            //\\pop %%r12
+            //\\pop %%r11
+            //\\pop %%r10
+            //\\pop %%r9
+            //\\pop %%r8
+            //\\pop %%rbp
+            //\\pop %%rdi
+            //\\pop %%rsi
+            //\\pop %%rdx
+            //\\pop %%rcx
+            //\\pop %%rbx
+            //\\pop %%rax
+            //\\add $0x10, %%rsp
+            //\\iretq
+            //);
 
             unreachable;
         }
