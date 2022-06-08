@@ -9,6 +9,7 @@ pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
+pub const TSS = @import("x86_64/tss.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const Paging = @import("x86_64/paging.zig");
 pub const ACPI = @import("x86_64/acpi.zig");
@@ -20,42 +21,108 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     enable_cpu_features();
     Stivale2.process_bootloader_information(stivale_struct) catch |bootloader_error| kernel.panic("Initialization from bootloader data failed: {}", .{bootloader_error});
 
-    gdt.initial_setup();
-
     enable_cpu_features();
     Paging.init();
-    init_scheduler();
-    init_all_cores();
+    preinit_scheduler();
+    init_timer();
+    //init_all_cores();
+
     // ACPI.init(rsdp);
 
+    //asm volatile ("int $0x40");
     log.debug("Everything OK", .{});
+    log.debug("CR8: 0x{x}", .{cr8.read()});
     while (true) {
         kernel.spinloop_hint();
     }
 }
 
-pub fn set_local_storage(cpu: *kernel.arch.CPU) void {
-    GS_base.write(@ptrToInt(cpu));
+fn init_timer() void {
+    const bsp = &kernel.cpus[0];
+    // TODO: HACK
+    bsp.lapic.write(.TIMER_DIV, 3);
+    // TODO: timer_interrupt = 0x40
+    bsp.lapic.write(.LVT_TIMER, 0x40 | (1 << 17));
+    bsp.lapic.write(.TIMER_INITCNT, 0x5000);
 }
+
+pub fn set_local_storage(cpu: *kernel.arch.CPU) void {
+    IA32_GS_BASE.write(@ptrToInt(cpu));
+}
+
+pub fn get_local_storage() *kernel.arch.CPU {
+    return @intToPtr(*kernel.arch.CPU, IA32_GS_BASE.read());
+}
+
+pub const sched_call_vector: u8 = 0x31;
+pub const ring_vector: u8 = 0x32;
+
+var last_vector: u8 = ring_vector;
+
+pub const syscall_vector: u8 = 0x80;
+pub const lapic_timer_interrupt: u8 = 0xef;
+pub const invlpg_vector: u8 = 0xFE;
+pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic() void {
-    const ia32_apic = IA32_APIC_base.read().bits;
+    const spurious_value = @as(u32, 0x100) | spurious_vector;
+    const cpu = get_local_storage();
+    // TODO: x2APIC
+    const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
+    cpu.lapic = LAPIC.new(kernel.Physical.Address.new(apic_physical_address), true);
+    cpu.lapic.write(.SPURIOUS, spurious_value);
+    const lapic_id = cpu.lapic.read(.LAPIC_ID);
+    kernel.assert(@src(), lapic_id == cpu.lapic_id);
+    log.debug("APIC enabled", .{});
 }
-pub fn init_scheduler() void {
-    set_local_storage(&kernel.cpus[0]);
+
+pub fn enable_syscall() void {
+    IA32_LSTAR.write(@ptrToInt(dummy_syscall_handler));
+    // TODO: figure out what this does
+    IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
+    // TODO: figure out what this does
+    IA32_STAR.write(@offsetOf(GDT.Table, "code_64") << 32);
+    // TODO: figure out what this does
+    var efer = IA32_EFER.read();
+    efer.or_flag(.SCE);
+    IA32_EFER.write(efer);
+    log.debug("Enabled syscalls", .{});
+}
+
+pub export fn dummy_syscall_handler() callconv(.Naked) noreturn {
+    while (true) {}
+}
+
+pub fn preinit_scheduler() void {
+    const bsp = &kernel.cpus[0];
+    set_local_storage(bsp);
+    bsp.gdt.initial_setup();
     interrupts.init();
     enable_apic();
+    enable_syscall();
+
+    bsp.shared_tss = TSS.Struct{};
+    bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
+    bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
+    bsp.gdt.update_tss(&bsp.shared_tss);
+
+    log.debug("Scheduler pre-initialization finished!", .{});
 }
 
-pub fn init_all_cores() void {
-    //const all_stacks_size = kernel.arch.bootstrap_stack_size * kernel.cpus.len;
-    //kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(
-}
+//pub fn init_all_cores() void {
+//// TODO: initialize each CPU but the BSP
+////for (
 
-var gdt = GDT.Table{
-    .tss = undefined,
-};
+//const all_stacks_size = kernel.arch.bootstrap_stack_size * kernel.cpus.len;
+//const stack_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(all_stacks_size)) orelse @panic("unable to allocate stacks");
+//const stack_allocation_virtual_address_value = stack_allocation.identity_virtual_address().value;
+
+//for (kernel.cpus) |*cpu, i| {
+//const stack = stack_allocation_virtual_address_value + (kernel.arch.bootstrap_stack_size * i);
+//const stack_top = stack + kernel.arch.bootstrap_stack_size - 0x10;
+//}
+//}
 
 pub var rsdp: kernel.Physical.Address = undefined;
 
@@ -645,16 +712,13 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     };
 }
 
-pub const IA32_APIC_base = ComplexMSR(0x0000001B, enum(u64) {
-    bsp = 8,
-    global_enable = 11,
-});
-
-fn get_apic_base(ia32_apic_base: IA32_APIC_base.Flags) u32 {
-    return @truncate(u32, ia32_apic_base.bits & 0xfffff000);
-}
-pub const PAT = SimpleMSR(0x277);
-pub const EFER = ComplexMSR(0xC0000080, enum(u6) {
+//pub const PAT = SimpleMSR(0x277);
+pub const IA32_STAR = SimpleMSR(0xC0000081);
+pub const IA32_LSTAR = SimpleMSR(0xC0000082);
+pub const IA32_FMASK = SimpleMSR(0xC0000084);
+pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
+pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
+pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u64) {
     /// Syscall Enable - syscall, sysret
     SCE = 0,
     /// Long Mode Enable
@@ -668,6 +732,14 @@ pub const EFER = ComplexMSR(0xC0000080, enum(u6) {
     FFXSR = 14,
     TCE = 15,
 });
+pub const IA32_APIC_BASE = ComplexMSR(0x0000001B, enum(u64) {
+    bsp = 8,
+    global_enable = 11,
+});
+
+fn get_apic_base(ia32_apic_base: IA32_APIC_BASE.Flags) u32 {
+    return @truncate(u32, ia32_apic_base.bits & 0xfffff000);
+}
 
 pub const RFLAGS = struct {
     pub const Flags = kernel.Bitflag(false, enum(u64) {
@@ -701,7 +773,6 @@ pub const RFLAGS = struct {
         };
     }
 };
-pub const GS_base = SimpleMSR(0xc0000102);
 
 pub const CPUID = struct {
     eax: u32,
@@ -737,54 +808,6 @@ pub inline fn cpuid(leaf: u32) CPUID {
         .ecx = ecx,
     };
 }
-
-//const PAT = struct {
-//value: u64,
-//uncacheable: ?Index,
-//write_combining: ?Index,
-//write_through: ?Index,
-//write_back: ?Index,
-
-//const Index = u3;
-//const EncodingInt = u3;
-//const Encoding = enum(EncodingInt) {
-//UC = 0,
-//WC = 1,
-//WT = 4,
-//WP = 5,
-//WB = 6,
-//UC_ = 7,
-//};
-
-//const msr = MSR(0x277);
-
-//fn init() PAT {
-//const id = cpuid(0x00000001);
-//kernel.assert(@truncate(u1, id.edx >> 16) == 1, @src());
-//const value = msr.read();
-
-//return PAT{
-//.value = value,
-//.uncacheable = find_index(value, Encoding.UC),
-//.write_combining = find_index(value, Encoding.WC),
-//.write_through = find_index(value, Encoding.WT),
-//.write_back = find_index(value, Encoding.WB),
-//};
-//}
-
-//inline fn find_index(pat: u64, comptime encoding: Encoding) ?Index {
-//if (@truncate(EncodingInt, pat >> (@as(u6, 0) * 8)) == @enumToInt(encoding)) return 0;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 1) * 8)) == @enumToInt(encoding)) return 1;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 2) * 8)) == @enumToInt(encoding)) return 2;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 3) * 8)) == @enumToInt(encoding)) return 3;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 4) * 8)) == @enumToInt(encoding)) return 4;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 5) * 8)) == @enumToInt(encoding)) return 5;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 6) * 8)) == @enumToInt(encoding)) return 6;
-//if (@truncate(EncodingInt, pat >> (@as(u6, 7) * 8)) == @enumToInt(encoding)) return 7;
-
-//return null;
-//}
-//};
 
 pub fn get_memory_map() kernel.Memory.Map {
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap) orelse @panic("Stivale had no RSDP struct");
@@ -830,27 +853,46 @@ pub inline fn are_interrupts_enabled() bool {
 }
 
 pub const LAPIC = struct {
-    var ticks_per_ms: u64 = 0;
-    var address: u32 = 0;
+    ticks_per_ms: u64 = 0,
+    address: kernel.Physical.Address,
 
     const timer_interrupt = 0x40;
 
-    pub inline fn read(register: u32) u32 {
-        kernel.assert(@src(), LAPIC.address != 0);
-        const result = @intToPtr([*]u32, address)[register];
+    const Register = enum(u32) {
+        LAPIC_ID = 0x20,
+        ICR_LOW = 0x300,
+        ICR_HIGH = 0x310,
+        LVT_TIMER = 0x320,
+        TIMER_DIV = 0x3E0,
+        TIMER_INITCNT = 0x380,
+        SPURIOUS = 0xF0,
+        EOI = 0xB0,
+    };
+
+    pub inline fn new(physical_address: kernel.Physical.Address, comptime map: bool) LAPIC {
+        if (map) {
+            kernel.address_space.map(physical_address, physical_address.identity_virtual_address());
+        }
+        return LAPIC{
+            .address = physical_address,
+        };
+    }
+
+    pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
+        const result = lapic.address.access_identity([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)];
         return result;
     }
 
-    pub inline fn write(register: u32, value: u32) u32 {
-        kernel.assert(@src(), LAPIC.address != 0);
-        @intToPtr([*]u32, address)[register] = value;
+    pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
+        kernel.assert(@src(), lapic.address.is_valid());
+        lapic.address.access_identity([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)] = value;
     }
 
-    pub inline fn next_timer(ms: u64) void {
-        kernel.assert(@src(), LAPIC.ticks_per_ms != 0);
-        kernel.assert(@src(), LAPIC.address != 0);
-        LAPIC.write(0x320 >> 2, timer_interrupt | (1 << 17));
-        LAPIC.write(0x380 >> 2, ms * ticks_per_ms);
+    pub inline fn next_timer(lapic: LAPIC, ms: u64) void {
+        kernel.assert(@src(), lapic.ticks_per_ms != 0);
+        kernel.assert(@src(), lapic.address != 0);
+        lapic.write(0x320 >> 2, timer_interrupt | (1 << 17));
+        lapic.write(0x380 >> 2, ms * lapic.ticks_per_ms);
     }
 
     pub inline fn end_of_interrupt() void {
@@ -863,3 +905,28 @@ pub const LAPIC = struct {
 //pub fn set_cpu_local_storage(index: u64) void {
 //GS_base.write(@ptrToInt(&cpu_local_storages[index]));
 //}
+
+const stack_size = 0x10000;
+const guard_stack_size = 0x1000;
+pub const CPU = struct {
+    gdt: GDT.Table,
+    shared_tss: TSS.Struct,
+    int_stack: u64,
+    scheduler_stack: u64,
+    lapic: LAPIC,
+    lapic_id: u32,
+    is_bootstrap: bool,
+
+    pub fn bootstrap_stacks(cpu: *CPU) void {
+        cpu.int_stack = bootstrap_stack(stack_size);
+        cpu.scheduler_stack = bootstrap_stack(stack_size);
+    }
+
+    fn bootstrap_stack(size: u64) u64 {
+        const total_size = size + guard_stack_size;
+        const physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(total_size, true)) orelse @panic("stack allocation");
+        const virtual_address = physical_address.identity_virtual_address();
+        kernel.address_space.map(physical_address, virtual_address);
+        return virtual_address.value + total_size;
+    }
+};

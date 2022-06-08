@@ -21,7 +21,9 @@ pub const Table = packed struct {
     }
 
     pub fn initial_setup(gdt: *Table) void {
-        gdt.tss = tss.get_descriptor();
+        gdt.* = Table{
+            .tss = bootstrap_tss.get_descriptor(),
+        };
         gdt.load();
         log.debug("GDT loaded", .{});
     }
@@ -38,9 +40,20 @@ pub const Table = packed struct {
             : [gdt_register] "*p" (&register),
         );
     }
+
+    pub inline fn update_tss(gdt: *Table, tss: *TSS.Struct) void {
+        gdt.tss = tss.get_descriptor();
+        const tss_selector: u16 = @offsetOf(Table, "tss");
+        asm volatile (
+            \\ltr %[tss_selector]
+            :
+            : [tss_selector] "r" (tss_selector),
+        );
+        log.debug("Updated TSS", .{});
+    }
 };
 
-var tss: TSS.Struct = undefined;
+const bootstrap_tss = TSS.Struct{};
 
 const Entry = u64;
 

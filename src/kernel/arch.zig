@@ -12,6 +12,7 @@ pub const AddressSpace = arch.AddressSpace;
 pub const Spinlock = arch.Spinlock;
 pub const page_size = arch.page_size;
 pub const page_shifter = @ctz(u64, page_size);
+pub const CPU = arch.CPU;
 
 pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;
@@ -46,10 +47,5 @@ pub fn check_page_size(asked_page_size: u64) u64 {
 
     unreachable;
 }
-
-pub const CPU = struct {
-    lapic_id: u32,
-    is_bootstrap: bool,
-};
 
 pub const bootstrap_stack_size = 0x10000;
