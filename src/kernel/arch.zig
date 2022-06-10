@@ -7,12 +7,17 @@ const arch = switch (current_arch) {
     else => @compileError("CPU architecture not supported"),
 };
 
+const Virtual = @import("virtual.zig");
+const scheduler = @import("scheduler.zig");
+const Thread = scheduler.Thread;
+
 /// Arch-specific part of the address space
 pub const AddressSpace = arch.AddressSpace;
 pub const Spinlock = arch.Spinlock;
 pub const page_size = arch.page_size;
 pub const page_shifter = @ctz(u64, page_size);
 pub const CPU = arch.CPU;
+pub const Context = arch.Context;
 
 pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;
@@ -49,3 +54,5 @@ pub fn check_page_size(asked_page_size: u64) u64 {
 }
 
 pub const bootstrap_stack_size = 0x10000;
+
+pub extern fn switch_context(context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) void;

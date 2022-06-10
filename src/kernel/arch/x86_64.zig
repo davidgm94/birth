@@ -15,6 +15,7 @@ pub const Paging = @import("x86_64/paging.zig");
 pub const ACPI = @import("x86_64/acpi.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
+pub const Context = interrupts.Context;
 
 pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     log.debug("Hello kernel!", .{});
@@ -930,3 +931,26 @@ pub const CPU = struct {
         return virtual_address.value + total_size;
     }
 };
+
+export fn switch_context() callconv(.Naked) void {
+    asm volatile (
+        \\cli
+        \\mov (%%rsi), %%rsi
+        \\mov %%cr3, %%rax
+        \\cmp %%rsi, %%rax
+        \\je .cont
+        \\mov %%rsi, %%cr3
+        \\.cont:
+        \\mov %%rdi, %%rsp
+        \\mov %%r8, %%rsi
+    );
+
+    interrupts.epilogue();
+
+    unreachable;
+}
+
+//export fn post_context_switch(context: *interrupts.Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) bool {
+//kernel.scheduler.lock.release();
+
+//}

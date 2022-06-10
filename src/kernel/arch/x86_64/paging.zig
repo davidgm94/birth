@@ -343,6 +343,7 @@ pub const HandlePageFaultFlags = kernel.Bitflag(false, enum(u32) {
 
 pub const HandlePageFaultError = error{};
 pub fn handle_page_fault(virtual_address: Virtual.Address, flags: HandlePageFaultFlags) !void {
+    log.debug("Handling page fault", .{});
     if (flags.contains(.supervisor)) {
         if (virtual_address.belongs_to_region(kernel.memory_region)) {} else {
             @panic("can't map to unknown region");
@@ -350,5 +351,6 @@ pub fn handle_page_fault(virtual_address: Virtual.Address, flags: HandlePageFaul
     } else {
         @panic("can't handle page fault for user mode");
     }
+    log.debug("why are we here");
     unreachable;
 }

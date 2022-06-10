@@ -369,6 +369,7 @@ export fn interrupt_handler(context: *Context) callconv(.C) void {
                             @panic("reserved write");
                         }
 
+                        log.debug("why are we here", .{});
                         if (true) unreachable;
 
                         x86_64.disable_interrupts();
@@ -378,43 +379,46 @@ export fn interrupt_handler(context: *Context) callconv(.C) void {
                 log.debug("Exception: {s}", .{@tagName(exception)});
             }
         },
-        else => unreachable,
+        0x40 => {
+            log.debug("@TODO: timer interrupt", .{});
+            kernel.scheduler.yield(context);
+            log.debug("we yield!", .{});
+        },
+        else => {
+            log.debug("whaaaaaat", .{});
+            unreachable;
+        },
     }
 
-    unreachable;
+    // TODO: sanity check interrupt context
+    if (x86_64.are_interrupts_enabled()) {
+        @panic("interrupts should not be enabled");
+    }
 }
 
 const std = @import("std");
 
-//pub const Context = struct {
-//cr2: u64,
-//ds: u64,
-//fxsave: [512 + 16]u8,
-//_check: u64,
-//cr8: u64,
-//r15: u64,
-//r14: u64,
-//r13: u64,
-//r12: u64,
-//r11: u64,
-//r10: u64,
-//r9: u64,
-//r8: u64,
-//rbp: u64,
-//rdi: u64,
-//rsi: u64,
-//rdx: u64,
-//rcx: u64,
-//rbx: u64,
-//rax: u64,
-//interrupt_number: u64,
-//error_code: u64,
-//rip: u64,
-//cs: u64,
-//flags: u64,
-//rsp: u64,
-//ss: u64,
-//};
+inline fn prologue() void {
+    asm volatile (
+        \\cld
+        \\push %%rax
+        \\push %%rbx
+        \\push %%rcx
+        \\push %%rdx
+        \\push %%rdi
+        \\push %%rsi
+        \\push %%rbp
+        \\push %%r8
+        \\push %%r9
+        \\push %%r10
+        \\push %%r11
+        \\push %%r12
+        \\push %%r13
+        \\push %%r14
+        \\push %%r15
+        \\mov %%rsp, %%rdi
+    );
+}
 
 pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
     kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
@@ -426,66 +430,13 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
                 : [interrupt_number] "i" (interrupt_number),
             );
 
-            asm volatile (
-                \\cld
-                \\push %%rax
-                \\push %%rbx
-                \\push %%rcx
-                \\push %%rdx
-                \\push %%rdi
-                \\push %%rsi
-                \\push %%rbp
-                \\push %%r8
-                \\push %%r9
-                \\push %%r10
-                \\push %%r11
-                \\push %%r12
-                \\push %%r13
-                \\push %%r14
-                \\push %%r15
-                \\mov %%rsp, %%rdi
-                \\and $~0xf, %%rsp
-            );
+            prologue();
 
-            asm volatile (
-                \\ call interrupt_handler
-            );
+            asm volatile ("call interrupt_handler");
 
-            if (true) unreachable;
+            epilogue();
 
-            //asm volatile (
-            //\\mov %%rbx, %%rsp
-            //\\pop %%rbx
-            //\\mov %%bx, %%es
-            //\\pop %%rbx
-            //\\mov %%bx, %%ds
-            //\\add $0x210, %%rsp
-            //\\mov %%rsp, %%rbx
-            //\\and $~0xf, %%rbx
-            //\\and $~0xf, %%rbx
-            //\\fxrstor -0x200(%%rbx)
-            //// @TODO: if this is a new thread, we must initialize the FPU
-            //\\pop %%rax
-            //\\pop %%r15
-            //\\pop %%r14
-            //\\pop %%r13
-            //\\pop %%r12
-            //\\pop %%r11
-            //\\pop %%r10
-            //\\pop %%r9
-            //\\pop %%r8
-            //\\pop %%rbp
-            //\\pop %%rdi
-            //\\pop %%rsi
-            //\\pop %%rdx
-            //\\pop %%rcx
-            //\\pop %%rbx
-            //\\pop %%rax
-            //\\add $0x10, %%rsp
-            //\\iretq
-            //);
-
-            unreachable;
+            @panic("Interrupt epilogue didn't iret properly");
         }
     }.handler;
 
@@ -500,6 +451,28 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
         .descriptor_privilege_level = 0,
         .present = 1,
     };
+}
+
+pub inline fn epilogue() void {
+    asm volatile (
+        \\pop %%r15
+        \\pop %%r14
+        \\pop %%r13
+        \\pop %%r12
+        \\pop %%r11
+        \\pop %%r10
+        \\pop %%r9
+        \\pop %%r8
+        \\pop %%rbp
+        \\pop %%rsi
+        \\pop %%rdi
+        \\pop %%rdx
+        \\pop %%rcx
+        \\pop %%rbx
+        \\pop %%rax
+        \\add $0x10, %%rsp
+        \\iretq
+    );
 }
 
 //pub const Context = extern struct {
