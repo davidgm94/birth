@@ -932,6 +932,7 @@ pub const CPU = struct {
     }
 };
 
+//pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) void;
 export fn switch_context() callconv(.Naked) void {
     asm volatile (
         \\cli
@@ -944,6 +945,8 @@ export fn switch_context() callconv(.Naked) void {
         \\mov %%rdi, %%rsp
         \\mov %%r8, %%rsi
     );
+
+    // call post context switch
 
     interrupts.epilogue();
 
