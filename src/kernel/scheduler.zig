@@ -2,6 +2,8 @@ const kernel = @import("kernel.zig");
 const TODO = kernel.TODO;
 const log = kernel.log.scoped(.Scheduler);
 
+const Virtual = kernel.Virtual;
+
 pub const Context = kernel.arch.Context;
 
 pub fn new_fn() noreturn {
@@ -24,39 +26,90 @@ pub fn yield(context: *Context) void {
 }
 
 pub const Thread = struct {
-    todo: u64,
+    privilege_level: PrivilegeLevel,
+    type: Type,
+    kernel_stack: Virtual.Address,
+    user_stack: Virtual.Address,
+    user_stack_reserve: u64,
+    user_stack_commit: u64,
+    id: u64,
+    context: *kernel.arch.Context,
 
-    const ThreadType = enum(u1) {
+    const PrivilegeLevel = enum(u1) {
         kernel = 0,
         user = 1,
     };
 
     // TODO: idle thread
-    const Idle = enum(u1) {
-        no = 0,
-        yes = 1,
+    const Type = enum(u1) {
+        normal = 0,
+        idle = 1,
     };
 
-    pub fn spawn(thread_type: ThreadType) Thread {
+    pub const EntryPoint = struct {
+        start_address: u64,
+        argument: u64,
+    };
+
+    pub fn spawn(privilege_level: PrivilegeLevel, entry_point: EntryPoint) *Thread {
         // TODO: lock
-        var thread = &thread_pool[thread_id % thread_pool.len];
+        const new_thread_id = thread_id;
+        const thread_index = new_thread_id % thread_pool.len;
+        var thread = &thread_pool[thread_index];
         thread_id += 1;
 
         var kernel_stack_size: u64 = 0x5000;
-        const user_stack_reserve: u64 = switch (thread_type) {
+        const user_stack_reserve: u64 = switch (privilege_level) {
             .kernel => kernel_stack_size,
             .user => 0x400000,
         };
-        const user_stack_commit: u64 = switch (thread_type) {
+        const user_stack_commit: u64 = switch (privilege_level) {
             .kernel => 0,
             .user => 0x10000,
         };
+        var user_stack: Virtual.Address = undefined;
+        // TODO: implemented idle thread
+
+        const kernel_stack = kernel.address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
+        switch (privilege_level) {
+            .kernel => {
+                user_stack = kernel_stack;
+            },
+            .user => {
+                TODO(@src());
+            },
+        }
+        thread.privilege_level = privilege_level;
+        thread.kernel_stack = kernel_stack;
+        thread.user_stack = user_stack;
+        thread.user_stack_reserve = user_stack_reserve;
+        thread.user_stack_commit = user_stack_commit;
+        thread.id = new_thread_id;
+        thread.type = .normal;
+        kernel.assert(@src(), thread.type == .normal);
+
+        if (thread.type != .idle) {
+            thread.context = kernel.arch.Context.new(thread, entry_point);
+        }
         _ = thread;
         _ = user_stack_reserve;
         _ = user_stack_commit;
 
-        unreachable;
+        return thread;
     }
 };
 
-pub fn init() void {}
+fn dummy_thread(arg: u64) void {
+    _ = arg;
+    while (true) {
+        log.debug("WE ARE PRINTING", .{});
+    }
+}
+
+pub fn init() void {
+    const thread = Thread.spawn(.kernel, Thread.EntryPoint{
+        .start_address = @ptrToInt(dummy_thread),
+        .argument = 0,
+    });
+    _ = thread;
+}

@@ -307,6 +307,13 @@ pub const Context = struct {
     rflags: u64,
     rsp: u64,
     ss: u64,
+
+    pub fn new(thread: *kernel.scheduler.Thread, entry_point: kernel.scheduler.Thread.EntryPoint) *Context {
+        const context = @intToPtr(*Context, thread.kernel_stack.value - thread.kernel_stack
+        _ = thread;
+        _ = entry_point;
+        unreachable;
+    }
 };
 
 const Exception = enum(u5) {
