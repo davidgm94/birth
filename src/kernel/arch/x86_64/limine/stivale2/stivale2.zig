@@ -16,26 +16,30 @@ pub const Error = error{
 };
 
 pub fn process_bootloader_information(stivale2_struct: *Struct) Error!void {
-    kernel.Physical.Memory.map = try process_memory_map(stivale2_struct);
-    kernel.higher_half_direct_map = try process_higher_half_direct_map(stivale2_struct);
-    kernel.file = try process_kernel_file(stivale2_struct);
     kernel.sections_in_memory = try process_pmrs(stivale2_struct);
-    x86_64.rsdp = try process_rsdp(stivale2_struct);
+    log.debug("Process sections in memory", .{});
+    kernel.file = try process_kernel_file(stivale2_struct);
+    log.debug("Process kernel file in memory", .{});
     kernel.cpus = try process_smp(stivale2_struct);
+    log.debug("Process SMP info", .{});
 }
 
 pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
-    var tag_opt = @intToPtr(?*align(1) stivale.Tag, stivale2_struct.tags);
+    var tag_opt = get_tag_from_physical(kernel.Physical.Address.new(stivale2_struct.tags));
 
     while (tag_opt) |tag| {
         if (tag.identifier == StructT.id) {
             return @ptrCast(*align(1) StructT, tag);
         }
 
-        tag_opt = @intToPtr(?*align(1) stivale.Tag, tag.next);
+        tag_opt = get_tag_from_physical(kernel.Physical.Address.new(tag.next));
     }
 
     return null;
+}
+
+fn get_tag_from_physical(physical_address: kernel.Physical.Address) ?*align(1) stivale.Tag {
+    return if (kernel.Virtual.initialized) physical_address.access_higher_half(?*align(1) stivale.Tag) else physical_address.access_identity(?*align(1) stivale.Tag);
 }
 
 pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory.Map {
@@ -177,21 +181,29 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
         }
     }
 
+    log.debug("Memory map initialized", .{});
+
     return result;
 }
 
 pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!kernel.Virtual.Address {
     const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse return Error.higher_half_direct_map;
+    log.debug("HHDM: 0x{x}", .{hhdm_struct.addr});
     return kernel.Virtual.Address.new(hhdm_struct.addr);
 }
 
 pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Virtual.Memory.RegionWithPermissions {
+    log.debug("Here", .{});
     const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
+    log.debug("PMRS struct: 0x{x}", .{@ptrToInt(pmrs_struct)});
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
+    log.debug("past this", .{});
 
-    const kernel_section_allocation = kernel.Physical.Memory.allocate_pages(1) orelse return Error.pmrs;
-    const kernel_sections = kernel_section_allocation.access_identity([*]kernel.Virtual.Memory.RegionWithPermissions)[0..pmrs.len];
+    kernel.assert(@src(), kernel.Virtual.initialized);
+    const kernel_section_allocation_size = kernel.align_forward(@sizeOf(kernel.Virtual.Memory.RegionWithPermissions) * pmrs.len, kernel.arch.page_size);
+    const kernel_section_allocation = kernel.address_space.allocate(kernel_section_allocation_size) orelse return Error.pmrs;
+    const kernel_sections = kernel_section_allocation.access([*]kernel.Virtual.Memory.RegionWithPermissions)[0..pmrs.len];
 
     for (pmrs) |pmr, i| {
         const kernel_section = &kernel_sections[i];
@@ -205,22 +217,25 @@ pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Virtual.Memory.Regi
 
     return kernel_sections;
 }
+pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
+    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse unreachable;
+    const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
+    return pmrs;
+}
 
 /// This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
 pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
+    kernel.assert(@src(), kernel.Virtual.initialized);
     const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
-    const file_address = kernel_file.kernel_file;
+    const file_address = kernel.Physical.Address.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
-    const kernel_page_count = kernel.bytes_to_pages(file_size, false);
-    const allocation = kernel.Physical.Memory.allocate_pages(kernel_page_count) orelse return Error.kernel_file;
-    const dst = allocation.access_identity([*]u8)[0..file_size];
-    const src = @intToPtr([*]u8, file_address)[0..file_size];
+    const allocation = kernel.address_space.allocate(kernel.align_forward(file_size, kernel.arch.page_size)) orelse return Error.kernel_file;
+    const dst = allocation.access([*]u8)[0..file_size];
+    const src = file_address.access_higher_half([*]u8)[0..file_size];
     log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
     kernel.copy(u8, dst, src);
-    kernel.file.address = kernel.Physical.Address.new(@ptrToInt(dst.ptr));
-    kernel.file.size = file_size;
     return kernel.File{
-        .address = kernel.Physical.Address.new(@ptrToInt(dst.ptr)),
+        .address = allocation,
         .size = file_size,
     };
 }
@@ -234,12 +249,13 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!kernel.Physical.Address {
 }
 
 pub fn process_smp(stivale2_struct: *Struct) Error![]kernel.arch.CPU {
+    kernel.assert(@src(), kernel.Virtual.initialized);
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
     const page_count = kernel.bytes_to_pages(smp_struct.cpu_count * @sizeOf(kernel.arch.CPU), false);
     const allocation = kernel.Physical.Memory.allocate_pages(page_count) orelse return Error.smp;
-    const cpus = allocation.access_identity([*]kernel.arch.CPU)[0..smp_struct.cpu_count];
+    const cpus = allocation.access_higher_half([*]kernel.arch.CPU)[0..smp_struct.cpu_count];
     const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];
     kernel.assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
     cpus[0].is_bootstrap = true;

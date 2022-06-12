@@ -17,15 +17,22 @@ pub const ACPI = @import("x86_64/acpi.zig");
 pub const AddressSpace = Paging.AddressSpace;
 pub const Context = interrupts.Context;
 
-pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
+pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Hello kernel!", .{});
+    log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
+    kernel.address_space = kernel.Virtual.AddressSpace.new(cr3.read_raw());
     enable_cpu_features();
-    Stivale2.process_bootloader_information(stivale_struct) catch |bootloader_error| kernel.panic("Initialization from bootloader data failed: {}", .{bootloader_error});
+    const stivale2_struct_physical_address = kernel.Physical.Address.new(stivale2_struct_address);
+    kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    kernel.Physical.Memory.map = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
+    const region_type = kernel.Physical.Memory.map.find_address(stivale2_struct_physical_address);
+    log.debug("Region type: {}", .{region_type});
+    Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
 
-    enable_cpu_features();
-    Paging.init();
     preinit_scheduler();
-    init_timer();
+    init_scheduler();
     //init_all_cores();
 
     // ACPI.init(rsdp);
@@ -36,6 +43,12 @@ pub export fn start(stivale_struct: *Stivale2.Struct) noreturn {
     while (true) {
         kernel.spinloop_hint();
     }
+}
+
+fn init_scheduler() void {
+    defer init_timer();
+
+    kernel.scheduler.init();
 }
 
 fn init_timer() void {
@@ -68,10 +81,13 @@ pub const spurious_vector: u8 = 0xFF;
 pub fn enable_apic() void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
     const cpu = get_local_storage();
+    log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
-    cpu.lapic = LAPIC.new(kernel.Physical.Address.new(apic_physical_address), true);
+    log.debug("APIC physical address: 0{x}", .{apic_physical_address});
+    cpu.lapic = LAPIC.new(kernel.Physical.Address.new(apic_physical_address));
+    log.debug("LAPIC: {}", .{cpu.lapic});
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
     kernel.assert(@src(), lapic_id == cpu.lapic_id);
@@ -425,7 +441,7 @@ const cr0 = ComplexR64("cr0", enum(u6) {
 // RESERVED: const CR1 = R64("cr1");
 
 /// Contains the page-fault linear address (the linear address that caused a page fault).
-const cr2 = SimpleR64("cr2");
+pub const cr2 = SimpleR64("cr2");
 
 /// Contains the physical address of the base of the paging-structure hierarchy and two flags (PCD and
 /// PWT). Only the most-significant bits (less the lower 12 bits) of the base address are specified; the lower 12 bits
@@ -855,7 +871,7 @@ pub inline fn are_interrupts_enabled() bool {
 
 pub const LAPIC = struct {
     ticks_per_ms: u64 = 0,
-    address: kernel.Physical.Address,
+    address: kernel.Virtual.Address,
 
     const timer_interrupt = 0x40;
 
@@ -870,23 +886,25 @@ pub const LAPIC = struct {
         EOI = 0xB0,
     };
 
-    pub inline fn new(physical_address: kernel.Physical.Address, comptime map: bool) LAPIC {
-        if (map) {
-            kernel.address_space.map(physical_address, physical_address.identity_virtual_address());
-        }
-        return LAPIC{
-            .address = physical_address,
+    pub inline fn new(lapic_physical_address: kernel.Physical.Address) LAPIC {
+        Paging.should_log = true;
+        const lapic_virtual_address = lapic_physical_address.identity_virtual_address_extended(true);
+        log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
+        kernel.address_space.map(lapic_physical_address, lapic_virtual_address);
+        const lapic = LAPIC{
+            .address = lapic_virtual_address,
         };
+        log.debug("LAPIC initialized", .{});
+        return lapic;
     }
 
     pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
-        const result = lapic.address.access_identity([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)];
+        const result = lapic.address.access([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)];
         return result;
     }
 
     pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
-        kernel.assert(@src(), lapic.address.is_valid());
-        lapic.address.access_identity([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)] = value;
+        lapic.address.access([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)] = value;
     }
 
     pub inline fn next_timer(lapic: LAPIC, ms: u64) void {
@@ -896,8 +914,8 @@ pub const LAPIC = struct {
         lapic.write(0x380 >> 2, ms * lapic.ticks_per_ms);
     }
 
-    pub inline fn end_of_interrupt() void {
-        LAPIC.write(0xb0 >> 2, 0);
+    pub inline fn end_of_interrupt(lapic: LAPIC) void {
+        lapic.write(0xb0 >> 2, 0);
     }
 };
 
@@ -926,7 +944,7 @@ pub const CPU = struct {
     fn bootstrap_stack(size: u64) u64 {
         const total_size = size + guard_stack_size;
         const physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(total_size, true)) orelse @panic("stack allocation");
-        const virtual_address = physical_address.identity_virtual_address();
+        const virtual_address = physical_address.access_higher_half();
         kernel.address_space.map(physical_address, virtual_address);
         return virtual_address.value + total_size;
     }

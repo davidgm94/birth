@@ -199,6 +199,7 @@ const x86_bios_qemu_cmd = [_][]const u8{
     "-machine", "q35",
     //"-smp", "4",
     "-d", "guest_errors,int",
+    //"-D", "logfile",
     // zig fmt: on
 };
 

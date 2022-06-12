@@ -37,8 +37,7 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
     var rsdp_physical_page = rsdp_physical_address;
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     rsdp_physical_page.page_align_backward();
-    kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.identity_virtual_address());
-    const rsdp1 = rsdp_physical_address.access_identity(*align(1) RSDP1);
+    const rsdp1 = rsdp_physical_address.access_higher_half(*align(1) RSDP1);
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});

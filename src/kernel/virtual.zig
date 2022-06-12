@@ -5,6 +5,8 @@ const log = kernel.log.scoped(.Virtual);
 pub const Memory = @import("virtual_memory.zig");
 pub const Address = @import("virtual_address.zig");
 
+pub var initialized = false;
+
 pub const AddressSpace = struct {
     arch: kernel.arch.AddressSpace,
     free_regions_by_address: kernel.AVL.Tree(Virtual.Memory.Region),
@@ -20,8 +22,13 @@ pub const AddressSpace = struct {
         };
     }
 
-    //pub inline fn allocate(address_space: *AddressSpace) void {
-    //}
+    // TODO: manage virtual memory
+    pub inline fn allocate(address_space: *AddressSpace, size: u64) ?Virtual.Address {
+        _ = address_space;
+        const page_count = kernel.bytes_to_pages(size, true);
+        const physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse return null;
+        return physical_address.to_higher_half_virtual_address();
+    }
 
     pub inline fn translate_address(address_space: *AddressSpace, virtual_address: Virtual.Address) ?Physical.Address {
         return address_space.arch.translate_address(virtual_address);
@@ -43,14 +50,16 @@ pub const AddressSpace = struct {
 
     pub fn integrate_mapped_physical_entry(address_space: *AddressSpace, entry: kernel.Physical.Memory.Map.Entry, base_virtual_address: Virtual.Address) !void {
         kernel.assert(@src(), entry.descriptor.size != 0);
-        log.debug("region size: {}", .{entry.descriptor.size});
+        //log.debug("Integrating (0x{x}, {}) into 0x{x}", .{ entry.descriptor.address.value, entry.descriptor.size, base_virtual_address.value });
 
         if (entry.descriptor.size != entry.allocated_size) {
             const free_region_offset = base_virtual_address.value + entry.allocated_size;
             const free_region_size = entry.descriptor.size - entry.allocated_size;
+            //log.debug("Allocating free region", .{});
             const free_region = kernel.core_heap.allocate(Virtual.Memory.Region) orelse return IntegrationError.region_allocation_failed;
+            //log.debug("Allocated free region", .{});
             free_region.* = Virtual.Memory.Region.new(Virtual.Address.new(free_region_offset), free_region_size);
-            log.debug("Free region: (0x{x}, {})", .{ free_region.address.value, free_region.size });
+            //log.debug("Free region: (0x{x}, {})", .{ free_region.address.value, free_region.size });
 
             var result = address_space.free_regions_by_address.insert(&free_region.item_address, free_region, free_region.address.value, .panic);
             kernel.assert(@src(), result);
@@ -58,11 +67,13 @@ pub const AddressSpace = struct {
             kernel.assert(@src(), result);
         }
 
-        if (entry.allocated_size != 0) {
+        if (entry.allocated_size > 0) {
+            //log.debug("allocating region", .{});
             const used_region = kernel.core_heap.allocate(Virtual.Memory.Region) orelse return IntegrationError.region_allocation_failed;
+            //log.debug("allocated region", .{});
             used_region.* = Virtual.Memory.Region.new(base_virtual_address, entry.allocated_size);
             used_region.used = true;
-            log.debug("Used region: (0x{x}, {})", .{ used_region.address.value, used_region.size });
+            //log.debug("Used region: (0x{x}, {})", .{ used_region.address.value, used_region.size });
 
             kernel.assert(@src(), used_region.address.value != 0);
             const result = address_space.used_regions.insert(&used_region.item_address, used_region, used_region.address.value, .panic);

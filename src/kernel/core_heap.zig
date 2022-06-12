@@ -1,4 +1,5 @@
 const kernel = @import("kernel.zig");
+const log = kernel.log.scoped(.CoreHeap);
 const TODO = kernel.TODO;
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
@@ -13,8 +14,7 @@ pub const AllocationResult = struct {
 };
 
 const Region = struct {
-    physical: u64,
-    virtual: u64,
+    virtual: Virtual.Address,
     size: u64,
     allocated: u64,
 };
@@ -35,27 +35,22 @@ pub inline fn allocate_many(heap: *Heap, comptime T: type, count: u64) ?[]T {
 }
 
 pub fn allocate_extended(heap: *Heap, size: u64, alignment: u64) ?Virtual.Address {
+    log.debug("Heap: 0x{x}", .{@ptrToInt(heap)});
     kernel.assert(@src(), size < region_size);
     heap.lock.acquire();
     defer heap.lock.release();
     const region = blk: {
-        for (heap.regions) |*region, region_index| {
+        for (heap.regions) |*region| {
             if (region.size > 0) {
                 region.allocated = kernel.align_forward(region.allocated, alignment);
                 kernel.assert(@src(), (region.size - region.allocated) >= size);
                 break :blk region;
             } else {
-                const physical_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(region_size, true)) orelse return null;
-                const physical_region = Physical.Memory.Region{
-                    .address = physical_allocation,
-                    .size = region_size,
-                };
-                const virtual_base = Virtual.Address.new(kernel.core_memory_region.address.value + (region_size * region_index));
-                physical_region.map(&kernel.address_space, virtual_base);
+                log.debug("have to allocate region", .{});
+                const virtual_address = kernel.address_space.allocate(region_size) orelse return null;
 
                 region.* = Region{
-                    .physical = physical_region.address.value,
-                    .virtual = virtual_base.value,
+                    .virtual = virtual_address,
                     .size = region_size,
                     .allocated = 0,
                 };
@@ -67,12 +62,7 @@ pub fn allocate_extended(heap: *Heap, size: u64, alignment: u64) ?Virtual.Addres
         @panic("unreachableeee");
     };
 
-    // TODO: move this when we don't allocate a new region
-    //const is_aligned = kernel.is_aligned(region.virtual + region.allocated, alignment);
-    //if (!is_aligned) {
-    //}
-
-    const result_address = region.virtual + region.allocated;
+    const result_address = region.virtual.value + region.allocated;
     region.allocated += size;
 
     return Virtual.Address.new(result_address);

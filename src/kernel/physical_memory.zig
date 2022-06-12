@@ -13,6 +13,44 @@ pub const Map = struct {
     kernel_and_modules: []Region,
     reserved: []Region,
 
+    pub const RegionType = enum(u3) {
+        usable = 0,
+        reclaimable = 1,
+        framebuffer = 2,
+        kernel_and_modules = 3,
+        reserved = 4,
+    };
+
+    pub fn find_address(mmap: *Map, physical_address: Physical.Address) ?RegionType {
+        for (mmap.usable) |region| {
+            if (physical_address.belongs_to_region(region.descriptor)) {
+                return .usable;
+            }
+        }
+        for (mmap.reclaimable) |region| {
+            if (physical_address.belongs_to_region(region.descriptor)) {
+                return .reclaimable;
+            }
+        }
+        for (mmap.framebuffer) |region| {
+            if (physical_address.belongs_to_region(region)) {
+                return .framebuffer;
+            }
+        }
+        for (mmap.kernel_and_modules) |region| {
+            if (physical_address.belongs_to_region(region)) {
+                return .kernel_and_modules;
+            }
+        }
+        for (mmap.reserved) |region| {
+            if (physical_address.belongs_to_region(region)) {
+                return .reserved;
+            }
+        }
+
+        return null;
+    }
+
     pub const Entry = struct {
         descriptor: Region,
         allocated_size: u64,
@@ -35,7 +73,7 @@ pub const Map = struct {
         pub fn get_bitset_from_address_and_size(address: Physical.Address, size: u64) []BitsetBaseType {
             const page_count = kernel.bytes_to_pages(size, true);
             const bitset_len = kernel.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), false);
-            return address.access_identity([*]BitsetBaseType)[0..bitset_len];
+            return if (kernel.Virtual.initialized) address.access_higher_half([*]BitsetBaseType)[0..bitset_len] else address.access_identity([*]BitsetBaseType)[0..bitset_len];
         }
 
         pub fn setup_bitset(entry: *Entry) void {
@@ -168,11 +206,29 @@ pub const Region = struct {
     address: Physical.Address,
     size: u64,
 
+    pub fn new(address: u64, size: u64) Region {
+        return Region{
+            .address = Physical.Address.new(address),
+            .size = size,
+        };
+    }
+
     pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address) void {
+        return region.map_extended(address_space, base_virtual_address, true);
+    }
+
+    pub fn map_extended(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, comptime is_page_aligned: bool) void {
         var physical_address = region.address;
         var virtual_address = base_virtual_address;
+        var region_size = region.size;
+        if (!is_page_aligned) {
+            physical_address.page_align_backward();
+            virtual_address.page_align_backward();
+            region_size = kernel.align_forward(region_size, kernel.arch.page_size);
+        }
+        log.debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.value + region_size, virtual_address.value, virtual_address.value + region_size });
         var size_it: u64 = 0;
-        while (size_it < region.size) : (size_it += kernel.arch.page_size) {
+        while (size_it < region_size) : (size_it += kernel.arch.page_size) {
             address_space.arch.map(physical_address, virtual_address);
             physical_address.page_up();
             virtual_address.page_up();

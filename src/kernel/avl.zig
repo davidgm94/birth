@@ -23,9 +23,9 @@ pub fn Tree(comptime T: type) type {
         };
 
         pub fn insert(self: *@This(), item: *Item, item_value: ?*T, key: Key, duplicate_key_policy: DuplicateKeyPolicy) bool {
-            log.debug("Validating before insertion of {*} with key 0x{x}", .{ item, key });
+            //log.debug("Validating before insertion of {*} with key 0x{x}", .{ item, key });
             self.validate();
-            log.debug("Validated before insertion of {*} with key 0x{x}", .{ item, key });
+            //log.debug("Validated before insertion of {*} with key 0x{x}", .{ item, key });
 
             if (item.tree != null) {
                 kernel.panic("item with key 0x{x} already in tree {*}", .{ key, item.tree });
@@ -224,12 +224,12 @@ pub fn Tree(comptime T: type) type {
         }
 
         fn validate(self: *@This()) void {
-            log.debug("Validating tree: {*}", .{self});
+            //log.debug("Validating tree: {*}", .{self});
             if (self.root) |root| {
-                log.debug("Root: {*}", .{root});
+                //log.debug("Root: {*}", .{root});
                 _ = root.validate(self, null);
             }
-            log.debug("Validated tree: {*}", .{self});
+            //log.debug("Validated tree: {*}", .{self});
         }
 
         pub const Item = struct {
@@ -320,7 +320,7 @@ pub fn Tree(comptime T: type) type {
             }
 
             fn validate(self: *@This(), tree: *Self, parent: ?*@This()) i32 {
-                log.debug("Validating node with key 0x{x}", .{self.key});
+                //log.debug("Validating node with key 0x{x}", .{self.key});
                 if (self.parent != parent) kernel.panic("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
                 if (self.tree != tree) kernel.panic("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
 
@@ -345,7 +345,7 @@ pub fn Tree(comptime T: type) type {
                 const height = 1 + if (left_height > right_height) left_height else right_height;
                 if (height != self.height) @panic("invalid tree");
 
-                log.debug("Validated node {*}", .{self});
+                //log.debug("Validated node {*}", .{self});
 
                 return height;
             }

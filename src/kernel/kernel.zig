@@ -42,7 +42,7 @@ pub var file: File = undefined;
 pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;
 
 pub const File = struct {
-    address: Physical.Address,
+    address: Virtual.Address,
     size: u64,
 };
 
