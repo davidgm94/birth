@@ -33,13 +33,11 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
 
     preinit_scheduler();
     init_scheduler();
-    //init_all_cores();
 
-    // ACPI.init(rsdp);
-
-    //asm volatile ("int $0x40");
     log.debug("Everything OK", .{});
     log.debug("CR8: 0x{x}", .{cr8.read()});
+
+    next_timer(1);
     while (true) {
         kernel.spinloop_hint();
     }
@@ -51,21 +49,51 @@ fn init_scheduler() void {
     kernel.scheduler.init();
 }
 
+var timestamp_ticks_per_ms: u64 = 0;
+
 fn init_timer() void {
+    disable_interrupts();
     const bsp = &kernel.cpus[0];
-    // TODO: HACK
-    bsp.lapic.write(.TIMER_DIV, 3);
-    // TODO: timer_interrupt = 0x40
-    bsp.lapic.write(.LVT_TIMER, 0x40 | (1 << 17));
-    bsp.lapic.write(.TIMER_INITCNT, 0x5000);
+    const timer_calibration_start = read_timestamp();
+    bsp.lapic.write(.TIMER_INITCNT, kernel.maxInt(u32));
+    var times_i: u64 = 0;
+    const times = 8;
+
+    while (times_i < times) : (times_i += 1) {
+        out8(IOPort.PIT_command, 0x30);
+        out8(IOPort.PIT_data, 0xa9);
+        out8(IOPort.PIT_data, 0x04);
+
+        while (true) {
+            out8(IOPort.PIT_command, 0xe2);
+            if (in8(IOPort.PIT_data) & (1 << 7) != 0) break;
+        }
+    }
+    bsp.lapic.ticks_per_ms = kernel.maxInt(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
+    const timer_calibration_end = read_timestamp();
+    timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
+    enable_interrupts();
+}
+
+pub inline fn read_timestamp() u64 {
+    var my_rdx: u64 = undefined;
+    var my_rax: u64 = undefined;
+
+    asm volatile (
+        \\rdtsc
+        : [rax] "={rax}" (my_rax),
+          [rdx] "={rdx}" (my_rdx),
+    );
+
+    return my_rdx << 32 | my_rax;
 }
 
 pub fn set_local_storage(cpu: *kernel.arch.CPU) void {
     IA32_GS_BASE.write(@ptrToInt(cpu));
 }
 
-pub fn get_local_storage() *kernel.arch.CPU {
-    return @intToPtr(*kernel.arch.CPU, IA32_GS_BASE.read());
+pub fn get_local_storage() ?*kernel.arch.CPU {
+    return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
 }
 
 pub const sched_call_vector: u8 = 0x31;
@@ -80,7 +108,7 @@ pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic() void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
-    const cpu = get_local_storage();
+    const cpu = get_local_storage() orelse unreachable;
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
@@ -147,7 +175,8 @@ pub const IOPort = struct {
     pub const DMA1 = 0x0000;
     pub const PIC1 = 0x0020;
     pub const Cyrix_MSR = 0x0022;
-    pub const PIT = 0x0040;
+    pub const PIT_data = 0x0040;
+    pub const PIT_command = 0x0043;
     pub const PS2 = 0x0060;
     pub const CMOS_RTC = 0x0070;
     pub const DMA_page_registers = 0x0080;
@@ -866,24 +895,27 @@ pub inline fn disable_interrupts() void {
 }
 
 pub inline fn are_interrupts_enabled() bool {
-    return RFLAGS.read().contains(.IF) and cr8.read() == 0;
+    const if_set = RFLAGS.read().contains(.IF);
+    const cr8_value = cr8.read();
+    return if_set and cr8_value == 0;
 }
 
 pub const LAPIC = struct {
-    ticks_per_ms: u64 = 0,
+    ticks_per_ms: u32 = 0,
     address: kernel.Virtual.Address,
 
     const timer_interrupt = 0x40;
 
     const Register = enum(u32) {
         LAPIC_ID = 0x20,
+        EOI = 0xB0,
+        SPURIOUS = 0xF0,
         ICR_LOW = 0x300,
         ICR_HIGH = 0x310,
         LVT_TIMER = 0x320,
         TIMER_DIV = 0x3E0,
         TIMER_INITCNT = 0x380,
-        SPURIOUS = 0xF0,
-        EOI = 0xB0,
+        TIMER_CURRENT_COUNT = 0x390,
     };
 
     pub inline fn new(lapic_physical_address: kernel.Physical.Address) LAPIC {
@@ -899,25 +931,34 @@ pub const LAPIC = struct {
     }
 
     pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
-        const result = lapic.address.access([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)];
+        const register_index = @enumToInt(register) / @sizeOf(u32);
+        const result = lapic.address.access([*]volatile u32)[register_index];
+        log.debug("Reading 0x{x} from {}", .{ result, register });
         return result;
     }
 
     pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
-        lapic.address.access([*]volatile u32)[@enumToInt(register) / @sizeOf(u32)] = value;
+        const register_index = @enumToInt(register) / @sizeOf(u32);
+        log.debug("Writing 0x{x} to {}", .{ value, register });
+        lapic.address.access([*]volatile u32)[register_index] = value;
     }
 
-    pub inline fn next_timer(lapic: LAPIC, ms: u64) void {
+    pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
         kernel.assert(@src(), lapic.ticks_per_ms != 0);
-        kernel.assert(@src(), lapic.address != 0);
-        lapic.write(0x320 >> 2, timer_interrupt | (1 << 17));
-        lapic.write(0x380 >> 2, ms * lapic.ticks_per_ms);
+        lapic.write(.LVT_TIMER, timer_interrupt | (1 << 17));
+        lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
+        _ = ms;
     }
 
     pub inline fn end_of_interrupt(lapic: LAPIC) void {
-        lapic.write(0xb0 >> 2, 0);
+        lapic.write(.EOI, 0);
     }
 };
+
+pub inline fn next_timer(ms: u32) void {
+    const current_cpu = get_local_storage().?;
+    current_cpu.lapic.next_timer(ms);
+}
 
 // /// This sets the address of the CPU local storage
 // /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
@@ -934,6 +975,8 @@ pub const CPU = struct {
     scheduler_stack: u64,
     lapic: LAPIC,
     lapic_id: u32,
+    spinlock_count: u64,
+    current_thread: ?*kernel.scheduler.Thread,
     is_bootstrap: bool,
 
     pub fn bootstrap_stacks(cpu: *CPU) void {
@@ -954,6 +997,7 @@ pub const CPU = struct {
 export fn switch_context() callconv(.Naked) void {
     asm volatile (
         \\cli
+        \\
         \\mov (%%rsi), %%rsi
         \\mov %%cr3, %%rax
         \\cmp %%rsi, %%rax
@@ -964,11 +1008,30 @@ export fn switch_context() callconv(.Naked) void {
         \\mov %%r8, %%rsi
     );
 
-    // call post context switch
+    asm volatile (
+        \\call post_context_switch
+    );
 
     interrupts.epilogue();
 
     unreachable;
+}
+
+export fn post_context_switch(context: *Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) void {
+    // TODO: checks
+    const local_storage = get_local_storage().?;
+    const current_thread = local_storage.current_thread.?;
+    //const new_thread = current_thread.time_slices == 1;
+    local_storage.lapic.end_of_interrupt();
+    context.check();
+
+    // TODO: close reference or dettach address space
+    _ = old_address_space;
+    current_thread.last_known_execution_address = context.rip;
+
+    if (are_interrupts_enabled()) @panic("interrupts enabled");
+    if (local_storage.spinlock_count > 0) @panic("spinlocks active");
+    // TODO: profiling
 }
 
 //export fn post_context_switch(context: *interrupts.Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) bool {

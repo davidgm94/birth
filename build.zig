@@ -112,6 +112,11 @@ pub fn build(b: *Builder) void {
     kernel.setOutputDir(cache_dir);
     b.default_step.dependOn(&kernel.step);
 
+    const disassembly_kernel = b.addSystemCommand(&.{ "llvm-objdump", "-d", "-Mintel", kernel_path });
+    disassembly_kernel.step.dependOn(&kernel.step);
+    const disassembly_kernel_step = b.step("disasm", "Disassembly the kernel ELF");
+    disassembly_kernel_step.dependOn(&disassembly_kernel.step);
+
     const minimal = b.addExecutable("minimal.elf", "src/user/minimal/main.zig");
     minimal.setTarget(get_target_base(current_arch));
     minimal.setOutputDir(cache_dir);

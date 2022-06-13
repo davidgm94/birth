@@ -14,5 +14,5 @@ pub fn panic(comptime format: []const u8, args: anytype) noreturn {
 }
 
 pub fn TODO(src: SourceLocation) noreturn {
-    panic("TODO: {s}:{}:{} {s}()\n", .{ src.file, src.line, src.column, src.fn_name });
+    panic("TODO: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
 }

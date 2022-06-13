@@ -16,24 +16,39 @@ var lock: kernel.arch.Spinlock = undefined;
 var thread_pool: [8192]Thread = undefined;
 var thread_id: u64 = 0;
 
-pub fn yield(context: *Context) void {
-    _ = context;
+pub fn yield(context: *Context) noreturn {
+    log.debug("Old context:", .{});
+    context.debug();
+    if (kernel.arch.get_local_storage().?.current_thread) |current_thread| {
+        current_thread.context = context;
+    }
+    _ = kernel.arch.are_interrupts_enabled();
     kernel.arch.disable_interrupts();
     lock.acquire();
     if (lock.were_interrupts_enabled) @panic("ffff");
-    var new_thread_foo: Thread = undefined;
-    kernel.arch.switch_context(context, &kernel.address_space.arch, 0, &new_thread_foo, &kernel.address_space);
+    const new_thread = pick_thread();
+    new_thread.time_slices += 1;
+    // TODO: idle
+    lock.release();
+
+    kernel.arch.next_timer(1);
+    log.debug("Setting preemption and switching to a new context", .{});
+    kernel.arch.switch_context(new_thread.context, &kernel.address_space.arch, new_thread.kernel_stack.value, new_thread, &kernel.address_space);
 }
 
 pub const Thread = struct {
     privilege_level: PrivilegeLevel,
     type: Type,
     kernel_stack: Virtual.Address,
-    user_stack: Virtual.Address,
+    kernel_stack_base: Virtual.Address,
+    kernel_stack_size: u64,
+    user_stack_base: Virtual.Address,
     user_stack_reserve: u64,
     user_stack_commit: u64,
     id: u64,
     context: *kernel.arch.Context,
+    time_slices: u64,
+    last_known_execution_address: u64,
 
     const PrivilegeLevel = enum(u1) {
         kernel = 0,
@@ -71,6 +86,7 @@ pub const Thread = struct {
         // TODO: implemented idle thread
 
         const kernel_stack = kernel.address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
+        log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
         switch (privilege_level) {
             .kernel => {
                 user_stack = kernel_stack;
@@ -80,8 +96,12 @@ pub const Thread = struct {
             },
         }
         thread.privilege_level = privilege_level;
-        thread.kernel_stack = kernel_stack;
-        thread.user_stack = user_stack;
+        thread.kernel_stack_base = kernel_stack;
+        thread.kernel_stack_size = kernel_stack_size;
+        thread.user_stack_base = switch (privilege_level) {
+            .kernel => Virtual.Address.new(0),
+            .user => user_stack,
+        };
         thread.user_stack_reserve = user_stack_reserve;
         thread.user_stack_commit = user_stack_commit;
         thread.id = new_thread_id;
@@ -89,27 +109,57 @@ pub const Thread = struct {
         kernel.assert(@src(), thread.type == .normal);
 
         if (thread.type != .idle) {
+            log.debug("Creating arch-specific thread initialization", .{});
             thread.context = kernel.arch.Context.new(thread, entry_point);
         }
-        _ = thread;
-        _ = user_stack_reserve;
-        _ = user_stack_commit;
+
+        // TODO: thread queues
+        log.debug("Thread created", .{});
 
         return thread;
     }
+
+    pub fn terminate(thread: *Thread) void {
+        _ = thread;
+        TODO(@src());
+    }
 };
 
-fn dummy_thread(arg: u64) void {
+fn thread1(arg: u64) void {
     _ = arg;
     while (true) {
-        log.debug("WE ARE PRINTING", .{});
+        //log.debug("THREAD 1", .{});
+        //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
     }
 }
 
+fn thread2(arg: u64) void {
+    _ = arg;
+    while (true) {
+        //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
+        //log.debug("THREAD 2", .{});
+    }
+}
+
+fn pick_thread() *Thread {
+    const local_storage = kernel.arch.get_local_storage().?;
+    const current_thread_id = if (local_storage.current_thread) |current_thread| current_thread.id else 0;
+    kernel.assert(@src(), current_thread_id <= 1);
+    const current_thread_index = current_thread_id % thread_pool.len;
+    const next_thread_index = @boolToInt(!(current_thread_index != 0));
+    const new_thread = &thread_pool[next_thread_index];
+    local_storage.current_thread = new_thread;
+    log.debug("Picked thread id: {}", .{local_storage.current_thread.?.id});
+    return new_thread;
+}
+
 pub fn init() void {
-    const thread = Thread.spawn(.kernel, Thread.EntryPoint{
-        .start_address = @ptrToInt(dummy_thread),
+    _ = Thread.spawn(.kernel, Thread.EntryPoint{
+        .start_address = @ptrToInt(thread1),
         .argument = 0,
     });
-    _ = thread;
+    _ = Thread.spawn(.kernel, Thread.EntryPoint{
+        .start_address = @ptrToInt(thread2),
+        .argument = 0,
+    });
 }
