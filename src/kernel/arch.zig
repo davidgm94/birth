@@ -34,9 +34,6 @@ pub const Writer = struct {
     const Error = error{};
     pub var lock: arch.Spinlock = undefined;
     fn write(_: void, bytes: []const u8) Error!usize {
-        lock.acquire();
-        defer lock.release();
-
         return arch.writer_function(bytes);
     }
 };

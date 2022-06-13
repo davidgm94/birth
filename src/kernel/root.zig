@@ -19,7 +19,9 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     //kernel.arch.writer.writeAll("[") catch unreachable;
     //kernel.arch.writer.writeAll(time_str) catch unreachable;
     //kernel.arch.writer.writeAll("] ") catch unreachable;
+    kernel.arch.Writer.lock.acquire();
     kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+    kernel.arch.Writer.lock.release();
 }
 
 //var panicking: usize = 0;
