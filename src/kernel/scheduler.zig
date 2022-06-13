@@ -128,20 +128,6 @@ pub const Thread = struct {
     }
 };
 
-fn thread1(arg: u64) void {
-    _ = arg;
-    while (true) {
-        log.debug("THREAD 1", .{});
-    }
-}
-
-fn thread2(arg: u64) void {
-    _ = arg;
-    while (true) {
-        log.debug("THREAD 2", .{});
-    }
-}
-
 fn pick_thread() *Thread {
     const current_cpu = kernel.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;

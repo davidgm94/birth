@@ -883,20 +883,35 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
     };
 }
 
+const use_cr8 = false;
+
 pub inline fn enable_interrupts() void {
-    cr8.write(0);
-    asm volatile ("sti");
+    if (use_cr8) {
+        cr8.write(0);
+        asm volatile ("sti");
+    } else {
+        asm volatile ("sti");
+    }
 }
 
 pub inline fn disable_interrupts() void {
-    cr8.write(0xe);
-    asm volatile ("sti");
+    if (use_cr8) {
+        cr8.write(0xe);
+        asm volatile ("sti");
+    } else {
+        asm volatile ("cli");
+    }
 }
 
 pub inline fn are_interrupts_enabled() bool {
-    const if_set = RFLAGS.read().contains(.IF);
-    const cr8_value = cr8.read();
-    return if_set and cr8_value == 0;
+    if (use_cr8) {
+        const if_set = RFLAGS.read().contains(.IF);
+        const cr8_value = cr8.read();
+        return if_set and cr8_value == 0;
+    } else {
+        const if_set = RFLAGS.read().contains(.IF);
+        return if_set;
+    }
 }
 
 pub const LAPIC = struct {
