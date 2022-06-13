@@ -5,6 +5,7 @@ const GDT = @import("gdt.zig");
 const x86_64 = @import("../x86_64.zig");
 
 const interrupts = @This();
+const Context = x86_64.Context;
 
 const TODO = kernel.TODO;
 const Thread = kernel.scheduler.Thread;
@@ -287,91 +288,6 @@ pub fn init() void {
     log.debug("Enabled interrupts", .{});
 }
 
-pub const Context = struct {
-    cr8: u64,
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    r11: u64,
-    r10: u64,
-    r9: u64,
-    r8: u64,
-    rbp: u64,
-    rsi: u64,
-    rdi: u64,
-    rdx: u64,
-    rcx: u64,
-    rbx: u64,
-    rax: u64,
-    interrupt_number: u64,
-    error_code: u64,
-    rip: u64,
-    cs: u64,
-    rflags: u64,
-    rsp: u64,
-    ss: u64,
-
-    pub fn new(thread: *kernel.scheduler.Thread, entry_point: kernel.scheduler.Thread.EntryPoint) *Context {
-        const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
-        const user_stack_base = if (thread.user_stack_base.value == 0) kernel_stack else thread.user_stack_base.value;
-        const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
-        const context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
-        thread.kernel_stack = Virtual.Address.new(kernel_stack);
-        log.debug("Kernel stack deref", .{});
-        thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
-        log.debug("Privilege level", .{});
-        // TODO: FPU
-        switch (thread.privilege_level) {
-            .kernel => {
-                context.cs = @offsetOf(x86_64.GDT.Table, "code_64");
-                context.ss = @offsetOf(x86_64.GDT.Table, "data_64");
-            },
-            .user => {
-                context.cs = @offsetOf(x86_64.GDT.Table, "user_code_64");
-                context.ss = @offsetOf(x86_64.GDT.Table, "user_data_64");
-            },
-        }
-
-        context.rflags = x86_64.RFLAGS.Flags.from_flag(.IF).bits;
-        context.rip = entry_point.start_address;
-        context.rsp = user_stack;
-        context.rdi = entry_point.argument;
-
-        return context;
-    }
-
-    pub fn debug(context: *Context) void {
-        log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
-        inline for (std.meta.fields(Context)) |field| {
-            log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
-        }
-    }
-
-    pub fn check(context: *Context) void {
-        var failed = false;
-        failed = failed or context.cs > 0x100;
-        failed = failed or context.ss > 0x100;
-        // TODO: more checking
-        if (failed) {
-            context.debug();
-            @panic("check failed");
-        }
-    }
-};
-
-export fn thread_terminate(thread: *Thread) void {
-    thread.terminate();
-}
-
-fn thread_terminate_stack() callconv(.Naked) void {
-    asm volatile (
-        \\sub $0x8, %%rsp
-        \\jmp thread_terminate
-    );
-    unreachable;
-}
-
 const Exception = enum(u5) {
     divide_by_zero = 0x00,
     debug = 0x01,
@@ -458,9 +374,8 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         },
     }
 
-    context.check();
+    context.check(@src());
 
-    // TODO: sanity check interrupt context
     if (x86_64.are_interrupts_enabled()) {
         @panic("interrupts should not be enabled");
     }

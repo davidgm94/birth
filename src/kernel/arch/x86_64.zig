@@ -15,7 +15,8 @@ pub const Paging = @import("x86_64/paging.zig");
 pub const ACPI = @import("x86_64/acpi.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
-pub const Context = interrupts.Context;
+const Virtual = kernel.Virtual;
+const Thread = kernel.scheduler.Thread;
 
 pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Hello kernel!", .{});
@@ -982,6 +983,96 @@ pub const CPU = struct {
     }
 };
 
+export fn thread_terminate(thread: *Thread) void {
+    thread.terminate();
+}
+
+fn thread_terminate_stack() callconv(.Naked) void {
+    asm volatile (
+        \\sub $0x8, %%rsp
+        \\jmp thread_terminate
+    );
+    unreachable;
+}
+
+pub const Context = struct {
+    cr8: u64,
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rbp: u64,
+    rsi: u64,
+    rdi: u64,
+    rdx: u64,
+    rcx: u64,
+    rbx: u64,
+    rax: u64,
+    interrupt_number: u64,
+    error_code: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+
+    pub fn new(thread: *kernel.scheduler.Thread, entry_point: kernel.scheduler.Thread.EntryPoint) *Context {
+        const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
+        const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
+        const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
+        log.debug("User stack: 0x{x}", .{user_stack});
+        const context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
+        thread.kernel_stack = Virtual.Address.new(kernel_stack);
+        log.debug("Kernel stack deref", .{});
+        thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
+        log.debug("Privilege level", .{});
+        // TODO: FPU
+        switch (thread.privilege_level) {
+            .kernel => {
+                context.cs = @offsetOf(GDT.Table, "code_64");
+                context.ss = @offsetOf(GDT.Table, "data_64");
+            },
+            .user => {
+                context.cs = @offsetOf(GDT.Table, "user_code_64");
+                context.ss = @offsetOf(GDT.Table, "user_data_64");
+            },
+        }
+
+        context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
+        context.rip = entry_point.start_address;
+        context.rsp = user_stack;
+        // TODO: remove when doing userspace
+        log.debug("RSP: 0x{x}", .{context.rsp});
+        log.debug("Stack top: 0x{x}", .{thread.kernel_stack_base.value + thread.kernel_stack_size});
+        kernel.assert(@src(), context.rsp < thread.kernel_stack_base.value + thread.kernel_stack_size);
+        context.rdi = entry_point.argument;
+
+        return context;
+    }
+
+    pub fn debug(context: *Context) void {
+        log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
+        inline for (kernel.fields(Context)) |field| {
+            log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
+        }
+    }
+
+    pub fn check(context: *Context, src: kernel.SourceLocation) void {
+        var failed = false;
+        failed = failed or context.cs > 0x100;
+        failed = failed or context.ss > 0x100;
+        // TODO: more checking
+        if (failed) {
+            context.debug();
+            kernel.panic("check failed: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+        }
+    }
+};
+
 //pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) void;
 export fn switch_context() callconv(.Naked) void {
     asm volatile (
@@ -994,7 +1085,8 @@ export fn switch_context() callconv(.Naked) void {
         \\mov %%rsi, %%cr3
         \\.cont:
         \\mov %%rdi, %%rsp
-        \\mov %%r8, %%rsi
+        \\mov %%rcx, %%rsi
+        \\mov %%r8, %%rdx
     );
 
     asm volatile (
@@ -1006,24 +1098,25 @@ export fn switch_context() callconv(.Naked) void {
     unreachable;
 }
 
-export fn post_context_switch(context: *Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) void {
-    // TODO: checks
+export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.Thread, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) void {
+    if (kernel.scheduler.lock.were_interrupts_enabled) {
+        @panic("interrupts were enabled");
+    }
+    kernel.assert(@src(), context == new_thread.context);
+    kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    context.check(@src());
     const current_cpu = get_current_cpu().?;
-    const current_thread = current_cpu.current_thread.?;
+    current_cpu.current_thread = new_thread;
+    // TODO: checks
     //const new_thread = current_thread.time_slices == 1;
-    current_cpu.lapic.end_of_interrupt();
-    context.check();
 
     // TODO: close reference or dettach address space
     _ = old_address_space;
-    current_thread.last_known_execution_address = context.rip;
+    new_thread.last_known_execution_address = context.rip;
 
     if (are_interrupts_enabled()) @panic("interrupts enabled");
+    kernel.scheduler.lock.release();
     if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
+    current_cpu.lapic.end_of_interrupt();
     // TODO: profiling
 }
-
-//export fn post_context_switch(context: *interrupts.Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) bool {
-//kernel.scheduler.lock.release();
-
-//}

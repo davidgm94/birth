@@ -26,6 +26,7 @@ pub const are_interrupts_enabled = arch.are_interrupts_enabled;
 pub const get_current_cpu = arch.get_current_cpu;
 
 pub const next_timer = arch.next_timer;
+pub const read_timestamp = arch.read_timestamp;
 
 pub const get_memory_map = arch.get_memory_map;
 

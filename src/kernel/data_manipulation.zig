@@ -110,14 +110,14 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
         pub inline fn from_flags(flags: anytype) @This() {
             const flags_type = @TypeOf(flags);
             const result = comptime blk: {
-                const fields = std.meta.fields(flags_type);
-                if (fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
+                const flag_fields = std.meta.fields(flags_type);
+                if (flag_fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
 
                 var bits: BitFlagIntType = 0;
 
                 var field_i: u64 = 0;
-                inline while (field_i < fields.len) : (field_i += 1) {
-                    const field = fields[field_i];
+                inline while (field_i < flag_fields.len) : (field_i += 1) {
+                    const field = flag_fields[field_i];
                     const enum_value: EnumT = field.default_value.?;
                     bits |= 1 << @enumToInt(enum_value);
                 }
@@ -182,3 +182,5 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
         }
     };
 }
+
+pub const fields = std.meta.fields;

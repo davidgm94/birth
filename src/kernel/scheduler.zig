@@ -12,22 +12,28 @@ pub fn new_fn() noreturn {
     }
 }
 
-var lock: kernel.arch.Spinlock = undefined;
+pub var lock: kernel.arch.Spinlock = undefined;
 var thread_pool: [8192]Thread = undefined;
 var thread_id: u64 = 0;
 
 pub fn yield(context: *Context) noreturn {
-    if (kernel.arch.get_current_cpu().?.current_thread) |current_thread| {
-        current_thread.context = context;
+    const current_cpu = kernel.arch.get_current_cpu().?;
+    if (current_cpu.spinlock_count > 0) {
+        @panic("spins active when yielding");
     }
-    _ = kernel.arch.are_interrupts_enabled();
     kernel.arch.disable_interrupts();
     lock.acquire();
     if (lock.were_interrupts_enabled) @panic("ffff");
+    if (current_cpu.current_thread) |current_thread| {
+        current_thread.context = context;
+    }
     const new_thread = pick_thread();
     new_thread.time_slices += 1;
     // TODO: idle
-    lock.release();
+
+    //log.debug("RSP: 0x{x}", .{context.rsp});
+    //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
+    //kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
     kernel.arch.next_timer(1);
     kernel.arch.switch_context(new_thread.context, &kernel.address_space.arch, new_thread.kernel_stack.value, new_thread, &kernel.address_space);
@@ -111,7 +117,7 @@ pub const Thread = struct {
         }
 
         // TODO: thread queues
-        log.debug("Thread created", .{});
+        log.debug("Thread {} created: 0x{x}", .{ thread.id, entry_point.start_address });
 
         return thread;
     }
@@ -126,14 +132,12 @@ fn thread1(arg: u64) void {
     _ = arg;
     while (true) {
         log.debug("THREAD 1", .{});
-        //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
     }
 }
 
 fn thread2(arg: u64) void {
     _ = arg;
     while (true) {
-        //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
         log.debug("THREAD 2", .{});
     }
 }
@@ -141,21 +145,31 @@ fn thread2(arg: u64) void {
 fn pick_thread() *Thread {
     const current_cpu = kernel.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
-    kernel.assert(@src(), current_thread_id <= 1);
-    const current_thread_index = current_thread_id % thread_pool.len;
-    const next_thread_index = @boolToInt(!(current_thread_index != 0));
+    kernel.assert(@src(), current_thread_id < thread_id);
+    const next_thread_index = kernel.arch.read_timestamp() % thread_id;
     const new_thread = &thread_pool[next_thread_index];
-    current_cpu.current_thread = new_thread;
     return new_thread;
 }
 
+fn test_thread(arg: u64) void {
+    const this_arg = arg;
+    while (true) {
+        kernel.assert(@src(), this_arg == arg);
+        kernel.assert(@src(), arg < thread_id);
+        log.debug("THREAD {}", .{arg});
+    }
+}
+
+pub fn test_threads(thread_count: u64) void {
+    var thread_i: u64 = 0;
+    while (thread_i < thread_count) : (thread_i += 1) {
+        _ = Thread.spawn(.kernel, Thread.EntryPoint{
+            .start_address = @ptrToInt(test_thread),
+            .argument = thread_i,
+        });
+    }
+}
+
 pub fn init() void {
-    _ = Thread.spawn(.kernel, Thread.EntryPoint{
-        .start_address = @ptrToInt(thread1),
-        .argument = 0,
-    });
-    _ = Thread.spawn(.kernel, Thread.EntryPoint{
-        .start_address = @ptrToInt(thread2),
-        .argument = 0,
-    });
+    test_threads(11);
 }
