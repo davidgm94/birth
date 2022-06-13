@@ -88,11 +88,11 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub fn set_local_storage(cpu: *kernel.arch.CPU) void {
+pub fn set_current_cpu(cpu: *kernel.arch.CPU) void {
     IA32_GS_BASE.write(@ptrToInt(cpu));
 }
 
-pub fn get_local_storage() ?*kernel.arch.CPU {
+pub fn get_current_cpu() ?*kernel.arch.CPU {
     return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
 }
 
@@ -108,7 +108,7 @@ pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic() void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
-    const cpu = get_local_storage() orelse unreachable;
+    const cpu = get_current_cpu() orelse unreachable;
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
@@ -141,7 +141,7 @@ pub export fn dummy_syscall_handler() callconv(.Naked) noreturn {
 
 pub fn preinit_scheduler() void {
     const bsp = &kernel.cpus[0];
-    set_local_storage(bsp);
+    set_current_cpu(bsp);
     bsp.gdt.initial_setup();
     interrupts.init();
     enable_apic();
@@ -670,8 +670,6 @@ fn get_task_priority_level() u4 {
 fn enable_cpu_features() void {
     kernel.Physical.Address.max_bit = CPUID.get_max_physical_address_bit();
     kernel.Physical.Address.max = @as(u64, 1) << kernel.Physical.Address.max_bit;
-    // TODO: this should go way before this
-    //set_cpu_local_storage(0);
 
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -933,13 +931,11 @@ pub const LAPIC = struct {
     pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
         const register_index = @enumToInt(register) / @sizeOf(u32);
         const result = lapic.address.access([*]volatile u32)[register_index];
-        log.debug("Reading 0x{x} from {}", .{ result, register });
         return result;
     }
 
     pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
         const register_index = @enumToInt(register) / @sizeOf(u32);
-        log.debug("Writing 0x{x} to {}", .{ value, register });
         lapic.address.access([*]volatile u32)[register_index] = value;
     }
 
@@ -947,7 +943,6 @@ pub const LAPIC = struct {
         kernel.assert(@src(), lapic.ticks_per_ms != 0);
         lapic.write(.LVT_TIMER, timer_interrupt | (1 << 17));
         lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
-        _ = ms;
     }
 
     pub inline fn end_of_interrupt(lapic: LAPIC) void {
@@ -956,15 +951,9 @@ pub const LAPIC = struct {
 };
 
 pub inline fn next_timer(ms: u32) void {
-    const current_cpu = get_local_storage().?;
+    const current_cpu = get_current_cpu().?;
     current_cpu.lapic.next_timer(ms);
 }
-
-// /// This sets the address of the CPU local storage
-// /// This is, when we do mov rax, qword ptr gs:x, we get this address + offset
-//pub fn set_cpu_local_storage(index: u64) void {
-//GS_base.write(@ptrToInt(&cpu_local_storages[index]));
-//}
 
 const stack_size = 0x10000;
 const guard_stack_size = 0x1000;
@@ -1019,10 +1008,10 @@ export fn switch_context() callconv(.Naked) void {
 
 export fn post_context_switch(context: *Context, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) void {
     // TODO: checks
-    const local_storage = get_local_storage().?;
-    const current_thread = local_storage.current_thread.?;
+    const current_cpu = get_current_cpu().?;
+    const current_thread = current_cpu.current_thread.?;
     //const new_thread = current_thread.time_slices == 1;
-    local_storage.lapic.end_of_interrupt();
+    current_cpu.lapic.end_of_interrupt();
     context.check();
 
     // TODO: close reference or dettach address space
@@ -1030,7 +1019,7 @@ export fn post_context_switch(context: *Context, old_address_space: *kernel.Virt
     current_thread.last_known_execution_address = context.rip;
 
     if (are_interrupts_enabled()) @panic("interrupts enabled");
-    if (local_storage.spinlock_count > 0) @panic("spinlocks active");
+    if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
 }
 

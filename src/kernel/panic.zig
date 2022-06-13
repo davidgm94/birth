@@ -8,7 +8,6 @@ pub const SourceLocation = std.builtin.SourceLocation;
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     @setCold(true);
     kernel.arch.disable_interrupts();
-    kernel.arch.Writer.should_lock = false;
     log.err(format, args);
     while (true) {}
 }

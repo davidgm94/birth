@@ -17,9 +17,7 @@ var thread_pool: [8192]Thread = undefined;
 var thread_id: u64 = 0;
 
 pub fn yield(context: *Context) noreturn {
-    log.debug("Old context:", .{});
-    context.debug();
-    if (kernel.arch.get_local_storage().?.current_thread) |current_thread| {
+    if (kernel.arch.get_current_cpu().?.current_thread) |current_thread| {
         current_thread.context = context;
     }
     _ = kernel.arch.are_interrupts_enabled();
@@ -32,7 +30,6 @@ pub fn yield(context: *Context) noreturn {
     lock.release();
 
     kernel.arch.next_timer(1);
-    log.debug("Setting preemption and switching to a new context", .{});
     kernel.arch.switch_context(new_thread.context, &kernel.address_space.arch, new_thread.kernel_stack.value, new_thread, &kernel.address_space);
 }
 
@@ -128,7 +125,7 @@ pub const Thread = struct {
 fn thread1(arg: u64) void {
     _ = arg;
     while (true) {
-        //log.debug("THREAD 1", .{});
+        log.debug("THREAD 1", .{});
         //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
     }
 }
@@ -137,19 +134,18 @@ fn thread2(arg: u64) void {
     _ = arg;
     while (true) {
         //log.debug("Interrupts enabled: {}", .{kernel.arch.are_interrupts_enabled()});
-        //log.debug("THREAD 2", .{});
+        log.debug("THREAD 2", .{});
     }
 }
 
 fn pick_thread() *Thread {
-    const local_storage = kernel.arch.get_local_storage().?;
-    const current_thread_id = if (local_storage.current_thread) |current_thread| current_thread.id else 0;
+    const current_cpu = kernel.arch.get_current_cpu().?;
+    const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
     kernel.assert(@src(), current_thread_id <= 1);
     const current_thread_index = current_thread_id % thread_pool.len;
     const next_thread_index = @boolToInt(!(current_thread_index != 0));
     const new_thread = &thread_pool[next_thread_index];
-    local_storage.current_thread = new_thread;
-    log.debug("Picked thread id: {}", .{local_storage.current_thread.?.id});
+    current_cpu.current_thread = new_thread;
     return new_thread;
 }
 

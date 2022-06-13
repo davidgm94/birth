@@ -12,8 +12,8 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
     kernel.arch.disable_interrupts();
     const expected = false;
     spinlock.assert_lock_status(expected);
-    if (kernel.arch.get_local_storage()) |local_storage| {
-        local_storage.spinlock_count += 1;
+    if (kernel.arch.get_current_cpu()) |current_cpu| {
+        current_cpu.spinlock_count += 1;
     }
     const result = @atomicRmw(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), .Xchg, !expected, .Acquire);
     spinlock.were_interrupts_enabled = are_interrupts_enabled;
@@ -22,12 +22,11 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
 
 pub fn release(spinlock: *volatile Spinlock) void {
     const expected = true;
-    if (kernel.arch.get_local_storage()) |local_storage| {
-        local_storage.spinlock_count -= 1;
+    if (kernel.arch.get_current_cpu()) |current_cpu| {
+        current_cpu.spinlock_count -= 1;
     }
     spinlock.assert_lock_status(expected);
     const were_interrupts_enabled = spinlock.were_interrupts_enabled;
-    log.debug("Were enabled: {}", .{were_interrupts_enabled});
     const result = @atomicRmw(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), .Xchg, !expected, .Release);
     if (were_interrupts_enabled) {
         kernel.arch.enable_interrupts();

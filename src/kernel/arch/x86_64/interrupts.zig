@@ -411,21 +411,19 @@ const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
 });
 
 export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
-    log.debug("new interrupt", .{});
-    context.debug();
-
     if (x86_64.are_interrupts_enabled()) {
         @panic("interrupts are enabled");
     }
 
-    if (x86_64.get_local_storage()) |local_storage| {
-        if (local_storage.spinlock_count != 0 and context.cr8 != 0xe) {
+    if (x86_64.get_current_cpu()) |current_cpu| {
+        if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
             @panic("spinlock count bug");
         }
     }
 
     switch (context.interrupt_number) {
         0x0...0x19 => {
+            context.debug();
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
             if (usermode) {
@@ -452,9 +450,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             }
         },
         0x40 => {
-            log.debug("@TODO: timer interrupt", .{});
             kernel.scheduler.yield(context);
-            log.debug("we yield!", .{});
         },
         else => {
             log.debug("whaaaaaat", .{});

@@ -4,34 +4,6 @@ const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
 
-pub const LAPIC = struct {
-    var ticks_per_ms: u64 = 0;
-    var address: u32 = 0;
-
-    const timer_interrupt = 0x40;
-
-    pub inline fn read(register: u32) u32 {
-        kernel.assert(@src(), LAPIC.address != 0);
-        const result = @intToPtr([*]u32, address)[register];
-        return result;
-    }
-
-    pub inline fn write(register: u32, value: u32) u32 {
-        kernel.assert(@src(), LAPIC.address != 0);
-        @intToPtr([*]u32, address)[register] = value;
-    }
-
-    pub inline fn next_timer(ms: u64) void {
-        kernel.assert(@src(), LAPIC.ticks_per_ms != 0);
-        kernel.assert(@src(), LAPIC.address != 0);
-        LAPIC.write(0x320 >> 2, timer_interrupt | (1 << 17));
-        LAPIC.write(0x380 >> 2, ms * ticks_per_ms);
-    }
-
-    pub inline fn end_of_interrupt() void {
-        LAPIC.write(0xb0 >> 2, 0);
-    }
-};
 /// ACPI initialization. We should have a page mapper ready before executing this function
 pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
     var rsdp_physical_page = rsdp_physical_address;
@@ -58,8 +30,6 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                 const madt = @ptrCast(*align(1) MADT, header);
                 log.debug("MADT: {}", .{madt});
                 log.debug("LAPIC address: 0x{x}", .{madt.LAPIC_address});
-
-                LAPIC.address = madt.LAPIC_address;
 
                 const madt_top = @ptrToInt(madt) + madt.header.length;
                 var offset = @ptrToInt(madt) + @sizeOf(MADT);

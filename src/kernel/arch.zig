@@ -23,7 +23,7 @@ pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;
 pub const are_interrupts_enabled = arch.are_interrupts_enabled;
 
-pub const get_local_storage = arch.get_local_storage;
+pub const get_current_cpu = arch.get_current_cpu;
 
 pub const next_timer = arch.next_timer;
 
@@ -32,16 +32,9 @@ pub const get_memory_map = arch.get_memory_map;
 pub const Writer = struct {
     const Error = error{};
     pub var lock: arch.Spinlock = undefined;
-    pub var should_lock = false;
     fn write(_: void, bytes: []const u8) Error!usize {
-        if (should_lock) {
-            lock.acquire();
-        }
-        defer {
-            if (should_lock) {
-                lock.release();
-            }
-        }
+        lock.acquire();
+        defer lock.release();
 
         return arch.writer_function(bytes);
     }
