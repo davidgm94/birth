@@ -232,7 +232,7 @@ const Debug = struct {
             unreachable;
         } else {
             const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
-            const process = try std.ChildProcess.init(qemu, b.allocator);
+            var process = std.ChildProcess.init(qemu, b.allocator);
             _ = try process.spawnAndWait();
 
             terminal_thread.join();
@@ -269,7 +269,7 @@ const Debug = struct {
         for (process_name) |arg, arg_i| {
             log.debug("Process[{}]: {s}", .{arg_i, arg});
         }
-        const process = std.ChildProcess.init(&process_name, b.allocator) catch unreachable;
+        var process = std.ChildProcess.init(&process_name, b.allocator);
         // zig fmt: on
         _ = process.spawnAndWait() catch unreachable;
     }
@@ -337,7 +337,7 @@ const Limine = struct {
         try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
         try std.fs.Dir.copyFile(cwd, kernel_path, img_dir, std.fs.path.basename(kernel_path), .{});
 
-        const xorriso_process = try std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, self.b.allocator);
+        var xorriso_process = std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, self.b.allocator);
         // Ignore stderr and stdout
         xorriso_process.stdin_behavior = std.ChildProcess.StdIo.Ignore;
         xorriso_process.stdout_behavior = std.ChildProcess.StdIo.Ignore;
