@@ -13,9 +13,23 @@ pub const AddressSpace = struct {
     free_regions_by_size: kernel.AVL.Tree(Virtual.Memory.Region),
     used_regions: kernel.AVL.Tree(Virtual.Memory.Region),
 
-    pub inline fn new(context: anytype) AddressSpace {
+    pub inline fn new() AddressSpace {
+        const new_context = kernel.arch.AddressSpace.new();
+        return from_context(new_context);
+    }
+
+    pub inline fn from_current() AddressSpace {
         return AddressSpace{
-            .arch = kernel.arch.AddressSpace.new(context),
+            .arch = kernel.arch.AddressSpace.from_current(),
+            .free_regions_by_address = kernel.AVL.Tree(Virtual.Memory.Region){},
+            .free_regions_by_size = kernel.AVL.Tree(Virtual.Memory.Region){},
+            .used_regions = kernel.AVL.Tree(Virtual.Memory.Region){},
+        };
+    }
+
+    pub inline fn from_context(context: anytype) AddressSpace {
+        return AddressSpace{
+            .arch = kernel.arch.AddressSpace.from_context(context),
             .free_regions_by_address = kernel.AVL.Tree(Virtual.Memory.Region){},
             .free_regions_by_size = kernel.AVL.Tree(Virtual.Memory.Region){},
             .used_regions = kernel.AVL.Tree(Virtual.Memory.Region){},

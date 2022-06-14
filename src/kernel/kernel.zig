@@ -29,7 +29,7 @@ pub const driver = @import("driver.zig");
 pub const Driver = driver.Driver;
 pub const ELF = @import("elf.zig");
 
-pub var address_space = Virtual.AddressSpace.new(@as(u64, 0));
+pub var address_space = Virtual.AddressSpace.from_context(@as(u64, 0));
 pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 

@@ -22,8 +22,8 @@ pub var should_log = false;
 
 pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     log.debug("About to dereference memory regions", .{});
-    const pml4e = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
     var bootloader_address_space = kernel.address_space;
+    const pml4e = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
     kernel.address_space = kernel.Virtual.AddressSpace.new(pml4e.value);
     kernel.zero(kernel.address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
 
@@ -108,7 +108,15 @@ pub const AddressSpace = struct {
 
     const Indices = [kernel.enum_values(PageIndex).len]u16;
 
-    pub inline fn new(context: anytype) AddressSpace {
+    pub inline fn new() AddressSpace {}
+
+    pub inline fn from_current() AddressSpace {
+        return AddressSpace{
+            .cr3 = x86_64.cr3.read_raw(),
+        };
+    }
+
+    pub inline fn from_context(context: anytype) AddressSpace {
         // This is taking a u64 instead of a physical address to easily put here the value of the CR3 register
         comptime kernel.assert_unsafe(@TypeOf(context) == u64);
         const cr3 = context;

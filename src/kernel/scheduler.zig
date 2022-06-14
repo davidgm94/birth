@@ -24,9 +24,9 @@ pub fn yield(context: *Context) noreturn {
     kernel.arch.disable_interrupts();
     lock.acquire();
     if (lock.were_interrupts_enabled) @panic("ffff");
-    if (current_cpu.current_thread) |current_thread| {
-        current_thread.context = context;
-    }
+    const current_thread = current_cpu.current_thread.?;
+    current_thread.context = context;
+    const old_address_space = current_thread.address_space;
     const new_thread = pick_thread();
     new_thread.time_slices += 1;
     // TODO: idle
@@ -36,7 +36,7 @@ pub fn yield(context: *Context) noreturn {
     //kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
     kernel.arch.next_timer(1);
-    kernel.arch.switch_context(new_thread.context, &kernel.address_space.arch, new_thread.kernel_stack.value, new_thread, &kernel.address_space);
+    kernel.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
 pub const Thread = struct {
@@ -52,6 +52,7 @@ pub const Thread = struct {
     context: *kernel.arch.Context,
     time_slices: u64,
     last_known_execution_address: u64,
+    address_space: *Virtual.AddressSpace,
 
     const PrivilegeLevel = enum(u1) {
         kernel = 0,
@@ -75,6 +76,15 @@ pub const Thread = struct {
         const thread_index = new_thread_id % thread_pool.len;
         var thread = &thread_pool[thread_index];
         thread_id += 1;
+
+        thread.address_space = switch (privilege_level) {
+            .kernel => &kernel.address_space,
+            .user => {
+
+                Virtual.AddressSpace.new(
+                @panic("create address space");
+            },
+        };
 
         var kernel_stack_size: u64 = 0x5000;
         const user_stack_reserve: u64 = switch (privilege_level) {
@@ -137,11 +147,12 @@ fn pick_thread() *Thread {
     return new_thread;
 }
 
+export fn user_space() void {
+    asm volatile ("syscall");
+}
+
 fn test_thread(arg: u64) void {
-    const this_arg = arg;
     while (true) {
-        kernel.assert(@src(), this_arg == arg);
-        kernel.assert(@src(), arg < thread_id);
         log.debug("THREAD {}", .{arg});
     }
 }
@@ -156,6 +167,14 @@ pub fn test_threads(thread_count: u64) void {
     }
 }
 
+pub fn test_userspace() void {
+    _ = Thread.spawn(.user, Thread.EntryPoint{
+        .start_address = @ptrToInt(user_space),
+        .argument = 0,
+    });
+}
+
 pub fn init() void {
-    test_threads(11);
+    test_userspace();
+    test_threads(1);
 }

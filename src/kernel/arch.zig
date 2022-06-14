@@ -50,4 +50,4 @@ pub fn check_page_size(asked_page_size: u64) u64 {
 
 pub const bootstrap_stack_size = 0x10000;
 
-pub extern fn switch_context(context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) noreturn;
+pub extern fn switch_context(context: *Context, new_address_space: *Virtual.AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) noreturn;
