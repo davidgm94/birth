@@ -23,8 +23,7 @@ pub var should_log = false;
 pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     log.debug("About to dereference memory regions", .{});
     var bootloader_address_space = kernel.address_space;
-    const pml4e = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PML4Table), true)) orelse @panic("unable to allocate memory for PML4E");
-    kernel.address_space = kernel.Virtual.AddressSpace.new(pml4e.value);
+    kernel.address_space = kernel.Virtual.AddressSpace.new() orelse unreachable;
     kernel.zero(kernel.address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
 
     // Map the kernel and do some tests
@@ -104,11 +103,17 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
 }
 
 pub const AddressSpace = struct {
-    cr3: u64,
+    cr3: u64 = 0,
 
     const Indices = [kernel.enum_values(PageIndex).len]u16;
 
-    pub inline fn new() AddressSpace {}
+    pub inline fn new() ?AddressSpace {
+        const page_count = kernel.bytes_to_pages(@sizeOf(PML4Table), true);
+        const cr3_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse return null;
+        return AddressSpace{
+            .cr3 = cr3_physical_address.value,
+        };
+    }
 
     pub inline fn from_current() AddressSpace {
         return AddressSpace{
