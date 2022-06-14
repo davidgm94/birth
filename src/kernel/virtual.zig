@@ -27,8 +27,11 @@ pub const AddressSpace = struct {
         };
     }
 
+    // TODO: handle free in error case
     pub inline fn new_for_user() ?*AddressSpace {
-        unreachable;
+        const address_space = kernel.core_heap.allocate(AddressSpace) orelse return null;
+        address_space.* = new() orelse return null;
+        return address_space;
     }
 
     // TODO: manage virtual memory

@@ -77,6 +77,7 @@ pub const Thread = struct {
         var thread = &thread_pool[thread_index];
         thread_id += 1;
 
+        log.debug("here", .{});
         // TODO: should we always use the same address space for kernel tasks?
         thread.address_space = switch (privilege_level) {
             .kernel => &kernel.address_space,
