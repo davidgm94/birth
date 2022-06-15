@@ -31,6 +31,7 @@ pub const AddressSpace = struct {
     pub inline fn new_for_user() ?*AddressSpace {
         const address_space = kernel.core_heap.allocate(AddressSpace) orelse return null;
         address_space.* = new() orelse return null;
+        address_space.arch.map_kernel_address_space_higher_half();
         return address_space;
     }
 

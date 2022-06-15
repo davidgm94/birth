@@ -55,6 +55,11 @@ pub inline fn zero(bytes: []u8) void {
     for (bytes) |*byte| byte.* = 0;
 }
 
+pub inline fn zero_slice(slice: anytype) void {
+    const bytes = as_bytes(slice);
+    zero(bytes);
+}
+
 pub inline fn zeroes(comptime T: type) T {
     var result: T = undefined;
     zero(@ptrCast([*]u8, &result)[0..@sizeOf(T)]);

@@ -134,6 +134,18 @@ pub const AddressSpace = struct {
         return Physical.Address.new(address_space.cr3);
     }
 
+    pub fn map_kernel_address_space_higher_half(address_space: AddressSpace) void {
+        const cr3 = address_space.cr3;
+        // TODO: proper address
+        const cr3_physical_address = kernel.Physical.Address.new(cr3);
+        const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
+        kernel.address_space.map(cr3_physical_address, cr3_virtual_address);
+        const pml4 = cr3_virtual_address.access(*PML4Table);
+        kernel.zero_slice(pml4[0..0x100]);
+        kernel.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+        log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
+    }
+
     pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address) void {
         if (should_log) log.debug("Init mapping", .{});
         kernel.assert(@src(), virtual_address.is_page_aligned());

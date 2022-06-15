@@ -933,8 +933,8 @@ pub const LAPIC = struct {
     };
 
     pub inline fn new(lapic_physical_address: kernel.Physical.Address) LAPIC {
-        Paging.should_log = true;
-        const lapic_virtual_address = lapic_physical_address.identity_virtual_address_extended(true);
+        //Paging.should_log = true;
+        const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
         kernel.address_space.map(lapic_physical_address, lapic_virtual_address);
         const lapic = LAPIC{
@@ -1037,6 +1037,7 @@ pub const Context = struct {
 
     pub fn new(thread: *kernel.scheduler.Thread, entry_point: kernel.scheduler.Thread.EntryPoint) *Context {
         const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
+        log.debug("thread user stack base: 0x{x}", .{thread.user_stack_base.value});
         const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
         const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
         log.debug("User stack: 0x{x}", .{user_stack});
@@ -1052,8 +1053,9 @@ pub const Context = struct {
                 context.ss = @offsetOf(GDT.Table, "data_64");
             },
             .user => {
-                context.cs = @offsetOf(GDT.Table, "user_code_64");
-                context.ss = @offsetOf(GDT.Table, "user_data_64");
+                context.cs = @offsetOf(GDT.Table, "user_code_64") | 0b11;
+                context.ss = @offsetOf(GDT.Table, "user_data_64") | 0b11;
+                log.debug("CS: 0x{x}. SS: 0x{x}", .{ context.cs, context.ss });
             },
         }
 

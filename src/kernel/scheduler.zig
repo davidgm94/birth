@@ -23,10 +23,14 @@ pub fn yield(context: *Context) noreturn {
     }
     kernel.arch.disable_interrupts();
     lock.acquire();
+    var old_address_space: *kernel.Virtual.AddressSpace = undefined;
     if (lock.were_interrupts_enabled) @panic("ffff");
-    const current_thread = current_cpu.current_thread.?;
-    current_thread.context = context;
-    const old_address_space = current_thread.address_space;
+    if (current_cpu.current_thread) |current_thread| {
+        current_thread.context = context;
+        old_address_space = current_thread.address_space;
+    } else {
+        old_address_space = &kernel.address_space;
+    }
     const new_thread = pick_thread();
     new_thread.time_slices += 1;
     // TODO: idle
@@ -98,21 +102,27 @@ pub const Thread = struct {
 
         const kernel_stack = kernel.address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
         log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
-        switch (privilege_level) {
-            .kernel => {
-                user_stack = kernel_stack;
+        user_stack = switch (privilege_level) {
+            .kernel => kernel_stack,
+            .user => blk: {
+                // TODO: lock
+                const user_stack_physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(user_stack_reserve, true)) orelse unreachable;
+                const user_stack_physical_region = kernel.Physical.Memory.Region.new(user_stack_physical_address, user_stack_reserve);
+                const user_stack_base_virtual_address = kernel.Virtual.Address.new(0x5000_0000_000);
+                user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address);
+
+                break :blk user_stack_base_virtual_address;
             },
-            .user => {
-                TODO(@src());
-            },
-        }
+        };
         thread.privilege_level = privilege_level;
+        log.debug("Thread privilege: {}", .{thread.privilege_level});
         thread.kernel_stack_base = kernel_stack;
         thread.kernel_stack_size = kernel_stack_size;
         thread.user_stack_base = switch (privilege_level) {
             .kernel => Virtual.Address.new(0),
             .user => user_stack,
         };
+        log.debug("USB: 0x{x}", .{thread.user_stack_base.value});
         thread.user_stack_reserve = user_stack_reserve;
         thread.user_stack_commit = user_stack_commit;
         thread.id = new_thread_id;
@@ -121,11 +131,22 @@ pub const Thread = struct {
 
         if (thread.type != .idle) {
             log.debug("Creating arch-specific thread initialization", .{});
-            thread.context = kernel.arch.Context.new(thread, entry_point);
+            // TODO: hack
+            thread.context = switch (privilege_level) {
+                .kernel => kernel.arch.Context.new(thread, entry_point),
+                .user => blk: {
+                    var kernel_entry_point_virtual_address = Virtual.Address.new(entry_point.start_address);
+                    kernel_entry_point_virtual_address.page_align_backward();
+                    const entry_point_physical_address = kernel.address_space.translate_address(kernel_entry_point_virtual_address) orelse @panic("unable to retrieve pa");
+                    const user_entry_point_virtual_address = kernel.Virtual.Address.new(0x6000_0000_000);
+                    thread.address_space.map(entry_point_physical_address, user_entry_point_virtual_address);
+                    break :blk kernel.arch.Context.new(thread, EntryPoint{
+                        .start_address = user_entry_point_virtual_address.value,
+                        .argument = entry_point.argument,
+                    });
+                },
+            };
         }
-
-        // TODO: thread queues
-        log.debug("Thread {} created: 0x{x}", .{ thread.id, entry_point.start_address });
 
         return thread;
     }
@@ -140,7 +161,8 @@ fn pick_thread() *Thread {
     const current_cpu = kernel.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
     kernel.assert(@src(), current_thread_id < thread_id);
-    const next_thread_index = kernel.arch.read_timestamp() % thread_id;
+    //const next_thread_index = kernel.arch.read_timestamp() % thread_id;
+    const next_thread_index = 0;
     const new_thread = &thread_pool[next_thread_index];
     return new_thread;
 }
@@ -168,11 +190,11 @@ pub fn test_threads(thread_count: u64) void {
 pub fn test_userspace() void {
     _ = Thread.spawn(.user, Thread.EntryPoint{
         .start_address = @ptrToInt(user_space),
-        .argument = 0,
+        .argument = 2,
     });
 }
 
 pub fn init() void {
+    //test_threads(1);
     test_userspace();
-    test_threads(1);
 }

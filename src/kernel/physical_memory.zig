@@ -206,9 +206,9 @@ pub const Region = struct {
     address: Physical.Address,
     size: u64,
 
-    pub fn new(address: u64, size: u64) Region {
+    pub fn new(address: Physical.Address, size: u64) Region {
         return Region{
-            .address = Physical.Address.new(address),
+            .address = address,
             .size = size,
         };
     }
