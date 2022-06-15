@@ -181,10 +181,9 @@ pub const AddressSpace = struct {
                 const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), true)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access(@TypeOf(pdp));
                 pdp.* = kernel.zeroes(PDPTable);
-                if (flags.contains(.read_write)) {
-                    pml4_entry_value.or_flag(.read_write);
-                }
                 pml4_entry_value.or_flag(.present);
+                pml4_entry_value.or_flag(.read_write);
+                pml4_entry_value.or_flag(.user);
                 pml4_entry_value.bits = set_entry_in_address_bits(pml4_entry_value.bits, pdp_allocation);
                 pml4_entry.value = pml4_entry_value;
             }
@@ -202,10 +201,9 @@ pub const AddressSpace = struct {
                 const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), true)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access(@TypeOf(pd));
                 pd.* = kernel.zeroes(PDTable);
-                if (flags.contains(.read_write)) {
-                    pdp_entry_value.or_flag(.read_write);
-                }
                 pdp_entry_value.or_flag(.present);
+                pdp_entry_value.or_flag(.read_write);
+                pdp_entry_value.or_flag(.user);
                 pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation);
                 pdp_entry.value = pdp_entry_value;
             }
@@ -222,12 +220,9 @@ pub const AddressSpace = struct {
                 const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), true)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access(@TypeOf(pt));
                 pt.* = kernel.zeroes(PTable);
-                if (flags.contains(.present)) {
-                    pd_entry_value.or_flag(.present);
-                }
-                if (flags.contains(.read_write)) {
-                    pd_entry_value.or_flag(.read_write);
-                }
+                pd_entry_value.or_flag(.present);
+                pd_entry_value.or_flag(.read_write);
+                pd_entry_value.or_flag(.user);
                 pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation);
                 pd_entry.value = pd_entry_value;
             }
