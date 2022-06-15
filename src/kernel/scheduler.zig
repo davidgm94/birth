@@ -172,8 +172,9 @@ fn pick_thread() *Thread {
     return new_thread;
 }
 
-export fn user_space() void {
+fn user_space() callconv(.Naked) noreturn {
     asm volatile ("syscall");
+    unreachable;
 }
 
 fn test_thread(arg: u64) void {
