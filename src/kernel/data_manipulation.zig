@@ -106,30 +106,44 @@ pub const IntType = std.meta.Int;
 
 pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
     return struct {
+        pub const Enum = EnumT;
         const BitFlagIntType = std.meta.Int(.unsigned, @bitSizeOf(EnumT));
-        const Enum = EnumT;
         const Ptr = if (is_volatile) *volatile @This() else *@This();
 
         bits: BitFlagIntType,
 
-        pub inline fn from_flags(flags: anytype) @This() {
-            const flags_type = @TypeOf(flags);
+        pub inline fn from_flags(comptime flags: []const EnumT) @This() {
             const result = comptime blk: {
-                const flag_fields = std.meta.fields(flags_type);
-                if (flag_fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
+                if (flags.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
 
-                var bits: BitFlagIntType = 0;
+                comptime var bits: BitFlagIntType = 0;
 
-                var field_i: u64 = 0;
-                inline while (field_i < flag_fields.len) : (field_i += 1) {
-                    const field = flag_fields[field_i];
-                    const enum_value: EnumT = field.default_value.?;
-                    bits |= 1 << @enumToInt(enum_value);
+                inline for (flags) |field| {
+                    bits |= 1 << @enumToInt(field);
                 }
+
                 break :blk bits;
             };
             return @This(){ .bits = result };
         }
+
+        //pub inline fn from_flags(flags: []EnumT) @This() {
+        //const flags_type = @TypeOf(flags);
+        //const result = comptime blk: {
+        //const flag_fields = std.meta.fields(flags_type);
+        //if (flag_fields.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
+
+        //var bits: BitFlagIntType = 0;
+
+        //inline for (flag_fields) |flag_field| {
+        //const enum_value: EnumT = @ptrCast(*const EnumT, flag_field.default_value.?).*;
+        //bits |= 1 << @enumToInt(enum_value);
+        //}
+
+        //break :blk bits;
+        //};
+        //return @This(){ .bits = result };
+        //}
 
         pub fn from_bits(bits: BitFlagIntType) @This() {
             return @This(){ .bits = bits };

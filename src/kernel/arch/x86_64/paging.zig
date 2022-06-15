@@ -53,23 +53,23 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     }
 
     for (kernel.Physical.Memory.map.usable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address());
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
     }
     log.debug("Mapped usable", .{});
 
     for (kernel.Physical.Memory.map.reclaimable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address());
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
     }
     log.debug("Mapped reclaimable", .{});
 
     for (kernel.Physical.Memory.map.framebuffer) |region| {
-        region.map(&kernel.address_space, region.address.to_higher_half_virtual_address());
+        region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
     }
     log.debug("Mapped framebuffer", .{});
 
-    for (kernel.Physical.Memory.map.reserved) |region| {
-        region.map_extended(&kernel.address_space, region.address.to_higher_half_virtual_address(), false);
-    }
+    //for (kernel.Physical.Memory.map.reserved) |region| {
+    //region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+    //}
 
     kernel.address_space.make_current();
     // Update physical pointers to virtual ones
@@ -155,7 +155,7 @@ pub const AddressSpace = struct {
         // TODO: proper address
         const cr3_physical_address = kernel.Physical.Address.new(cr3);
         const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
-        kernel.address_space.map(cr3_physical_address, cr3_virtual_address);
+        kernel.address_space.map(cr3_physical_address, cr3_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
         const pml4 = cr3_virtual_address.access(*PML4Table);
         kernel.zero_slice(pml4[0..0x100]);
         kernel.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
@@ -235,6 +235,9 @@ pub const AddressSpace = struct {
 
             if (flags.contains(.read_write)) {
                 pte.value.or_flag(.read_write);
+            }
+            if (flags.contains(.user)) {
+                pte.value.or_flag(.user);
             }
             pte.value.or_flag(.present);
             pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);

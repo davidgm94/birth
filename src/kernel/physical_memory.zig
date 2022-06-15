@@ -213,8 +213,8 @@ pub const Region = struct {
         };
     }
 
-    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address) void {
-        return region.map_extended(address_space, base_virtual_address, true);
+    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
+        return region.map_extended(address_space, base_virtual_address, true, flags);
     }
 
     pub fn map_extended(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, comptime is_page_aligned: bool, flags: kernel.Virtual.AddressSpace.Flags) void {

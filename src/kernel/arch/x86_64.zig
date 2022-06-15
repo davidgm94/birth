@@ -116,7 +116,6 @@ pub fn enable_apic() void {
     const apic_physical_address = get_apic_base(ia32_apic);
     log.debug("APIC physical address: 0{x}", .{apic_physical_address});
     cpu.lapic = LAPIC.new(kernel.Physical.Address.new(apic_physical_address));
-    log.debug("LAPIC: {}", .{cpu.lapic});
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
     kernel.assert(@src(), lapic_id == cpu.lapic_id);
@@ -936,11 +935,11 @@ pub const LAPIC = struct {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        kernel.address_space.map(lapic_physical_address, lapic_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.cache_disable));
+        kernel.address_space.map(lapic_physical_address, lapic_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
         const lapic = LAPIC{
             .address = lapic_virtual_address,
         };
-        log.debug("LAPIC initialized", .{});
+        log.debug("LAPIC initialized: 0x{x}", .{lapic_virtual_address.value});
         return lapic;
     }
 
@@ -1064,7 +1063,6 @@ pub const Context = struct {
         context.rsp = user_stack;
         // TODO: remove when doing userspace
         log.debug("RSP: 0x{x}", .{context.rsp});
-        log.debug("Stack top: 0x{x}", .{thread.kernel_stack_base.value + thread.kernel_stack_size});
         kernel.assert(@src(), context.rsp < thread.kernel_stack_base.value + thread.kernel_stack_size);
         context.rdi = entry_point.argument;
 

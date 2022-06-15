@@ -108,8 +108,8 @@ pub const Thread = struct {
                 // TODO: lock
                 const user_stack_physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(user_stack_reserve, true)) orelse unreachable;
                 const user_stack_physical_region = kernel.Physical.Memory.Region.new(user_stack_physical_address, user_stack_reserve);
-                const user_stack_base_virtual_address = kernel.Virtual.Address.new(0x5000_0000_000);
-                user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address);
+                const user_stack_base_virtual_address = kernel.Virtual.Address.new(0x5000_0000_0000);
+                user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
 
                 break :blk user_stack_base_virtual_address;
             },
@@ -135,17 +135,22 @@ pub const Thread = struct {
             thread.context = switch (privilege_level) {
                 .kernel => kernel.arch.Context.new(thread, entry_point),
                 .user => blk: {
-                    var kernel_entry_point_virtual_address = Virtual.Address.new(entry_point.start_address);
-                    kernel_entry_point_virtual_address.page_align_backward();
-                    const entry_point_physical_address = kernel.address_space.translate_address(kernel_entry_point_virtual_address) orelse @panic("unable to retrieve pa");
-                    const user_entry_point_virtual_address = kernel.Virtual.Address.new(0x6000_0000_000);
-                    thread.address_space.map(entry_point_physical_address, user_entry_point_virtual_address);
+                    var kernel_entry_point_virtual_address_page = Virtual.Address.new(entry_point.start_address);
+                    kernel_entry_point_virtual_address_page.page_align_backward();
+                    const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
+                    log.debug("Offset: 0x{x}", .{offset});
+                    const entry_point_physical_address_page = kernel.address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
+                    const user_entry_point_virtual_address_page = kernel.Virtual.Address.new(0x6000_0000_0000);
+                    thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.user}));
+                    const user_entry_point_virtual_address = kernel.Virtual.Address.new(user_entry_point_virtual_address_page.value + offset);
                     break :blk kernel.arch.Context.new(thread, EntryPoint{
                         .start_address = user_entry_point_virtual_address.value,
                         .argument = entry_point.argument,
                     });
                 },
             };
+            log.debug("Thread context:", .{});
+            thread.context.debug();
         }
 
         return thread;
