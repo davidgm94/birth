@@ -936,7 +936,7 @@ pub const LAPIC = struct {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        kernel.address_space.map(lapic_physical_address, lapic_virtual_address);
+        kernel.address_space.map(lapic_physical_address, lapic_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.cache_disable));
         const lapic = LAPIC{
             .address = lapic_virtual_address,
         };

@@ -20,12 +20,12 @@ pub const Region = struct {
         };
     }
 
-    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_physical_address: Physical.Address) void {
+    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_physical_address: Physical.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
         var physical_address = base_physical_address;
         var virtual_address = region.address;
         var size_it: u64 = 0;
         while (size_it < region.size) : (size_it += kernel.arch.page_size) {
-            address_space.arch.map(physical_address, virtual_address);
+            address_space.arch.map(physical_address, virtual_address, flags);
             physical_address.page_up();
             virtual_address.page_up();
         }

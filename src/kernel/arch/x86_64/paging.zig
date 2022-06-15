@@ -32,7 +32,23 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
             const section_virtual_address = Virtual.Address.new(pmr.address);
             const kernel_section_virtual_region = Virtual.Memory.Region.new(section_virtual_address, pmr.size);
             const section_physical_address = bootloader_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
-            kernel_section_virtual_region.map(&kernel.address_space, section_physical_address);
+            kernel_section_virtual_region.map(&kernel.address_space, section_physical_address, blk: {
+                var flags = kernel.Virtual.AddressSpace.Flags.empty();
+                const permissions = pmr.permissions;
+                const executable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.executable != 0;
+                const readable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.readable != 0;
+                const writable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.writable != 0;
+
+                if (!executable) {
+                    flags.or_flag(.execute_disable);
+                }
+                kernel.assert(@src(), readable);
+                if (writable) {
+                    flags.or_flag(.read_write);
+                }
+
+                break :blk flags;
+            });
         }
     }
 
@@ -146,7 +162,7 @@ pub const AddressSpace = struct {
         log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
     }
 
-    pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address) void {
+    pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
         if (should_log) log.debug("Init mapping", .{});
         kernel.assert(@src(), virtual_address.is_page_aligned());
         kernel.assert(@src(), physical_address.is_page_aligned());
@@ -165,8 +181,10 @@ pub const AddressSpace = struct {
                 const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), true)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access(@TypeOf(pdp));
                 pdp.* = kernel.zeroes(PDPTable);
+                if (flags.contains(.read_write)) {
+                    pml4_entry_value.or_flag(.read_write);
+                }
                 pml4_entry_value.or_flag(.present);
-                pml4_entry_value.or_flag(.read_write);
                 pml4_entry_value.bits = set_entry_in_address_bits(pml4_entry_value.bits, pdp_allocation);
                 pml4_entry.value = pml4_entry_value;
             }
@@ -184,8 +202,10 @@ pub const AddressSpace = struct {
                 const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), true)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access(@TypeOf(pd));
                 pd.* = kernel.zeroes(PDTable);
+                if (flags.contains(.read_write)) {
+                    pdp_entry_value.or_flag(.read_write);
+                }
                 pdp_entry_value.or_flag(.present);
-                pdp_entry_value.or_flag(.read_write);
                 pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation);
                 pdp_entry.value = pdp_entry_value;
             }
@@ -202,8 +222,12 @@ pub const AddressSpace = struct {
                 const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), true)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access(@TypeOf(pt));
                 pt.* = kernel.zeroes(PTable);
-                pd_entry_value.or_flag(.present);
-                pd_entry_value.or_flag(.read_write);
+                if (flags.contains(.present)) {
+                    pd_entry_value.or_flag(.present);
+                }
+                if (flags.contains(.read_write)) {
+                    pd_entry_value.or_flag(.read_write);
+                }
                 pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation);
                 pd_entry.value = pd_entry_value;
             }
@@ -214,8 +238,10 @@ pub const AddressSpace = struct {
                 .value = PTE.Flags.empty(),
             };
 
+            if (flags.contains(.read_write)) {
+                pte.value.or_flag(.read_write);
+            }
             pte.value.or_flag(.present);
-            pte.value.or_flag(.read_write);
             pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);
 
             break :blk pte;

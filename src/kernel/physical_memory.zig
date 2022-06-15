@@ -217,7 +217,7 @@ pub const Region = struct {
         return region.map_extended(address_space, base_virtual_address, true);
     }
 
-    pub fn map_extended(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, comptime is_page_aligned: bool) void {
+    pub fn map_extended(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, comptime is_page_aligned: bool, flags: kernel.Virtual.AddressSpace.Flags) void {
         var physical_address = region.address;
         var virtual_address = base_virtual_address;
         var region_size = region.size;
@@ -229,7 +229,7 @@ pub const Region = struct {
         log.debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.value + region_size, virtual_address.value, virtual_address.value + region_size });
         var size_it: u64 = 0;
         while (size_it < region_size) : (size_it += kernel.arch.page_size) {
-            address_space.arch.map(physical_address, virtual_address);
+            address_space.arch.map(physical_address, virtual_address, flags);
             physical_address.page_up();
             virtual_address.page_up();
         }

@@ -47,11 +47,23 @@ pub const AddressSpace = struct {
         return address_space.arch.translate_address(virtual_address);
     }
 
-    pub inline fn map(address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address) void {
-        address_space.arch.map(physical_address, virtual_address);
+    pub inline fn map(address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address, flags: Flags) void {
+        address_space.arch.map(physical_address, virtual_address, flags);
         const checked_physical_address = address_space.translate_address(virtual_address) orelse @panic("mapping failed");
         kernel.assert(@src(), checked_physical_address.value == physical_address.value);
     }
+
+    pub const Flags = kernel.Bitflag(true, enum(u64) {
+        read_write = 1,
+        user = 2,
+        write_through = 3,
+        cache_disable = 4,
+        accessed = 5,
+        dirty = 6,
+        pat = 7, // must be 0
+        global = 8,
+        execute_disable = 63,
+    });
 
     pub inline fn make_current(address_space: *AddressSpace) void {
         address_space.arch.make_current();
