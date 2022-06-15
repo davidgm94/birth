@@ -197,6 +197,7 @@ fn get_qemu_command(comptime arch: std.Target.Cpu.Arch) []const []const u8 {
 const x86_bios_qemu_cmd = [_][]const u8{
     // zig fmt: off
     "qemu-system-x86_64",
+    "-no-reboot", "-no-shutdown",
     "-cdrom", image_path,
     "-debugcon", "stdio",
     "-vga", "std",

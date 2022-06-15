@@ -327,6 +327,7 @@ const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
 });
 
 export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
+    log.debug("Getting 0x{x}", .{context.interrupt_number});
     if (x86_64.are_interrupts_enabled()) {
         @panic("interrupts are enabled");
     }

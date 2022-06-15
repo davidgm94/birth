@@ -39,7 +39,7 @@ pub fn yield(context: *Context) noreturn {
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
     //kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
-    kernel.arch.next_timer(1);
+    //kernel.arch.next_timer(1);
     kernel.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
@@ -149,8 +149,6 @@ pub const Thread = struct {
                     });
                 },
             };
-            log.debug("Thread context:", .{});
-            thread.context.debug();
         }
 
         return thread;

@@ -34,11 +34,13 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
 
     preinit_scheduler();
     init_scheduler();
+    asm volatile ("int $0x40");
+    //kernel.scheduler.yield(undefined);
 
     log.debug("Everything OK", .{});
     log.debug("CR8: 0x{x}", .{cr8.read()});
 
-    next_timer(1);
+    //next_timer(1);
     while (true) {
         kernel.spinloop_hint();
     }
@@ -136,7 +138,11 @@ pub fn enable_syscall() void {
 }
 
 pub export fn dummy_syscall_handler() callconv(.Naked) noreturn {
-    while (true) {}
+    disable_interrupts();
+    log.debug("We are getting a syscall", .{});
+    while (true) {
+        asm volatile ("hlt");
+    }
 }
 
 pub fn preinit_scheduler() void {
@@ -882,7 +888,7 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
     };
 }
 
-const use_cr8 = false;
+const use_cr8 = true;
 
 pub inline fn enable_interrupts() void {
     if (use_cr8) {
@@ -891,6 +897,7 @@ pub inline fn enable_interrupts() void {
     } else {
         asm volatile ("sti");
     }
+    //log.debug("IF=1", .{});
 }
 
 pub inline fn disable_interrupts() void {
@@ -900,6 +907,7 @@ pub inline fn disable_interrupts() void {
     } else {
         asm volatile ("cli");
     }
+    //log.debug("IF=0", .{});
 }
 
 pub inline fn are_interrupts_enabled() bool {
@@ -923,6 +931,7 @@ pub const LAPIC = struct {
         LAPIC_ID = 0x20,
         EOI = 0xB0,
         SPURIOUS = 0xF0,
+        ERROR_STATUS_REGISTER = 0x280,
         ICR_LOW = 0x300,
         ICR_HIGH = 0x310,
         LVT_TIMER = 0x320,
@@ -962,6 +971,7 @@ pub const LAPIC = struct {
 
     pub inline fn end_of_interrupt(lapic: LAPIC) void {
         lapic.write(.EOI, 0);
+        log.debug("LAPIC error status register: 0x{x}", .{lapic.read(.ERROR_STATUS_REGISTER)});
     }
 };
 
@@ -1114,11 +1124,13 @@ export fn switch_context() callconv(.Naked) void {
 }
 
 export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.Thread, old_address_space: *kernel.Virtual.AddressSpace) callconv(.C) void {
+    log.debug("Context switching", .{});
     if (kernel.scheduler.lock.were_interrupts_enabled) {
         @panic("interrupts were enabled");
     }
-    kernel.assert(@src(), context == new_thread.context);
-    kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    kernel.scheduler.lock.release();
+    //kernel.assert(@src(), context == new_thread.context);
+    //kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
     context.check(@src());
     const current_cpu = get_current_cpu().?;
     current_cpu.current_thread = new_thread;
@@ -1129,9 +1141,8 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
     _ = old_address_space;
     new_thread.last_known_execution_address = context.rip;
 
-    if (are_interrupts_enabled()) @panic("interrupts enabled");
-    kernel.scheduler.lock.release();
-    if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
     current_cpu.lapic.end_of_interrupt();
+    if (are_interrupts_enabled()) @panic("interrupts enabled");
+    if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
 }
