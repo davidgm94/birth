@@ -369,9 +369,13 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         0x40 => {
             kernel.scheduler.yield(context);
         },
+        0x80 => {
+            log.debug("We are getting a syscall", .{});
+            context.debug();
+            unreachable;
+        },
         else => {
             log.debug("whaaaaaat", .{});
-            unreachable;
         },
     }
 
@@ -402,15 +406,19 @@ inline fn prologue() void {
         \\push %%r13
         \\push %%r14
         \\push %%r15
+        \\xor %%rax, %%rax
+        \\mov %%ds, %%rax
+        \\push %% rax
+        \\mov %%es, %%rax
+        \\push %%rax
         \\mov %%cr8, %%rax
         \\push %%rax
         \\mov %%rsp, %%rdi
     );
 }
 
-pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
-    kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
-    const handler_function = struct {
+pub fn get_handler(comptime interrupt_number: u64, comptime has_error_code: bool) fn handler() align(0x10) callconv(.Naked) void {
+    return struct {
         pub fn handler() align(0x10) callconv(.Naked) void {
             if (comptime !has_error_code) asm volatile ("push $0");
             asm volatile ("push %[interrupt_number]"
@@ -427,6 +435,11 @@ pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error
             @panic("Interrupt epilogue didn't iret properly");
         }
     }.handler;
+}
+
+pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
+    kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
+    const handler_function = get_handler(interrupt_number, has_error_code);
 
     const handler_address = @ptrToInt(handler_function);
     return IDT.Descriptor{
@@ -446,6 +459,10 @@ pub inline fn epilogue() void {
         \\cli
         \\pop %%rax
         \\mov %%rax, %%cr8
+        \\pop %%rax
+        \\mov %%rax, %%es
+        \\pop %%rax
+        \\mov %%rax, %%ds
         \\pop %%r15
         \\pop %%r14
         \\pop %%r13

@@ -91,12 +91,23 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub fn set_current_cpu(cpu: *kernel.arch.CPU) void {
-    IA32_GS_BASE.write(@ptrToInt(cpu));
+pub inline fn set_current_cpu(cpu: *kernel.arch.CPU) void {
+    log.debug("Setting current CPU: 0x{x}", .{@ptrToInt(cpu)});
+    IA32_KERNEL_GS_BASE.write(@ptrToInt(cpu));
 }
 
-pub fn get_current_cpu() ?*kernel.arch.CPU {
-    return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
+pub inline fn get_current_cpu() ?*CPU {
+    return @intToPtr(?*kernel.arch.CPU, IA32_KERNEL_GS_BASE.read());
+    //return asm volatile (
+    //\\mov %%gs:[0], %[result]
+    //: [result] "=r" (-> ?*kernel.arch.CPU),
+    //);
+}
+pub inline fn read_gs() ?*kernel.arch.CPU {
+    return asm volatile (
+        \\mov %%gs:[0], %[result]
+        : [result] "=r" (-> ?*kernel.arch.CPU),
+    );
 }
 
 pub const sched_call_vector: u8 = 0x31;
@@ -111,7 +122,7 @@ pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic() void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
-    const cpu = get_current_cpu() orelse unreachable;
+    const cpu = get_current_cpu() orelse @panic("cannot get cpu");
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
@@ -124,8 +135,29 @@ pub fn enable_apic() void {
     log.debug("APIC enabled", .{});
 }
 
+pub export fn foo(myrsp: u64) callconv(.C) void {
+    const cpu = @intToPtr(?*CPU, IA32_GS_BASE.read()).?;
+    log.debug("GS: {}", .{read_gs()});
+    asm volatile ("swapgs");
+    log.debug("GS: {}", .{read_gs()});
+    log.debug("CPU: 0x{x}. INTSTACK: 0x{x}. SCHDSTACK: 0x{x}", .{ @ptrToInt(cpu), cpu.int_stack, cpu.scheduler_stack });
+    log.debug("RSP: 0x{x}", .{myrsp});
+}
+
+pub export fn syscall_handler() callconv(.Naked) void {
+    asm volatile (
+        \\mov %%gs, %%rdi
+        \\swapgs
+        \\call foo
+        \\cli
+        \\loop:
+        \\hlt
+        \\jmp loop
+    );
+}
+
 pub fn enable_syscall() void {
-    IA32_LSTAR.write(@ptrToInt(dummy_syscall_handler));
+    IA32_LSTAR.write(@ptrToInt(syscall_handler));
     // TODO: figure out what this does
     IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
     // TODO: figure out what this does
@@ -137,17 +169,10 @@ pub fn enable_syscall() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub export fn dummy_syscall_handler() callconv(.Naked) noreturn {
-    disable_interrupts();
-    log.debug("We are getting a syscall", .{});
-    while (true) {
-        asm volatile ("hlt");
-    }
-}
-
 pub fn preinit_scheduler() void {
     const bsp = &kernel.cpus[0];
     set_current_cpu(bsp);
+    IA32_GS_BASE.write(0);
     bsp.gdt.initial_setup();
     interrupts.init();
     enable_apic();
@@ -768,6 +793,7 @@ pub const IA32_LSTAR = SimpleMSR(0xC0000082);
 pub const IA32_FMASK = SimpleMSR(0xC0000084);
 pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
 pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
+pub const IA32_KERNEL_GS_BASE = SimpleMSR(0xC0000102);
 pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u64) {
     /// Syscall Enable - syscall, sysret
     SCE = 0,
@@ -1021,6 +1047,8 @@ fn thread_terminate_stack() callconv(.Naked) void {
 
 pub const Context = struct {
     cr8: u64,
+    es: u64,
+    ds: u64,
     r15: u64,
     r14: u64,
     r13: u64,

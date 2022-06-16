@@ -141,7 +141,7 @@ pub const Thread = struct {
                     log.debug("Offset: 0x{x}", .{offset});
                     const entry_point_physical_address_page = kernel.address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
                     const user_entry_point_virtual_address_page = kernel.Virtual.Address.new(0x6000_0000_0000);
-                    thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.user}));
+                    thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .user, .read_write }));
                     const user_entry_point_virtual_address = kernel.Virtual.Address.new(user_entry_point_virtual_address_page.value + offset);
                     break :blk kernel.arch.Context.new(thread, EntryPoint{
                         .start_address = user_entry_point_virtual_address.value,
@@ -171,6 +171,9 @@ fn pick_thread() *Thread {
 }
 
 fn user_space() callconv(.Naked) noreturn {
+    asm volatile ("mov $0x43, %%rax");
+    asm volatile ("mov %%rax, %%gs");
+    asm volatile ("mov %%gs, %%rdi");
     asm volatile ("syscall");
     unreachable;
 }

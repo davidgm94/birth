@@ -37,15 +37,15 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
                 const permissions = pmr.permissions;
                 const executable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.executable != 0;
                 const readable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.readable != 0;
-                const writable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.writable != 0;
+                //const writable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.writable != 0;
 
                 if (!executable) {
                     flags.or_flag(.execute_disable);
                 }
                 kernel.assert(@src(), readable);
-                if (writable) {
-                    flags.or_flag(.read_write);
-                }
+                //if (writable) {
+                flags.or_flag(.read_write);
+                //}
 
                 break :blk flags;
             });
@@ -53,17 +53,17 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     }
 
     for (kernel.Physical.Memory.map.usable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped usable", .{});
 
     for (kernel.Physical.Memory.map.reclaimable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped reclaimable", .{});
 
     for (kernel.Physical.Memory.map.framebuffer) |region| {
-        region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+        region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped framebuffer", .{});
 
@@ -313,7 +313,9 @@ pub const AddressSpace = struct {
     }
 
     pub fn make_current(address_space: *AddressSpace) void {
+        log.debug("Applying address space: 0x{x}", .{address_space.cr3});
         x86_64.cr3.write_raw(address_space.cr3);
+        log.debug("Applied address space: 0x{x}", .{address_space.cr3});
     }
 };
 
