@@ -18,7 +18,10 @@ pub const AddressSpace = Paging.AddressSpace;
 const Virtual = kernel.Virtual;
 const Thread = kernel.scheduler.Thread;
 
+var zero: u64 = 0;
+
 pub export fn start(stivale2_struct_address: u64) noreturn {
+    IA32_GS_BASE.write(@ptrToInt(&zero));
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
     kernel.address_space = kernel.Virtual.AddressSpace.from_current() orelse unreachable;
@@ -31,7 +34,6 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     const region_type = kernel.Physical.Memory.map.find_address(stivale2_struct_physical_address);
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
-
     preinit_scheduler();
     init_scheduler();
     asm volatile ("int $0x40");
@@ -92,16 +94,17 @@ pub inline fn read_timestamp() u64 {
 }
 
 pub inline fn set_current_cpu(cpu: *kernel.arch.CPU) void {
-    log.debug("Setting current CPU: 0x{x}", .{@ptrToInt(cpu)});
-    IA32_KERNEL_GS_BASE.write(@ptrToInt(cpu));
+    cpu.base = cpu;
+    //log.debug("Setting current CPU: 0x{x}", .{@ptrToInt(cpu)});
+    IA32_GS_BASE.write(@ptrToInt(cpu));
 }
 
 pub inline fn get_current_cpu() ?*CPU {
-    return @intToPtr(?*kernel.arch.CPU, IA32_KERNEL_GS_BASE.read());
-    //return asm volatile (
-    //\\mov %%gs:[0], %[result]
-    //: [result] "=r" (-> ?*kernel.arch.CPU),
-    //);
+    //return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
+    return asm volatile (
+        \\mov %%gs:[0], %[result]
+        : [result] "=r" (-> ?*kernel.arch.CPU),
+    );
 }
 pub inline fn read_gs() ?*kernel.arch.CPU {
     return asm volatile (
@@ -135,21 +138,39 @@ pub fn enable_apic() void {
     log.debug("APIC enabled", .{});
 }
 
-pub export fn foo(myrsp: u64) callconv(.C) void {
-    const cpu = @intToPtr(?*CPU, IA32_GS_BASE.read()).?;
-    log.debug("GS: {}", .{read_gs()});
-    asm volatile ("swapgs");
-    log.debug("GS: {}", .{read_gs()});
-    log.debug("CPU: 0x{x}. INTSTACK: 0x{x}. SCHDSTACK: 0x{x}", .{ @ptrToInt(cpu), cpu.int_stack, cpu.scheduler_stack });
-    log.debug("RSP: 0x{x}", .{myrsp});
+pub export fn foo() callconv(.C) void {
+    log.debug("cpu: 0x{x}", .{rsp.read()});
+    //log.debug("CPU: 0x{x}. INTSTACK: 0x{x}. SCHDSTACK: 0x{x}", .{ @ptrToInt(cpu), cpu.int_stack, cpu.scheduler_stack });
+    //log.debug("RSP: 0x{x}", .{myrsp});
 }
 
-pub export fn syscall_handler() callconv(.Naked) void {
+export fn get_kernel_stack() callconv(.C) u64 {
+    log.debug("Getting kernel stack...", .{});
+    const current_cpu = get_current_cpu() orelse @panic("foo");
+    return current_cpu.current_thread.?.kernel_stack.value;
+}
+
+pub const Syscall = enum(u64) {
+    exit_thread = 0,
+};
+
+pub export fn syscall_handler(syscall: Syscall, gs_value: u64) callconv(.C) void {
+    log.debug("gs: 0x{x}", .{gs_value});
+    log.debug("We are getting a syscall and our RSP is: 0x{x}", .{rsp.read()});
+    switch (syscall) {
+        .exit_thread => {
+            TODO(@src());
+        },
+    }
+}
+
+pub export fn syscall_entry_point() callconv(.Naked) void {
     asm volatile (
-        \\mov %%gs, %%rdi
-        \\swapgs
-        \\call foo
-        \\cli
+        \\call get_kernel_stack
+        \\mov %%gs:[0], %%rsi
+        \\mov %%rax, %%rsp
+        \\mov $0x0, %%rdi
+        \\call syscall_handler
         \\loop:
         \\hlt
         \\jmp loop
@@ -157,7 +178,7 @@ pub export fn syscall_handler() callconv(.Naked) void {
 }
 
 pub fn enable_syscall() void {
-    IA32_LSTAR.write(@ptrToInt(syscall_handler));
+    IA32_LSTAR.write(@ptrToInt(syscall_entry_point));
     // TODO: figure out what this does
     IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
     // TODO: figure out what this does
@@ -172,7 +193,7 @@ pub fn enable_syscall() void {
 pub fn preinit_scheduler() void {
     const bsp = &kernel.cpus[0];
     set_current_cpu(bsp);
-    IA32_GS_BASE.write(0);
+    IA32_KERNEL_GS_BASE.write(0);
     bsp.gdt.initial_setup();
     interrupts.init();
     enable_apic();
@@ -302,6 +323,9 @@ pub const r12 = SimpleR64("r12");
 pub const r13 = SimpleR64("r13");
 pub const r14 = SimpleR64("r14");
 pub const r15 = SimpleR64("r15");
+
+pub const gs = SimpleR64("gs");
+pub const cs = SimpleR64("cs");
 
 pub fn SimpleR64(comptime name: []const u8) type {
     return struct {
@@ -1009,6 +1033,8 @@ pub inline fn next_timer(ms: u32) void {
 const stack_size = 0x10000;
 const guard_stack_size = 0x1000;
 pub const CPU = struct {
+    base: *CPU,
+    current_thread: ?*kernel.scheduler.Thread,
     gdt: GDT.Table,
     shared_tss: TSS.Struct,
     int_stack: u64,
@@ -1016,7 +1042,6 @@ pub const CPU = struct {
     lapic: LAPIC,
     lapic_id: u32,
     spinlock_count: u64,
-    current_thread: ?*kernel.scheduler.Thread,
     is_bootstrap: bool,
 
     pub fn bootstrap_stacks(cpu: *CPU) void {
@@ -1047,7 +1072,6 @@ fn thread_terminate_stack() callconv(.Naked) void {
 
 pub const Context = struct {
     cr8: u64,
-    es: u64,
     ds: u64,
     r15: u64,
     r14: u64,
@@ -1126,6 +1150,17 @@ pub const Context = struct {
     }
 };
 
+pub inline fn flush_segments_kernel() void {
+    asm volatile (
+        \\xor %%rax, %%rax
+        \\mov $0x30, %%rax
+        \\mov %%rax, %%ds
+        \\mov %%rax, %%es
+        \\mov %%rax, %%fs
+        \\mov %%rax, %%gs
+    );
+}
+
 //pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *Virtual.AddressSpace) callconv(.C) void;
 export fn switch_context() callconv(.Naked) void {
     asm volatile (
@@ -1134,9 +1169,9 @@ export fn switch_context() callconv(.Naked) void {
         \\mov (%%rsi), %%rsi
         \\mov %%cr3, %%rax
         \\cmp %%rsi, %%rax
-        \\je .cont
+        \\je .ctx_swtch_cont
         \\mov %%rsi, %%cr3
-        \\.cont:
+        \\.ctx_swtch_cont:
         \\mov %%rdi, %%rsp
         \\mov %%rcx, %%rsi
         \\mov %%r8, %%rdx
@@ -1162,6 +1197,8 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
     context.check(@src());
     const current_cpu = get_current_cpu().?;
     current_cpu.current_thread = new_thread;
+    const should_swap_gs = cs.read() != 0x28;
+    log.debug("Should swap GS: {}", .{should_swap_gs});
     // TODO: checks
     //const new_thread = current_thread.time_slices == 1;
 
@@ -1173,4 +1210,5 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
     if (are_interrupts_enabled()) @panic("interrupts enabled");
     if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
+    if (should_swap_gs) asm volatile ("swapgs");
 }

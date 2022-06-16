@@ -171,9 +171,6 @@ fn pick_thread() *Thread {
 }
 
 fn user_space() callconv(.Naked) noreturn {
-    asm volatile ("mov $0x43, %%rax");
-    asm volatile ("mov %%rax, %%gs");
-    asm volatile ("mov %%gs, %%rdi");
     asm volatile ("syscall");
     unreachable;
 }

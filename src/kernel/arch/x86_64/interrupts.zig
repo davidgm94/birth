@@ -327,9 +327,18 @@ const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
 });
 
 export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
-    log.debug("Getting 0x{x}", .{context.interrupt_number});
     if (x86_64.are_interrupts_enabled()) {
         @panic("interrupts are enabled");
+    }
+
+    log.debug("Getting 0x{x}", .{context.interrupt_number});
+    const should_swap_gs = x86_64.cs.read() != 0x28;
+    log.debug("Should swap GS: {}", .{should_swap_gs});
+    if (should_swap_gs) {
+        asm volatile ("swapgs");
+    }
+    defer {
+        if (should_swap_gs) asm volatile ("swapgs");
     }
 
     if (x86_64.get_current_cpu()) |current_cpu| {
@@ -409,8 +418,6 @@ inline fn prologue() void {
         \\xor %%rax, %%rax
         \\mov %%ds, %%rax
         \\push %% rax
-        \\mov %%es, %%rax
-        \\push %%rax
         \\mov %%cr8, %%rax
         \\push %%rax
         \\mov %%rsp, %%rdi
@@ -460,9 +467,10 @@ pub inline fn epilogue() void {
         \\pop %%rax
         \\mov %%rax, %%cr8
         \\pop %%rax
-        \\mov %%rax, %%es
-        \\pop %%rax
         \\mov %%rax, %%ds
+        \\mov %%rax, %%es
+        \\mov %%rax, %%fs
+        //\\mov %%rax, %%gs
         \\pop %%r15
         \\pop %%r14
         \\pop %%r13

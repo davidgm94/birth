@@ -1,4 +1,5 @@
 const kernel = @import("../../kernel.zig");
+const x86_64 = @import("../x86_64.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
 const log = kernel.log.scoped(.GDT);
@@ -17,15 +18,24 @@ pub const Table = packed struct {
 
     comptime {
         kernel.assert_unsafe(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        kernel.assert_unsafe(@offsetOf(Table, "code_64") == 0x28);
+        kernel.assert_unsafe(@offsetOf(Table, "data_64") == 0x30);
+        kernel.assert_unsafe(@offsetOf(Table, "user_code_64") == 0x38);
+        kernel.assert_unsafe(@offsetOf(Table, "user_data_64") == 0x40);
         kernel.assert_unsafe(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
     }
 
     pub fn initial_setup(gdt: *Table) void {
+        log.debug("Loading GDT...", .{});
         gdt.* = Table{
             .tss = bootstrap_tss.get_descriptor(),
         };
+        log.debug("GDT loaded", .{});
         gdt.load();
         log.debug("GDT loaded", .{});
+        x86_64.flush_segments_kernel();
+        x86_64.set_current_cpu(&kernel.cpus[0]);
+        _ = x86_64.get_current_cpu();
     }
 
     pub inline fn load(gdt: *Table) void {
