@@ -44,9 +44,9 @@ pub fn yield(context: *Context) noreturn {
 }
 
 pub const Thread = struct {
+    kernel_stack: Virtual.Address,
     privilege_level: PrivilegeLevel,
     type: Type,
-    kernel_stack: Virtual.Address,
     kernel_stack_base: Virtual.Address,
     kernel_stack_size: u64,
     user_stack_base: Virtual.Address,
@@ -170,8 +170,31 @@ fn pick_thread() *Thread {
     return new_thread;
 }
 
+//pub fn syscall5(number: SYS, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) usize {
+//return asm volatile ("syscall"
+//: [ret] "={rax}" (-> usize),
+//: [number] "{rax}" (@enumToInt(number)),
+//[arg1] "{rdi}" (arg1),
+//[arg2] "{rsi}" (arg2),
+//[arg3] "{rdx}" (arg3),
+//[arg4] "{r10}" (arg4),
+//[arg5] "{r8}" (arg5),
+//: "rcx", "r11", "memory"
+//);
+//}
+
 fn user_space() callconv(.Naked) noreturn {
-    asm volatile ("syscall");
+    _ = asm volatile (
+        \\syscall
+        : [ret] "={rax}" (-> usize),
+        : [number] "{rax}" (@as(u64, 0)),
+          //[arg1] "{rdi}" (arg1),
+          //[arg2] "{rsi}" (arg2),
+          //[arg3] "{rdx}" (arg3),
+          //[arg4] "{r10}" (arg4),
+          //[arg5] "{r8}" (arg5),
+          //: "rcx", "r11", "memory"
+    );
     unreachable;
 }
 

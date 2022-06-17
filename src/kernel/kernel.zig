@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const kernel = @This();
+
 pub const arch = @import("arch.zig");
 pub const log = std.log;
 pub const build_mode = builtin.mode;
@@ -8,7 +10,6 @@ pub const Physical = @import("physical.zig");
 pub const Virtual = @import("virtual.zig");
 pub usingnamespace @import("assertion.zig");
 pub usingnamespace @import("data_manipulation.zig");
-pub usingnamespace @import("meta.zig");
 const panic_file = @import("panic.zig");
 pub const panic = panic_file.panic;
 pub const TODO = panic_file.TODO;
@@ -28,6 +29,10 @@ pub const RNUFS = @import("rnu_fs.zig");
 pub const driver = @import("driver.zig");
 pub const Driver = driver.Driver;
 pub const ELF = @import("elf.zig");
+pub const Syscall = @import("syscall.zig");
+comptime {
+    kernel.reference_all_declarations(Syscall);
+}
 
 pub var address_space = Virtual.AddressSpace.from_context(undefined);
 pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);

@@ -18,6 +18,7 @@ pub const page_size = arch.page_size;
 pub const page_shifter = @ctz(u64, page_size);
 pub const CPU = arch.CPU;
 pub const Context = arch.Context;
+pub const Syscall = arch.Syscall;
 
 pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;

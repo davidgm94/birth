@@ -13,6 +13,7 @@ pub const TSS = @import("x86_64/tss.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const Paging = @import("x86_64/paging.zig");
 pub const ACPI = @import("x86_64/acpi.zig");
+pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
 const Virtual = kernel.Virtual;
@@ -118,7 +119,6 @@ pub const ring_vector: u8 = 0x32;
 
 var last_vector: u8 = ring_vector;
 
-pub const syscall_vector: u8 = 0x80;
 pub const lapic_timer_interrupt: u8 = 0xef;
 pub const invlpg_vector: u8 = 0xFE;
 pub const spurious_vector: u8 = 0xFF;
@@ -144,52 +144,6 @@ pub export fn foo() callconv(.C) void {
     //log.debug("RSP: 0x{x}", .{myrsp});
 }
 
-export fn get_kernel_stack() callconv(.C) u64 {
-    log.debug("Getting kernel stack...", .{});
-    const current_cpu = get_current_cpu() orelse @panic("foo");
-    return current_cpu.current_thread.?.kernel_stack.value;
-}
-
-pub const Syscall = enum(u64) {
-    exit_thread = 0,
-};
-
-pub export fn syscall_handler(syscall: Syscall, gs_value: u64) callconv(.C) void {
-    log.debug("gs: 0x{x}", .{gs_value});
-    log.debug("We are getting a syscall and our RSP is: 0x{x}", .{rsp.read()});
-    switch (syscall) {
-        .exit_thread => {
-            TODO(@src());
-        },
-    }
-}
-
-pub export fn syscall_entry_point() callconv(.Naked) void {
-    asm volatile (
-        \\call get_kernel_stack
-        \\mov %%gs:[0], %%rsi
-        \\mov %%rax, %%rsp
-        \\mov $0x0, %%rdi
-        \\call syscall_handler
-        \\loop:
-        \\hlt
-        \\jmp loop
-    );
-}
-
-pub fn enable_syscall() void {
-    IA32_LSTAR.write(@ptrToInt(syscall_entry_point));
-    // TODO: figure out what this does
-    IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
-    // TODO: figure out what this does
-    IA32_STAR.write(@offsetOf(GDT.Table, "code_64") << 32);
-    // TODO: figure out what this does
-    var efer = IA32_EFER.read();
-    efer.or_flag(.SCE);
-    IA32_EFER.write(efer);
-    log.debug("Enabled syscalls", .{});
-}
-
 pub fn preinit_scheduler() void {
     const bsp = &kernel.cpus[0];
     set_current_cpu(bsp);
@@ -197,7 +151,7 @@ pub fn preinit_scheduler() void {
     bsp.gdt.initial_setup();
     interrupts.init();
     enable_apic();
-    enable_syscall();
+    Syscall.enable();
 
     bsp.shared_tss = TSS.Struct{};
     bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
@@ -1104,7 +1058,7 @@ pub const Context = struct {
         log.debug("User stack: 0x{x}", .{user_stack});
         const context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
         thread.kernel_stack = Virtual.Address.new(kernel_stack);
-        log.debug("Kernel stack deref", .{});
+        log.debug("ARch Kernel stack: 0x{x}", .{thread.kernel_stack.value});
         thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
         log.debug("Privilege level", .{});
         // TODO: FPU
@@ -1166,12 +1120,13 @@ export fn switch_context() callconv(.Naked) void {
     asm volatile (
         \\cli
         \\
+        // Compare address spaces and switch if they are not the same
         \\mov (%%rsi), %%rsi
         \\mov %%cr3, %%rax
         \\cmp %%rsi, %%rax
-        \\je .ctx_swtch_cont
+        \\je 0f
         \\mov %%rsi, %%cr3
-        \\.ctx_swtch_cont:
+        \\0:
         \\mov %%rdi, %%rsp
         \\mov %%rcx, %%rsi
         \\mov %%r8, %%rdx
