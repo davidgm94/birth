@@ -6,12 +6,6 @@ const Virtual = kernel.Virtual;
 
 pub const Context = kernel.arch.Context;
 
-pub fn new_fn() noreturn {
-    while (true) {
-        log.debug("new process", .{});
-    }
-}
-
 pub var lock: kernel.arch.Spinlock = undefined;
 var thread_pool: [8192]Thread = undefined;
 var thread_id: u64 = 0;
@@ -185,6 +179,12 @@ fn pick_thread() *Thread {
 
 fn user_space() callconv(.Naked) noreturn {
     _ = asm volatile (
+        \\mov %%rsp, %%rbp
+    );
+    var a = [_]u8{ 'u', 's', 'e', 'r', '\n' };
+    _ = x86_64.writer_function(&a);
+    _ = asm volatile (
+        \\call user_space_foo
         \\syscall
         : [ret] "={rax}" (-> usize),
         : [number] "{rax}" (@as(u64, 0)),
@@ -197,6 +197,10 @@ fn user_space() callconv(.Naked) noreturn {
     );
     unreachable;
 }
+
+const x86_64 = @import("./arch/x86_64.zig");
+
+export fn user_space_foo() callconv(.C) void {}
 
 fn test_thread(arg: u64) void {
     while (true) {

@@ -151,6 +151,7 @@ pub const AddressSpace = struct {
     }
 
     pub fn map_kernel_address_space_higher_half(address_space: AddressSpace) void {
+        const used_memory_before = kernel.Physical.Memory.map.get_used_memory();
         const cr3 = address_space.cr3;
         // TODO: proper address
         const cr3_physical_address = kernel.Physical.Address.new(cr3);
@@ -159,7 +160,11 @@ pub const AddressSpace = struct {
         const pml4 = cr3_virtual_address.access(*PML4Table);
         kernel.zero_slice(pml4[0..0x100]);
         kernel.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+        const used_memory_after = kernel.Physical.Memory.map.get_used_memory();
+        const memory_overhead = used_memory_after - used_memory_before;
         log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
+        log.debug("Kernel used memory: {}", .{used_memory_after});
+        log.debug("Kernel mapping memory overhead: {}", .{memory_overhead});
     }
 
     pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {

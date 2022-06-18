@@ -21,6 +21,15 @@ pub const Map = struct {
         reserved = 4,
     };
 
+    pub fn get_used_memory(memory_map: *Map) u64 {
+        var allocated_memory: u64 = 0;
+        for (memory_map.usable) |region| {
+            allocated_memory += region.allocated_size;
+        }
+
+        return allocated_memory;
+    }
+
     pub fn find_address(mmap: *Map, physical_address: Physical.Address) ?RegionType {
         for (mmap.usable) |region| {
             if (physical_address.belongs_to_region(region.descriptor)) {
