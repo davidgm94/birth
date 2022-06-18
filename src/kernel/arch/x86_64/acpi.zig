@@ -4,11 +4,20 @@ const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
 
+const Signature = enum(u32) {
+    APIC = @ptrCast(*const u32, "APIC").*,
+    FACP = @ptrCast(*const u32, "FACP").*,
+    HPET = @ptrCast(*const u32, "HPET").*,
+    MCFG = @ptrCast(*const u32, "MCFG").*,
+    WAET = @ptrCast(*const u32, "WAET").*,
+};
+
 /// ACPI initialization. We should have a page mapper ready before executing this function
 pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
     var rsdp_physical_page = rsdp_physical_address;
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     rsdp_physical_page.page_align_backward();
+    kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
     const rsdp1 = rsdp_physical_address.access_higher_half(*align(1) RSDP1);
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
@@ -16,68 +25,86 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
         const rsdt_physical_address = Physical.Address.new(rsdp1.RSDT_address);
         var rsdt_physical_page = rsdt_physical_address;
         rsdt_physical_page.page_align_backward();
-        kernel.address_space.map(rsdt_physical_page, rsdt_physical_page.identity_virtual_address());
-        const rsdt = rsdt_physical_address.access_identity(*align(1) Header);
+        kernel.address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+        log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
+        const rsdt = rsdt_physical_address.access_higher_half(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
         const rsdt_table_count = (rsdt.length - @sizeOf(Header)) / @sizeOf(u32);
         log.debug("RSDT table count: {}", .{rsdt_table_count});
         const tables = @intToPtr([*]align(1) u32, @ptrToInt(rsdt) + @sizeOf(Header))[0..rsdt_table_count];
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
-            const header = @intToPtr(*align(1) Header, table_address);
+            const table_physical_address = kernel.Physical.Address.new(table_address);
+            var table_physical_page = table_physical_address;
+            table_physical_page.page_align_backward();
+            kernel.address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+            const header = table_physical_address.access_higher_half(*align(1) Header);
 
-            if (kernel.string_eq(&header.signature, "APIC")) {
-                const madt = @ptrCast(*align(1) MADT, header);
-                log.debug("MADT: {}", .{madt});
-                log.debug("LAPIC address: 0x{x}", .{madt.LAPIC_address});
+            switch (header.signature) {
+                .APIC => {
+                    const madt = @ptrCast(*align(1) MADT, header);
+                    log.debug("MADT: {}", .{madt});
+                    log.debug("LAPIC address: 0x{x}", .{madt.LAPIC_address});
 
-                const madt_top = @ptrToInt(madt) + madt.header.length;
-                var offset = @ptrToInt(madt) + @sizeOf(MADT);
+                    const madt_top = @ptrToInt(madt) + madt.header.length;
+                    var offset = @ptrToInt(madt) + @sizeOf(MADT);
 
-                var processor_count: u64 = 0;
-                var entry_length: u64 = undefined;
+                    var processor_count: u64 = 0;
+                    var entry_length: u64 = undefined;
 
-                while (offset != madt_top) : (offset += entry_length) {
-                    const entry_type = @intToPtr(*MADT.Type, offset).*;
-                    entry_length = @intToPtr(*u8, offset + 1).*;
-                    processor_count += @boolToInt(entry_type == .LAPIC);
-                }
-
-                //kernel.cpus = kernel.core_heap.allocate_many(kernel.arch.CPU, processor_count);
-                processor_count = 0;
-
-                offset = @ptrToInt(madt) + @sizeOf(MADT);
-
-                while (offset != madt_top) : (offset += entry_length) {
-                    const entry_type = @intToPtr(*MADT.Type, offset).*;
-                    entry_length = @intToPtr(*u8, offset + 1).*;
-
-                    switch (entry_type) {
-                        .LAPIC => {
-                            const lapic = @intToPtr(*align(1) MADT.LAPIC, offset);
-                            log.debug("LAPIC: {}", .{lapic});
-                            kernel.assert(@src(), @sizeOf(MADT.LAPIC) == entry_length);
-                        },
-                        .IO_APIC => {
-                            const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
-                            log.debug("IO_APIC: {}", .{ioapic});
-                            kernel.assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
-                        },
-                        .ISO => {
-                            const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
-                            log.debug("ISO: {}", .{iso});
-                            kernel.assert(@src(), @sizeOf(MADT.InterruptSourceOverride) == entry_length);
-                        },
-                        .LAPIC_NMI => {
-                            const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
-                            log.debug("LAPIC_NMI: {}", .{lapic_nmi});
-                            kernel.assert(@src(), @sizeOf(MADT.LAPIC_NMI) == entry_length);
-                        },
-                        else => kernel.panic("ni: {}", .{entry_type}),
+                    while (offset != madt_top) : (offset += entry_length) {
+                        const entry_type = @intToPtr(*MADT.Type, offset).*;
+                        entry_length = @intToPtr(*u8, offset + 1).*;
+                        processor_count += @boolToInt(entry_type == .LAPIC);
                     }
-                }
-            } else {
-                log.debug("Ignored table: {s}", .{header.signature});
+
+                    //kernel.cpus = kernel.core_heap.allocate_many(kernel.arch.CPU, processor_count);
+                    processor_count = 0;
+
+                    offset = @ptrToInt(madt) + @sizeOf(MADT);
+
+                    while (offset != madt_top) : (offset += entry_length) {
+                        const entry_type = @intToPtr(*MADT.Type, offset).*;
+                        entry_length = @intToPtr(*u8, offset + 1).*;
+
+                        switch (entry_type) {
+                            .LAPIC => {
+                                const lapic = @intToPtr(*align(1) MADT.LAPIC, offset);
+                                log.debug("LAPIC: {}", .{lapic});
+                                kernel.assert(@src(), @sizeOf(MADT.LAPIC) == entry_length);
+                            },
+                            .IO_APIC => {
+                                const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
+                                log.debug("IO_APIC: {}", .{ioapic});
+                                kernel.assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
+                            },
+                            .ISO => {
+                                const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
+                                log.debug("ISO: {}", .{iso});
+                                kernel.assert(@src(), @sizeOf(MADT.InterruptSourceOverride) == entry_length);
+                            },
+                            .LAPIC_NMI => {
+                                const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
+                                log.debug("LAPIC_NMI: {}", .{lapic_nmi});
+                                kernel.assert(@src(), @sizeOf(MADT.LAPIC_NMI) == entry_length);
+                            },
+                            else => kernel.panic("ni: {}", .{entry_type}),
+                        }
+                    }
+                },
+                //.MCFG => {
+                //const mcfg = @ptrCast(*align(1) MCFG, header);
+                //const configurations = mcfg.get_configurations();
+                //log.debug("Configurations: {any}", .{configurations});
+
+                //for (configurations) |configuration| {
+                //}
+
+                //unreachable;
+                //},
+                else => {
+                    log.debug("Ignored table: {s}", .{@tagName(header.signature)});
+                },
             }
         }
     } else {
@@ -138,7 +165,7 @@ const RSDP2 = packed struct {
 };
 
 const Header = extern struct {
-    signature: [4]u8,
+    signature: Signature,
     length: u32,
     revision: u8,
     checksum: u8,
@@ -208,5 +235,29 @@ const MADT = extern struct {
         ACPI_processor_UID: u8,
         flags: u16,
         LAPIC_lint: u8,
+    };
+};
+
+const MCFG = packed struct {
+    header: Header,
+    reserved: u64,
+
+    fn get_configurations(mcfg: *align(1) MCFG) []Configuration {
+        const entry_count = (mcfg.header.length - @sizeOf(MCFG)) / @sizeOf(Configuration);
+        const configuration_base = @ptrToInt(mcfg) + @sizeOf(MCFG);
+        return @intToPtr([*]Configuration, configuration_base)[0..entry_count];
+    }
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
+        kernel.assert_unsafe(@sizeOf(Configuration) == 0x10);
+    }
+
+    const Configuration = packed struct {
+        base_address: u64,
+        segment_group_number: u16,
+        start_bus: u8,
+        end_bus: u8,
+        reserved: u32,
     };
 };

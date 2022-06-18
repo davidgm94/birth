@@ -3,6 +3,7 @@ const TODO = kernel.TODO;
 const log = kernel.log.scoped(.Scheduler);
 
 const Virtual = kernel.Virtual;
+const PrivilegeLevel = kernel.PrivilegeLevel;
 
 pub const Context = kernel.arch.Context;
 
@@ -51,11 +52,6 @@ pub const Thread = struct {
     time_slices: u64,
     last_known_execution_address: u64,
     address_space: *Virtual.AddressSpace,
-
-    const PrivilegeLevel = enum(u1) {
-        kernel = 0,
-        user = 1,
-    };
 
     // TODO: idle thread
     const Type = enum(u1) {

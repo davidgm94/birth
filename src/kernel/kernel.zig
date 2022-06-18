@@ -52,3 +52,8 @@ pub const File = struct {
 };
 
 pub var cpus: []arch.CPU = undefined;
+
+pub const PrivilegeLevel = enum(u1) {
+    kernel = 0,
+    user = 1,
+};

@@ -4,14 +4,168 @@ const log = std.log;
 
 const fs = @import("src/build/fs.zig");
 const Builder = std.build.Builder;
+const LibExeObjStep = std.build.LibExeObjStep;
 
 const building_os = builtin.target.os.tag;
-const current_arch = std.Target.Cpu.Arch.x86_64;
+const building_arch = builtin.target.cpu.arch;
+const Arch = std.Target.Cpu.Arch;
 
 const cache_dir = "zig-cache";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
-const arch_source_dir = "src/kernel/arch/" ++ @tagName(current_arch) ++ "/";
+
+pub fn build(b: *Builder) void {
+    create_kernel_for_arch(b, .x86_64);
+}
+
+fn create_kernel_for_arch(b: *Builder, arch: Arch) void {
+    var kernel = b.addExecutable(kernel_name, "src/kernel/root.zig");
+    set_target_specific_parameters_for_kernel(b, kernel, arch);
+    kernel.setMainPkgPath("src");
+    kernel.setBuildMode(b.standardReleaseOptions());
+    kernel.setOutputDir(cache_dir);
+    b.default_step.dependOn(&kernel.step);
+
+    create_disassembly_step(b, kernel);
+
+    //const userspace_programs = create_userspace_programs(b, arch);
+
+    //const disk = Disk.create(b, userspace_programs);
+    //create_run_and_debug_steps(b, .{
+    //});
+
+    //switch (arch) {
+    //.x86_64 => {
+    //const image_step = Limine.create_image_step(b, kernel);
+    //qemu.step.dependOn(image_step);
+    //},
+    //else => {
+    //unreachable;
+    ////qemu.step.dependOn(&kernel.step);
+    //},
+    //}
+
+    // TODO: as disk is not written, this dependency doesn't need to be executed for every time the run step is executed
+    //qemu.step.dependOn(&disk.step);
+
+    //const debug = Debug.create(b, arch);
+    //debug.step.dependOn(&kernel.step);
+    //debug.step.dependOn(&disk.step);
+}
+
+const x86_bios_qemu_cmd = [_][]const u8{
+    // zig fmt: off
+    "qemu-system-x86_64",
+    "-no-reboot", "-no-shutdown",
+    "-cdrom", image_path,
+    "-debugcon", "stdio",
+    "-vga", "std",
+    "-m", "4G",
+    //"-machine", "q35,accel=kvm:whpx:tcg",
+    "-machine", "q35",
+    //"-smp", "4",
+    "-d", "guest_errors,int,in_asm",
+    "-D", "logfile",
+    "-device", "virtio-gpu-pci",
+    // zig fmt: on
+};
+
+fn create_run_and_debug_steps(b: *Builder, options: RunOptions) void {
+    var run_argument_list = std.ArrayList(u8).init(b.allocator);
+    var debug_argument_list: std.ArrayList(u8) = undefined;
+
+    switch (options.emulator) {
+        .QEMU => {
+            const qemu_name = std.mem.concat(b.allocator, u8, &.{"qemu-system-", @tagName(options.arch)}) catch unreachable;
+            run_argument_list.append(qemu_name) catch unreachable;
+            run_argument_list.append("-no-reboot") catch unreachable;
+            run_argument_list.append("-no-shutdown") catch unreachable;
+
+            const memory_arg = b.fmt("{}{s}", .{options.memory.get_bytes(), @tagName(options.unit)});
+            run_argument_list.append("-m");
+            run_argument_list.append(memory_arg);
+
+            if (options.emulator.qemu.vga) |vga_option| {
+                run_argument_list.append("-vga");
+                run_argument_list.append(@tagName(vga_option));
+            } else {
+                run_argument_list.append("-nographic");
+            }
+
+            if (options.arch == .x86_64) {
+                run_argument_list.append("-debugcon");
+                run_argument_list.append("stdio");
+            }
+
+            debug_argument_list = run_argument_list.clone();
+            if (options.arch == building_arch and !options.emulator.qemu.run_for_debug) {
+
+            } else {
+            }
+        },
+    }
+}
+
+const RunOptions = struct {
+    arch: Arch,
+    disk_interface: DiskInterface,
+    filesystem: Filesystem,
+    memory: Memory,
+    emulator: union(enum) {
+        qemu: QEMU,
+    },
+
+    const Memory = struct {
+        amount: u64,
+        unit: Unit,
+
+        const Unit = enum(u3) {
+            K = 1,
+            M = 2,
+            G = 3,
+            T = 4,
+        };
+
+        fn get_bytes(memory: Memory) u64 {
+            var result = memory.amount;
+            var i: u3 = 0;
+            while (i <= memory.unit) : (i += 1) {
+                result <<= 10;
+            }
+
+            return result;
+        }
+    };
+
+const QEMU = struct {
+    vga: ?VGA,
+    log: ?LogOptions,
+    run_for_debug: bool,
+const VGA = enum {
+    std,
+    virtio,
+};
+};
+
+const LogOptions = packed struct {
+    file: ?[]const u8,
+    guest_errors: bool,
+    cpu: bool,
+    interrupts: bool,
+    assembly: bool,
+};
+};
+
+
+const DiskInterface = enum {
+    virtio,
+    ahci,
+    nvme,
+};
+
+const Filesystem = enum {
+    custom
+};
 
 const CPUFeatures = struct {
     enabled: std.Target.Cpu.Feature.Set,
@@ -47,11 +201,11 @@ fn get_x86_base_features() CPUFeatures {
     return features;
 }
 
-fn get_target_base(comptime arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
-    const cpu_features = switch (current_arch) {
+fn get_target_base(arch: Arch) std.zig.CrossTarget {
+    const cpu_features = switch (arch) {
         .riscv64 => get_riscv_base_features(),
         .x86_64 => get_x86_base_features(),
-        else => @compileError("CPU architecture notFeatureed\n"),
+        else => unreachable,
     };
 
     const target = std.zig.CrossTarget{
@@ -65,24 +219,27 @@ fn get_target_base(comptime arch: std.Target.Cpu.Arch) std.zig.CrossTarget {
     return target;
 }
 
-fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjStep) void {
-    var target = get_target_base(current_arch);
+fn set_target_specific_parameters_for_kernel(b: *Builder, kernel_exe: *std.build.LibExeObjStep, arch: Arch) void {
+    var target = get_target_base(arch);
 
-    switch (current_arch) {
+    switch (arch) {
         .riscv64 => {
             target.cpu_features_sub.addFeature(@enumToInt(std.Target.riscv.Feature.d));
             kernel_exe.code_model = .medium;
 
             const asssembly_files = [_][]const u8{
-                arch_source_dir ++ "start.S",
-                arch_source_dir ++ "interrupt.S",
+                "start.S",
+                "interrupt.S",
             };
 
+            const arch_source_dir = b.fmt("src/kernel/arch/{s}/", .{@tagName(arch)});
+
             for (asssembly_files) |asm_file| {
-                kernel_exe.addAssemblyFile(asm_file);
+                const asm_file_path = std.mem.concat(b.allocator, u8, &.{ arch_source_dir, asm_file }) catch unreachable;
+                kernel_exe.addAssemblyFile(asm_file_path);
             }
 
-            const linker_path = arch_source_dir ++ "linker.ld";
+            const linker_path = std.mem.concat(b.allocator, u8, &.{ arch_source_dir, "linker.ld" }) catch unreachable;
             kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_path));
         },
         .x86_64 => {
@@ -98,73 +255,84 @@ fn set_target_specific_parameters_for_kernel(kernel_exe: *std.build.LibExeObjSte
             const linker_script_path = Limine.base_path ++ linker_script_file;
             kernel_exe.setLinkerScriptPath(std.build.FileSource.relative(linker_script_path));
         },
-        else => @compileError("CPU architecture not supported"),
+        else => unreachable,
     }
 
     kernel_exe.setTarget(target);
 }
 
-pub fn build(b: *Builder) void {
-    var kernel = b.addExecutable(kernel_name, "src/kernel/root.zig");
-    set_target_specific_parameters_for_kernel(kernel);
-    kernel.setMainPkgPath("src");
-    kernel.setBuildMode(b.standardReleaseOptions());
-    kernel.setOutputDir(cache_dir);
-    b.default_step.dependOn(&kernel.step);
-
-    const disassembly_kernel = b.addSystemCommand(&.{ "llvm-objdump", "-d", "-S", "-Mintel", kernel_path });
+fn create_disassembly_step(b: *Builder, kernel: *LibExeObjStep) void {
+    var arg_list = std.ArrayList([]const u8).init(b.allocator);
+    const main_args = &.{ "llvm-objdump", kernel_path };
+    const common_flags = &.{ "-d", "-S" };
+    arg_list.appendSlice(main_args) catch unreachable;
+    arg_list.appendSlice(common_flags) catch unreachable;
+    switch (kernel.target.getCpu().arch) {
+        .x86_64 => arg_list.append("-Mintel") catch unreachable,
+        else => {},
+    }
+    const disassembly_kernel = b.addSystemCommand(arg_list.items);
     disassembly_kernel.step.dependOn(&kernel.step);
     const disassembly_kernel_step = b.step("disasm", "Disassembly the kernel ELF");
     disassembly_kernel_step.dependOn(&disassembly_kernel.step);
-
-    const minimal = b.addExecutable("minimal.elf", "src/user/minimal/main.zig");
-    minimal.setTarget(get_target_base(current_arch));
-    minimal.setOutputDir(cache_dir);
-    b.default_step.dependOn(&minimal.step);
-
-    const disk = HDD.create(b);
-    disk.step.dependOn(&minimal.step);
-    const qemu = qemu_command(b);
-    switch (current_arch) {
-        .x86_64 => {
-            const image_step = Limine.create_image_step(b, kernel);
-            qemu.step.dependOn(image_step);
-        },
-        else => {
-            qemu.step.dependOn(&kernel.step);
-        },
-    }
-    // TODO: as disk is not written, this dependency doesn't need to be executed for every time the run step is executed
-    //qemu.step.dependOn(&disk.step);
-
-    const debug = Debug.create(b);
-    debug.step.dependOn(&kernel.step);
-    debug.step.dependOn(&disk.step);
 }
 
-const HDD = struct {
+const ZigProgramDescriptor = struct {
+    out_filename: []const u8,
+    main_source_file: []const u8,
+};
+
+fn create_userspace_programs(b: *Builder, arch: Arch) []*LibExeObjStep {
+    var userspace_programs = std.ArrayList(*LibExeObjStep).init(b.allocator);
+    const userspace_program_descriptors = [_]ZigProgramDescriptor{.{
+        .out_filename = "minimal.elf",
+        .main_source_file = "src/user/minimal/main.zig",
+    }};
+
+    for (userspace_program_descriptors) |descriptor| {
+        const program = user_program_from_zig_descriptor(b, descriptor, arch);
+        userspace_programs.append(program) catch unreachable;
+    }
+
+    return userspace_programs.items;
+}
+
+fn user_program_from_zig_descriptor(b: *Builder, zig_descriptor: ZigProgramDescriptor, arch: Arch) *LibExeObjStep {
+    const program = b.addExecutable(zig_descriptor.out_filename, zig_descriptor.main_source_file);
+    program.setTarget(get_target_base(arch));
+    program.setOutputDir(cache_dir);
+    b.default_step.dependOn(&program.step);
+
+    return program;
+}
+
+const Disk = struct {
     const block_size = 0x400;
     const block_count = 32;
     var buffer: [block_size * block_count]u8 align(0x1000) = undefined;
-    const path = "zig-cache/hdd.bin";
+    const path = "zig-cache/disk.bin";
 
     step: std.build.Step,
     b: *std.build.Builder,
 
-    fn create(b: *Builder) *HDD {
-        const self = b.allocator.create(HDD) catch @panic("out of memory\n");
-        self.* = .{
-            .step = std.build.Step.init(.custom, "hdd_create", b.allocator, make),
+    fn create(b: *Builder, userspace_programs: []*LibExeObjStep) *Disk {
+        const disk = b.allocator.create(Disk) catch @panic("out of memory\n");
+        disk.* = .{
+            .step = std.build.Step.init(.custom, "disk_create", b.allocator, make),
             .b = b,
         };
 
         const named_step = b.step("disk", "Create a disk blob to use with QEMU");
-        named_step.dependOn(&self.step);
-        return self;
+        named_step.dependOn(&disk.step);
+
+        for (userspace_programs) |program| {
+            disk.step.dependOn(&program.step);
+        }
+        return disk;
     }
 
     fn make(step: *std.build.Step) !void {
-        const parent = @fieldParentPtr(HDD, "step", step);
+        const parent = @fieldParentPtr(Disk, "step", step);
         const allocator = parent.b.allocator;
         const font_file = try std.fs.cwd().readFileAlloc(allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
         std.debug.print("Font file size: {} bytes\n", .{font_file.len});
@@ -175,18 +343,18 @@ const HDD = struct {
         fs.read_debug(disk);
         //std.mem.copy(u8, &buffer, font_file);
 
-        try std.fs.cwd().writeFile(HDD.path, &HDD.buffer);
+        try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
     }
 };
 
-fn qemu_command(b: *Builder) *std.build.RunStep {
-    const run_step = b.addSystemCommand(get_qemu_command(current_arch));
+fn qemu_command(b: *Builder, arch: Arch) *std.build.RunStep {
+    const run_step = b.addSystemCommand(get_qemu_command(arch));
     const step = b.step("run", "run step");
     step.dependOn(&run_step.step);
     return run_step;
 }
 
-fn get_qemu_command(comptime arch: std.Target.Cpu.Arch) []const []const u8 {
+fn get_qemu_command(arch: std.Target.Cpu.Arch) []const []const u8 {
     return switch (arch) {
         .riscv64 => &riscv_qemu_command_str,
         .x86_64 => &x86_bios_qemu_cmd,
@@ -194,30 +362,18 @@ fn get_qemu_command(comptime arch: std.Target.Cpu.Arch) []const []const u8 {
     };
 }
 
-const x86_bios_qemu_cmd = [_][]const u8{
-    // zig fmt: off
-    "qemu-system-x86_64",
-    "-no-reboot", "-no-shutdown",
-    "-cdrom", image_path,
-    "-debugcon", "stdio",
-    "-vga", "std",
-    "-m", "4G",
-    "-machine", "q35",
-    //"-smp", "4",
-    "-d", "guest_errors,int,in_asm",
-    "-D", "logfile",
-    // zig fmt: on
-};
 
 const Debug = struct {
     step: std.build.Step,
     b: *std.build.Builder,
+    arch: Arch,
 
-    fn create(b: *std.build.Builder) *Debug {
+    fn create(b: *std.build.Builder, arch: Arch) *Debug {
         const self = b.allocator.create(@This()) catch @panic("out of memory\n");
         self.* = Debug{
             .step = std.build.Step.init(.custom, "_debug_", b.allocator, make),
             .b = b,
+            .arch = arch,
         };
 
         const named_step = b.step("debug", "Debug the program with QEMU and GDB");
@@ -228,7 +384,7 @@ const Debug = struct {
     fn make(step: *std.build.Step) !void {
         const self = @fieldParentPtr(Debug, "step", step);
         const b = self.b;
-        const qemu = get_qemu_command(current_arch) ++ [_][]const u8{ "-S", "-s" };
+        const qemu = get_qemu_command(self.arch) ++ [_][]const u8{ "-S", "-s" };
         if (building_os == .windows) {
             unreachable;
         } else {
@@ -244,35 +400,35 @@ const Debug = struct {
     fn terminal_and_gdb_thread(b: *std.build.Builder) void {
         _ = b;
         //zig fmt: off
-        var kernel_elf = std.fs.realpathAlloc(b.allocator, "zig-cache/kernel.elf") catch unreachable;
-        if (builtin.os.tag == .windows) {
-            const buffer = b.allocator.create([512]u8) catch unreachable;
-            var counter: u64 = 0;
-            for (kernel_elf) |ch| {
-                const is_separator = ch == '\\';
-                buffer[counter] = ch;
-                buffer[counter + @boolToInt(is_separator)] = ch;
-                counter += @as(u64, 1) + @boolToInt(is_separator);
-            }
-            kernel_elf = buffer[0..counter];
-        }
-        const symbol_file = b.fmt("symbol-file {s}", .{kernel_elf});
-        const process_name = [_][]const u8{
-            "wezterm", "start", "--",
-            get_gdb_name(current_arch),
-            "-tui",
-            "-ex", symbol_file,
-            "-ex", "target remote :1234",
-            "-ex", "b start",
-            "-ex", "c",
-        };
+        //var kernel_elf = std.fs.realpathAlloc(b.allocator, "zig-cache/kernel.elf") catch unreachable;
+        //if (builtin.os.tag == .windows) {
+            //const buffer = b.allocator.create([512]u8) catch unreachable;
+            //var counter: u64 = 0;
+            //for (kernel_elf) |ch| {
+                //const is_separator = ch == '\\';
+                //buffer[counter] = ch;
+                //buffer[counter + @boolToInt(is_separator)] = ch;
+                //counter += @as(u64, 1) + @boolToInt(is_separator);
+            //}
+            //kernel_elf = buffer[0..counter];
+        //}
+        //const symbol_file = b.fmt("symbol-file {s}", .{kernel_elf});
+        //const process_name = [_][]const u8{
+            //"wezterm", "start", "--",
+            //get_gdb_name(arch),
+            //"-tui",
+            //"-ex", symbol_file,
+            //"-ex", "target remote :1234",
+            //"-ex", "b start",
+            //"-ex", "c",
+        //};
 
-        for (process_name) |arg, arg_i| {
-            log.debug("Process[{}]: {s}", .{arg_i, arg});
-        }
-        var process = std.ChildProcess.init(&process_name, b.allocator);
+        //for (process_name) |arg, arg_i| {
+            //log.debug("Process[{}]: {s}", .{arg_i, arg});
+        //}
+        //var process = std.ChildProcess.init(&process_name, b.allocator);
         // zig fmt: on
-        _ = process.spawnAndWait() catch unreachable;
+        //_ = process.spawnAndWait() catch unreachable;
     }
 };
 
@@ -286,7 +442,7 @@ const riscv_qemu_command_str = [_][]const u8 {
     "-bios", "default",
     "-kernel", kernel_path,
     "-serial", "mon:stdio",
-    "-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
+    "-drive", "if=none,format=raw,file=zig-cache/disk.bin,id=foo",
     "-global", "virtio-mmio.force-legacy=false",
     "-device", "virtio-blk-device,drive=foo",
     "-device", "virtio-gpu-device",

@@ -1,4 +1,5 @@
 const kernel = @import("../kernel.zig");
+const PCI = @import("../../drivers/pci.zig");
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -29,12 +30,14 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     enable_cpu_features();
     const stivale2_struct_physical_address = kernel.Physical.Address.new(stivale2_struct_address);
     kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    _ = rsdp;
     kernel.Physical.Memory.map = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
     const region_type = kernel.Physical.Memory.map.find_address(stivale2_struct_physical_address);
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
+    PCI.init();
     preinit_scheduler();
     init_scheduler();
     asm volatile ("int $0x40");
@@ -66,13 +69,13 @@ fn init_timer() void {
     const times = 8;
 
     while (times_i < times) : (times_i += 1) {
-        out8(IOPort.PIT_command, 0x30);
-        out8(IOPort.PIT_data, 0xa9);
-        out8(IOPort.PIT_data, 0x04);
+        out(u8, IOPort.PIT_command, 0x30);
+        out(u8, IOPort.PIT_data, 0xa9);
+        out(u8, IOPort.PIT_data, 0x04);
 
         while (true) {
-            out8(IOPort.PIT_command, 0xe2);
-            if (in8(IOPort.PIT_data) & (1 << 7) != 0) break;
+            out(u8, IOPort.PIT_command, 0xe2);
+            if (in(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
         }
     }
     bsp.lapic.ticks_per_ms = kernel.maxInt(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
@@ -175,7 +178,7 @@ pub fn preinit_scheduler() void {
 //}
 //}
 
-pub var rsdp: kernel.Physical.Address = undefined;
+//pub var rsdp: kernel.Physical.Address = undefined;
 
 pub const IOPort = struct {
     pub const DMA1 = 0x0000;
@@ -197,6 +200,8 @@ pub const IOPort = struct {
     pub const IBM_VGA = 0x03b0;
     pub const floppy = 0x03f0;
     pub const serial1 = 0x03f8;
+    pub const PCI_config = 0x0cf8;
+    pub const PCI_data = 0x0cfc;
 };
 
 const Serial = struct {
@@ -228,25 +233,58 @@ const Serial = struct {
             fn init() Serial.InitError!void {
                 if (initialization_state[port_index]) return Serial.InitError.already_initialized;
 
-                out8(io_port + 7, 0);
-                if (in8(io_port + 7) != 0) return Serial.InitError.not_present;
-                out8(io_port + 7, 0xff);
-                if (in8(io_port + 7) != 0xff) return Serial.InitError.not_present;
+                out(u8, io_port + 7, 0);
+                if (in(u8, io_port + 7) != 0) return Serial.InitError.not_present;
+                out(u8, io_port + 7, 0xff);
+                if (in(u8, io_port + 7) != 0xff) return Serial.InitError.not_present;
                 TODO();
             }
         };
     }
 };
 
-pub inline fn in8(comptime port: u16) u8 {
-    return asm volatile ("inb %[port], %[result]"
-        : [result] "={al}" (-> u8),
-        : [port] "N{dx}" (port),
-    );
+pub inline fn in(comptime T: type, comptime port: u16) T {
+    return switch (T) {
+        u8 => asm volatile ("inb %[port], %[result]"
+            : [result] "={al}" (-> u8),
+            : [port] "N{dx}" (port),
+        ),
+        u16 => asm volatile ("inw %[port], %[result]"
+            : [result] "={ax}" (-> u16),
+            : [port] "N{dx}" (port),
+        ),
+        u32 => asm volatile ("inl %[port], %[result]"
+            : [result] "={eax}" (-> u32),
+            : [port] "N{dx}" (port),
+        ),
+
+        else => unreachable,
+    };
 }
 
-pub inline fn out8(comptime port: u16, value: u8) void {
-    asm volatile ("outb %[value], %[port]"
+pub inline fn out(comptime T: type, comptime port: u16, value: T) void {
+    switch (T) {
+        u8 => asm volatile ("outb %[value], %[port]"
+            :
+            : [value] "{al}" (value),
+              [port] "N{dx}" (port),
+        ),
+        u16 => asm volatile ("outw %[value], %[port]"
+            :
+            : [value] "{ax}" (value),
+              [port] "N{dx}" (port),
+        ),
+        u32 => asm volatile ("outl %[value], %[port]"
+            :
+            : [value] "{eax}" (value),
+              [port] "N{dx}" (port),
+        ),
+        else => unreachable,
+    }
+}
+
+pub inline fn out16(comptime port: u16, value: u16) void {
+    asm volatile ("outw %[value], %[port]"
         :
         : [value] "{al}" (value),
           [port] "N{dx}" (port),
@@ -255,7 +293,7 @@ pub inline fn out8(comptime port: u16, value: u8) void {
 
 pub inline fn writer_function(str: []const u8) usize {
     for (str) |c| {
-        out8(IOPort.E9_hack, c);
+        out(u8, IOPort.E9_hack, c);
     }
 
     return str.len;
@@ -1166,4 +1204,28 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
     if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
     if (should_swap_gs) asm volatile ("swapgs");
+}
+
+var pci_lock: kernel.Spinlock = undefined;
+
+inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
+    out(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
+}
+
+pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
+    pci_lock.acquire();
+    defer pci_lock.release();
+
+    kernel.assert(@src(), kernel.is_aligned(offset, 4));
+    notify_config_op(bus, slot, function, offset);
+    return in(T, IOPort.PCI_data);
+}
+
+pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
+    pci_lock.acquire();
+    defer pci_lock.release();
+
+    kernel.assert(@src(), kernel.is_aligned(offset, 4));
+    notify_config_op(bus, slot, function, offset);
+    out(T, IOPort.PCI_data, value);
 }
