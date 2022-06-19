@@ -24,9 +24,9 @@ pub fn build(b: *Builder) void {
     kernel.* = Kernel {
         .builder = b,
         .options = .{
-            .arch = .x86_64,
+            .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
-                .disk_interface = .nvme,
+                .disk_interface = null,// .nvme,
                 .filesystem = .custom,
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -47,68 +47,8 @@ const Kernel = struct {
     builder: *Builder,
     executable: *LibExeObjStep = undefined,
     userspace_programs: []*LibExeObjStep = &.{},
-    boot_image: ?union(Arch) {
-        arm,
-        armeb,
-        aarch64,
-        aarch64_be,
-        aarch64_32,
-        arc,
-        avr,
-        bpfel,
-        bpfeb,
-        csky,
-        hexagon,
-        m68k,
-        mips,
-        mipsel,
-        mips64,
-        mips64el,
-        msp430,
-        powerpc,
-        powerpcle,
-        powerpc64,
-        powerpc64le,
-        r600,
-        amdgcn,
-        riscv32,
-        riscv64: void,
-        sparc,
-        sparc64,
-        sparcel,
-        s390x,
-        tce,
-        tcele,
-        thumb,
-        thumbeb,
-        i386,
-        x86_64: x86_64.Bootloader,
-        xcore,
-        nvptx,
-        nvptx64,
-        le32,
-        le64,
-        amdil,
-        amdil64,
-        hsail,
-        hsail64,
-        spir,
-        spir64,
-        kalimba,
-        shave,
-        lanai,
-        wasm32,
-        wasm64,
-        renderscript32,
-        renderscript64,
-        ve,
-        // Stage1 currently assumes that architectures above this comment
-        // map one-to-one with the ZigLLVM_ArchType enum.
-        spu_2,
-        spirv32,
-        spirv64,
-    } = null,
     options: Options,
+    boot_image: BootImage = undefined,
 
     fn create(kernel: *Kernel) void {
         kernel.create_executable();
@@ -152,8 +92,7 @@ const Kernel = struct {
                 kernel.executable.code_model = .kernel;
                 kernel.executable.red_zone = false;
                 kernel.executable.omit_frame_pointer = false;
-                const linker_script_file = @tagName(Limine.protocol) ++ ".ld";
-                const linker_script_path = Limine.base_path ++ linker_script_file;
+                const linker_script_path = std.mem.concat(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
                 kernel.executable.setLinkerScriptPath(FileSource.relative(linker_script_path));
             },
             else => unreachable,
@@ -202,26 +141,141 @@ const Kernel = struct {
     }
 
     fn create_boot_image(kernel: *Kernel) void {
-        kernel.boot_image = switch (kernel.options.arch) {
-            .x86_64 => blk: {
-
-    fn build(step: *Step) !void {
-    }
-                break :blk undefined;
+        kernel.boot_image = .{ .arch = switch (kernel.options.arch) {
+            .x86_64 => .{
+                .x86_64 = switch (kernel.options.arch.x86_64.bootloader) {
+                    .limine => BootImage.x86_64.Limine.new(kernel),
+                },
             },
             else => unreachable,
-        };
+        } };
     }
 
     fn create_disk(kernel: *Kernel) void {
-        _ = kernel;
-        unreachable;
+        if (kernel.options.run.disk_interface) |_| {
+            log.debug("TODO: disk", .{});
+        }
     }
 
     fn create_run_and_debug_steps(kernel: *Kernel) void {
         _ = kernel;
-        unreachable;
+        log.debug("TODO: run and debug", .{});
     }
+
+    const BootImage = struct {
+        arch: ArchSpecific,
+        const ArchSpecific = union(Arch) {
+            arm,
+            armeb,
+            aarch64,
+            aarch64_be,
+            aarch64_32,
+            arc,
+            avr,
+            bpfel,
+            bpfeb,
+            csky,
+            hexagon,
+            m68k,
+            mips,
+            mipsel,
+            mips64,
+            mips64el,
+            msp430,
+            powerpc,
+            powerpcle,
+            powerpc64,
+            powerpc64le,
+            r600,
+            amdgcn,
+            riscv32,
+            riscv64: void,
+            sparc,
+            sparc64,
+            sparcel,
+            s390x,
+            tce,
+            tcele,
+            thumb,
+            thumbeb,
+            i386,
+            x86_64: x86_64,
+            xcore,
+            nvptx,
+            nvptx64,
+            le32,
+            le64,
+            amdil,
+            amdil64,
+            hsail,
+            hsail64,
+            spir,
+            spir64,
+            kalimba,
+            shave,
+            lanai,
+            wasm32,
+            wasm64,
+            renderscript32,
+            renderscript64,
+            ve,
+            // Stage1 currently assumes that architectures above this comment
+            // map one-to-one with the ZigLLVM_ArchType enum.
+            spu_2,
+            spirv32,
+            spirv64,
+        };
+        const x86_64 = struct {
+            step: Step,
+
+            const Limine = struct {
+                const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
+                const base_path = "src/kernel/arch/x86_64/limine/";
+                const to_install_path = base_path ++ "to_install/";
+
+                fn new(kernel: *Kernel) x86_64 {
+                    return x86_64{
+                        .step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build),
+                    };
+                }
+
+                fn build(step: *Step) !void {
+                    const kernel = @fieldParentPtr(Kernel, "boot_image", @fieldParentPtr(BootImage, "arch", @ptrCast(*ArchSpecific, @fieldParentPtr(x86_64, "step", step))));
+                    assert(kernel.options.arch == .x86_64);
+                    const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+                    const cwd = std.fs.cwd();
+                    cwd.deleteFile(image_path) catch {};
+                    const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
+                    const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+                    const limine_dir = try cwd.openDir(to_install_path, .{});
+
+                    const limine_efi_bin_file = "limine-cd-efi.bin";
+                    const files_to_copy_from_limine_dir = [_][]const u8{
+                        "limine.cfg",
+                        "limine.sys",
+                        "limine-cd.bin",
+                        limine_efi_bin_file,
+                    };
+
+                    for (files_to_copy_from_limine_dir) |filename| {
+                        log.debug("Trying to copy {s}", .{filename});
+                        try std.fs.Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+                    }
+                    try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+                    try std.fs.Dir.copyFile(cwd, kernel_path, img_dir, std.fs.path.basename(kernel_path), .{});
+
+                    var xorriso_process = std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, kernel.builder.allocator);
+                    // Ignore stderr and stdout
+                    xorriso_process.stdin_behavior = std.ChildProcess.StdIo.Ignore;
+                    xorriso_process.stdout_behavior = std.ChildProcess.StdIo.Ignore;
+                    xorriso_process.stderr_behavior = std.ChildProcess.StdIo.Ignore;
+                    _ = try xorriso_process.spawnAndWait();
+
+                    try Limine.installer.install(image_path, false, null);
+                }
+            };
+        };
+    };
 
     const Disk = struct {
         const block_size = 0x400;
@@ -262,64 +316,156 @@ const Kernel = struct {
         }
     };
 
-    const x86_64 = struct {
-        const Bootloader = struct {
-            fn build(step: *Step) !void {
-            }
-        };
-    };
-};
+    const Options = struct {
+        arch: ArchSpecific,
+        run: RunOptions,
 
-const Options = struct {
-    arch: Arch,
-    run: RunOptions,
+        const x86_64 = struct {
+            bootloader: union(Bootloader) {
+                limine: Limine,
+            },
 
-    const RunOptions = struct {
-        disk_interface: ?DiskInterface,
-        filesystem: ?Filesystem,
-        memory: Memory,
-        emulator: union(enum) {
-            qemu: QEMU,
-        },
-
-        const Memory = struct {
-            amount: u64,
-            unit: Unit,
-
-            const Unit = enum(u3) {
-                K = 1,
-                M = 2,
-                G = 3,
-                T = 4,
+            const Bootloader = enum {
+                limine,
             };
 
-            fn get_bytes(memory: Memory) u64 {
-                var result = memory.amount;
-                var i: u3 = 0;
-                while (i <= @enumToInt(memory.unit)) : (i += 1) {
-                    result <<= 10;
+            fn new(context: anytype) Options.ArchSpecific {
+                return switch (context.bootloader) {
+                    .limine => .{
+                        .x86_64 = .{
+                            .bootloader = .{
+                                .limine = Limine{
+                                    .protocol = context.protocol,
+                                },
+                            },
+                        },
+                    },
+                    else => unreachable,
+                };
+            }
+
+            const Limine = struct {
+                protocol: Protocol,
+
+                const Protocol = enum(u32) {
+                    stivale2,
+                    limine,
+                };
+
+                fn create_boot_image(kernel: *Kernel) void {
+                    _ = kernel;
+                    unreachable;
                 }
-
-                return result;
-            }
-        };
-
-        const QEMU = struct {
-            vga: ?VGA,
-            log: ?LogOptions,
-            run_for_debug: bool,
-            const VGA = enum {
-                std,
-                virtio,
             };
         };
+        const ArchSpecific = union(Arch) {
+            arm,
+            armeb,
+            aarch64,
+            aarch64_be,
+            aarch64_32,
+            arc,
+            avr,
+            bpfel,
+            bpfeb,
+            csky,
+            hexagon,
+            m68k,
+            mips,
+            mipsel,
+            mips64,
+            mips64el,
+            msp430,
+            powerpc,
+            powerpcle,
+            powerpc64,
+            powerpc64le,
+            r600,
+            amdgcn,
+            riscv32,
+            riscv64: void,
+            sparc,
+            sparc64,
+            sparcel,
+            s390x,
+            tce,
+            tcele,
+            thumb,
+            thumbeb,
+            i386,
+            x86_64: x86_64,
+            xcore,
+            nvptx,
+            nvptx64,
+            le32,
+            le64,
+            amdil,
+            amdil64,
+            hsail,
+            hsail64,
+            spir,
+            spir64,
+            kalimba,
+            shave,
+            lanai,
+            wasm32,
+            wasm64,
+            renderscript32,
+            renderscript64,
+            ve,
+            // Stage1 currently assumes that architectures above this comment
+            // map one-to-one with the ZigLLVM_ArchType enum.
+            spu_2,
+            spirv32,
+            spirv64,
+        };
+        const RunOptions = struct {
+            disk_interface: ?DiskInterface,
+            filesystem: ?Filesystem,
+            memory: Memory,
+            emulator: union(enum) {
+                qemu: QEMU,
+            },
 
-        const LogOptions = struct {
-            file: ?[]const u8,
-            guest_errors: bool,
-            cpu: bool,
-            interrupts: bool,
-            assembly: bool,
+            const Memory = struct {
+                amount: u64,
+                unit: Unit,
+
+                const Unit = enum(u3) {
+                    K = 1,
+                    M = 2,
+                    G = 3,
+                    T = 4,
+                };
+
+                fn get_bytes(memory: Memory) u64 {
+                    var result = memory.amount;
+                    var i: u3 = 0;
+                    while (i <= @enumToInt(memory.unit)) : (i += 1) {
+                        result <<= 10;
+                    }
+
+                    return result;
+                }
+            };
+
+            const QEMU = struct {
+                vga: ?VGA,
+                log: ?LogOptions,
+                run_for_debug: bool,
+                const VGA = enum {
+                    std,
+                    virtio,
+                };
+            };
+
+            const LogOptions = struct {
+                file: ?[]const u8,
+                guest_errors: bool,
+                cpu: bool,
+                interrupts: bool,
+                assembly: bool,
+            };
         };
     };
 };
@@ -548,70 +694,26 @@ const riscv_qemu_command_str = [_][]const u8 {
 
 const image_path = "zig-cache/universal.iso";
 
-const Limine = struct {
-    step: Step,
-    b: *Builder,
+//const Limine = struct {
+//step: Step,
+//b: *Builder,
 
-    const Protocol = enum(u32) {
-        stivale2,
-        limine,
-    };
-    const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
+//fn create_image_step(b: *Builder, kernel: *LibExeObjStep) *Step {
+//var self = kernel.builder.allocator.create(@This()) catch @panic("out of memory");
 
-    const protocol = Protocol.stivale2;
-    const base_path = "src/kernel/arch/x86_64/limine/";
-    const to_install_path = base_path ++ "to_install/";
+//self.* = @This(){
+//.step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, @This().build),
+//.b = b,
+//};
 
-    fn build(step: *Step) !void {
-        const self = @fieldParentPtr(@This(), "step", step);
-        const img_dir_path = self.kernel.builder.fmt("{s}/img_dir", .{self.kernel.builder.cache_root});
-        const cwd = std.fs.cwd();
-        cwd.deleteFile(image_path) catch {};
-        const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
-        const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-        const limine_dir = try cwd.openDir(to_install_path, .{});
+//self.step.dependOn(&kernel.step);
 
-        const limine_efi_bin_file = "limine-cd-efi.bin";
-        const files_to_copy_from_limine_dir = [_][]const u8{
-            "limine.cfg",
-            "limine.sys",
-            "limine-cd.bin",
-            limine_efi_bin_file,
-        };
+//const image_step = kernel.builder.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
+//image_step.dependOn(&self.step);
 
-        for (files_to_copy_from_limine_dir) |filename| {
-            log.debug("Trying to copy {s}", .{filename});
-            try std.fs.Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
-        }
-        try std.fs.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
-        try std.fs.Dir.copyFile(cwd, kernel_path, img_dir, std.fs.path.basename(kernel_path), .{});
-
-        var xorriso_process = std.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, self.kernel.builder.allocator);
-        // Ignore stderr and stdout
-        xorriso_process.stdin_behavior = std.ChildProcess.StdIo.Ignore;
-        xorriso_process.stdout_behavior = std.ChildProcess.StdIo.Ignore;
-        xorriso_process.stderr_behavior = std.ChildProcess.StdIo.Ignore;
-        _ = try xorriso_process.spawnAndWait();
-
-        try Limine.installer.install(image_path, false, null);
-    }
-
-    fn create_image_step(b: *Builder, kernel: *LibExeObjStep) *Step {
-        var self = kernel.builder.allocator.create(@This()) catch @panic("out of memory");
-
-        self.* = @This(){
-            .step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, @This().build),
-            .b = b,
-        };
-
-        self.step.dependOn(&kernel.step);
-
-        const image_step = kernel.builder.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
-        image_step.dependOn(&self.step);
-
-        return image_step;
-    }
-};
+//return image_step;
+//}
+//};
 
 fn get_gdb_name(comptime arch: std.Target.Cpu.Arch) []const u8 {
     return switch (arch) {
