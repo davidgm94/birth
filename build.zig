@@ -155,6 +155,7 @@ const Kernel = struct {
     fn create_disk(kernel: *Kernel) void {
         if (kernel.options.run.disk_interface) |_| {
             log.debug("TODO: disk", .{});
+            unreachable;
         }
     }
 
@@ -211,6 +212,11 @@ const Kernel = struct {
                 if (kernel.options.arch == .x86_64) {
                     run_argument_list.append("-debugcon") catch unreachable;
                     run_argument_list.append("stdio") catch unreachable;
+                }
+
+                if (kernel.options.run.disk_interface) |disk_interface| {
+                    _ = disk_interface;
+                    unreachable;
                 }
 
                 // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
@@ -328,9 +334,9 @@ const Kernel = struct {
     };
 
     const Disk = struct {
-        const block_size = 0x400;
-        const block_count = 32;
-        var buffer: [block_size * block_count]u8 align(0x1000) = undefined;
+        const block_size = 0x200;
+        const block_count = 64;
+        var buffer: [block_size * block_count]u8 = undefined;
         const path = "zig-cache/disk.bin";
 
         step: Step,
