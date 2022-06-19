@@ -89,7 +89,7 @@ pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, compti
     return quotient + @boolToInt(remainder_not_zero);
 }
 
-pub const maxInt = std.math.maxInt;
+pub const max_int = std.math.maxInt;
 
 pub const as_bytes = std.mem.asBytes;
 

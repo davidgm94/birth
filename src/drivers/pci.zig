@@ -162,8 +162,16 @@ fn enumerate(pci: *Controller) void {
             }
         }
     }
-    log.debug("buses to scan: {}", .{buses_to_scan});
-    unreachable;
+}
+
+pub fn find_device(pci: *Controller, class_code: u8, subclass_code: u8) ?*Device {
+    for (pci.devices) |*device| {
+        if (device.class_code == class_code and device.subclass_code == subclass_code) {
+            return device;
+        }
+    }
+
+    return null;
 }
 
 const class_code_names = [_][]const u8{
@@ -196,7 +204,7 @@ const subclass1_code_names = [_][]const u8{
     "ATA controller",
     "Serial ATA",
     "Serial attached SCSI",
-    "Non-volatile memory controller",
+    "Non-volatile memory controller (NVMe)",
 };
 
 const subclass12_code_names = [_][]const u8{

@@ -1,5 +1,6 @@
 const kernel = @import("../kernel.zig");
 const PCI = @import("../../drivers/pci.zig");
+const NVMe = @import("../../drivers/nvme.zig");
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -38,6 +39,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
     PCI.init();
+    NVMe.init(&PCI.controller) catch @panic("nvme drive not found");
     preinit_scheduler();
     init_scheduler();
     asm volatile ("int $0x40");
@@ -64,7 +66,7 @@ fn init_timer() void {
     disable_interrupts();
     const bsp = &kernel.cpus[0];
     const timer_calibration_start = read_timestamp();
-    bsp.lapic.write(.TIMER_INITCNT, kernel.maxInt(u32));
+    bsp.lapic.write(.TIMER_INITCNT, kernel.max_int(u32));
     var times_i: u64 = 0;
     const times = 8;
 
@@ -78,7 +80,7 @@ fn init_timer() void {
             if (in(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
         }
     }
-    bsp.lapic.ticks_per_ms = kernel.maxInt(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
+    bsp.lapic.ticks_per_ms = kernel.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
     const timer_calibration_end = read_timestamp();
     timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
     enable_interrupts();

@@ -26,7 +26,7 @@ pub fn build(b: *Builder) void {
         .options = .{
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
-                .disk_interface = null,// .nvme,
+                .disk_interface = .nvme,// .nvme,
                 .filesystem = .custom,
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -34,7 +34,7 @@ pub fn build(b: *Builder) void {
                         .vga = .std,
                         .smp = null,
                         .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
-                        .run_for_debug = true,
+                        .run_for_debug = false,
                     },
                 },
             },
@@ -50,6 +50,7 @@ const Kernel = struct {
     userspace_programs: []*LibExeObjStep = &.{},
     options: Options,
     boot_image_step: Step = undefined,
+    disk_step: Step = undefined,
 
     fn create(kernel: *Kernel) void {
         kernel.create_executable();
@@ -154,8 +155,7 @@ const Kernel = struct {
 
     fn create_disk(kernel: *Kernel) void {
         if (kernel.options.run.disk_interface) |_| {
-            log.debug("TODO: disk", .{});
-            unreachable;
+            Disk.create(kernel);
         }
     }
 
@@ -215,8 +215,20 @@ const Kernel = struct {
                 }
 
                 if (kernel.options.run.disk_interface) |disk_interface| {
-                    _ = disk_interface;
-                    unreachable;
+                    run_argument_list.append("-drive") catch unreachable;
+                    // TODO: consider other drive options
+                    const disk_id = "primary_disk";
+                    const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ Disk.path, disk_id });
+                    run_argument_list.append(drive_options) catch unreachable;
+
+                    switch (disk_interface) {
+                        .nvme => {
+                            run_argument_list.append("-device") catch unreachable;
+                            const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
+                            run_argument_list.append(device_options) catch unreachable;
+                        },
+                        else => unreachable,
+                    }
                 }
 
                 // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
@@ -260,15 +272,6 @@ const Kernel = struct {
             },
         }
 
-        log.debug("run arg list:", .{});
-        for (run_argument_list.items) |arg| {
-            log.debug("{s}", .{arg});
-        }
-        log.debug("debug arg list:", .{});
-        for (debug_argument_list.items) |arg| {
-            log.debug("{s}", .{arg});
-        }
-
         const run_command = kernel.builder.addSystemCommand(run_argument_list.items);
         const run_step = kernel.builder.step("run", "run step");
         run_step.dependOn(&run_command.step);
@@ -281,8 +284,6 @@ const Kernel = struct {
 
     const BootImage = struct {
         const x86_64 = struct {
-            step: Step,
-
             const Limine = struct {
                 const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
                 const base_path = "src/kernel/arch/x86_64/limine/";
@@ -336,37 +337,29 @@ const Kernel = struct {
     const Disk = struct {
         const block_size = 0x200;
         const block_count = 64;
-        var buffer: [block_size * block_count]u8 = undefined;
+        var buffer: [block_size * block_count]u8 align(0x1000) = undefined;
         const path = "zig-cache/disk.bin";
 
-        step: Step,
-
-        fn create(kernel: *Kernel) *Disk {
-            const disk = kernel.builder.allocator.create(Disk) catch @panic("out of memory\n");
-            disk.* = .{
-                .step = Step.init(.custom, "disk_create", kernel.builder.allocator, make),
-            };
+        fn create(kernel: *Kernel) void {
+            kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, make);
 
             const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
-            named_step.dependOn(&disk.step);
+            named_step.dependOn(&kernel.disk_step);
 
             for (kernel.userspace_programs) |program| {
-                disk.step.dependOn(&program.step);
+                kernel.disk_step.dependOn(&program.step);
             }
-            return disk;
         }
 
         fn make(step: *Step) !void {
-            const parent = @fieldParentPtr(Disk, "step", step);
-            const allocator = parent.kernel.builder.allocator;
-            const font_file = try std.fs.cwd().readFileAlloc(allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
+            const kernel = @fieldParentPtr(Kernel, "disk_step", step);
+            const font_file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
             std.debug.print("Font file size: {} bytes\n", .{font_file.len});
             var disk = fs.MemoryDisk{
                 .bytes = buffer[0..],
             };
             fs.add_file(disk, "font.psf", font_file);
             fs.read_debug(disk);
-            //std.mem.copy(u8, &buffer, font_file);
 
             try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
         }

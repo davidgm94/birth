@@ -98,7 +98,7 @@ pub const Map = struct {
             const bitset = entry.get_bitset();
 
             for (bitset[0..quotient]) |*bitset_elem| {
-                bitset_elem.* = kernel.maxInt(Map.Entry.BitsetBaseType);
+                bitset_elem.* = kernel.max_int(Map.Entry.BitsetBaseType);
             }
 
             var remainder_i: @TypeOf(remainder) = 0;

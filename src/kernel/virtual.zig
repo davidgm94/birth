@@ -43,6 +43,18 @@ pub const AddressSpace = struct {
         return physical_address.to_higher_half_virtual_address();
     }
 
+    pub inline fn allocate_and_map(address_space: *AddressSpace, size: u64, flags: Flags) ?Virtual.Address {
+        _ = address_space;
+        const page_count = kernel.bytes_to_pages(size, true);
+        const physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse return null;
+        const virtual_address = physical_address.to_higher_half_virtual_address();
+
+        const physical_region = kernel.Physical.Memory.Region.new(physical_address, size);
+        physical_region.map(address_space, virtual_address, flags);
+
+        return virtual_address;
+    }
+
     pub inline fn translate_address(address_space: *AddressSpace, virtual_address: Virtual.Address) ?Physical.Address {
         return address_space.arch.translate_address(virtual_address);
     }
