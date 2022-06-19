@@ -32,7 +32,7 @@ pub fn build(b: *Builder) void {
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = true, .assembly = true, .interrupts = true, },
+                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },
@@ -158,12 +158,119 @@ const Kernel = struct {
     }
 
     fn create_run_and_debug_steps(kernel: *Kernel) void {
-        _ = kernel;
-        log.debug("TODO: run and debug", .{});
+        var run_argument_list = std.ArrayList([]const u8).init(kernel.builder.allocator);
+        var debug_argument_list: std.ArrayList([]const u8) = undefined;
+
+        switch (kernel.options.run.emulator) {
+            .qemu => {
+                const qemu_name = std.mem.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
+                run_argument_list.append(qemu_name) catch unreachable;
+                run_argument_list.append("-no-reboot") catch unreachable;
+                run_argument_list.append("-no-shutdown") catch unreachable;
+
+                const memory_arg = kernel.builder.fmt("{}{s}", .{ kernel.options.run.memory.amount, @tagName(kernel.options.run.memory.unit) });
+                run_argument_list.append("-m") catch unreachable;
+                run_argument_list.append(memory_arg) catch unreachable;
+
+                if (kernel.options.run.emulator.qemu.vga) |vga_option| {
+                    run_argument_list.append("-vga") catch unreachable;
+                    run_argument_list.append(@tagName(vga_option)) catch unreachable;
+                } else {
+                    run_argument_list.append("-nographic") catch unreachable;
+                }
+
+                if (kernel.options.arch == .x86_64) {
+                    run_argument_list.append("-debugcon") catch unreachable;
+                    run_argument_list.append("stdio") catch unreachable;
+                }
+
+                switch (kernel.options.arch) {
+                    .x86_64 => {
+                        const image_flag = "-cdrom";
+                        const image_path = Kernel.BootImage.x86_64.Limine.image_path;
+                        run_argument_list.append(image_flag) catch unreachable;
+                        run_argument_list.append(image_path) catch unreachable;
+                    },
+                    else => unreachable,
+                }
+
+                // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
+                run_argument_list.append("-machine") catch unreachable;
+                debug_argument_list = run_argument_list.clone() catch unreachable;
+                if (kernel.options.arch == building_arch and !kernel.options.run.emulator.qemu.run_for_debug) {
+                    switch (kernel.options.arch) {
+                        .x86_64 => run_argument_list.append("q35,accel=kvm:whpx:tcg") catch unreachable,
+                        else => unreachable,
+                    }
+                } else {
+                    switch (kernel.options.arch) {
+                        .x86_64 => {
+                            const machine = "q35";
+                            run_argument_list.append(machine) catch unreachable;
+                            debug_argument_list.append(machine) catch unreachable;
+                        },
+                        else => unreachable,
+                    }
+
+                    if (kernel.options.run.emulator.qemu.log) |log_options| {
+                        const log_flag = "-d";
+                        run_argument_list.append(log_flag) catch unreachable;
+                        debug_argument_list.append(log_flag) catch unreachable;
+
+                        var log_what = std.ArrayList(u8).init(kernel.builder.allocator);
+                        if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
+                        if (log_options.cpu) log_what.appendSlice("cpu,") catch unreachable;
+                        if (log_options.interrupts) log_what.appendSlice("int,") catch unreachable;
+                        if (log_options.assembly) log_what.appendSlice("in_asm,") catch unreachable;
+                        // Delete the last comma
+                        _ = log_what.pop();
+                        run_argument_list.append(log_what.items) catch unreachable;
+                        debug_argument_list.append(log_what.items) catch unreachable;
+
+                        if (log_options.file) |log_file| {
+                            const log_file_flag = "-D";
+                            run_argument_list.append(log_file_flag) catch unreachable;
+                            debug_argument_list.append(log_file_flag) catch unreachable;
+                            run_argument_list.append(log_file) catch unreachable;
+                            debug_argument_list.append(log_file) catch unreachable;
+                        }
+                    }
+                }
+            },
+        }
+
+        log.debug("run arg list:", .{});
+        for (run_argument_list.items) |arg| {
+            log.debug("{s}", .{arg});
+        }
+        log.debug("debug arg list:", .{});
+        for (debug_argument_list.items) |arg| {
+            log.debug("{s}", .{arg});
+        }
+
+        const run_command = kernel.builder.addSystemCommand(run_argument_list.items);
+        const run_step = kernel.builder.step("run", "run step");
+        run_step.dependOn(&run_command.step);
+
+        switch (kernel.options.arch) {
+            .x86_64 => {
+                const boot_image_step = kernel.boot_image.get_step() orelse unreachable;
+                run_command.step.dependOn(boot_image_step);
+            },
+            else => unreachable,
+        }
     }
 
     const BootImage = struct {
         arch: ArchSpecific,
+
+        fn get_step(boot_image: *BootImage) ?*Step {
+            return switch (boot_image.arch) {
+                .x86_64 => &boot_image.arch.x86_64.step,
+                else => null,
+            };
+        }
+
         const ArchSpecific = union(Arch) {
             arm,
             armeb,
@@ -225,6 +332,7 @@ const Kernel = struct {
             spirv32,
             spirv64,
         };
+
         const x86_64 = struct {
             step: Step,
 
@@ -232,11 +340,14 @@ const Kernel = struct {
                 const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
                 const base_path = "src/kernel/arch/x86_64/limine/";
                 const to_install_path = base_path ++ "to_install/";
+                const image_path = "zig-cache/universal.iso";
 
                 fn new(kernel: *Kernel) x86_64 {
-                    return x86_64{
+                    var result = x86_64{
                         .step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build),
                     };
+                    result.step.dependOn(&kernel.executable.step);
+                    return result;
                 }
 
                 fn build(step: *Step) !void {
@@ -317,7 +428,7 @@ const Kernel = struct {
     };
 
     const Options = struct {
-        arch: ArchSpecific,
+        arch: Options.ArchSpecific,
         run: RunOptions,
 
         const x86_64 = struct {
@@ -334,7 +445,7 @@ const Kernel = struct {
                     .limine => .{
                         .x86_64 = .{
                             .bootloader = .{
-                                .limine = Limine{
+                                .limine = .{
                                     .protocol = context.protocol,
                                 },
                             },
@@ -351,13 +462,9 @@ const Kernel = struct {
                     stivale2,
                     limine,
                 };
-
-                fn create_boot_image(kernel: *Kernel) void {
-                    _ = kernel;
-                    unreachable;
-                }
             };
         };
+
         const ArchSpecific = union(Arch) {
             arm,
             armeb,
@@ -419,6 +526,7 @@ const Kernel = struct {
             spirv32,
             spirv64,
         };
+
         const RunOptions = struct {
             disk_interface: ?DiskInterface,
             filesystem: ?Filesystem,
@@ -438,15 +546,15 @@ const Kernel = struct {
                     T = 4,
                 };
 
-                fn get_bytes(memory: Memory) u64 {
-                    var result = memory.amount;
-                    var i: u3 = 0;
-                    while (i <= @enumToInt(memory.unit)) : (i += 1) {
-                        result <<= 10;
-                    }
+                //fn get_bytes(memory: Memory) u64 {
+                //var result = memory.amount;
+                //var i: u3 = 0;
+                //while (i <= @enumToInt(memory.unit)) : (i += 1) {
+                //result <<= 10;
+                //}
 
-                    return result;
-                }
+                //return result;
+                //}
             };
 
             const QEMU = struct {
@@ -466,72 +574,34 @@ const Kernel = struct {
                 interrupts: bool,
                 assembly: bool,
             };
+
+            const DiskInterface = enum {
+                virtio,
+                ahci,
+                nvme,
+            };
+
+            const Filesystem = enum { custom };
         };
     };
 };
 
-const x86_bios_qemu_cmd = [_][]const u8{
-    // zig fmt: off
-    "qemu-system-x86_64",
-    "-no-reboot", "-no-shutdown",
-    "-cdrom", image_path,
-    "-debugcon", "stdio",
-    "-vga", "std",
-    "-m", "4G",
-    //"-machine", "q35,accel=kvm:whpx:tcg",
-    "-machine", "q35",
-    //"-smp", "4",
-    "-d", "guest_errors,int,in_asm",
-    "-D", "logfile",
-    "-device", "virtio-gpu-pci",
-    // zig fmt: on
-};
-
-fn create_run_and_debug_steps(kernel: *Kernel) void {
-    var run_argument_list = std.ArrayList([]const u8).init(kernel.builder.allocator);
-    var debug_argument_list: std.ArrayList([]const u8) = undefined;
-
-    switch (kernel.options.run.emulator) {
-        .qemu => {
-            const qemu_name = std.mem.concat(kernel.builder.allocator, u8, &.{"qemu-system-", @tagName(kernel.options.arch)}) catch unreachable;
-            run_argument_list.append(qemu_name) catch unreachable;
-            run_argument_list.append("-no-reboot") catch unreachable;
-            run_argument_list.append("-no-shutdown") catch unreachable;
-
-            const memory_arg = kernel.builder.fmt("{}{s}", .{kernel.options.run.memory.get_bytes(), @tagName(kernel.options.run.memory.unit)});
-            run_argument_list.append("-m") catch unreachable;
-            run_argument_list.append(memory_arg) catch unreachable;
-
-            if (kernel.options.run.emulator.qemu.vga) |vga_option| {
-                run_argument_list.append("-vga") catch unreachable;
-                run_argument_list.append(@tagName(vga_option)) catch unreachable;
-            } else {
-                run_argument_list.append("-nographic") catch unreachable;
-            }
-
-            if (kernel.options.arch == .x86_64) {
-                run_argument_list.append("-debugcon") catch unreachable;
-                run_argument_list.append("stdio") catch unreachable;
-            }
-
-            debug_argument_list = run_argument_list.clone() catch unreachable;
-            if (kernel.options.arch == building_arch and !kernel.options.run.emulator.qemu.run_for_debug) {
-
-            } else {
-            }
-        },
-    }
-}
-
-const DiskInterface = enum {
-    virtio,
-    ahci,
-    nvme,
-};
-
-const Filesystem = enum {
-    custom
-};
+//const x86_bios_qemu_cmd = [_][]const u8{
+//// zig fmt: off
+//"qemu-system-x86_64",
+//"-no-reboot", "-no-shutdown",
+//"-cdrom", image_path,
+//"-debugcon", "stdio",
+//"-vga", "std",
+//"-m", "4G",
+////"-machine", "q35,accel=kvm:whpx:tcg",
+//"-machine", "q35",
+////"-smp", "4",
+//"-d", "guest_errors,int,in_asm",
+//"-D", "logfile",
+//"-device", "virtio-gpu-pci",
+//// zig fmt: on
+//};
 
 const CPUFeatures = struct {
     enabled: std.Target.Cpu.Feature.Set,
@@ -585,146 +655,107 @@ fn get_target_base(arch: Arch) std.zig.CrossTarget {
     return target;
 }
 
-
-
 const ZigProgramDescriptor = struct {
     out_filename: []const u8,
     main_source_file: []const u8,
 };
 
-fn get_qemu_command(arch: std.Target.Cpu.Arch) []const []const u8 {
-    return switch (arch) {
-        .riscv64 => &riscv_qemu_command_str,
-        .x86_64 => &x86_bios_qemu_cmd,
-        else => unreachable,
-    };
-}
-
+//fn get_qemu_command(arch: std.Target.Cpu.Arch) []const []const u8 {
+//return switch (arch) {
+//.riscv64 => &riscv_qemu_command_str,
+//.x86_64 => &x86_bios_qemu_cmd,
+//else => unreachable,
+//};
+//}
 
 //const Debug = struct {
-    //step: Step,
-    //b: *Builder,
-    //arch: Arch,
-
-    //fn create(b: *Builder, arch: Arch) *Debug {
-        //const self = kernel.builder.allocator.create(@This()) catch @panic("out of memory\n");
-        //self.* = Debug{
-            //.step = Step.init(.custom, "_debug_", kernel.builder.allocator, make),
-            //.b = b,
-            //.arch = arch,
-        //};
-
-        //const named_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
-        //named_step.dependOn(&self.step);
-        //return self;
-    //}
-
-    //fn make(step: *Step) !void {
-        //const self = @fieldParentPtr(Debug, "step", step);
-        //const b = self.b;
-        //const qemu = get_qemu_command(self.arch) ++ [_][]const u8{ "-S", "-s" };
-        //if (building_os == .windows) {
-            //unreachable;
-        //} else {
-            //const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
-            //var process = std.ChildProcess.init(qemu, kernel.builder.allocator);
-            //_ = try process.spawnAndWait();
-
-            //terminal_thread.join();
-            //_ = try process.kill();
-        //}
-    //}
-
-    //fn terminal_and_gdb_thread(b: *Builder) void {
-        //_ = b;
-        ////zig fmt: off
-        ////var kernel_elf = std.fs.realpathAlloc(kernel.builder.allocator, "zig-cache/kernel.elf") catch unreachable;
-        ////if (builtin.os.tag == .windows) {
-            ////const buffer = kernel.builder.allocator.create([512]u8) catch unreachable;
-            ////var counter: u64 = 0;
-            ////for (kernel_elf) |ch| {
-                ////const is_separator = ch == '\\';
-                ////buffer[counter] = ch;
-                ////buffer[counter + @boolToInt(is_separator)] = ch;
-                ////counter += @as(u64, 1) + @boolToInt(is_separator);
-            ////}
-            ////kernel_elf = buffer[0..counter];
-        ////}
-        ////const symbol_file = kernel.builder.fmt("symbol-file {s}", .{kernel_elf});
-        ////const process_name = [_][]const u8{
-            ////"wezterm", "start", "--",
-            ////get_gdb_name(arch),
-            ////"-tui",
-            ////"-ex", symbol_file,
-            ////"-ex", "target remote :1234",
-            ////"-ex", "b start",
-            ////"-ex", "c",
-        ////};
-
-        ////for (process_name) |arg, arg_i| {
-            ////log.debug("Process[{}]: {s}", .{arg_i, arg});
-        ////}
-        ////var process = std.ChildProcess.init(&process_name, kernel.builder.allocator);
-        //// zig fmt: on
-        ////_ = process.spawnAndWait() catch unreachable;
-    //}
-//};
-
-// zig fmt: off
-const riscv_qemu_command_str = [_][]const u8 {
-    "qemu-system-riscv64",
-    "-no-reboot", "-no-shutdown",
-    "-machine", "virt",
-    "-cpu", "rv64",
-    "-m", "4G",
-    "-bios", "default",
-    "-kernel", kernel_path,
-    "-serial", "mon:stdio",
-    "-drive", "if=none,format=raw,file=zig-cache/disk.bin,id=foo",
-    "-global", "virtio-mmio.force-legacy=false",
-    "-device", "virtio-blk-device,drive=foo",
-    "-device", "virtio-gpu-device",
-    "-d", "guest_errors,int",
-    //"-D", "logfile",
-
-    //"-trace", "virtio*",
-    //"-S", "-s",
-};
-// zig fmt: on
-
-const image_path = "zig-cache/universal.iso";
-
-//const Limine = struct {
 //step: Step,
 //b: *Builder,
+//arch: Arch,
 
-//fn create_image_step(b: *Builder, kernel: *LibExeObjStep) *Step {
-//var self = kernel.builder.allocator.create(@This()) catch @panic("out of memory");
-
-//self.* = @This(){
-//.step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, @This().build),
+//fn create(b: *Builder, arch: Arch) *Debug {
+//const self = kernel.builder.allocator.create(@This()) catch @panic("out of memory\n");
+//self.* = Debug{
+//.step = Step.init(.custom, "_debug_", kernel.builder.allocator, make),
 //.b = b,
+//.arch = arch,
 //};
 
-//self.step.dependOn(&kernel.step);
+//const named_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
+//named_step.dependOn(&self.step);
+//return self;
+//}
 
-//const image_step = kernel.builder.step("x86_64-universal-image", "Build the x86_64 universal (bios and uefi) image");
-//image_step.dependOn(&self.step);
+//fn make(step: *Step) !void {
+//const self = @fieldParentPtr(Debug, "step", step);
+//const b = self.b;
+//const qemu = get_qemu_command(self.arch) ++ [_][]const u8{ "-S", "-s" };
+//if (building_os == .windows) {
+//unreachable;
+//} else {
+//const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
+//var process = std.ChildProcess.init(qemu, kernel.builder.allocator);
+//_ = try process.spawnAndWait();
 
-//return image_step;
+//terminal_thread.join();
+//_ = try process.kill();
+//}
+//}
+
+//fn terminal_and_gdb_thread(b: *Builder) void {
+//_ = b;
+////zig fmt: off
+////var kernel_elf = std.fs.realpathAlloc(kernel.builder.allocator, "zig-cache/kernel.elf") catch unreachable;
+////if (builtin.os.tag == .windows) {
+////const buffer = kernel.builder.allocator.create([512]u8) catch unreachable;
+////var counter: u64 = 0;
+////for (kernel_elf) |ch| {
+////const is_separator = ch == '\\';
+////buffer[counter] = ch;
+////buffer[counter + @boolToInt(is_separator)] = ch;
+////counter += @as(u64, 1) + @boolToInt(is_separator);
+////}
+////kernel_elf = buffer[0..counter];
+////}
+////const symbol_file = kernel.builder.fmt("symbol-file {s}", .{kernel_elf});
+////const process_name = [_][]const u8{
+////"wezterm", "start", "--",
+////get_gdb_name(arch),
+////"-tui",
+////"-ex", symbol_file,
+////"-ex", "target remote :1234",
+////"-ex", "b start",
+////"-ex", "c",
+////};
+
+////for (process_name) |arg, arg_i| {
+////log.debug("Process[{}]: {s}", .{arg_i, arg});
+////}
+////var process = std.ChildProcess.init(&process_name, kernel.builder.allocator);
+//// zig fmt: on
+////_ = process.spawnAndWait() catch unreachable;
 //}
 //};
 
-fn get_gdb_name(comptime arch: std.Target.Cpu.Arch) []const u8 {
-    return switch (arch) {
-        .riscv64 => "riscv64-elf-gdb",
-        .x86_64 => blk: {
-            switch (building_os) {
-                .windows => break :blk "C:\\Users\\David\\programs\\gdb\\bin\\gdb",
-                .macos => break :blk "x86_64-elf-gdb",
-                else => break :blk "gdb",
-            }
-        },
-        else => @compileError("CPU architecture not supported"),
-    };
-}
+// zig fmt: off
+//const riscv_qemu_command_str = [_][]const u8 {
+    //"qemu-system-riscv64",
+    //"-no-reboot", "-no-shutdown",
+    //"-machine", "virt",
+    //"-cpu", "rv64",
+    //"-m", "4G",
+    //"-bios", "default",
+    //"-kernel", kernel_path,
+    //"-serial", "mon:stdio",
+    //"-drive", "if=none,format=raw,file=zig-cache/disk.bin,id=foo",
+    //"-global", "virtio-mmio.force-legacy=false",
+    //"-device", "virtio-blk-device,drive=foo",
+    //"-device", "virtio-gpu-device",
+    //"-d", "guest_errors,int",
+    ////"-D", "logfile",
+
+    ////"-trace", "virtio*",
+    ////"-S", "-s",
+//};
+// zig fmt: on
+
