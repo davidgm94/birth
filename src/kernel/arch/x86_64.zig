@@ -39,7 +39,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
     PCI.init();
-    NVMe.init(&PCI.controller) catch @panic("nvme drive not found");
+    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
     preinit_scheduler();
     init_scheduler();
     asm volatile ("int $0x40");
@@ -71,13 +71,13 @@ fn init_timer() void {
     const times = 8;
 
     while (times_i < times) : (times_i += 1) {
-        out(u8, IOPort.PIT_command, 0x30);
-        out(u8, IOPort.PIT_data, 0xa9);
-        out(u8, IOPort.PIT_data, 0x04);
+        io_write(u8, IOPort.PIT_command, 0x30);
+        io_write(u8, IOPort.PIT_data, 0xa9);
+        io_write(u8, IOPort.PIT_data, 0x04);
 
         while (true) {
-            out(u8, IOPort.PIT_command, 0xe2);
-            if (in(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
+            io_write(u8, IOPort.PIT_command, 0xe2);
+            if (io_read(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
         }
     }
     bsp.lapic.ticks_per_ms = kernel.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
@@ -235,17 +235,17 @@ const Serial = struct {
             fn init() Serial.InitError!void {
                 if (initialization_state[port_index]) return Serial.InitError.already_initialized;
 
-                out(u8, io_port + 7, 0);
-                if (in(u8, io_port + 7) != 0) return Serial.InitError.not_present;
-                out(u8, io_port + 7, 0xff);
-                if (in(u8, io_port + 7) != 0xff) return Serial.InitError.not_present;
+                io_write(u8, io_port + 7, 0);
+                if (io_read(u8, io_port + 7) != 0) return Serial.InitError.not_present;
+                io_write(u8, io_port + 7, 0xff);
+                if (io_read(u8, io_port + 7) != 0xff) return Serial.InitError.not_present;
                 TODO();
             }
         };
     }
 };
 
-pub inline fn in(comptime T: type, comptime port: u16) T {
+pub inline fn io_read(comptime T: type, port: u16) T {
     return switch (T) {
         u8 => asm volatile ("inb %[port], %[result]"
             : [result] "={al}" (-> u8),
@@ -264,7 +264,7 @@ pub inline fn in(comptime T: type, comptime port: u16) T {
     };
 }
 
-pub inline fn out(comptime T: type, comptime port: u16, value: T) void {
+pub inline fn io_write(comptime T: type, port: u16, value: T) void {
     switch (T) {
         u8 => asm volatile ("outb %[value], %[port]"
             :
@@ -295,7 +295,7 @@ pub inline fn out16(comptime port: u16, value: u16) void {
 
 pub inline fn writer_function(str: []const u8) usize {
     for (str) |c| {
-        out(u8, IOPort.E9_hack, c);
+        io_write(u8, IOPort.E9_hack, c);
     }
 
     return str.len;
@@ -1211,7 +1211,7 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
 var pci_lock: kernel.Spinlock = undefined;
 
 inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
-    out(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
+    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
 }
 
 pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
@@ -1220,7 +1220,7 @@ pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset
 
     kernel.assert(@src(), kernel.is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
-    return in(T, IOPort.PCI_data);
+    return io_read(T, IOPort.PCI_data);
 }
 
 pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
@@ -1229,5 +1229,5 @@ pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function:
 
     kernel.assert(@src(), kernel.is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
-    out(T, IOPort.PCI_data, value);
+    io_write(T, IOPort.PCI_data, value);
 }

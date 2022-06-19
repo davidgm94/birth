@@ -28,14 +28,34 @@ base_addresses: [6]u32,
 
 //uint32_t baseAddresses[6];
 
-pub fn read_config(device: *Device, comptime T: type, offset: u8, comptime privilege_level: PrivilegeLevel) T {
+pub inline fn read_config(device: *Device, comptime T: type, offset: u8, comptime privilege_level: PrivilegeLevel) T {
     kernel.assert(@src(), privilege_level == .kernel);
     return kernel.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
 }
 
-pub fn write_config(device: *Device, comptime T: type, value: T, offset: u8, comptime privilege_level: PrivilegeLevel) void {
+pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8, comptime privilege_level: PrivilegeLevel) void {
     kernel.assert(@src(), privilege_level == .kernel);
     return kernel.arch.pci_write_config(T, value, device.bus, device.slot, device.function, offset);
+}
+
+pub inline fn read_bar(device: *Device, comptime T: type, index: u64, offset: u64) T {
+    const base_address = device.base_addresses[index];
+    const result = if (T != u64) (if (base_address & 1 != 0) kernel.arch.io_read(T, @intCast(u16, (base_address & ~@as(u32, 3)) + offset)) else device.base_virtual_addresses[index].offset(offset).access(*volatile T).*) else (if (base_address & 1 != 0) device.read_bar(u32, index, offset) | (@intCast(u64, device.read_bar(u64, index, offset + @sizeOf(u32))) << 32) else device.base_virtual_addresses[index].offset(offset).access(*volatile T).*);
+    return result;
+}
+
+pub inline fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
+    const base_address = device.base_addresses[index];
+    if (T != u64) {
+        if (base_address & 1 != 0) kernel.arch.io_write(T, (base_address & ~3) + offset, value) else device.base_virtual_addresses[index].offset(offset).access(*volatile T).* = value;
+    } else {
+        if (base_address & 1 != 0) {
+            device.write_bar(u32, offset, @truncate(u32, value));
+            device.write_bar(u32, offset + @sizeOf(u32), @truncate(u32, value >> 32));
+        } else {
+            device.base_virtual_addresses[index].offset(offset).access(*volatile T).* = value;
+        }
+    }
 }
 
 pub const Features = kernel.Bitflag(false, enum(u64) {

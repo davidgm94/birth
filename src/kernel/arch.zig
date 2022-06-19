@@ -27,6 +27,9 @@ pub const are_interrupts_enabled = arch.are_interrupts_enabled;
 pub const pci_read_config = arch.pci_read_config;
 pub const pci_write_config = arch.pci_write_config;
 
+pub const io_read = arch.io_read;
+pub const io_write = arch.io_write;
+
 pub const get_current_cpu = arch.get_current_cpu;
 
 pub const next_timer = arch.next_timer;
