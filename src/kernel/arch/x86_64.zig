@@ -119,13 +119,9 @@ pub inline fn read_gs() ?*kernel.arch.CPU {
     );
 }
 
-pub const sched_call_vector: u8 = 0x31;
-pub const ring_vector: u8 = 0x32;
-
-var last_vector: u8 = ring_vector;
-
-pub const lapic_timer_interrupt: u8 = 0xef;
-pub const invlpg_vector: u8 = 0xFE;
+pub const timer_interrupt = 0x40;
+pub const interrupt_vector_msi_start = 0x70;
+pub const interrupt_vector_msi_count = 0x40;
 pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic() void {
@@ -968,8 +964,6 @@ pub inline fn are_interrupts_enabled() bool {
 pub const LAPIC = struct {
     ticks_per_ms: u32 = 0,
     address: kernel.Virtual.Address,
-
-    const timer_interrupt = 0x40;
 
     const Register = enum(u32) {
         LAPIC_ID = 0x20,

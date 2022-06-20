@@ -1,13 +1,14 @@
 const kernel = @import("../kernel/kernel.zig");
 const log = kernel.log.scoped(.NVMe);
 const TODO = kernel.TODO;
-const PCIController = @import("pci.zig");
-const PCIDevice = @import("pci_device.zig");
+const PCI = @import("pci.zig");
+
+const x86_64 = @import("../kernel/arch/x86_64.zig");
 
 const NVMe = @This();
 pub var controller: NVMe = undefined;
 
-device: *PCIDevice,
+device: *PCI.Device,
 capabilities: u64,
 version: u32,
 doorbell_stride: u64,
@@ -21,7 +22,7 @@ const io_queue_entry_count = 256;
 const submission_queue_entry_bytes = 64;
 const completion_queue_entry_bytes = 16;
 
-pub fn new(device: *PCIDevice) NVMe {
+pub fn new(device: *PCI.Device) NVMe {
     return NVMe{
         .device = device,
         .capabilities = 0,
@@ -33,7 +34,7 @@ pub fn new(device: *PCIDevice) NVMe {
     };
 }
 
-pub fn find(pci: *PCIController) ?*PCIDevice {
+pub fn find(pci: *PCI) ?*PCI.Device {
     return pci.find_device(0x1, 0x8);
 }
 
@@ -41,11 +42,11 @@ const Error = error{
     not_found,
 };
 
-pub fn find_and_init(pci: *PCIController) Error!void {
+pub fn find_and_init(pci: *PCI) Error!void {
     const nvme_device = find(pci) orelse return Error.not_found;
     log.debug("Found NVMe drive", .{});
     controller = NVMe.new(nvme_device);
-    const result = controller.device.enable_features(PCIDevice.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
+    const result = controller.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
     kernel.assert(@src(), result);
     log.debug("Device features enabled", .{});
 
@@ -151,5 +152,16 @@ pub fn init(nvme: *NVMe) void {
         }
     }
 
+    if (!nvme.device.enable_single_interrupt(x86_64.interrupts.HandlerInfo.new(nvme, handle_irq))) {
+        @panic("f hanlder");
+    }
+
     TODO(@src());
+}
+
+pub const Callback = fn (*NVMe) void;
+
+pub fn handle_irq(nvme: *NVMe) void {
+    _ = nvme;
+    unreachable;
 }

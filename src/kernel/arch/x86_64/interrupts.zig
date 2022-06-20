@@ -490,3 +490,60 @@ pub inline fn epilogue() void {
         \\iretq
     );
 }
+
+pub var msi_handlers: [x86_64.interrupt_vector_msi_count]HandlerInfo = undefined;
+
+pub const HandlerInfo = struct {
+    const Callback = fn (u64) void;
+    callback: Callback,
+    context: u64,
+
+    pub fn new(context: anytype, callback: anytype) HandlerInfo {
+        return HandlerInfo{
+            .callback = @ptrCast(Callback, callback),
+            .context = @ptrToInt(context),
+        };
+    }
+
+    pub fn register_MSI(handler: HandlerInfo) void {
+        const msi_end = x86_64.interrupt_vector_msi_start + x86_64.interrupt_vector_msi_count;
+        var msi = x86_64.interrupt_vector_msi_start;
+        while (msi < msi_end) : (msi += 1) {
+            if (msi_handlers[msi].address != 0) continue;
+            msi_handlers[msi] = handler;
+        }
+    }
+
+    pub fn register_IRQ(handler: HandlerInfo, pci_device: *PCI.Device) bool {
+        if (line > 0x20) @panic("unexpected irq");
+
+        var found = false;
+
+        // TODO: @Lock
+        for (irq_handlers) |*irq_handler| {
+            if (irq_handler.context == 0) {
+                found = true;
+                irq_handler.* = .{
+                    .callback = handler.callback,
+                    .context = handler.context,
+                    .line = pci_device.line,
+                    .pci_device = pci_device,
+                };
+                break;
+            }
+        }
+
+        if (!found) return false;
+        
+        if (Setup
+    }
+};
+
+var irq_handlers: [0x40]IRQHandler = undefined;
+
+const IRQHandler = struct {
+    callback: HandlerInfo.Callback,
+    context: u64,
+    line: u64,
+    pci_device: *PCI.Device,
+};

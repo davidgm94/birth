@@ -205,3 +205,4 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
 pub const fields = std.meta.fields;
 
 pub const reference_all_declarations = std.testing.refAllDecls;
+pub const Type = std.builtin.Type;
