@@ -1,5 +1,6 @@
 const kernel = @import("../kernel/kernel.zig");
 const log = kernel.log.scoped(.NVMe);
+const TODO = kernel.TODO;
 const PCIController = @import("pci.zig");
 const PCIDevice = @import("pci_device.zig");
 
@@ -9,6 +10,8 @@ pub var controller: NVMe = undefined;
 device: *PCIDevice,
 capabilities: u64,
 version: u32,
+doorbell_stride: u64,
+ready_transition_timeout: u64,
 
 const general_timeout = 5000;
 const admin_queue_entry_count = 2;
@@ -21,6 +24,8 @@ pub fn new(device: *PCIDevice) NVMe {
         .device = device,
         .capabilities = 0,
         .version = 0,
+        .doorbell_stride = 0,
+        .ready_transition_timeout = 0,
     };
 }
 
@@ -41,19 +46,6 @@ pub fn find_and_init(pci: *PCIController) Error!void {
     log.debug("Device features enabled", .{});
 
     controller.init();
-}
-
-pub fn init(nvme: *NVMe) void {
-    nvme.capabilities = nvme.read(cap);
-    nvme.version = nvme.read(vs);
-    log.debug("Capabilities = 0x{x}. Version = {}", .{ nvme.capabilities, nvme.version });
-
-    if ((nvme.version >> 16) < 1) @panic("f1");
-    if ((nvme.version >> 16) == 1 and @truncate(u8, nvme.version >> 8) < 1) @panic("f2");
-    if (@truncate(u16, nvme.capabilities) == 0) @panic("f3");
-    if (~nvme.capabilities & (1 << 37) != 0) @panic("f4");
-    if (@truncate(u4, nvme.capabilities >> 48) < kernel.arch.page_shifter - 12) @panic("f5");
-    if (@truncate(u4, nvme.capabilities >> 52) < kernel.arch.page_shifter - 12) @panic("f6");
 }
 
 const Register = struct {
@@ -87,3 +79,42 @@ inline fn write(nvme: *NVMe, comptime register: Register, value: register.type) 
 //inline fn read_CQHDBL(device: *PCIDevicei)     pci-> ReadBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 1))    // Completion queue head doorbell.
 //inline fn write_CQHDBL(device: *PCIDevicei, x)  pci->WriteBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 1), x)
 
+pub fn init(nvme: *NVMe) void {
+    nvme.capabilities = nvme.read(cap);
+    nvme.version = nvme.read(vs);
+    log.debug("Capabilities = 0x{x}. Version = {}", .{ nvme.capabilities, nvme.version });
+
+    if ((nvme.version >> 16) < 1) @panic("f1");
+    if ((nvme.version >> 16) == 1 and @truncate(u8, nvme.version >> 8) < 1) @panic("f2");
+    if (@truncate(u16, nvme.capabilities) == 0) @panic("f3");
+    if (~nvme.capabilities & (1 << 37) != 0) @panic("f4");
+    if (@truncate(u4, nvme.capabilities >> 48) < kernel.arch.page_shifter - 12) @panic("f5");
+    if (@truncate(u4, nvme.capabilities >> 52) < kernel.arch.page_shifter - 12) @panic("f6");
+
+    nvme.doorbell_stride = @as(u64, 4) << @truncate(u4, nvme.capabilities >> 32);
+    log.debug("NVMe doorbell stride: 0x{x}", .{nvme.doorbell_stride});
+
+    nvme.ready_transition_timeout = @truncate(u8, nvme.capabilities >> 24) * @as(u64, 500);
+    log.debug("NVMe ready transition timeout: 0x{x}", .{nvme.ready_transition_timeout});
+
+    const previous_configuration = nvme.read(cc);
+    log.debug("Previous configuration: 0x{x}", .{previous_configuration});
+
+    log.debug("we are here", .{});
+    if (previous_configuration & (1 << 0) != 0) {
+        log.debug("branch", .{});
+        // TODO. HACK we should use a timeout here
+        while (~nvme.read(csts) & (1 << 0) != 0) {
+            log.debug("busy waiting", .{});
+        }
+        nvme.write(cc, nvme.read(cc) & ~@as(cc.type, 1 << 0));
+    }
+
+    {
+        // TODO. HACK we should use a timeout here
+        while (nvme.read(csts) & (1 << 0) != 0) {}
+        log.debug("past the timeout", .{});
+    }
+
+    TODO(@src());
+}
