@@ -12,6 +12,8 @@ capabilities: u64,
 version: u32,
 doorbell_stride: u64,
 ready_transition_timeout: u64,
+admin_submission_queue: [*]u8,
+admin_completion_queue: [*]u8,
 
 const general_timeout = 5000;
 const admin_queue_entry_count = 2;
@@ -26,6 +28,8 @@ pub fn new(device: *PCIDevice) NVMe {
         .version = 0,
         .doorbell_stride = 0,
         .ready_transition_timeout = 0,
+        .admin_submission_queue = undefined,
+        .admin_completion_queue = undefined,
     };
 }
 
@@ -114,6 +118,37 @@ pub fn init(nvme: *NVMe) void {
         // TODO. HACK we should use a timeout here
         while (nvme.read(csts) & (1 << 0) != 0) {}
         log.debug("past the timeout", .{});
+    }
+
+    nvme.write(cc, (nvme.read(cc) & 0xff00000f) | (0x00460000) | ((kernel.arch.page_shifter - 12) << 7));
+    nvme.write(aqa, (nvme.read(aqa) & 0xF000F000) | ((admin_queue_entry_count - 1) << 16) | (admin_queue_entry_count - 1));
+
+    const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
+    const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
+    const admin_queue_page_count = kernel.align_forward(admin_submission_queue_size, kernel.arch.page_size) + kernel.align_forward(admin_completion_queue_size, kernel.arch.page_size);
+    const admin_queue_physical_address = kernel.Physical.Memory.allocate_pages(admin_queue_page_count) orelse @panic("admin queue");
+    const admin_submission_queue_physical_address = admin_queue_physical_address;
+    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(kernel.align_forward(admin_submission_queue_size, kernel.arch.page_size));
+
+    nvme.write(asq, admin_submission_queue_physical_address.value);
+    nvme.write(acq, admin_completion_queue_physical_address.value);
+
+    const admin_submission_queue_virtual_address = admin_submission_queue_physical_address.to_higher_half_virtual_address();
+    const admin_completion_queue_virtual_address = admin_completion_queue_physical_address.to_higher_half_virtual_address();
+    kernel.address_space.map(admin_submission_queue_physical_address, admin_submission_queue_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
+    kernel.address_space.map(admin_completion_queue_physical_address, admin_completion_queue_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
+
+    nvme.admin_submission_queue = admin_submission_queue_virtual_address.access([*]u8);
+    nvme.admin_completion_queue = admin_completion_queue_virtual_address.access([*]u8);
+
+    nvme.write(cc, nvme.read(cc) | (1 << 0));
+
+    {
+        // TODO: HACK use a timeout
+        while (true) {
+            const status = nvme.read(csts);
+            if (status & (1 << 1) != 0) @panic("f") else if (status & (1 << 0) != 0) break;
+        }
     }
 
     TODO(@src());

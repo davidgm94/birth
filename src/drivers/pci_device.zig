@@ -78,8 +78,8 @@ pub inline fn write_bar(device: *Device, comptime T: type, index: u64, offset: u
     } else {
         if (base_address & 1 != 0) {
             log.debug("here?", .{});
-            device.write_bar(u32, offset, @truncate(u32, value));
-            device.write_bar(u32, offset + @sizeOf(u32), @truncate(u32, value >> 32));
+            device.write_bar(u32, index, offset, @truncate(u32, value));
+            device.write_bar(u32, index, offset + @sizeOf(u32), @truncate(u32, value >> 32));
         } else {
             log.debug("here?", .{});
             device.base_virtual_addresses[index].offset(offset).access(*volatile T).* = value;

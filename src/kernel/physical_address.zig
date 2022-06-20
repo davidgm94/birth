@@ -77,3 +77,7 @@ pub inline fn is_page_aligned(physical_address: PhysicalAddress) bool {
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: Physical.Memory.Region) bool {
     return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
 }
+
+pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) PhysicalAddress {
+    return PhysicalAddress.new(physical_address.value + asked_offset);
+}
