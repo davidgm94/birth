@@ -332,7 +332,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         @panic("interrupts are enabled");
     }
 
-    log.debug("Getting 0x{x}", .{context.interrupt_number});
+    log.debug("===================== INT 0x{x} =====================", .{context.interrupt_number});
     const should_swap_gs = x86_64.cs.read() != 0x28;
     log.debug("Should swap GS: {}", .{should_swap_gs});
     if (should_swap_gs) {
@@ -378,6 +378,16 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         },
         0x40 => {
             kernel.scheduler.yield(context);
+        },
+        irq_base...irq_base + 0x20 => {
+            // TODO: @Lock
+            // TODO: check lines
+            const line = context.interrupt_number - irq_base;
+            // TODO: dont hard code
+            const handler = irq_handlers[0];
+            const result = handler.callback(handler.context, line);
+            kernel.assert(@src(), result);
+            x86_64.get_current_cpu().?.lapic.end_of_interrupt();
         },
         0x80 => {
             log.debug("We are getting a syscall", .{});
@@ -493,7 +503,7 @@ pub inline fn epilogue() void {
 pub var msi_handlers: [x86_64.interrupt_vector_msi_count]HandlerInfo = undefined;
 
 pub const HandlerInfo = struct {
-    const Callback = fn (u64) void;
+    const Callback = fn (u64, u64) bool;
     callback: Callback,
     context: u64,
 
