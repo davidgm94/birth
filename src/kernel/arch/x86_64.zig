@@ -21,10 +21,36 @@ pub const AddressSpace = Paging.AddressSpace;
 const Virtual = kernel.Virtual;
 const Thread = kernel.scheduler.Thread;
 
-var zero: u64 = 0;
+pub const IOAPIC = struct {
+    address: kernel.Physical.Address,
+    gsi: u32,
+    id: u8,
 
+    pub inline fn read(apic: IOAPIC, register: u32) u32 {
+        apic.address.access([*]volatile u32)[0] = register;
+        return apic.address.access([*]volatile u32)[4];
+    }
+
+    pub inline fn write(apic: IOAPIC, register: u32, value: u32) void {
+        apic.address.access([*]volatile u32)[0] = register;
+        apic.address.access([*]volatile u32)[4] = value;
+    }
+};
+
+pub const ISO = struct {
+    gsi: u32,
+    source_IRQ: u8,
+    active_low: bool,
+    level_triggered: bool,
+};
+
+pub var ioapic: IOAPIC = undefined;
+pub var iso: []ISO = undefined;
+
+var _zero: u64 = 0;
 pub export fn start(stivale2_struct_address: u64) noreturn {
-    IA32_GS_BASE.write(@ptrToInt(&zero));
+    // We just need GS base to point to something so it doesn't crash
+    IA32_GS_BASE.write(@ptrToInt(&_zero));
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
     kernel.address_space = kernel.Virtual.AddressSpace.from_current() orelse unreachable;
@@ -32,16 +58,16 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     const stivale2_struct_physical_address = kernel.Physical.Address.new(stivale2_struct_address);
     kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    _ = rsdp;
     kernel.Physical.Memory.map = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
     const region_type = kernel.Physical.Memory.map.find_address(stivale2_struct_physical_address);
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
-    PCI.init();
-    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
     preinit_scheduler();
     init_scheduler();
+    ACPI.init(rsdp);
+    PCI.init();
+    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
     asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 

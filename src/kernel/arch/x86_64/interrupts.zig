@@ -3,6 +3,7 @@ const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
 const GDT = @import("gdt.zig");
 const x86_64 = @import("../x86_64.zig");
+const PCI = @import("../../../drivers/pci.zig");
 
 const interrupts = @This();
 const Context = x86_64.Context;
@@ -383,9 +384,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             context.debug();
             unreachable;
         },
-        else => {
-            log.debug("whaaaaaat", .{});
-        },
+        else => unreachable,
     }
 
     context.check(@src());
@@ -514,8 +513,11 @@ pub const HandlerInfo = struct {
         }
     }
 
-    pub fn register_IRQ(handler: HandlerInfo, pci_device: *PCI.Device) bool {
-        if (line > 0x20) @panic("unexpected irq");
+    pub fn register_IRQ(handler: HandlerInfo, maybe_line: ?u64, pci_device: *PCI.Device) bool {
+        // TODO: @Lock
+        if (maybe_line) |line| {
+            if (line > 0x20) @panic("unexpected irq");
+        }
 
         var found = false;
 
@@ -526,7 +528,7 @@ pub const HandlerInfo = struct {
                 irq_handler.* = .{
                     .callback = handler.callback,
                     .context = handler.context,
-                    .line = pci_device.line,
+                    .line = pci_device.interrupt_line,
                     .pci_device = pci_device,
                 };
                 break;
@@ -534,10 +536,56 @@ pub const HandlerInfo = struct {
         }
 
         if (!found) return false;
-        
-        if (Setup
+
+        if (maybe_line) |line| {
+            return setup_interrupt_redirection_entry(line);
+        } else {
+            return setup_interrupt_redirection_entry(9) and
+                setup_interrupt_redirection_entry(10) and
+                setup_interrupt_redirection_entry(11);
+        }
     }
 };
+
+var already_setup: u32 = 0;
+const irq_base = 0x50;
+
+fn setup_interrupt_redirection_entry(asked_line: u64) bool {
+    // TODO: @Lock
+    if (already_setup & (@as(u32, 1) << @intCast(u5, asked_line)) != 0) return true;
+    const processor_irq = irq_base + @intCast(u32, asked_line);
+    _ = processor_irq;
+
+    var active_low = false;
+    var level_triggered = false;
+    var line = asked_line;
+
+    for (x86_64.iso) |iso| {
+        if (iso.source_IRQ == line) {
+            line = iso.gsi;
+            active_low = iso.active_low;
+            level_triggered = iso.level_triggered;
+            break;
+        }
+    }
+
+    if (line >= x86_64.ioapic.gsi and line < (x86_64.ioapic.gsi + @truncate(u8, x86_64.ioapic.read(1) >> 16))) {
+        line -= x86_64.ioapic.gsi;
+        const redirection_table_index: u32 = @intCast(u32, line) * 2 + 0x10;
+        var redirection_entry = processor_irq;
+        if (active_low) redirection_entry |= (1 << 13);
+        if (level_triggered) redirection_entry |= (1 << 15);
+
+        x86_64.ioapic.write(redirection_table_index, 1 << 16);
+        x86_64.ioapic.write(redirection_table_index + 1, kernel.cpus[0].lapic_id << 24);
+        x86_64.ioapic.write(redirection_table_index, redirection_entry);
+
+        already_setup |= @as(u32, 1) << @intCast(u5, asked_line);
+        return true;
+    } else {
+        @panic("ioapic");
+    }
+}
 
 var irq_handlers: [0x40]IRQHandler = undefined;
 

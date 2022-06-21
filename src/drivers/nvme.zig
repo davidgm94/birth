@@ -15,12 +15,15 @@ doorbell_stride: u64,
 ready_transition_timeout: u64,
 admin_submission_queue: [*]u8,
 admin_completion_queue: [*]u8,
+admin_completion_queue_head: u32,
+admin_submission_queue_tail: u32,
 
 const general_timeout = 5000;
 const admin_queue_entry_count = 2;
 const io_queue_entry_count = 256;
 const submission_queue_entry_bytes = 64;
 const completion_queue_entry_bytes = 16;
+const Command = [16]u32;
 
 pub fn new(device: *PCI.Device) NVMe {
     return NVMe{
@@ -31,6 +34,8 @@ pub fn new(device: *PCI.Device) NVMe {
         .ready_transition_timeout = 0,
         .admin_submission_queue = undefined,
         .admin_completion_queue = undefined,
+        .admin_submission_queue_tail = 0,
+        .admin_completion_queue_head = 0,
     };
 }
 
@@ -77,6 +82,35 @@ inline fn read(nvme: *NVMe, comptime register: Register) register.type {
 inline fn write(nvme: *NVMe, comptime register: Register, value: register.type) void {
     log.debug("Writing {} bytes (0x{x}) to BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), value, register.index, register.offset });
     nvme.device.write_bar(register.type, register.index, register.offset, value);
+}
+
+inline fn read_sqtdbl(nvme: *NVMe, index: u32) u32 {
+    return nvme.device.read_bar(u32, 0, 0x1000 + nvme.doorbell_stride * (2 * index + 0));
+}
+
+inline fn read_cqhdbl(nvme: *NVMe, index: u32) u32 {
+    return nvme.device.read_bar(u32, 0, 0x1000 + nvme.doorbell_stride * (2 * index + 1));
+}
+
+inline fn write_sqtdbl(nvme: *NVMe, index: u32, value: u32) void {
+    nvme.device.write_bar(u32, 0, 0x1000 + nvme.doorbell_stride * (2 * index + 0), value);
+}
+
+inline fn write_cqhdbl(nvme: *NVMe, index: u32, value: u32) void {
+    nvme.device.read_bar(u32, 0, 0x1000 + nvme.doorbell_stride * (2 * index + 1), value);
+}
+
+pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
+    _ = result;
+    @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.admin_submission_queue[nvme.admin_submission_queue_tail * @sizeOf(Command)])).* = command.*;
+    nvme.admin_submission_queue_tail = (nvme.admin_submission_queue_tail + 1) % admin_queue_entry_count;
+
+    // TODO: reset event
+    @fence(.SeqCst); // best memory barrier?
+    nvme.write_sqtdbl(0, nvme.admin_submission_queue_tail);
+    // TODO: wait for event
+    log.debug("interrupts: {}", .{x86_64.are_interrupts_enabled()});
+    TODO(@src());
 }
 
 //inline fn read_SQTDBL(device: *PCIDevicei)     pci-> ReadBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 0))    // Submission queue tail doorbell.
@@ -156,6 +190,21 @@ pub fn init(nvme: *NVMe) void {
         @panic("f hanlder");
     }
 
+    nvme.write(intmc, 1 << 0);
+
+    // TODO: @Hack remove that 3 for a proper value
+    const identify_data_physical_address = kernel.Physical.Memory.allocate_pages(3) orelse @panic("identify");
+    kernel.address_space.map(identify_data_physical_address, identify_data_physical_address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+
+    {
+        var command = kernel.zeroes(Command);
+        command[0] = 0x06;
+        command[6] = @truncate(u32, identify_data_physical_address.value);
+        command[7] = @truncate(u32, identify_data_physical_address.value >> 32);
+        command[10] = 0x01;
+
+        if (!nvme.issue_admin_command(&command, null)) @panic("issue identify");
+    }
     TODO(@src());
 }
 

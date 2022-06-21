@@ -142,6 +142,7 @@ fn enumerate(pci: *Controller) void {
 
                     pci_device.interrupt_pin = @truncate(u8, interrupt_information >> 8);
                     pci_device.interrupt_line = @truncate(u8, interrupt_information);
+                    log.debug("Interrupt line: 0x{x}", .{pci_device.interrupt_line});
 
                     const new_device_id = pci_read_config(u32, bus, device, function, 0x00);
                     kernel.assert(@src(), new_device_id == inner_device_id);
@@ -400,6 +401,11 @@ pub const Device = struct {
         kernel.assert(@src(), result);
 
         // TODO: consider some stuff Essence does?
+        const interrupt_line: ?u64 = null;
+
+        if (handler.register_IRQ(interrupt_line, device)) {
+            return true;
+        }
 
         TODO(@src());
     }

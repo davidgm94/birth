@@ -1,4 +1,5 @@
 const kernel = @import("../../kernel.zig");
+const x86_64 = @import("../x86_64.zig");
 const log = kernel.log.scoped(.ACPI);
 const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
@@ -50,16 +51,20 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                     var offset = @ptrToInt(madt) + @sizeOf(MADT);
 
                     var processor_count: u64 = 0;
-                    var entry_length: u64 = undefined;
+                    var iso_count: u64 = 0;
+                    var entry_length: u64 = 0;
 
                     while (offset != madt_top) : (offset += entry_length) {
                         const entry_type = @intToPtr(*MADT.Type, offset).*;
                         entry_length = @intToPtr(*u8, offset + 1).*;
                         processor_count += @boolToInt(entry_type == .LAPIC);
+                        iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    //kernel.cpus = kernel.core_heap.allocate_many(kernel.arch.CPU, processor_count);
-                    processor_count = 0;
+                    x86_64.iso = kernel.core_heap.allocate_many(x86_64.ISO, iso_count) orelse @panic("iso");
+                    var iso_i: u64 = 0;
+
+                    kernel.assert(@src(), processor_count == kernel.cpus.len);
 
                     offset = @ptrToInt(madt) + @sizeOf(MADT);
 
@@ -77,11 +82,21 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                                 const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
                                 log.debug("IO_APIC: {}", .{ioapic});
                                 kernel.assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
+                                x86_64.ioapic.gsi = ioapic.global_system_interrupt_base;
+                                x86_64.ioapic.address = kernel.Physical.Address.new(ioapic.IO_APIC_address);
+                                kernel.address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .cache_disable }));
+                                x86_64.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {
                                 const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
                                 log.debug("ISO: {}", .{iso});
                                 kernel.assert(@src(), @sizeOf(MADT.InterruptSourceOverride) == entry_length);
+                                const iso_ptr = &x86_64.iso[iso_i];
+                                iso_i += 1;
+                                iso_ptr.gsi = iso.global_system_interrupt;
+                                iso_ptr.source_IRQ = iso.source;
+                                iso_ptr.active_low = iso.flags & 2 != 0;
+                                iso_ptr.level_triggered = iso.flags & 8 != 0;
                             },
                             .LAPIC_NMI => {
                                 const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
@@ -92,16 +107,6 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                         }
                     }
                 },
-                //.MCFG => {
-                //const mcfg = @ptrCast(*align(1) MCFG, header);
-                //const configurations = mcfg.get_configurations();
-                //log.debug("Configurations: {any}", .{configurations});
-
-                //for (configurations) |configuration| {
-                //}
-
-                //unreachable;
-                //},
                 else => {
                     log.debug("Ignored table: {s}", .{@tagName(header.signature)});
                 },
