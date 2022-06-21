@@ -368,10 +368,10 @@ pub fn init(nvme: *NVMe) void {
             if (@truncate(u16, lba_format) != 0) continue;
             log.debug("lba_format", .{});
 
-            const sector_bytes_exponent = @truncate(u8, lba_format >> 16);
-            log.debug("sector bytes exponent: {}", .{sector_bytes_exponent});
+            const sector_bytes_exponent = @truncate(u5, lba_format >> 16);
             if (sector_bytes_exponent < 9 or sector_bytes_exponent > 16) continue;
-            log.debug("sector bytes", .{});
+            const sector_bytes = @as(u64, 1) << sector_bytes_exponent;
+            log.debug("sector bytes: {}", .{sector_bytes});
 
             device_count += 1;
         }
