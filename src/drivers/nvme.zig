@@ -211,7 +211,7 @@ pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operati
         command[9] = @truncate(u32, prp2_physical_address.value >> 32);
         command[10] = @truncate(u32, sector_offset);
         command[11] = @truncate(u32, sector_offset >> 32);
-        command[12] = @truncate(u16, sector_count - 1);
+        command[12] = @truncate(u16, sector_count);
         command[13] = 0;
         command[14] = 0;
         command[15] = 0;
@@ -221,6 +221,16 @@ pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operati
         @fence(.SeqCst);
         nvme.write_sqtdbl(1, new_tail);
         asm volatile ("hlt");
+        for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
+            if (byte != 0) {
+                log.debug("[{}]: 0x{x}", .{ i, byte });
+            }
+        }
+        for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
+            if (byte != 0) {
+                log.debug("[{}]: 0x{x}", .{ i, byte });
+            }
+        }
         TODO(@src());
     } else @panic("queue full");
 
@@ -475,10 +485,25 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
         const status = (@ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 14])).*) & 0xfffe;
 
         if (index < io_queue_entry_count) {
-            _ = status;
-            //if (status != 0) {} else {}
-            TODO(@src());
+            log.debug("Success: {}", .{status == 0});
+            if (status != 0) {
+                @panic("failed");
+            }
+            // TODO: abstraction stuff
         } else @panic("wtf");
+
+        @fence(.SeqCst);
+
+        nvme.io_submission_queue_head = @ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 8])).*;
+        // TODO: event set
+        nvme.io_completion_queue_head += 1;
+
+        if (nvme.io_completion_queue_head == io_queue_entry_count) {
+            nvme.io_completion_queue_phase = !nvme.io_completion_queue_phase;
+            nvme.io_completion_queue_head = 0;
+        }
+
+        nvme.write_cqhdbl(1, nvme.io_completion_queue_head);
     }
 
     return from_admin or from_io;

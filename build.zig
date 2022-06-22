@@ -359,8 +359,12 @@ const Kernel = struct {
                 .bytes = buffer[0..],
             };
             fs.add_file(disk, "font.psf", font_file);
-            fs.read_debug(disk);
+            var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
+            for (disk.bytes) |byte, i| {
+                try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
+            }
 
+            try std.fs.cwd().writeFile("debug_disk", debug_file.items);
             try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
         }
     };
