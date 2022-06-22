@@ -508,3 +508,27 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
 
     return from_admin or from_io;
 }
+
+const Admin = struct {
+    const Command = struct {
+        const DataTransfer = enum(u2) {
+            foo = 1,
+        };
+        //const Function = enum(u5) {
+        //};
+        const Opcode = enum(u8) {
+            foo = 1,
+            pub inline fn is_generic_command(opcode: Opcode) bool {
+                return opcode & 0b10000000 != 0;
+            }
+
+            pub inline fn get_data_transfer(opcode: Opcode) DataTransfer {
+                return @intToEnum(DataTransfer, @truncate(u2, @enumToInt(opcode)));
+            }
+
+            pub inline fn get_function(opcode: Opcode) u5 {
+                return @truncate(u5, (@enumToInt(opcode) & 0b01111100) >> 2);
+            }
+        };
+    };
+};
