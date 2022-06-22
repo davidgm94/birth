@@ -30,6 +30,7 @@ io_submission_queue: ?[*]u8,
 io_completion_queue: ?[*]u8,
 io_completion_queue_head: u32,
 io_submission_queue_tail: u32,
+io_submission_queue_head: u32,
 io_completion_queue_phase: bool,
 
 prp_list_pages: [io_queue_entry_count]kernel.Physical.Address,
@@ -64,6 +65,7 @@ pub fn new(device: *PCI.Device) NVMe {
         .io_completion_queue = null,
         .io_submission_queue_tail = 0,
         .io_completion_queue_head = 0,
+        .io_submission_queue_head = 0,
         .io_completion_queue_phase = false,
         .prp_list_pages = undefined,
         .prp_list_virtual = undefined,
@@ -165,10 +167,71 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
     return true;
 }
 
-//inline fn read_SQTDBL(device: *PCIDevicei)     pci-> ReadBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 0))    // Submission queue tail doorbell.
-//inline fn write_SQTDBL(device: *PCIDevicei, x)  pci->WriteBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 0), x)
-//inline fn read_CQHDBL(device: *PCIDevicei)     pci-> ReadBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 1))    // Completion queue head doorbell.
-//inline fn write_CQHDBL(device: *PCIDevicei, x)  pci->WriteBAR32(0, 0x1000 + doorbellStride * (2 * (i) + 1), x)
+const sector_size = 0x200;
+
+const Operation = enum {
+    read,
+    write,
+};
+pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operation) bool {
+    // TODO: @Lock
+    const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
+    const submission_queue_full = new_tail == nvme.io_submission_queue_head;
+
+    if (!submission_queue_full) {
+        const sector_offset = byte_offset / sector_size;
+        const sector_count = byte_count / sector_size;
+        _ = sector_offset;
+        _ = sector_count;
+
+        const prp1_physical_address = kernel.Physical.Memory.allocate_pages(1) orelse @panic("ph");
+        const prp1_virtual_address = prp1_physical_address.to_higher_half_virtual_address();
+        kernel.address_space.map(prp1_physical_address, prp1_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+        // if (!prp2)
+        // TODO: @Hack
+        var prp2_physical_address: kernel.Physical.Address = undefined;
+        if (true) {
+            prp2_physical_address = nvme.prp_list_pages[nvme.io_submission_queue_tail];
+            kernel.address_space.map(prp2_physical_address, nvme.prp_list_virtual, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
+            const index = 0;
+            nvme.prp_list_virtual.access([*]kernel.Virtual.Address)[index] = kernel.address_space.allocate(0x1000) orelse @panic("asdjkajsdk");
+        }
+
+        var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
+        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (operation == .write) 0x01 else 0x02);
+        // TODO:
+        command[1] = device_nsid;
+        command[2] = 0;
+        command[3] = 0;
+        command[4] = 0;
+        command[5] = 0;
+        command[6] = @truncate(u32, prp1_physical_address.value);
+        command[7] = @truncate(u32, prp1_physical_address.value >> 32);
+        command[8] = @truncate(u32, prp2_physical_address.value);
+        command[9] = @truncate(u32, prp2_physical_address.value >> 32);
+        command[10] = @truncate(u32, sector_offset);
+        command[11] = @truncate(u32, sector_offset >> 32);
+        command[12] = @truncate(u16, sector_count - 1);
+        command[13] = 0;
+        command[14] = 0;
+        command[15] = 0;
+
+        nvme.io_submission_queue_tail = new_tail;
+        log.debug("Sending the command", .{});
+        @fence(.SeqCst);
+        nvme.write_sqtdbl(1, new_tail);
+        asm volatile ("hlt");
+        TODO(@src());
+    } else @panic("queue full");
+
+    if (submission_queue_full) {
+        @panic("queue full wait");
+    }
+
+    return true;
+}
+
+pub var device_nsid: u32 = 0;
 
 pub fn init(nvme: *NVMe) void {
     nvme.capabilities = nvme.read(cap);
@@ -373,12 +436,13 @@ pub fn init(nvme: *NVMe) void {
             const sector_bytes = @as(u64, 1) << sector_bytes_exponent;
             log.debug("sector bytes: {}", .{sector_bytes});
 
+            device_nsid = nsid;
             device_count += 1;
+            log.debug("Device NSID: {}", .{nsid});
         }
     }
 
-    log.debug("Device count: {}", .{device_count});
-    TODO(@src());
+    kernel.assert(@src(), device_count == 1);
 }
 
 pub const Callback = fn (nvme: *NVMe, line: u64) bool;
@@ -411,7 +475,8 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
         const status = (@ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 14])).*) & 0xfffe;
 
         if (index < io_queue_entry_count) {
-            if (status != 0) {} else {}
+            _ = status;
+            //if (status != 0) {} else {}
             TODO(@src());
         } else @panic("wtf");
     }

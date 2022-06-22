@@ -68,7 +68,8 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     ACPI.init(rsdp);
     PCI.init();
     NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
-    asm volatile ("int $0x40");
+    _ = NVMe.controller.access(0, 0x200, .read);
+    //asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 
     log.debug("Everything OK", .{});
