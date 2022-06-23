@@ -1,3 +1,4 @@
+// This has been implemented with NVMe Specification 2.0b
 const kernel = @import("../kernel/kernel.zig");
 const log = kernel.log.scoped(.NVMe);
 const TODO = kernel.TODO;
@@ -91,30 +92,14 @@ pub fn find_and_init(pci: *PCI) Error!void {
     controller.init();
 }
 
-const Register = struct {
-    index: u64,
-    offset: u64,
-    type: type,
-};
-
-const cap = Register{ .index = 0, .offset = 0, .type = u64 };
-const vs = Register{ .index = 0, .offset = 0x08, .type = u32 };
-const intms = Register{ .index = 0, .offset = 0xc, .type = u32 };
-const intmc = Register{ .index = 0, .offset = 0x10, .type = u32 };
-const cc = Register{ .index = 0, .offset = 0x14, .type = u32 };
-const csts = Register{ .index = 0, .offset = 0x1c, .type = u32 };
-const aqa = Register{ .index = 0, .offset = 0x24, .type = u32 };
-const asq = Register{ .index = 0, .offset = 0x28, .type = u64 };
-const acq = Register{ .index = 0, .offset = 0x30, .type = u64 };
-
-inline fn read(nvme: *NVMe, comptime register: Register) register.type {
-    log.debug("Reading {} bytes from BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), register.index, register.offset });
+inline fn read(nvme: *NVMe, comptime register: Property) register.type {
+    log.debug("Reading {} bytes from BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), 0, register.offset });
     return nvme.device.read_bar(register.type, register.index, register.offset);
 }
 
-inline fn write(nvme: *NVMe, comptime register: Register, value: register.type) void {
-    log.debug("Writing {} bytes (0x{x}) to BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), value, register.index, register.offset });
-    nvme.device.write_bar(register.type, register.index, register.offset, value);
+inline fn write(nvme: *NVMe, comptime register: Property, value: register.type) void {
+    log.debug("Writing {} bytes (0x{x}) to BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), value, 0, register.offset });
+    nvme.device.write_bar(register.type, 0, register.offset, value);
 }
 
 inline fn read_sqtdbl(nvme: *NVMe, index: u32) u32 {
@@ -512,12 +497,44 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
 const Admin = struct {
     const Command = struct {
         const DataTransfer = enum(u2) {
-            foo = 1,
+            no_data_transfer = 0,
+            host_to_controller = 1,
+            controller_to_host = 2,
+            bidirectional = 3,
         };
-        //const Function = enum(u5) {
-        //};
+
         const Opcode = enum(u8) {
-            foo = 1,
+            delete_io_submission_queue = 0x00,
+            create_io_submission_queue = 0x01,
+            get_log_page = 0x02,
+            delete_io_completion_queue = 0x04,
+            create_io_completion_queue = 0x05,
+            identify = 0x06,
+            abort = 0x08,
+            set_features = 0x09,
+            get_features = 0x0a,
+            asynchronous_event_request = 0x0c,
+            namespace_management = 0x0d,
+            firmware_commit = 0x10,
+            firmware_image_download = 0x11,
+            device_self_test = 0x14,
+            namespace_attachment = 0x15,
+            keep_alive = 0x18,
+            directive_send = 0x19,
+            directive_receive = 0x1a,
+            virtualization_management = 0x1c,
+            nvme_mi_send = 0x1d,
+            nvme_mi_receive = 0x1e,
+            capacity_management = 0x20,
+            lockdown = 0x24,
+            doorbell_buffer_config = 0x7c,
+            fabrics_commands = 0x7f,
+            format_nvm = 0x80,
+            security_send = 0x81,
+            security_receive = 0x82,
+            sanitize = 0x84,
+            get_lba_status = 0x86,
+
             pub inline fn is_generic_command(opcode: Opcode) bool {
                 return opcode & 0b10000000 != 0;
             }
@@ -531,4 +548,649 @@ const Admin = struct {
             }
         };
     };
+};
+
+const SubmissionQueueEntry = struct {
+    command_dword0: CommandDword0,
+};
+
+const CommandDword0 = packed struct {
+    opcode: u8,
+    fuse: FUSE,
+    reserved: u4,
+    psdt: PSDT,
+    cid: u16,
+
+    const FUSE = enum(u2) {
+        normal = 0,
+        fuse_first_command = 1,
+        fuse_second_command = 2,
+        reserved = 3,
+    };
+
+    const PSDT = enum(u2) {
+        prps_used = 0,
+        sgls_buffer = 1,
+        sgls_segment = 2,
+        reserved = 3,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CommandDword0) == @sizeOf(u32));
+    }
+};
+
+const CommonCommandFormat = packed struct {
+    command_dword0: u4,
+    nsid: u4,
+    command_dword2: u4,
+    command_dword3: u4,
+    mptr: u8,
+    dptr: u16,
+    command_dword10: u4,
+    command_dword11: u4,
+    command_dword12: u4,
+    command_dword13: u4,
+    command_dword14: u4,
+    command_dword15: u4,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CommonCommandFormat) == @sizeOf(u64));
+    }
+};
+
+const AdminCommonCommandFormat = packed struct {
+    command_dword0: u4,
+    nsid: u4,
+    reserved: u8,
+    // == Same as Common ==
+    mptr: u8,
+    dptr: u16,
+    // == Same as Common ==
+    ndt: u4,
+    ndm: u4,
+    command_dword12: u4,
+    command_dword13: u4,
+    command_dword14: u4,
+    command_dword15: u4,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(AdminCommonCommandFormat) == @sizeOf(u64));
+    }
+};
+
+const CommonCompletionQueueEntry = packed struct {
+    dw0: u32,
+    dw1: u32,
+    dw2: DW2,
+
+    const DW2 = packed struct {
+        sqhp: u16,
+        sqid: u16,
+
+        comptime {
+            kernel.assert_unsafe(@sizeOf(DW2) == @sizeOf(u32));
+        }
+    };
+
+    const DW3 = packed struct {
+        cid: u16,
+        phase_tag: u1,
+        status_field: StatusField,
+
+        comptime {
+            kernel.assert_unsafe(@sizeOf(DW3) == @sizeOf(u32));
+        }
+    };
+
+    const StatusField = packed struct {
+        sc: u8,
+        sct: u3,
+        crd: u2,
+        more: u1,
+        dnr: u1,
+    };
+
+    const GenericCommandStatus = enum(u8) {
+        successful_completion = 0x00,
+        invalid_command_opcode = 0x01,
+        invalid_field_in_command = 0x02,
+        command_id_conflict = 0x03,
+        data_transfer_error = 0x04,
+        commmands_aborted_due_to_power_loss_notification = 0x05,
+        internal_error = 0x06,
+        command_abort_requested = 0x07,
+        command_aborted_due_to_sq_deletion = 0x08,
+        command_aborted_due_to_failed_fused_command = 0x09,
+        command_aborted_due_to_missing_fused_command = 0x0a,
+        invalid_namespace_or_format = 0x0b,
+        command_sequence_error = 0x0c,
+        invalid_sgl_segment_descriptor = 0x0d,
+        invalid_number_of_sgl_descriptors = 0x0e,
+        data_sgl_length_invalid = 0x0f,
+        metadata_sgl_length_invalid = 0x10,
+        sgl_descriptor_type_invalid = 0x11,
+        invalid_use_of_controller_memory_buffer = 0x12,
+        prp_offset_invalid = 0x13,
+        atomic_write_unit_exceeded = 0x14,
+        operation_denied = 0x15,
+        sgl_offset_invalid = 0x16,
+        reserved = 0x17,
+        host_identifier_inconsistent_format = 0x18,
+        keep_alive_timer_expired = 0x19,
+        keep_alive_timeout_invalid = 0x1a,
+        command_aborted_due_to_preempt_and_abort = 0x1b,
+        sanitize_failed = 0x1c,
+        sanitize_in_progress = 0x1d,
+        sgl_data_block_glanularity_invalid = 0x1e,
+        command_not_supported_for_queue_in_cmb = 0x1f,
+        namespace_is_write_protected = 0x20,
+        command_interrupted = 0x21,
+        transient_transport_error = 0x22,
+        command_prohibited_by_command_and_feature_lockdown = 0x23,
+        admin_command_media_not_ready = 0x24,
+        lba_out_of_range = 0x80,
+        capacity_exceeded = 0x81,
+        namespace_not_ready = 0x82,
+        reservation_conflict = 0x83,
+        format_in_progress = 0x84,
+        invalid_value_size = 0x85,
+        invalid_key_size = 0x86,
+        kv_key_does_not_exist = 0x87,
+        unrecovered_error = 0x88,
+        key_exists = 0x89,
+        _,
+    };
+
+    const CommandSpecificStatus = enum(u8) {
+        completion_queue_invalid = 0x00,
+        invalid_queue_identifier = 0x01,
+        invalid_queue_size = 0x02,
+        abort_command_limit_exceeded = 0x03,
+        reserved = 0x04,
+        asynchronous_event_request_limi_exceeded = 0x05,
+        invalid_firmware_slot = 0x06,
+        invalid_firmware_image = 0x07,
+        invalid_interrupt_vector = 0x08,
+        invalid_log_page = 0x09,
+        invalid_format = 0x0a,
+        firmware_activation_requires_conventional_reset = 0x0b,
+        invalid_queue_deletion = 0x0c,
+        feature_identifier_not_saveable = 0x0d,
+        feature_not_changeable = 0x0e,
+        feature_not_namespace_specific = 0x0f,
+        firmware_activation_requires_nvm_subsystem_reset = 0x10,
+        firmware_activation_requires_controller_level_reset = 0x11,
+        firmware_activation_requires_maximum_time_violation = 0x12,
+        firmware_activation_prohibited = 0x13,
+        overlapping_range = 0x14,
+        namespace_insufficient_capacity = 0x15,
+        namespace_identifier_unavailable = 0x16,
+        reserved = 0x17,
+        namespace_already_attached = 0x18,
+        namespace_is_private = 0x19,
+        namespace_not_attached = 0x1a,
+        thin_provisioning_not_supported = 0x1b,
+        controller_list_invalid = 0x1c,
+        device_self_test_in_progress = 0x1d,
+        boot_partition_write_prohibited = 0x1e,
+        invalid_controller_identifier = 0x1f,
+        invalid_secondary_controller_state = 0x20,
+        invalid_number_of_controller_resources = 0x21,
+        invalid_resource_identifier = 0x22,
+        sanitize_prohibited_while_persistent_memory_region_is_enabled = 0x23,
+        ana_group_identifier_invalid = 0x24,
+        ana_attach_failed = 0x25,
+        insufficient_capacity = 0x26,
+        namespace_attachment_limit_exceeded = 0x27,
+        prohibition_of_command_execution_not_supported = 0x28,
+        io_command_set_not_supported = 0x29,
+        io_command_set_not_enabled = 0x2a,
+        io_command_set_combination_rejected = 0x2b,
+        invalid_io_command_set = 0x2c,
+        identifier_unavailable = 0x2d,
+        _,
+    };
+
+    const IOCommandSpecificStatus = enum(u8) {
+        conflicting_attributes = 0x80,
+        invalid_protection_information = 0x81,
+        attempted_write_to_read_only_range = 0x82,
+        command_size_limit_exceeded = 0x83,
+        _,
+        zoned_boundary_error = 0xb8,
+        zone_is_full = 0xb9,
+        zone_is_read_only = 0xba,
+        zone_is_offline = 0xbb,
+        zone_invalid_write = 0xbc,
+        too_many_active_zones = 0xbd,
+        too_many_open_zones = 0xbe,
+        invalid_zone_state_transition = 0xbf,
+    };
+
+    const FabricsCommandSpecificStatus = enum(u8) {
+        incompatible_format = 0x80,
+        controller_busy = 0x81,
+        connect_invalid_parameters = 0x82,
+        connected_restar_discovery = 0x83,
+        connect_invalid_host = 0x84,
+        invalid_queue_type = 0x85,
+        discover_restart = 0x90,
+        authentication_required = 0x91,
+    };
+
+    const MediaAndDataIntegrityError = enum(u8) {
+        write_fault = 0x80,
+        unrecovered_read_error = 0x81,
+        end_to_end_guard_check_error = 0x82,
+        end_to_end_application_tag_check_error = 0x83,
+        end_to_end_reference_tag_check_error = 0x84,
+        compare_failure = 0x85,
+        access_denied = 0x86,
+        deallocated_or_unwritten_logical_block = 0x87,
+        end_to_end_storage_tag_check_error = 0x88,
+    };
+
+    const PathRelatedStatus = enum(u8) {
+        internal_path_error = 0x00,
+        asymmetric_access_persistent_loss = 0x01,
+        asymmetric_access_inaccessible = 0x02,
+        asymmetric_access_transition = 0x03,
+
+        controller_pathing_error = 0x60,
+
+        host_pathing_error = 0x70,
+        command_aborted_by_host = 0x71,
+    };
+};
+
+const Property = struct {
+    offset: u64,
+    type: type,
+};
+
+const cap = Property{ .offset = 0, .type = CAP };
+const vs = Property{ .offset = 0x08, .type = u32 };
+const intms = Property{ .offset = 0xc, .type = u32 };
+const intmc = Property{ .offset = 0x10, .type = u32 };
+const cc = Property{ .offset = 0x14, .type = CC };
+const csts = Property{ .offset = 0x1c, .type = CSTS };
+const nssr = Property{ .offset = 0x20, .type = u32 };
+const aqa = Property{ .offset = 0x24, .type = AQA };
+const asq = Property{ .offset = 0x28, .type = ASQ };
+const acq = Property{ .offset = 0x30, .type = ACQ };
+const cmbloc = Property{ .offset = 0x38, .type = CMBLOC };
+const cmbsz = Property{ .offset = 0x3c, .type = CMBSZ };
+const bpinfo = Property{ .offset = 0x40, .type = BPINFO };
+const bprsel = Property{ .offset = 0x44, .type = BPRSEL };
+const bpmbl = Property{ .offset = 0x48, .type = BPMBL };
+const cmbmsc = Property{ .offset = 0x50, .type = CMBMSC };
+const cmbsts = Property{ .offset = 0x58, .type = CMBSTS };
+const cmbebs = Property{ .offset = 0x5c, .type = CMBEBS };
+const cmbswtp = Property{ .offset = 0x60, .type = CMBSWTP };
+const nssd = Property{ .offset = 0x64, .type = u32 };
+const crto = Property{ .offset = 0x68, .type = CRTO };
+const pmrcap = Property{ .offset = 0xe00, .type = PMRCAP };
+const pmrctl = Property{ .offset = 0xe04, .type = PMRCTL };
+const pmrsts = Property{ .offset = 0xe08, .type = PMRSTS };
+const pmrebs = Property{ .offset = 0xe0c, .type = PMREBS };
+const pmrswtp = Property{ .offset = 0xe10, .type = PMRSWTP };
+const pmrmscl = Property{ .offset = 0xe14, .type = PMRMSCL };
+const pmrmscu = Property{ .offset = 0xe18, .type = u32 };
+
+const CAP = packed struct {
+    mqes: u16,
+    cqr: u1,
+    ams: u2,
+    reserved: u5,
+    timeout: u8,
+    doorbell_stride: u4,
+    nssrs: u1,
+    css: u8,
+    bps: u1,
+    cps: u2,
+    mpsmin: u4,
+    mpsmax: u4,
+    pmrs: u1,
+    cmbs: u1,
+    nsss: u1,
+    crwms: u1,
+    crims: u1,
+    reserved2: u3,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CAP) == @sizeOf(u64));
+    }
+};
+
+const CC = packed struct {
+    enable: u1,
+    reserved: u3,
+    css: CSS,
+    mps: u4,
+    ams: AMS,
+    shn: SHN,
+    iosqes: u4,
+    iocqes: u4,
+    crime: u1,
+    reserved: u7,
+
+    const CSS = enum(u3) {
+        nvm_command_set = 0b000,
+        _,
+        all_supported_io_command_sets = 0b110,
+        admin_command_set_only = 0b111,
+    };
+
+    const AMS = enum(u3) {
+        round_robin = 0b000,
+        weighted_round_robin_with_urgent_priority_class = 0b001,
+        _,
+        vendor_specific = 0b111,
+    };
+
+    const SHN = enum(u2) {
+        no_notification = 0b00,
+        normal_shutdown_notification = 0b01,
+        abrupt_shutdown_notification = 0b10,
+        reserved = 0b11,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CC) == @sizeOf(u32));
+    }
+};
+
+const CSTS = packed struct {
+    ready: u1,
+    cfs: u1,
+    shst: SHST,
+    nssro: u1,
+    pp: u1,
+    st: u1,
+    reserved: u25,
+
+    const SHST = enum(u2) {
+        norma_operation = 0,
+        shutdown_processing_occurring = 1,
+        shutdown_processing_complete = 2,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CSTS) == @sizeOf(u32));
+    }
+};
+
+const AQA = packed struct {
+    asqs: u12,
+    reserved: u4,
+    acqs: u12,
+    reserved2: u4,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(AQA) == @sizeOf(u32));
+    }
+};
+
+const ASQ = packed struct {
+    reserved: u12,
+    asqb: u52,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(ASQ) == @sizeOf(u64));
+    }
+};
+
+const ACQ = packed struct {
+    reserved: u12,
+    acqb: u52,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(ACQ) == @sizeOf(u64));
+    }
+};
+
+const CMBLOC = packed struct {
+    bir: u3,
+    cqmms: u1,
+    cqpds: u1,
+    cdpmls: u1,
+    cdpcils: u1,
+    cdmmms: u1,
+    cqda: u1,
+    reserved: u3,
+    offset: u20,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBLOC) == @sizeOf(u32));
+    }
+};
+
+const CMBSZ = packed struct {
+    sqs: u1,
+    cqs: u1,
+    lists: u1,
+    rds: u1,
+    wds: u1,
+    reserved: u3,
+    szu: SZU,
+    size: u20,
+
+    const SZU = enum(u4) {
+        kib_4 = 0,
+        kib_64 = 1,
+        mib_1 = 2,
+        mib_16 = 3,
+        mib_256 = 4,
+        gib_4 = 5,
+        gib_64 = 6,
+        _,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBSZ) == @sizeOf(u32));
+    }
+};
+
+const BPINFO = packed struct {
+    bpsz: u15,
+    reserved: u9,
+    brs: BRS,
+    reserved: u5,
+    abpid: u1,
+
+    const BRS = enum(u2) {
+        no_bpr = 0,
+        bpr_in_progress = 1,
+        bpr_completed = 2,
+        bpr_error = 3,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(BPINFO) == @sizeOf(u32));
+    }
+};
+
+const BPRSEL = packed struct {
+    bprsz: u10,
+    bprof: u20,
+    reserved: u1,
+    bpid: u1,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(BPRSEL) == @sizeOf(u32));
+    }
+};
+
+const BPMBL = packed struct {
+    reserved: u12,
+    bmbba: u52,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(BPMBL) == @sizeOf(u64));
+    }
+};
+
+const CMBMSC = packed struct {
+    cre: u1,
+    cmse: u1,
+    reserved: u10,
+    cba: u52,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBMSC) == @sizeOf(u64));
+    }
+};
+
+const CMBSTS = packed struct {
+    cbai: u1,
+    reserved: u31,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBSTS) == @sizeOf(u32));
+    }
+};
+
+const CMBEBS = packed struct {
+    cmbszu: CMBSZU,
+    read_bypass_behavior: u1,
+    reserved: u3,
+    cmbwbz: u24,
+
+    const CMBSZU = enum(u4) {
+        bytes = 0,
+        kib = 1,
+        mib = 2,
+        gib = 3,
+        _,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBEBS) == @sizeOf(u32));
+    }
+};
+
+const CMBSWTP = packed struct {
+    cmbswtu: CMBSWTU,
+    reserved: u4,
+    cmbswtv: u24,
+
+    const CMBSWTU = enum(u4) {
+        bytes_s = 0,
+        kibs_s = 1,
+        mibs_s = 2,
+        gibs_s = 3,
+        _,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CMBSWTP) == @sizeOf(u32));
+    }
+};
+
+const CRTO = packed struct {
+    crwmt: u16,
+    crimt: u16,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(CRTO) == @sizeOf(u32));
+    }
+};
+
+const PMRCAP = packed struct {
+    reserved: u3,
+    rds: u1,
+    wds: u1,
+    bir: u3,
+    pmrtu: PMRTU,
+    pmrwbm: u4,
+    reserved: u2,
+    pmrto: u8,
+    cmss: u1,
+    reserved: u7,
+
+    const PMRTU = enum(u2) {
+        ms_500 = 0,
+        minutes = 1,
+        _,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMRCAP) == @sizeOf(u32));
+    }
+};
+
+const PMRCTL = packed struct {
+    enable: u1,
+    reserved: u31,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMRCTL) == @sizeOf(u32));
+    }
+};
+
+const PMRSTS = packed struct {
+    err: u8,
+    nrdy: u1,
+    hsts: HSTS,
+    cbai: u1,
+    reserved: u20,
+
+    const HSTS = enum(u2) {
+        normal = 0,
+        restore_error = 1,
+        read_only = 2,
+        unreliable = 3,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMRSTS) == @sizeOf(u32));
+    }
+};
+
+const PMREBS = packed struct {
+    pmrszu: PMRSZU,
+    read_bypass_behavior: u1,
+    reserved: u3,
+    pmrwbz: u24,
+
+    const PMRSZU = enum(u4) {
+        bytes = 0,
+        kib = 1,
+        mib = 2,
+        gib = 3,
+        _,
+    };
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMREBS) == @sizeOf(u32));
+    }
+};
+
+const PMRSWTP = packed struct {
+    pmrswtu: PMRSWTU,
+    reserved: u4,
+    pmrswtv: u24,
+
+    const PMRSWTU = enum(u4) {
+        bytes_s = 0,
+        kib_s = 1,
+        mib_s = 2,
+        gib_s,
+        _,
+    };
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMRSWTP) == @sizeOf(u32));
+    }
+};
+
+const PMRMSCL = packed struct {
+    reserved: u1,
+    cmse: u1,
+    reserved2: u10,
+    cba: u20,
+
+    comptime {
+        kernel.assert_unsafe(@sizeOf(PMRMSCL) == @sizeOf(u32));
+    }
 };
