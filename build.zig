@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
+const print = std.debug.print;
 const assert = std.debug.assert;
 
 const fs = @import("src/build/fs.zig");
@@ -34,7 +35,7 @@ pub fn build(b: *Builder) void {
                         .vga = .std,
                         .smp = null,
                         .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
-                        .run_for_debug = false,
+                        .run_for_debug = true,
                     },
                 },
             },
@@ -51,6 +52,8 @@ const Kernel = struct {
     options: Options,
     boot_image_step: Step = undefined,
     disk_step: Step = undefined,
+    run_argument_list: std.ArrayList([]const u8) = undefined,
+    debug_argument_list: std.ArrayList([]const u8) = undefined,
 
     fn create(kernel: *Kernel) void {
         kernel.create_executable();
@@ -160,13 +163,11 @@ const Kernel = struct {
     }
 
     fn create_run_and_debug_steps(kernel: *Kernel) void {
-        var run_argument_list = std.ArrayList([]const u8).init(kernel.builder.allocator);
-        var debug_argument_list: std.ArrayList([]const u8) = undefined;
-
+        kernel.run_argument_list = std.ArrayList([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
                 const qemu_name = std.mem.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
-                run_argument_list.append(qemu_name) catch unreachable;
+                kernel.run_argument_list.append(qemu_name) catch unreachable;
 
                 switch (kernel.options.arch) {
                     .x86_64 => {
@@ -174,81 +175,81 @@ const Kernel = struct {
                         const image_path = switch (kernel.options.arch.x86_64.bootloader) {
                             .limine => Kernel.BootImage.x86_64.Limine.image_path,
                         };
-                        run_argument_list.append(image_flag) catch unreachable;
-                        run_argument_list.append(image_path) catch unreachable;
+                        kernel.run_argument_list.append(image_flag) catch unreachable;
+                        kernel.run_argument_list.append(image_path) catch unreachable;
                     },
                     .riscv64 => {
-                        run_argument_list.append("-bios") catch unreachable;
-                        run_argument_list.append("default") catch unreachable;
-                        run_argument_list.append("-kernel") catch unreachable;
-                        run_argument_list.append(kernel_path) catch unreachable;
+                        kernel.run_argument_list.append("-bios") catch unreachable;
+                        kernel.run_argument_list.append("default") catch unreachable;
+                        kernel.run_argument_list.append("-kernel") catch unreachable;
+                        kernel.run_argument_list.append(kernel_path) catch unreachable;
                     },
                     else => unreachable,
                 }
 
                 {
-                    run_argument_list.append("-no-reboot") catch unreachable;
-                    run_argument_list.append("-no-shutdown") catch unreachable;
+                    kernel.run_argument_list.append("-no-reboot") catch unreachable;
+                    kernel.run_argument_list.append("-no-shutdown") catch unreachable;
                 }
 
                 {
                     const memory_arg = kernel.builder.fmt("{}{s}", .{ kernel.options.run.memory.amount, @tagName(kernel.options.run.memory.unit) });
-                    run_argument_list.append("-m") catch unreachable;
-                    run_argument_list.append(memory_arg) catch unreachable;
+                    kernel.run_argument_list.append("-m") catch unreachable;
+                    kernel.run_argument_list.append(memory_arg) catch unreachable;
                 }
 
                 if (kernel.options.run.emulator.qemu.smp) |smp_count| {
-                    run_argument_list.append("-smp") catch unreachable;
-                    run_argument_list.append(kernel.builder.fmt("{}", .{smp_count})) catch unreachable;
+                    kernel.run_argument_list.append("-smp") catch unreachable;
+                    kernel.run_argument_list.append(kernel.builder.fmt("{}", .{smp_count})) catch unreachable;
                 }
 
                 if (kernel.options.run.emulator.qemu.vga) |vga_option| {
-                    run_argument_list.append("-vga") catch unreachable;
-                    run_argument_list.append(@tagName(vga_option)) catch unreachable;
+                    kernel.run_argument_list.append("-vga") catch unreachable;
+                    kernel.run_argument_list.append(@tagName(vga_option)) catch unreachable;
                 } else {
-                    run_argument_list.append("-nographic") catch unreachable;
+                    kernel.run_argument_list.append("-nographic") catch unreachable;
                 }
 
                 if (kernel.options.arch == .x86_64) {
-                    run_argument_list.append("-debugcon") catch unreachable;
-                    run_argument_list.append("stdio") catch unreachable;
+                    kernel.run_argument_list.append("-debugcon") catch unreachable;
+                    kernel.run_argument_list.append("stdio") catch unreachable;
                 }
 
                 if (kernel.options.run.disk_interface) |disk_interface| {
-                    run_argument_list.append("-drive") catch unreachable;
+                    kernel.run_argument_list.append("-drive") catch unreachable;
                     // TODO: consider other drive options
                     const disk_id = "primary_disk";
                     const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ Disk.path, disk_id });
-                    run_argument_list.append(drive_options) catch unreachable;
+                    kernel.run_argument_list.append(drive_options) catch unreachable;
 
                     switch (disk_interface) {
                         .nvme => {
-                            run_argument_list.append("-device") catch unreachable;
+                            kernel.run_argument_list.append("-device") catch unreachable;
                             const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
-                            run_argument_list.append(device_options) catch unreachable;
+                            kernel.run_argument_list.append(device_options) catch unreachable;
                         },
                         else => unreachable,
                     }
                 }
 
                 // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
-                run_argument_list.append("-machine") catch unreachable;
-                debug_argument_list = run_argument_list.clone() catch unreachable;
+                kernel.run_argument_list.append("-machine") catch unreachable;
+                kernel.debug_argument_list = kernel.run_argument_list.clone() catch unreachable;
                 const machine = switch (kernel.options.arch) {
                     .x86_64 => "q35",
                     .riscv64 => "virt",
                     else => unreachable,
                 };
-                debug_argument_list.append(machine) catch unreachable;
+                kernel.debug_argument_list.append(machine) catch unreachable;
                 if (kernel.options.arch == building_arch and !kernel.options.run.emulator.qemu.run_for_debug) {
-                    run_argument_list.append(kernel.builder.fmt("{s},accel=kvm:whpx:tcg", .{machine})) catch unreachable;
+                    kernel.run_argument_list.append(kernel.builder.fmt("{s},accel=kvm:whpx:tcg", .{machine})) catch unreachable;
                 } else {
-                    run_argument_list.append(machine) catch unreachable;
+                    kernel.run_argument_list.append(machine) catch unreachable;
 
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
                         const log_flag = "-d";
-                        run_argument_list.append(log_flag) catch unreachable;
-                        debug_argument_list.append(log_flag) catch unreachable;
+                        kernel.run_argument_list.append(log_flag) catch unreachable;
+                        kernel.debug_argument_list.append(log_flag) catch unreachable;
 
                         var log_what = std.ArrayList(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
@@ -257,28 +258,33 @@ const Kernel = struct {
                         if (log_options.assembly) log_what.appendSlice("in_asm,") catch unreachable;
                         // Delete the last comma
                         _ = log_what.pop();
-                        run_argument_list.append(log_what.items) catch unreachable;
-                        debug_argument_list.append(log_what.items) catch unreachable;
+                        kernel.run_argument_list.append(log_what.items) catch unreachable;
+                        kernel.debug_argument_list.append(log_what.items) catch unreachable;
 
                         if (log_options.file) |log_file| {
                             const log_file_flag = "-D";
-                            run_argument_list.append(log_file_flag) catch unreachable;
-                            debug_argument_list.append(log_file_flag) catch unreachable;
-                            run_argument_list.append(log_file) catch unreachable;
-                            debug_argument_list.append(log_file) catch unreachable;
+                            kernel.run_argument_list.append(log_file_flag) catch unreachable;
+                            kernel.debug_argument_list.append(log_file_flag) catch unreachable;
+                            kernel.run_argument_list.append(log_file) catch unreachable;
+                            kernel.debug_argument_list.append(log_file) catch unreachable;
                         }
                     }
                 }
             },
         }
 
-        const run_command = kernel.builder.addSystemCommand(run_argument_list.items);
+        const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
         const run_step = kernel.builder.step("run", "run step");
         run_step.dependOn(&run_command.step);
 
         switch (kernel.options.arch) {
             .x86_64 => run_command.step.dependOn(&kernel.boot_image_step),
             else => unreachable,
+        }
+
+        log.debug("Run argument list:", .{});
+        for (kernel.run_argument_list.items) |arg| {
+            print("{s} ", .{arg});
         }
     }
 

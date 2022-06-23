@@ -252,6 +252,7 @@ pub fn init(nvme: *NVMe) void {
 
     log.debug("we are here", .{});
     if (previous_configuration.enable) {
+        log.debug("the controller was enabled", .{});
         log.debug("branch", .{});
         // TODO. HACK we should use a timeout here
         // TODO: PRobably buggy
@@ -534,113 +535,121 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
     return from_admin or from_io;
 }
 
-const Admin = struct {
-    const Command = struct {
-        const DataTransfer = enum(u2) {
-            no_data_transfer = 0,
-            host_to_controller = 1,
-            controller_to_host = 2,
-            bidirectional = 3,
-        };
-
-        const Opcode = enum(u8) {
-            delete_io_submission_queue = 0x00,
-            create_io_submission_queue = 0x01,
-            get_log_page = 0x02,
-            delete_io_completion_queue = 0x04,
-            create_io_completion_queue = 0x05,
-            identify = 0x06,
-            abort = 0x08,
-            set_features = 0x09,
-            get_features = 0x0a,
-            asynchronous_event_request = 0x0c,
-            namespace_management = 0x0d,
-            firmware_commit = 0x10,
-            firmware_image_download = 0x11,
-            device_self_test = 0x14,
-            namespace_attachment = 0x15,
-            keep_alive = 0x18,
-            directive_send = 0x19,
-            directive_receive = 0x1a,
-            virtualization_management = 0x1c,
-            nvme_mi_send = 0x1d,
-            nvme_mi_receive = 0x1e,
-            capacity_management = 0x20,
-            lockdown = 0x24,
-            doorbell_buffer_config = 0x7c,
-            fabrics_commands = 0x7f,
-            format_nvm = 0x80,
-            security_send = 0x81,
-            security_receive = 0x82,
-            sanitize = 0x84,
-            get_lba_status = 0x86,
-
-            pub inline fn is_generic_command(opcode: Opcode) bool {
-                return opcode & 0b10000000 != 0;
-            }
-
-            pub inline fn get_data_transfer(opcode: Opcode) DataTransfer {
-                return @intToEnum(DataTransfer, @truncate(u2, @enumToInt(opcode)));
-            }
-
-            pub inline fn get_function(opcode: Opcode) u5 {
-                return @truncate(u5, (@enumToInt(opcode) & 0b01111100) >> 2);
-            }
-        };
-    };
+const DataTransfer = enum(u2) {
+    no_data_transfer = 0,
+    host_to_controller = 1,
+    controller_to_host = 2,
+    bidirectional = 3,
 };
 
 const SubmissionQueueEntry = struct {
     command_dword0: CommandDword0,
 };
 
-const CommandDword0 = packed struct {
-    opcode: u8,
-    fuse: FUSE,
-    reserved: u4,
-    psdt: PSDT,
-    cid: u16,
+fn CommandDword0(comptime Opcode: type) type {
+    return packed struct {
+        opcode: Opcode,
+        fuse: FUSE,
+        reserved: u4,
+        psdt: PSDT,
+        cid: u16,
 
-    const FUSE = enum(u2) {
-        normal = 0,
-        fuse_first_command = 1,
-        fuse_second_command = 2,
-        reserved = 3,
+        const FUSE = enum(u2) {
+            normal = 0,
+            fuse_first_command = 1,
+            fuse_second_command = 2,
+            reserved = 3,
+        };
+
+        const PSDT = enum(u2) {
+            prps_used = 0,
+            sgls_buffer = 1,
+            sgls_segment = 2,
+            reserved = 3,
+        };
+
+        comptime {
+            kernel.assert_unsafe(@sizeOf(CommandDword0) == @sizeOf(u32));
+        }
     };
+}
 
-    const PSDT = enum(u2) {
-        prps_used = 0,
-        sgls_buffer = 1,
-        sgls_segment = 2,
-        reserved = 3,
-    };
+const QueueType = enum(u2) {
+    admin = 0,
+    fabrics = 1,
+    io = 2,
 
-    comptime {
-        kernel.assert_unsafe(@sizeOf(CommandDword0) == @sizeOf(u32));
+    const count = kernel.enum_values(QueueType).len;
+};
+const AdminOpcode = enum(u8) {
+    delete_io_submission_queue = 0x00,
+    create_io_submission_queue = 0x01,
+    get_log_page = 0x02,
+    delete_io_completion_queue = 0x04,
+    create_io_completion_queue = 0x05,
+    identify = 0x06,
+    abort = 0x08,
+    set_features = 0x09,
+    get_features = 0x0a,
+    asynchronous_event_request = 0x0c,
+    namespace_management = 0x0d,
+    firmware_commit = 0x10,
+    firmware_image_download = 0x11,
+    device_self_test = 0x14,
+    namespace_attachment = 0x15,
+    keep_alive = 0x18,
+    directive_send = 0x19,
+    directive_receive = 0x1a,
+    virtualization_management = 0x1c,
+    nvme_mi_send = 0x1d,
+    nvme_mi_receive = 0x1e,
+    capacity_management = 0x20,
+    lockdown = 0x24,
+    doorbell_buffer_config = 0x7c,
+    fabrics_commands = 0x7f,
+    format_nvm = 0x80,
+    security_send = 0x81,
+    security_receive = 0x82,
+    sanitize = 0x84,
+    get_lba_status = 0x86,
+
+    pub inline fn is_generic_command(opcode: @This()) bool {
+        return opcode & 0b10000000 != 0;
+    }
+
+    pub inline fn get_data_transfer(opcode: @This()) DataTransfer {
+        return @intToEnum(DataTransfer, @truncate(u2, @enumToInt(opcode)));
+    }
+
+    pub inline fn get_function(opcode: @This()) u5 {
+        return @truncate(u5, (@enumToInt(opcode) & 0b01111100) >> 2);
     }
 };
+const FabricsOpcode = enum(u8) {
+    property_set = 0x00,
+    connect = 0x01,
+    property_get = 0x04,
+    authentication_send = 0x05,
+    authentication_receive = 0x06,
+    disconnect = 0x08,
+};
+const IOOpcode = enum(u8) {
+    flush = 0x00,
+    reservation_register = 0x0d,
+    reservation_report = 0x0e,
+    reservation_acquire = 0x11,
+    reservation_release = 0x15,
 
-const CommonCommandFormat = packed struct {
-    command_dword0: u4,
-    nsid: u4,
-    command_dword2: u4,
-    command_dword3: u4,
-    mptr: u8,
-    dptr: u16,
-    command_dword10: u4,
-    command_dword11: u4,
-    command_dword12: u4,
-    command_dword13: u4,
-    command_dword14: u4,
-    command_dword15: u4,
-
-    comptime {
-        kernel.assert_unsafe(@sizeOf(CommonCommandFormat) == @sizeOf(u64));
-    }
+    _,
+};
+const opcodes = [QueueType.count]type{
+    AdminOpcode,
+    FabricsOpcode,
+    IOOpcode,
 };
 
 const AdminCommonCommandFormat = packed struct {
-    command_dword0: u4,
+    command_dword0: CommandDword0(AdminOpcode),
     nsid: u4,
     reserved: u8,
     // == Same as Common ==
@@ -658,6 +667,34 @@ const AdminCommonCommandFormat = packed struct {
         kernel.assert_unsafe(@sizeOf(AdminCommonCommandFormat) == @sizeOf(u64));
     }
 };
+
+fn NormalCommonCommandFormat(comptime MyCommandDword0: type) type {
+    return packed struct {
+        command_dword0: MyCommandDword0,
+        nsid: u4,
+        command_dword2: u4,
+        command_dword3: u4,
+        mptr: u8,
+        dptr: u16,
+        command_dword10: u4,
+        command_dword11: u4,
+        command_dword12: u4,
+        command_dword13: u4,
+        command_dword14: u4,
+        command_dword15: u4,
+
+        comptime {
+            kernel.assert_unsafe(@sizeOf(CommonCommandFormat) == @sizeOf(u64));
+        }
+    };
+}
+
+fn CommonCommandFormat(comptime queue_type: QueueType) type {
+    const Opcode = opcodes[queue_type];
+    const MyCommandDword0 = CommandDword0(Opcode);
+    const MyCommonCommandFormat = if (queue_type == .admin) AdminCommonCommandFormat else NormalCommonCommandFormat(MyCommandDword0);
+    return MyCommonCommandFormat;
+}
 
 const CommonCompletionQueueEntry = packed struct {
     dw0: u32,
