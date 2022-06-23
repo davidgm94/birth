@@ -10,7 +10,7 @@ const NVMe = @This();
 pub var controller: NVMe = undefined;
 
 device: *PCI.Device,
-capabilities: u64,
+capabilities: CAP,
 version: u32,
 doorbell_stride: u64,
 ready_transition_timeout: u64,
@@ -47,7 +47,7 @@ const Command = [16]u32;
 pub fn new(device: *PCI.Device) NVMe {
     return NVMe{
         .device = device,
-        .capabilities = 0,
+        .capabilities = @bitCast(CAP, @as(u64, 0)),
         .version = 0,
         .doorbell_stride = 0,
         .ready_transition_timeout = 0,
@@ -94,7 +94,7 @@ pub fn find_and_init(pci: *PCI) Error!void {
 
 inline fn read(nvme: *NVMe, comptime register: Property) register.type {
     log.debug("Reading {} bytes from BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), 0, register.offset });
-    return nvme.device.read_bar(register.type, register.index, register.offset);
+    return nvme.device.read_bar(register.type, 0, register.offset);
 }
 
 inline fn write(nvme: *NVMe, comptime register: Property, value: register.type) void {
@@ -235,38 +235,56 @@ pub fn init(nvme: *NVMe) void {
 
     if ((nvme.version >> 16) < 1) @panic("f1");
     if ((nvme.version >> 16) == 1 and @truncate(u8, nvme.version >> 8) < 1) @panic("f2");
-    if (@truncate(u16, nvme.capabilities) == 0) @panic("f3");
-    if (~nvme.capabilities & (1 << 37) != 0) @panic("f4");
-    if (@truncate(u4, nvme.capabilities >> 48) < kernel.arch.page_shifter - 12) @panic("f5");
-    if (@truncate(u4, nvme.capabilities >> 52) < kernel.arch.page_shifter - 12) @panic("f6");
+    if (nvme.capabilities.mqes == 0) @panic("f3");
+    kernel.assert_unsafe(@bitOffsetOf(CAP, "nssrs") == 36);
+    if (!nvme.capabilities.css.nvm_command_set) @panic("f4");
+    if (nvme.capabilities.mpsmin < kernel.arch.page_shifter - 12) @panic("f5");
+    if (nvme.capabilities.mpsmax < kernel.arch.page_shifter - 12) @panic("f6");
 
-    nvme.doorbell_stride = @as(u64, 4) << @truncate(u4, nvme.capabilities >> 32);
+    nvme.doorbell_stride = @as(u64, 4) << nvme.capabilities.doorbell_stride;
     log.debug("NVMe doorbell stride: 0x{x}", .{nvme.doorbell_stride});
 
-    nvme.ready_transition_timeout = @truncate(u8, nvme.capabilities >> 24) * @as(u64, 500);
+    nvme.ready_transition_timeout = nvme.capabilities.timeout * @as(u64, 500);
     log.debug("NVMe ready transition timeout: 0x{x}", .{nvme.ready_transition_timeout});
 
     const previous_configuration = nvme.read(cc);
     log.debug("Previous configuration: 0x{x}", .{previous_configuration});
 
     log.debug("we are here", .{});
-    if (previous_configuration & (1 << 0) != 0) {
+    if (previous_configuration.enable) {
         log.debug("branch", .{});
         // TODO. HACK we should use a timeout here
-        while (~nvme.read(csts) & (1 << 0) != 0) {
+        // TODO: PRobably buggy
+        while (!nvme.read(csts).ready) {
             log.debug("busy waiting", .{});
         }
-        nvme.write(cc, nvme.read(cc) & ~@as(cc.type, 1 << 0));
+        var config = nvme.read(cc);
+        config.enable = false;
+        nvme.write(cc, config);
     }
 
     {
         // TODO. HACK we should use a timeout here
-        while (nvme.read(csts) & (1 << 0) != 0) {}
+        while (nvme.read(csts).ready) {}
         log.debug("past the timeout", .{});
     }
 
-    nvme.write(cc, (nvme.read(cc) & 0xff00000f) | (0x00460000) | ((kernel.arch.page_shifter - 12) << 7));
-    nvme.write(aqa, (nvme.read(aqa) & 0xF000F000) | ((admin_queue_entry_count - 1) << 16) | (admin_queue_entry_count - 1));
+    nvme.write(cc, blk: {
+        var cc_value = nvme.read(cc);
+        cc_value.css = .nvm_command_set;
+        cc_value.mps = kernel.arch.page_shifter - 12;
+        cc_value.ams = .round_robin;
+        cc_value.shn = .no_notification;
+        cc_value.iosqes = 6;
+        cc_value.iocqes = 4;
+        break :blk cc_value;
+    });
+    nvme.write(aqa, blk: {
+        var aqa_value = nvme.read(aqa);
+        aqa_value.asqs = admin_queue_entry_count - 1;
+        aqa_value.acqs = admin_queue_entry_count - 1;
+        break :blk aqa_value;
+    });
 
     const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
     const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
@@ -275,8 +293,14 @@ pub fn init(nvme: *NVMe) void {
     const admin_submission_queue_physical_address = admin_queue_physical_address;
     const admin_completion_queue_physical_address = admin_queue_physical_address.offset(kernel.align_forward(admin_submission_queue_size, kernel.arch.page_size));
 
-    nvme.write(asq, admin_submission_queue_physical_address.value);
-    nvme.write(acq, admin_completion_queue_physical_address.value);
+    nvme.write(asq, ASQ{
+        .reserved = 0,
+        .asqb = @truncate(u52, admin_submission_queue_physical_address.value >> 12),
+    });
+    nvme.write(acq, ACQ{
+        .reserved = 0,
+        .acqb = @truncate(u52, admin_completion_queue_physical_address.value >> 12),
+    });
 
     const admin_submission_queue_virtual_address = admin_submission_queue_physical_address.to_higher_half_virtual_address();
     const admin_completion_queue_virtual_address = admin_completion_queue_physical_address.to_higher_half_virtual_address();
@@ -286,13 +310,21 @@ pub fn init(nvme: *NVMe) void {
     nvme.admin_submission_queue = admin_submission_queue_virtual_address.access([*]u8);
     nvme.admin_completion_queue = admin_completion_queue_virtual_address.access([*]u8);
 
-    nvme.write(cc, nvme.read(cc) | (1 << 0));
+    nvme.write(cc, blk: {
+        var new_cc = nvme.read(cc);
+        new_cc.enable = true;
+        break :blk new_cc;
+    });
 
     {
         // TODO: HACK use a timeout
         while (true) {
             const status = nvme.read(csts);
-            if (status & (1 << 1) != 0) @panic("f") else if (status & (1 << 0) != 0) break;
+            if (status.cfs) {
+                @panic("cfs");
+            } else if (status.ready) {
+                break;
+            }
         }
     }
 
@@ -317,7 +349,15 @@ pub fn init(nvme: *NVMe) void {
 
         if (!nvme.issue_admin_command(&command, null)) @panic("issue identify");
 
-        nvme.maximum_data_transfer_bytes = if (identify_data[77] != 0) (@as(u64, 1) << (12 + @intCast(u6, identify_data[77]) + @truncate(u4, nvme.capabilities))) else 0;
+        nvme.maximum_data_transfer_bytes = blk: {
+            if (identify_data[77] != 0) {
+                // TODO: mpsmin? shouldnt this be mpsmax?
+                break :blk @as(u64, 1) << (12 + @intCast(u6, identify_data[77]) + nvme.capabilities.mpsmin);
+            } else {
+                break :blk 0;
+            }
+        };
+
         nvme.rtd3_entry_latency_us = @ptrCast(*u32, @alignCast(@alignOf(u32), &identify_data[88])).*;
         nvme.maximum_data_outstanding_commands = @ptrCast(*u16, @alignCast(@alignOf(u16), &identify_data[514])).*;
         kernel.copy(u8, &nvme.model, identify_data[24 .. 24 + @sizeOf(@TypeOf(nvme.model))]);
@@ -635,7 +675,7 @@ const CommonCompletionQueueEntry = packed struct {
 
     const DW3 = packed struct {
         cid: u16,
-        phase_tag: u1,
+        phase_tag: bool,
         status_field: StatusField,
 
         comptime {
@@ -647,8 +687,8 @@ const CommonCompletionQueueEntry = packed struct {
         sc: u8,
         sct: u3,
         crd: u2,
-        more: u1,
-        dnr: u1,
+        more: bool,
+        dnr: bool,
     };
 
     const GenericCommandStatus = enum(u8) {
@@ -840,23 +880,30 @@ const pmrmscu = Property{ .offset = 0xe18, .type = u32 };
 
 const CAP = packed struct {
     mqes: u16,
-    cqr: u1,
+    cqr: bool,
     ams: u2,
     reserved: u5,
     timeout: u8,
     doorbell_stride: u4,
-    nssrs: u1,
-    css: u8,
-    bps: u1,
+    nssrs: bool,
+    css: CSS,
+    bps: bool,
     cps: u2,
     mpsmin: u4,
     mpsmax: u4,
-    pmrs: u1,
-    cmbs: u1,
-    nsss: u1,
-    crwms: u1,
-    crims: u1,
+    pmrs: bool,
+    cmbs: bool,
+    nsss: bool,
+    crwms: bool,
+    crims: bool,
     reserved2: u3,
+
+    const CSS = packed struct {
+        nvm_command_set: bool,
+        reserved: u5,
+        io_command_sets: bool,
+        no_io_command_set: bool,
+    };
 
     comptime {
         kernel.assert_unsafe(@sizeOf(CAP) == @sizeOf(u64));
@@ -864,7 +911,7 @@ const CAP = packed struct {
 };
 
 const CC = packed struct {
-    enable: u1,
+    enable: bool,
     reserved: u3,
     css: CSS,
     mps: u4,
@@ -872,21 +919,21 @@ const CC = packed struct {
     shn: SHN,
     iosqes: u4,
     iocqes: u4,
-    crime: u1,
-    reserved: u7,
+    crime: bool,
+    reserved2: u7,
 
     const CSS = enum(u3) {
         nvm_command_set = 0b000,
-        _,
         all_supported_io_command_sets = 0b110,
         admin_command_set_only = 0b111,
+        _,
     };
 
     const AMS = enum(u3) {
         round_robin = 0b000,
         weighted_round_robin_with_urgent_priority_class = 0b001,
-        _,
         vendor_specific = 0b111,
+        _,
     };
 
     const SHN = enum(u2) {
@@ -902,12 +949,12 @@ const CC = packed struct {
 };
 
 const CSTS = packed struct {
-    ready: u1,
-    cfs: u1,
+    ready: bool,
+    cfs: bool,
     shst: SHST,
-    nssro: u1,
-    pp: u1,
-    st: u1,
+    nssro: bool,
+    pp: bool,
+    st: bool,
     reserved: u25,
 
     const SHST = enum(u2) {
@@ -952,12 +999,12 @@ const ACQ = packed struct {
 
 const CMBLOC = packed struct {
     bir: u3,
-    cqmms: u1,
-    cqpds: u1,
-    cdpmls: u1,
-    cdpcils: u1,
-    cdmmms: u1,
-    cqda: u1,
+    cqmms: bool,
+    cqpds: bool,
+    cdpmls: bool,
+    cdpcils: bool,
+    cdmmms: bool,
+    cqda: bool,
     reserved: u3,
     offset: u20,
 
@@ -967,11 +1014,11 @@ const CMBLOC = packed struct {
 };
 
 const CMBSZ = packed struct {
-    sqs: u1,
-    cqs: u1,
-    lists: u1,
-    rds: u1,
-    wds: u1,
+    sqs: bool,
+    cqs: bool,
+    lists: bool,
+    rds: bool,
+    wds: bool,
     reserved: u3,
     szu: SZU,
     size: u20,
@@ -997,7 +1044,7 @@ const BPINFO = packed struct {
     reserved: u9,
     brs: BRS,
     reserved: u5,
-    abpid: u1,
+    abpid: bool,
 
     const BRS = enum(u2) {
         no_bpr = 0,
@@ -1014,8 +1061,8 @@ const BPINFO = packed struct {
 const BPRSEL = packed struct {
     bprsz: u10,
     bprof: u20,
-    reserved: u1,
-    bpid: u1,
+    reserved: bool,
+    bpid: bool,
 
     comptime {
         kernel.assert_unsafe(@sizeOf(BPRSEL) == @sizeOf(u32));
@@ -1032,8 +1079,8 @@ const BPMBL = packed struct {
 };
 
 const CMBMSC = packed struct {
-    cre: u1,
-    cmse: u1,
+    cre: bool,
+    cmse: bool,
     reserved: u10,
     cba: u52,
 
@@ -1043,7 +1090,7 @@ const CMBMSC = packed struct {
 };
 
 const CMBSTS = packed struct {
-    cbai: u1,
+    cbai: bool,
     reserved: u31,
 
     comptime {
@@ -1053,7 +1100,7 @@ const CMBSTS = packed struct {
 
 const CMBEBS = packed struct {
     cmbszu: CMBSZU,
-    read_bypass_behavior: u1,
+    read_bypass_behavior: bool,
     reserved: u3,
     cmbwbz: u24,
 
@@ -1099,14 +1146,14 @@ const CRTO = packed struct {
 
 const PMRCAP = packed struct {
     reserved: u3,
-    rds: u1,
-    wds: u1,
+    rds: bool,
+    wds: bool,
     bir: u3,
     pmrtu: PMRTU,
     pmrwbm: u4,
     reserved: u2,
     pmrto: u8,
-    cmss: u1,
+    cmss: bool,
     reserved: u7,
 
     const PMRTU = enum(u2) {
@@ -1121,7 +1168,7 @@ const PMRCAP = packed struct {
 };
 
 const PMRCTL = packed struct {
-    enable: u1,
+    enable: bool,
     reserved: u31,
 
     comptime {
@@ -1131,9 +1178,9 @@ const PMRCTL = packed struct {
 
 const PMRSTS = packed struct {
     err: u8,
-    nrdy: u1,
+    nrdy: bool,
     hsts: HSTS,
-    cbai: u1,
+    cbai: bool,
     reserved: u20,
 
     const HSTS = enum(u2) {
@@ -1150,7 +1197,7 @@ const PMRSTS = packed struct {
 
 const PMREBS = packed struct {
     pmrszu: PMRSZU,
-    read_bypass_behavior: u1,
+    read_bypass_behavior: bool,
     reserved: u3,
     pmrwbz: u24,
 
@@ -1185,8 +1232,8 @@ const PMRSWTP = packed struct {
 };
 
 const PMRMSCL = packed struct {
-    reserved: u1,
-    cmse: u1,
+    reserved: bool,
+    cmse: bool,
     reserved2: u10,
     cba: u20,
 
