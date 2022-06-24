@@ -315,7 +315,7 @@ pub fn find_device(pci: *Controller, class_code: u8, subclass_code: u8) ?*Device
 pub fn find_virtio_device(pci: *Controller) ?*Device {
     for (pci.devices) |*device| {
         // TODO: better matching
-        if (device.vendor_id == 0x1af4 and device.device_id >= 0x1040 and device.device_id <= 0x107f) {
+        if (device.vendor_id == 0x1af4) {
             return device;
         }
     }
