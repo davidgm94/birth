@@ -27,7 +27,7 @@ pub fn build(b: *Builder) void {
         .options = .{
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
-                .disk_interface = .nvme,// .nvme,
+                .disk_interface = .virtio,
                 .filesystem = .custom,
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -215,6 +215,15 @@ const Kernel = struct {
                     kernel.run_argument_list.append("stdio") catch unreachable;
                 }
 
+                //"-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
+                //"-global", "virtio-mmio.force-legacy=false",
+                //"-device", "virtio-blk-device,drive=foo",
+                //"-device", "virtio-gpu-device",
+                kernel.run_argument_list.append("-global") catch unreachable;
+                kernel.run_argument_list.append("virtio-mmio.force-legacy=false") catch unreachable;
+                //kernel.run_argument_list.append("-global") catch unreachable;
+                //kernel.run_argument_list.append("virtio-pci.force-legacy=false") catch unreachable;
+
                 if (kernel.options.run.disk_interface) |disk_interface| {
                     kernel.run_argument_list.append("-drive") catch unreachable;
                     // TODO: consider other drive options
@@ -226,6 +235,16 @@ const Kernel = struct {
                         .nvme => {
                             kernel.run_argument_list.append("-device") catch unreachable;
                             const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
+                            kernel.run_argument_list.append(device_options) catch unreachable;
+                        },
+                        .virtio => {
+                            kernel.run_argument_list.append("-device") catch unreachable;
+                            const device_type = switch (kernel.options.arch) {
+                                .x86_64 => "pci",
+                                .riscv64 => "device",
+                                else => unreachable,
+                            };
+                            const device_options = kernel.builder.fmt("virtio-blk-{s},drive={s}", .{ device_type, disk_id });
                             kernel.run_argument_list.append(device_options) catch unreachable;
                         },
                         else => unreachable,
@@ -280,11 +299,6 @@ const Kernel = struct {
         switch (kernel.options.arch) {
             .x86_64 => run_command.step.dependOn(&kernel.boot_image_step),
             else => unreachable,
-        }
-
-        log.debug("Run argument list:", .{});
-        for (kernel.run_argument_list.items) |arg| {
-            print("{s} ", .{arg});
         }
     }
 

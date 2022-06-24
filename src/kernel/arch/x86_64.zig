@@ -1,6 +1,7 @@
 const kernel = @import("../kernel.zig");
 const PCI = @import("../../drivers/pci.zig");
 const NVMe = @import("../../drivers/nvme.zig");
+const Virtio = @import("../../drivers/virtio.zig");
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -67,8 +68,11 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     init_scheduler();
     ACPI.init(rsdp);
     PCI.init();
-    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
-    _ = NVMe.controller.access(0, 0x200, .read);
+    const virtio = PCI.controller.find_virtio_device();
+    log.debug("Virtio {}", .{virtio});
+    //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
+    //NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
+    //_ = NVMe.controller.access(0, 0x200, .read);
     //asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 
@@ -1231,24 +1235,27 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
 
 var pci_lock: kernel.Spinlock = undefined;
 
-inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
-    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
+inline fn notify_config_op(bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
+    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, @enumToInt(bus)) << 16) | (@as(u32, @enumToInt(slot)) << 11) | (@as(u32, @enumToInt(function)) << 8) | offset);
 }
 
-pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
+pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) T {
+    const IntType = kernel.IntType(.unsigned, @bitSizeOf(T));
+    comptime kernel.assert_unsafe(IntType == u8 or IntType == u16 or IntType == u32);
+    pci_lock.acquire();
+    defer pci_lock.release();
+
+    notify_config_op(bus, slot, function, offset);
+    return io_read(IntType, IOPort.PCI_data);
+}
+
+pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
+    const IntType = kernel.IntType(.unsigned, @bitSizeOf(T));
+    comptime kernel.assert_unsafe(IntType == u8 or IntType == u16 or IntType == u32);
     pci_lock.acquire();
     defer pci_lock.release();
 
     kernel.assert(@src(), kernel.is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
-    return io_read(T, IOPort.PCI_data);
-}
-
-pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
-    pci_lock.acquire();
-    defer pci_lock.release();
-
-    kernel.assert(@src(), kernel.is_aligned(offset, 4));
-    notify_config_op(bus, slot, function, offset);
-    io_write(T, IOPort.PCI_data, value);
+    io_write(IntType, IOPort.PCI_data, value);
 }
