@@ -3,8 +3,9 @@ const kernel = @import("../kernel/kernel.zig");
 const log = kernel.log.scoped(.PCI);
 const TODO = kernel.TODO;
 const Controller = @This();
-const PrivilegeLevel = kernel.PrivilegeLevel;
 const x86_64 = @import("../kernel/arch/x86_64.zig");
+const Physical = kernel.Physical;
+const Virtual = kernel.Virtual;
 
 devices: []Device,
 bus_scan_states: [256]BusScanState,
@@ -70,22 +71,35 @@ fn Header(comptime HeaderT: type) type {
             return @TypeOf(@field(header, field_name));
         }
 
-        fn read(comptime field: []const u8, bus: Bus, slot: Slot, function: Function) get_type_from_field_name(field) {
-            const FieldType = get_type_from_field_name(field);
-            return pci_read_config(FieldType, bus, slot, function, @offsetOf(HeaderT, field));
+        pub fn read(comptime field_name: []const u8, bus: Bus, slot: Slot, function: Function) get_type_from_field_name(field_name) {
+            const FieldType = get_type_from_field_name(field_name);
+            return read_extended(FieldType, bus, slot, function, @offsetOf(HeaderT, field_name));
         }
 
-        fn read_from_function(comptime field: []const u8, function: Function) get_type_from_field_name(field) {
-            return read(field, Bus.new(0), Slot.new(0), function);
+        pub fn read_extended(comptime FieldType: type, bus: Bus, slot: Slot, function: Function, offset: u8) FieldType {
+            return pci_read_config(FieldType, bus, slot, function, offset);
         }
 
-        fn read_base(comptime field: []const u8) get_type_from_field_name(field) {
-            return read(field, Bus.new(0), Slot.new(0), Function.new(0));
+        pub fn read_from_function(comptime field_name: []const u8, function: Function) get_type_from_field_name(field_name) {
+            return read(field_name, Bus.new(0), Slot.new(0), function);
+        }
+
+        pub fn read_base(comptime field_name: []const u8) get_type_from_field_name(field_name) {
+            return read(field_name, Bus.new(0), Slot.new(0), Function.new(0));
+        }
+
+        pub fn read_from_offset(comptime field_name: []const u8, bus: Bus, slot: Slot, function: Function, offset: u8) get_type_from_field_name(field_name) {
+            const FieldType = get_type_from_field_name(field_name);
+            return read_extended(FieldType, bus, slot, function, offset + @offsetOf(HeaderT, field_name));
+        }
+
+        pub fn get_offset(comptime field_name: []const u8) u64 {
+            return @offsetOf(HeaderT, field_name);
         }
     };
 }
 
-const CommonHeader = Header(packed struct {
+pub const CommonHeader = Header(packed struct {
     vendor_id: u16,
     device_id: u16,
     command: u16,
@@ -104,7 +118,7 @@ const CommonHeader = Header(packed struct {
     }
 });
 
-const HeaderType0x00 = Header(packed struct {
+pub const HeaderType0x00 = Header(packed struct {
     vendor_id: u16,
     device_id: u16,
     command: u16,
@@ -276,7 +290,7 @@ fn enumerate(pci: *Controller) void {
 
                         pci_device.device_id = CommonHeader.read("device_id", bus, device, function);
                         pci_device.vendor_id = CommonHeader.read("vendor_id", bus, device, function);
-                        log.debug("Vendor ID: 0x{x}", .{pci_device.vendor_id});
+                        log.debug("Device ID: 0x{x}. Vendor ID: 0x{x}", .{ pci_device.device_id, pci_device.vendor_id });
                         pci_device.subsystem_id = HeaderType0x00.read("subsystem_id", bus, device, function);
                         pci_device.subsystem_vendor_id = HeaderType0x00.read("subsystem_vendor_id", bus, device, function);
 
@@ -312,6 +326,7 @@ pub fn find_device(pci: *Controller, class_code: u8, subclass_code: u8) ?*Device
     return null;
 }
 
+// TODO: harden the search
 pub fn find_virtio_device(pci: *Controller) ?*Device {
     for (pci.devices) |*device| {
         // TODO: better matching
@@ -421,13 +436,11 @@ pub const Device = struct {
 
     //uint32_t baseAddresses[6];
 
-    pub inline fn read_config(device: *Device, comptime T: type, offset: u8, comptime privilege_level: PrivilegeLevel) T {
-        kernel.assert(@src(), privilege_level == .kernel);
+    pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
         return kernel.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
     }
 
-    pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8, comptime privilege_level: PrivilegeLevel) void {
-        kernel.assert(@src(), privilege_level == .kernel);
+    pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8) void {
         return kernel.arch.pci_write_config(T, value, device.bus, device.slot, device.function, offset);
     }
 
@@ -495,15 +508,15 @@ pub const Device = struct {
 
     pub fn enable_features(device: *Device, features: Features) bool {
         log.debug("Enabling features for device {}", .{device});
-        var config = device.read_config(u32, 4, .kernel);
+        var config = device.read_config(u32, 4);
         if (features.contains(.interrupts)) config &= ~@as(u32, 1 << 10);
         if (features.contains(.busmastering_dma)) config |= 1 << 2;
         if (features.contains(.memory_space_access)) config |= 1 << 1;
         if (features.contains(.io_port_access)) config |= 1 << 0;
         log.debug("Writing config: 0x{x}", .{config});
-        device.write_config(u32, config, 4, .kernel);
+        device.write_config(u32, config, 4);
 
-        if (device.read_config(u32, 4, .kernel) != config) {
+        if (device.read_config(u32, 4) != config) {
             return false;
         }
 
@@ -524,19 +537,19 @@ pub const Device = struct {
             var size: u64 = 0;
 
             if (is_size_64) {
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i), .kernel);
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1), .kernel);
-                size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i), .kernel);
-                size |= @intCast(u64, device.read_config(u32, 0x10 + 4 * @intCast(u8, i + 1), .kernel)) << 32;
-                device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i), .kernel);
-                device.write_config(u32, device.base_addresses[i + 1], 0x10 + 4 * @intCast(u8, i + 1), .kernel);
+                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
+                size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
+                size |= @intCast(u64, device.read_config(u32, 0x10 + 4 * @intCast(u8, i + 1))) << 32;
+                device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, device.base_addresses[i + 1], 0x10 + 4 * @intCast(u8, i + 1));
                 address = base_address;
                 address |= @intCast(u64, device.base_addresses[i + 1]) << 32;
             } else {
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i), .kernel);
-                size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i), .kernel);
+                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
                 size |= @as(u64, kernel.max_int(u32)) << 32;
-                device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i), .kernel);
+                device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
                 address = base_address;
             }
 
@@ -579,11 +592,11 @@ pub const Device = struct {
 
     pub fn enable_MSI(device: *Device, handler: x86_64.interrupts.HandlerInfo) bool {
         _ = handler;
-        const status = device.read_config(u32, 0x04, .kernel) >> 16;
+        const status = device.read_config(u32, 0x04) >> 16;
 
         if (~status & (1 << 4) != 0) return false;
 
-        var pointer = device.read_config(u8, 0x34, .kernel);
+        var pointer = device.read_config(u8, 0x34);
         var index: u64 = 0;
 
         while (true) {
@@ -591,7 +604,7 @@ pub const Device = struct {
             if (index >= 0xff) break;
             index += 1;
 
-            const dw = device.read_config(u32, pointer, .kernel);
+            const dw = device.read_config(u32, pointer);
             const next_pointer = @truncate(u8, dw >> 8);
             const id = @truncate(u8, dw);
 
@@ -607,4 +620,15 @@ pub const Device = struct {
 
         return false;
     }
+
+    pub fn read_capabilities_pointer(device: *Device) u8 {
+        return HeaderType0x00.read("capabilities_pointer", device.bus, device.slot, device.function);
+    }
+
+    //pub fn read_bar(device: *Device, bar_index: u8) u32 {
+    //}
+
+    //pub fn bar_info(device: *Device, bar_index: u8) Physical.Memory.Region {
+
+    //}
 };

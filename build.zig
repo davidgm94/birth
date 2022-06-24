@@ -27,7 +27,7 @@ pub fn build(b: *Builder) void {
         .options = .{
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
-                .disk_interface = .virtio,
+                .disk_interface = .nvme,
                 .filesystem = .custom,
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{

@@ -11,7 +11,7 @@ pub var controller: NVMe = undefined;
 
 device: *PCI.Device,
 capabilities: CAP,
-version: u32,
+version: Version,
 doorbell_stride: u64,
 ready_transition_timeout: u64,
 maximum_data_transfer_bytes: u64,
@@ -47,8 +47,8 @@ const Command = [16]u32;
 pub fn new(device: *PCI.Device) NVMe {
     return NVMe{
         .device = device,
-        .capabilities = @bitCast(CAP, @as(u64, 0)),
-        .version = 0,
+        .capabilities = undefined,
+        .version = undefined,
         .doorbell_stride = 0,
         .ready_transition_timeout = 0,
         .maximum_data_transfer_bytes = 0,
@@ -206,16 +206,16 @@ pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operati
         @fence(.SeqCst);
         nvme.write_sqtdbl(1, new_tail);
         asm volatile ("hlt");
-        for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
-            if (byte != 0) {
-                log.debug("[{}]: 0x{x}", .{ i, byte });
-            }
-        }
-        for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
-            if (byte != 0) {
-                log.debug("[{}]: 0x{x}", .{ i, byte });
-            }
-        }
+        //for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
+        //if (byte != 0) {
+        //log.debug("[{}]: 0x{x}", .{ i, byte });
+        //}
+        //}
+        //for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
+        //if (byte != 0) {
+        //log.debug("[{}]: 0x{x}", .{ i, byte });
+        //}
+        //}
         TODO(@src());
     } else @panic("queue full");
 
@@ -231,10 +231,11 @@ pub var device_nsid: u32 = 0;
 pub fn init(nvme: *NVMe) void {
     nvme.capabilities = nvme.read(cap);
     nvme.version = nvme.read(vs);
-    log.debug("Capabilities = 0x{x}. Version = {}", .{ nvme.capabilities, nvme.version });
+    log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
 
-    if ((nvme.version >> 16) < 1) @panic("f1");
-    if ((nvme.version >> 16) == 1 and @truncate(u8, nvme.version >> 8) < 1) @panic("f2");
+    if (nvme.version > 1) @panic("version too new");
+    if (nvme.version.major < 1) @panic("f1");
+    if (nvme.version.major == 1 and nvme.version.minor < 1) @panic("f2");
     if (nvme.capabilities.mqes == 0) @panic("f3");
     kernel.assert_unsafe(@bitOffsetOf(CAP, "nssrs") == 36);
     if (!nvme.capabilities.css.nvm_command_set) @panic("f4");
@@ -887,7 +888,7 @@ const Property = struct {
 };
 
 const cap = Property{ .offset = 0, .type = CAP };
-const vs = Property{ .offset = 0x08, .type = u32 };
+const vs = Property{ .offset = 0x08, .type = Version };
 const intms = Property{ .offset = 0xc, .type = u32 };
 const intmc = Property{ .offset = 0x10, .type = u32 };
 const cc = Property{ .offset = 0x14, .type = CC };
@@ -945,6 +946,12 @@ const CAP = packed struct {
     comptime {
         kernel.assert_unsafe(@sizeOf(CAP) == @sizeOf(u64));
     }
+};
+
+const Version = packed struct {
+    tertiary: u8,
+    minor: u8,
+    major: u16,
 };
 
 const CC = packed struct {

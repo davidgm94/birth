@@ -68,12 +68,19 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     init_scheduler();
     ACPI.init(rsdp);
     PCI.init();
-    const virtio = PCI.controller.find_virtio_device();
-    log.debug("Virtio {}", .{virtio});
+    // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
-    //NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
-    //_ = NVMe.controller.access(0, 0x200, .read);
-    //asm volatile ("int $0x40");
+    // TODO: harden
+    //if (PCI.controller.find_virtio_device()) |virtio_block_pci| {
+    //Virtio.init_from_pci(virtio_block_pci);
+    //} else {
+    //@panic("virtio device not found");
+    //}
+
+    // TODO:
+    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
+    _ = NVMe.controller.access(0, 0x3000, .read);
+    asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 
     log.debug("Everything OK", .{});
@@ -1246,7 +1253,7 @@ pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function:
     defer pci_lock.release();
 
     notify_config_op(bus, slot, function, offset);
-    return io_read(IntType, IOPort.PCI_data);
+    return io_read(IntType, IOPort.PCI_data + @intCast(u16, offset % 4));
 }
 
 pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
@@ -1257,5 +1264,6 @@ pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot
 
     kernel.assert(@src(), kernel.is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
-    io_write(IntType, IOPort.PCI_data, value);
+
+    io_write(IntType, IOPort.PCI_data + @intCast(u16, offset % 4), value);
 }
