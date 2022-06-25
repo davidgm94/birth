@@ -233,7 +233,8 @@ pub fn init(nvme: *NVMe) void {
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
 
-    if (nvme.version > 1) @panic("version too new");
+    kernel.assert(@src(), nvme.version.major == 1 and nvme.version.minor == 4);
+    if (nvme.version.major > 1) @panic("version too new");
     if (nvme.version.major < 1) @panic("f1");
     if (nvme.version.major == 1 and nvme.version.minor < 1) @panic("f2");
     if (nvme.capabilities.mqes == 0) @panic("f3");
@@ -543,9 +544,11 @@ const DataTransfer = enum(u2) {
     bidirectional = 3,
 };
 
-const SubmissionQueueEntry = struct {
-    command_dword0: CommandDword0,
-};
+fn SubmissionQueueEntry(comptime Opcode: type) type {
+    return packed struct {
+        command_dword0: CommandDword0(Opcode),
+    };
+}
 
 fn CommandDword0(comptime Opcode: type) type {
     return packed struct {
@@ -634,6 +637,7 @@ const FabricsOpcode = enum(u8) {
     authentication_receive = 0x06,
     disconnect = 0x08,
 };
+
 const IOOpcode = enum(u8) {
     flush = 0x00,
     reservation_register = 0x0d,
@@ -643,6 +647,7 @@ const IOOpcode = enum(u8) {
 
     _,
 };
+
 const opcodes = [QueueType.count]type{
     AdminOpcode,
     FabricsOpcode,
@@ -668,34 +673,6 @@ const AdminCommonCommandFormat = packed struct {
         kernel.assert_unsafe(@sizeOf(AdminCommonCommandFormat) == @sizeOf(u64));
     }
 };
-
-fn NormalCommonCommandFormat(comptime MyCommandDword0: type) type {
-    return packed struct {
-        command_dword0: MyCommandDword0,
-        nsid: u4,
-        command_dword2: u4,
-        command_dword3: u4,
-        mptr: u8,
-        dptr: u16,
-        command_dword10: u4,
-        command_dword11: u4,
-        command_dword12: u4,
-        command_dword13: u4,
-        command_dword14: u4,
-        command_dword15: u4,
-
-        comptime {
-            kernel.assert_unsafe(@sizeOf(CommonCommandFormat) == @sizeOf(u64));
-        }
-    };
-}
-
-fn CommonCommandFormat(comptime queue_type: QueueType) type {
-    const Opcode = opcodes[queue_type];
-    const MyCommandDword0 = CommandDword0(Opcode);
-    const MyCommonCommandFormat = if (queue_type == .admin) AdminCommonCommandFormat else NormalCommonCommandFormat(MyCommandDword0);
-    return MyCommonCommandFormat;
-}
 
 const CommonCompletionQueueEntry = packed struct {
     dw0: u32,
