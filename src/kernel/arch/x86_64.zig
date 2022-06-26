@@ -55,6 +55,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
     kernel.address_space = kernel.Virtual.AddressSpace.from_current() orelse unreachable;
+    kernel.core_heap.init();
     enable_cpu_features();
     const stivale2_struct_physical_address = kernel.Physical.Address.new(stivale2_struct_address);
     kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;

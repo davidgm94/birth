@@ -39,7 +39,6 @@ pub var address_space = Virtual.AddressSpace.from_context(undefined);
 pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
-pub var heap: Heap = undefined;
 pub var core_heap: CoreHeap = undefined;
 pub var font: PSF1.Font = undefined;
 pub const Writer = std.io.Writer;

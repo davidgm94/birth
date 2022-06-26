@@ -13,7 +13,7 @@ pub const AllocationResult = struct {
     given_size: u64,
 };
 
-const Region = struct {
+pub const Region = struct {
     virtual: Virtual.Address,
     size: u64,
     allocated: u64,
@@ -25,7 +25,12 @@ lock: kernel.Spinlock,
 allocator: kernel.Allocator,
 
 const region_size = 2 * kernel.mb;
-const region_count = kernel.core_memory_region.size / region_size;
+pub const region_count = kernel.core_memory_region.size / region_size;
+
+pub fn init(heap: *Heap) void {
+    heap.allocator.ptr = heap;
+    heap.allocator.vtable = &allocator_interface.vtable;
+}
 
 pub inline fn allocate(heap: *Heap, comptime T: type) ?*T {
     return @intToPtr(*T, (heap.allocate_extended(@sizeOf(T), @alignOf(T)) orelse return null).value);
@@ -69,8 +74,12 @@ pub fn allocate_extended(heap: *Heap, size: u64, alignment: u64) ?Virtual.Addres
     return Virtual.Address.new(result_address);
 }
 
-var allocator = struct {
-    vtab: kernel.Allocator.VTable = .{ .alloc = alloc, .resize = resize, .free = free },
+var allocator_interface = struct {
+    vtable: kernel.Allocator.VTable = .{
+        .alloc = @ptrCast(fn alloc(heap: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8, alloc),
+        .resize = @ptrCast(fn resize(heap: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, resize),
+        .free = @ptrCast(fn free(heap: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
+    },
 
     fn alloc(heap: *Heap, len: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8 {
         _ = heap;
