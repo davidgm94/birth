@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const stivale = @import("header.zig");
 const log = std.log.scoped(.stivale2);
-const kernel = @import("../../../../kernel.zig");
+const kernel = @import("../../../../../kernel.zig");
 const x86_64 = @import("../../../x86_64.zig");
 pub const Struct = stivale.Struct;
 

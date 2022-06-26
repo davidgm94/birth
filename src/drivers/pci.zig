@@ -1,5 +1,5 @@
 // TODO: batch PCI register access
-const kernel = @import("../kernel/kernel.zig");
+const kernel = @import("../kernel.zig");
 const log = kernel.log.scoped(.PCI);
 const TODO = kernel.TODO;
 const Controller = @This();

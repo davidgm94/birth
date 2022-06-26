@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 
 pub const Descriptor = packed struct {
     limit_low: u16,

@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const TODO = kernel.TODO;
 
 var plic_base: u64 = 0;

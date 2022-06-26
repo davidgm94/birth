@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 var frequency: u32 = 0;
 
 pub fn init() void {

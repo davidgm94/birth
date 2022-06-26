@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const virtio = @import("virtio.zig");
 const SplitQueue = virtio.SplitQueue;
 const MMIO = virtio.MMIO;

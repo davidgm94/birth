@@ -1,6 +1,6 @@
 const Spinlock = @This();
 
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const builtin = @import("builtin");
 const log = kernel.log.scoped(.Spinlock_x86_64);
 const AtomicRmwOp = builtin.AtomicRmwOp;

@@ -37,6 +37,9 @@ pub const read_timestamp = arch.read_timestamp;
 
 pub const get_memory_map = arch.get_memory_map;
 
+pub const init_block_drivers = arch.init_block_drivers;
+pub const init_graphics_drivers = arch.init_graphics_drivers;
+
 pub const Writer = struct {
     const Error = error{};
     pub var lock: arch.Spinlock = undefined;

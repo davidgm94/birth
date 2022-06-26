@@ -5,7 +5,7 @@
 // • The AC flag in the EFLAGS register (bit 18).
 // • The “enable HLAT” VM-execution control (tertiary processor-based VM-execution control bit 1; see Section 24.6.2, “Processor-Based VM-Execution Controls,” in the Intel® 64 and IA-32 Architectures Software Developer’s Manual, Volume 3C).
 
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const x86_64 = @import("../x86_64.zig");
 
 const Physical = kernel.Physical;

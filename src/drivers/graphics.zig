@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const Font = kernel.PSF1.Font;
 
 const log = kernel.log.scoped(.graphics);

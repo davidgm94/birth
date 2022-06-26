@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const arch = kernel.arch;
 const Physical = kernel.arch.Physical;
 const page_size = kernel.arch.page_size;

@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const fs = @import("../common/fs.zig");
 const TODO = kernel.TODO;
 const log = kernel.log.scoped(.FS);
@@ -25,13 +25,13 @@ pub fn init(comptime SpecificDriver: type, comptime InitializationContext: type,
     init_callback(driver, context) catch |err| return err;
 
     // Register the driver
-    if (drivers.len == 0) {
-        drivers.ptr = &_drivers_array;
-    }
-    const index = drivers.len;
-    drivers.len += 1;
-    drivers[index] = @ptrCast(*Driver, driver);
+    //if (drivers.len == 0) {
+    //drivers.ptr = &_drivers_array;
+    //}
+    //const index = drivers.len;
+    //drivers.len += 1;
+    //drivers[index] = @ptrCast(*Driver, driver);
+    TODO(@src());
 }
 
-pub var drivers: []*Driver = undefined;
-pub var _drivers_array: [64]*Driver = undefined;
+pub var drivers: kernel.ArrayList(*Driver) = undefined;

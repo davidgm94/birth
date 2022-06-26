@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const log = kernel.log.scoped(.Syscall);
 const TODO = kernel.TODO;
 const x86_64 = @import("arch/x86_64.zig");

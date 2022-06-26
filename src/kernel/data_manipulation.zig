@@ -1,5 +1,5 @@
 const std = @import("std");
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const page_size = kernel.arch.page_size;
 const sector_size = kernel.arch.sector_size;
 
@@ -208,3 +208,6 @@ pub const reference_all_declarations = std.testing.refAllDecls;
 pub const Type = std.builtin.Type;
 
 pub const Allocator = std.mem.Allocator;
+pub const ArrayList = std.ArrayListUnmanaged;
+pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
+pub const MultiArrayList = std.MultiArrayList;

@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("../../kernel.zig");
 const PCI = @import("../../drivers/pci.zig");
 const NVMe = @import("../../drivers/nvme.zig");
 const Virtio = @import("../../drivers/virtio.zig");
@@ -20,10 +20,11 @@ pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
 const Virtual = kernel.Virtual;
+const Physical = kernel.Physical;
 const Thread = kernel.scheduler.Thread;
 
 pub const IOAPIC = struct {
-    address: kernel.Physical.Address,
+    address: Physical.Address,
     gsi: u32,
     id: u8,
 
@@ -55,20 +56,20 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
     kernel.address_space = kernel.Virtual.AddressSpace.from_current() orelse unreachable;
-    kernel.core_heap.init();
+    kernel.core_heap.init(&kernel.address_space);
     enable_cpu_features();
-    const stivale2_struct_physical_address = kernel.Physical.Address.new(stivale2_struct_address);
+    const stivale2_struct_physical_address = Physical.Address.new(stivale2_struct_address);
     kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    kernel.Physical.Memory.map = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
+    Physical.Memory.map = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
-    const region_type = kernel.Physical.Memory.map.find_address(stivale2_struct_physical_address);
+    const region_type = Physical.Memory.map.find_address(stivale2_struct_physical_address);
     log.debug("Region type: {}", .{region_type});
     Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
     preinit_scheduler();
     init_scheduler();
-    ACPI.init(rsdp);
-    PCI.init();
+    prepare_drivers(rsdp);
+    kernel.drivers.init() catch |driver_init_error| kernel.panic("Failed to initialize drivers: {}", .{driver_init_error});
     // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
     // TODO: harden
@@ -79,22 +80,22 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     //}
 
     // TODO:
-    NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
-    const buffer_size = 0x1000;
-    var buffer = kernel.DMA.Buffer{
-        .address = kernel.address_space.allocate(buffer_size) orelse TODO(@src()),
-        .total_size = buffer_size,
-        .completed_size = 0,
-    };
+    //NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
+    //const buffer_size = 0x1000;
+    //var buffer = kernel.DMA.Buffer{
+    //.address = kernel.address_space.allocate(buffer_size) orelse TODO(@src()),
+    //.total_size = buffer_size,
+    //.completed_size = 0,
+    //};
 
-    _ = NVMe.controller.access(&buffer, .{
-        .offset = 0,
-        .size = buffer.total_size,
-        .operation = .read,
-    });
-    for (buffer.address.access([*]u8)[0..buffer.total_size]) |byte, i| {
-        if (byte != 0) log.debug("[{}]: 0x{x}", .{ i, byte });
-    }
+    //_ = NVMe.controller.access(&buffer, .{
+    //.offset = 0,
+    //.size = buffer.total_size,
+    //.operation = .read,
+    //});
+    //for (buffer.address.access([*]u8)[0..buffer.total_size]) |byte, i| {
+    //if (byte != 0) log.debug("[{}]: 0x{x}", .{ i, byte });
+    //}
     asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 
@@ -103,8 +104,29 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
 
     //next_timer(1);
     while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+        );
         kernel.spinloop_hint();
     }
+}
+
+pub fn init_block_drivers(allocator: kernel.Allocator) !void {
+    // TODO: make ACPI and PCI controller standard
+    // TODO: make a category for NVMe and standardize it there
+    // INFO: this callback also initialize child drives
+    NVMe.driver = try NVMe.Initialization.callback(allocator, &PCI.controller);
+}
+
+pub fn init_graphics_drivers(allocator: kernel.Allocator) !void {
+    _ = allocator;
+    log.debug("TODO: initialize graphics drivers", .{});
+}
+
+fn prepare_drivers(rsdp: Physical.Address) void {
+    ACPI.init(rsdp);
+    PCI.init();
 }
 
 fn init_scheduler() void {
@@ -185,7 +207,7 @@ pub fn enable_apic() void {
     const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
     log.debug("APIC physical address: 0{x}", .{apic_physical_address});
-    cpu.lapic = LAPIC.new(kernel.Physical.Address.new(apic_physical_address));
+    cpu.lapic = LAPIC.new(Physical.Address.new(apic_physical_address));
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
     kernel.assert(@src(), lapic_id == cpu.lapic_id);
@@ -766,8 +788,8 @@ fn get_task_priority_level() u4 {
 }
 
 fn enable_cpu_features() void {
-    kernel.Physical.Address.max_bit = CPUID.get_max_physical_address_bit();
-    kernel.Physical.Address.max = @as(u64, 1) << kernel.Physical.Address.max_bit;
+    Physical.Address.max_bit = CPUID.get_max_physical_address_bit();
+    Physical.Address.max = @as(u64, 1) << Physical.Address.max_bit;
 
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -1031,7 +1053,7 @@ pub const LAPIC = struct {
         TIMER_CURRENT_COUNT = 0x390,
     };
 
-    pub inline fn new(lapic_physical_address: kernel.Physical.Address) LAPIC {
+    pub inline fn new(lapic_physical_address: Physical.Address) LAPIC {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
@@ -1092,7 +1114,7 @@ pub const CPU = struct {
 
     fn bootstrap_stack(size: u64) u64 {
         const total_size = size + guard_stack_size;
-        const physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(total_size, true)) orelse @panic("stack allocation");
+        const physical_address = Physical.Memory.allocate_pages(kernel.bytes_to_pages(total_size, true)) orelse @panic("stack allocation");
         const virtual_address = physical_address.access_higher_half();
         kernel.address_space.map(physical_address, virtual_address);
         return virtual_address.value + total_size;

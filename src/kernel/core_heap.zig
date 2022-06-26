@@ -1,17 +1,10 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const log = kernel.log.scoped(.CoreHeap);
 const TODO = kernel.TODO;
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 
 const Heap = @This();
-
-pub const AllocationResult = struct {
-    physical: u64,
-    virtual: u64,
-    asked_size: u64,
-    given_size: u64,
-};
 
 pub const Region = struct {
     virtual: Virtual.Address,
@@ -20,16 +13,18 @@ pub const Region = struct {
 };
 
 allocator: kernel.Allocator,
+// TODO: use another synchronization primitive
 lock: kernel.Spinlock,
 regions: [region_count]Region,
-// TODO: use another synchronization primitive
+address_space: *Virtual.AddressSpace,
 
 const region_size = 2 * kernel.mb;
 pub const region_count = kernel.core_memory_region.size / region_size;
 
-pub fn init(heap: *Heap) void {
+pub fn init(heap: *Heap, address_space: *Virtual.AddressSpace) void {
     heap.allocator.ptr = heap;
     heap.allocator.vtable = &allocator_interface.vtable;
+    heap.address_space = address_space;
 }
 
 var allocator_interface = struct {
@@ -56,7 +51,7 @@ var allocator_interface = struct {
                     break :blk region;
                 } else {
                     log.debug("have to allocate region", .{});
-                    const virtual_address = kernel.address_space.allocate(region_size) orelse return kernel.Allocator.Error.OutOfMemory;
+                    const virtual_address = heap.address_space.allocate(region_size) orelse return kernel.Allocator.Error.OutOfMemory;
 
                     region.* = Region{
                         .virtual = virtual_address,

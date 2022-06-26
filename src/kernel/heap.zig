@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const TODO = kernel.TODO;
 const AddresPair = kernel.Memory.AddressPair;
 const Physical = kernel.arch.Physical;

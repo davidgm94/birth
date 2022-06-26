@@ -1,5 +1,5 @@
 // This has been implemented with NVMe Specification 2.0b
-const kernel = @import("../kernel/kernel.zig");
+const kernel = @import("../kernel.zig");
 const log = kernel.log.scoped(.NVMe);
 const TODO = kernel.TODO;
 const PCI = @import("pci.zig");
@@ -11,7 +11,9 @@ const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 
 const NVMe = @This();
-pub var controller: NVMe = undefined;
+const Driver = NVMe;
+
+pub var driver: *Driver = undefined;
 
 device: *PCI.Device,
 capabilities: CAP,
@@ -48,6 +50,33 @@ const submission_queue_entry_bytes = 64;
 const completion_queue_entry_bytes = 16;
 const Command = [16]u32;
 
+const FindError = error{
+    not_found,
+};
+
+pub const Initialization = struct {
+    pub const Context = *PCI;
+    pub const Error = error{
+        allocation_failure,
+        not_found,
+    };
+
+    pub fn callback(allocator: kernel.Allocator, pci: *PCI) Error!*Driver {
+        const nvme_device = find(pci) orelse return FindError.not_found;
+        log.debug("Found NVMe controller", .{});
+        driver = allocator.create(Driver) catch return Error.allocation_failure;
+        driver.* = NVMe.new(nvme_device);
+        const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
+        kernel.assert(@src(), result);
+        log.debug("Device features enabled", .{});
+        driver.init();
+
+        log.debug("NVMe driver initialized", .{});
+
+        return driver;
+    }
+};
+
 pub fn new(device: *PCI.Device) NVMe {
     return NVMe{
         .device = device,
@@ -79,21 +108,6 @@ pub fn new(device: *PCI.Device) NVMe {
 
 pub fn find(pci: *PCI) ?*PCI.Device {
     return pci.find_device(0x1, 0x8);
-}
-
-const Error = error{
-    not_found,
-};
-
-pub fn find_and_init(pci: *PCI) Error!void {
-    const nvme_device = find(pci) orelse return Error.not_found;
-    log.debug("Found NVMe drive", .{});
-    controller = NVMe.new(nvme_device);
-    const result = controller.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
-    kernel.assert(@src(), result);
-    log.debug("Device features enabled", .{});
-
-    controller.init();
 }
 
 inline fn read(nvme: *NVMe, comptime register: Property) register.type {

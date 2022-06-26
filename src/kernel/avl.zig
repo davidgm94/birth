@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const log = kernel.log.scoped(.AVL);
 
 pub fn Tree(comptime T: type) type {

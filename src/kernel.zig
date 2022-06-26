@@ -3,34 +3,28 @@ const builtin = @import("builtin");
 
 const kernel = @This();
 
-pub const arch = @import("arch.zig");
+pub const arch = @import("kernel/arch.zig");
 pub const log = std.log;
 pub const build_mode = builtin.mode;
-pub const Physical = @import("physical.zig");
-pub const Virtual = @import("virtual.zig");
-pub usingnamespace @import("assertion.zig");
-pub usingnamespace @import("data_manipulation.zig");
-const panic_file = @import("panic.zig");
+pub const Physical = @import("kernel/physical.zig");
+pub const Virtual = @import("kernel/virtual.zig");
+pub usingnamespace @import("kernel/assertion.zig");
+pub usingnamespace @import("kernel/data_manipulation.zig");
+const panic_file = @import("kernel/panic.zig");
 pub const panic = panic_file.panic;
 pub const TODO = panic_file.TODO;
 pub const SourceLocation = panic_file.SourceLocation;
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
-pub const AVL = @import("avl.zig");
-pub const Heap = @import("heap.zig");
-pub const CoreHeap = @import("core_heap.zig");
-pub const PSF1 = @import("psf1.zig");
-pub const graphics = @import("graphics.zig");
-pub const scheduler = @import("scheduler.zig");
-pub const Filesystem = @import("filesystem.zig");
-pub const Disk = @import("disk.zig");
-// TODO: move this to drivers
-pub const RNUFS = @import("rnu_fs.zig");
-pub const driver = @import("driver.zig");
-pub const Driver = driver.Driver;
-pub const ELF = @import("elf.zig");
-pub const Syscall = @import("syscall.zig");
-pub const DMA = @import("../drivers/dma.zig");
+pub const AVL = @import("kernel/avl.zig");
+pub const Heap = @import("kernel/heap.zig");
+pub const CoreHeap = @import("kernel/core_heap.zig");
+pub const PSF1 = @import("kernel/psf1.zig");
+pub const scheduler = @import("kernel/scheduler.zig");
+pub const drivers = @import("drivers.zig");
+pub const ELF = @import("kernel/elf.zig");
+pub const Syscall = @import("kernel/syscall.zig");
+pub const DMA = @import("drivers/dma.zig");
 comptime {
     kernel.reference_all_declarations(Syscall);
 }

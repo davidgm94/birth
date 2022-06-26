@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 /// Define root.log_level to override the default
 pub const log_level: std.log.Level = switch (builtin.mode) {
     .Debug => .debug,

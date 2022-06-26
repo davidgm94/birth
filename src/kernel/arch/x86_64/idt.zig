@@ -1,4 +1,4 @@
-const kernel = @import("../../kernel.zig");
+const kernel = @import("../../../kernel.zig");
 const Interrupt = @import("interrupts.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const IDT = @This();

@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const Driver = @This();
 
 const Type = enum(u32) {
@@ -8,5 +8,4 @@ const Type = enum(u32) {
 type: Type,
 read_callback: fn (driver: *Driver, buffer: []u8, sector_start: u64, sector_count: u64) u64,
 
-pub var _drivers_array: [64]*Driver = undefined;
-pub var drivers: []*Driver = undefined;
+pub var drivers: kernel.ArrayList(*Driver) = undefined;

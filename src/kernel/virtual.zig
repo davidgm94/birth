@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("../kernel.zig");
 const Virtual = @This();
 const Physical = kernel.Physical;
 const log = kernel.log.scoped(.Virtual);
