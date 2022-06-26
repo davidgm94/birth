@@ -61,7 +61,7 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                         iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    x86_64.iso = kernel.core_heap.allocate_many(x86_64.ISO, iso_count) orelse @panic("iso");
+                    x86_64.iso = kernel.core_heap.allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
 
                     kernel.assert(@src(), processor_count == kernel.cpus.len);

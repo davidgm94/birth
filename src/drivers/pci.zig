@@ -235,7 +235,7 @@ fn enumerate(pci: *Controller) void {
         log.debug("Device count: {}", .{device_count});
 
         buses_to_scan = original_bus_to_scan_count;
-        pci.devices = kernel.core_heap.allocate_many(Device, device_count) orelse @panic("unable to allocate pci devices");
+        pci.devices = kernel.core_heap.allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
 
         var registered_device_count: u64 = 0;
 

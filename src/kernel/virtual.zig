@@ -29,7 +29,7 @@ pub const AddressSpace = struct {
 
     // TODO: handle free in error case
     pub inline fn new_for_user() ?*AddressSpace {
-        const address_space = kernel.core_heap.allocate(AddressSpace) orelse return null;
+        const address_space = kernel.core_heap.allocator.create(AddressSpace) catch return null;
         address_space.* = new() orelse return null;
         address_space.arch.map_kernel_address_space_higher_half();
         return address_space;
@@ -93,7 +93,7 @@ pub const AddressSpace = struct {
             const free_region_offset = base_virtual_address.value + entry.allocated_size;
             const free_region_size = entry.descriptor.size - entry.allocated_size;
             //log.debug("Allocating free region", .{});
-            const free_region = kernel.core_heap.allocate(Virtual.Memory.Region) orelse return IntegrationError.region_allocation_failed;
+            const free_region = kernel.core_heap.allocator.create(Virtual.Memory.Region) catch return IntegrationError.region_allocation_failed;
             //log.debug("Allocated free region", .{});
             free_region.* = Virtual.Memory.Region.new(Virtual.Address.new(free_region_offset), free_region_size);
             //log.debug("Free region: (0x{x}, {})", .{ free_region.address.value, free_region.size });
@@ -106,7 +106,7 @@ pub const AddressSpace = struct {
 
         if (entry.allocated_size > 0) {
             //log.debug("allocating region", .{});
-            const used_region = kernel.core_heap.allocate(Virtual.Memory.Region) orelse return IntegrationError.region_allocation_failed;
+            const used_region = kernel.core_heap.allocator.create(Virtual.Memory.Region) catch return IntegrationError.region_allocation_failed;
             //log.debug("allocated region", .{});
             used_region.* = Virtual.Memory.Region.new(base_virtual_address, entry.allocated_size);
             used_region.used = true;
@@ -122,7 +122,7 @@ pub const AddressSpace = struct {
         kernel.assert(@src(), region.size != 0);
         log.debug("region size: {}", .{region.size});
 
-        const used_region = kernel.core_heap.allocate(Virtual.Memory.Region) orelse return IntegrationError.region_allocation_failed;
+        const used_region = kernel.core_heap.allocator.create(Virtual.Memory.Region) catch return IntegrationError.region_allocation_failed;
         used_region.* = Virtual.Memory.Region.new(base_virtual_address, region.size);
         used_region.used = true;
         log.debug("Used region: (0x{x}, {})", .{ used_region.address.value, used_region.size });
