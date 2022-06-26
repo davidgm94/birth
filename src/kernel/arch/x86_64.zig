@@ -91,6 +91,9 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
         .size = buffer.total_size,
         .operation = .read,
     });
+    for (buffer.address.access([*]u8)[0..buffer.total_size]) |byte, i| {
+        if (byte != 0) log.debug("[{}]: 0x{x}", .{ i, byte });
+    }
     asm volatile ("int $0x40");
     //kernel.scheduler.yield(undefined);
 

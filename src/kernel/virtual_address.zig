@@ -42,3 +42,7 @@ pub inline fn belongs_to_region(virtual_address: VirtualAddress, region: Virtual
 pub inline fn offset(virtual_address: VirtualAddress, asked_offset: u64) VirtualAddress {
     return VirtualAddress.new(virtual_address.value + asked_offset);
 }
+
+pub inline fn translate(virtual_address: VirtualAddress, address_space: *Virtual.AddressSpace) ?Physical.Address {
+    return address_space.translate_address(virtual_address);
+}

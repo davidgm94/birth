@@ -19,6 +19,16 @@ pub inline fn new(value: u64) PhysicalAddress {
     return physical_address;
 }
 
+pub inline fn temporary_invalid() PhysicalAddress {
+    return maybe_invalid(0);
+}
+
+pub inline fn maybe_invalid(value: u64) PhysicalAddress {
+    return PhysicalAddress{
+        .value = value,
+    };
+}
+
 pub inline fn identity_virtual_address(physical_address: PhysicalAddress) Virtual.Address {
     return physical_address.identity_virtual_address_extended(false);
 }

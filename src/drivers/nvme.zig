@@ -178,11 +178,11 @@ fn setup_buffer(buffer: *DMA.Buffer) PRPs {
         const first_prp_length = kernel.arch.page_size - offset;
         log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
         var prp2: u64 = 0;
-        if (buffer.size > first_prp_length) {
+        if (buffer.total_size > first_prp_length) {
             TODO(@src());
         }
 
-        return [2]Physical.Address{ prp1, Physical.Address.new(prp2) };
+        return [2]Physical.Address{ prp1, Physical.Address.maybe_invalid(prp2) };
     }
 
     TODO(@src());
@@ -194,63 +194,59 @@ pub fn access(nvme: *NVMe, buffer: *DMA.Buffer, disk_work: DiskWork) bool {
     const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
     const submission_queue_full = new_tail == nvme.io_submission_queue_head;
 
-    if (!submission_queue_full) {
-        const sector_offset = disk_work.offset / sector_size;
-        const sector_count = disk_work.size / sector_size;
-
-        const prp1_physical_address = kernel.Physical.Memory.allocate_pages(1) orelse @panic("ph");
-        const prp1_virtual_address = prp1_physical_address.to_higher_half_virtual_address();
-        kernel.address_space.map(prp1_physical_address, prp1_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
-        // if (!prp2)
+    // TODO: @Lock
+    while (submission_queue_full) : ({
+        // Acquire lock
+    }) {
         // TODO: @Hack
-        var prp2_physical_address: kernel.Physical.Address = undefined;
-        if (true) {
-            prp2_physical_address = nvme.prp_list_pages[nvme.io_submission_queue_tail];
-            kernel.address_space.map(prp2_physical_address, nvme.prp_list_virtual, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
-            const index = 0;
-            nvme.prp_list_virtual.access([*]kernel.Virtual.Address)[index] = kernel.address_space.allocate(0x1000) orelse @panic("asdjkajsdk");
-        }
-
-        var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
-        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
-        // TODO:
-        command[1] = device_nsid;
-        command[2] = 0;
-        command[3] = 0;
-        command[4] = 0;
-        command[5] = 0;
-        command[6] = @truncate(u32, prp1_physical_address.value);
-        command[7] = @truncate(u32, prp1_physical_address.value >> 32);
-        command[8] = @truncate(u32, prp2_physical_address.value);
-        command[9] = @truncate(u32, prp2_physical_address.value >> 32);
-        command[10] = @truncate(u32, sector_offset);
-        command[11] = @truncate(u32, sector_offset >> 32);
-        command[12] = @truncate(u16, sector_count);
-        command[13] = 0;
-        command[14] = 0;
-        command[15] = 0;
-
-        nvme.io_submission_queue_tail = new_tail;
-        log.debug("Sending the command", .{});
-        @fence(.SeqCst);
-        nvme.write_sqtdbl(1, new_tail);
-        asm volatile ("hlt");
-        for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
-            if (byte != 0) {
-                log.debug("[{}]: 0x{x}", .{ i, byte });
-            }
-        }
-        for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
-            if (byte != 0) {
-                log.debug("[{}]: 0x{x}", .{ i, byte });
-            }
-        }
         TODO(@src());
-    } else @panic("queue full");
-
-    if (submission_queue_full) {
-        @panic("queue full wait");
+        // Release lock
     }
+
+    const sector_offset = disk_work.offset / sector_size;
+    const sector_count = disk_work.size / sector_size;
+    if (false) {
+
+        //const prp1_physical_address = kernel.Physical.Memory.allocate_pages(1) orelse @panic("ph");
+        //const prp1_virtual_address = prp1_physical_address.to_higher_half_virtual_address();
+        //kernel.address_space.map(prp1_physical_address, prp1_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
+        //// if (!prp2)
+        //// TODO: @Hack
+        //var prp2_physical_address: kernel.Physical.Address = undefined;
+        //if (true) {
+        //prp2_physical_address = nvme.prp_list_pages[nvme.io_submission_queue_tail];
+        //kernel.address_space.map(prp2_physical_address, nvme.prp_list_virtual, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
+        //const index = 0;
+        //nvme.prp_list_virtual.access([*]kernel.Virtual.Address)[index] = kernel.address_space.allocate(0x1000) orelse @panic("asdjkajsdk");
+        //}
+    }
+
+    const prps = setup_buffer(buffer);
+
+    var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
+    command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
+    // TODO:
+    command[1] = device_nsid;
+    command[2] = 0;
+    command[3] = 0;
+    command[4] = 0;
+    command[5] = 0;
+    command[6] = @truncate(u32, prps[0].value);
+    command[7] = @truncate(u32, prps[0].value >> 32);
+    command[8] = @truncate(u32, prps[1].value);
+    command[9] = @truncate(u32, prps[1].value >> 32);
+    command[10] = @truncate(u32, sector_offset);
+    command[11] = @truncate(u32, sector_offset >> 32);
+    command[12] = @truncate(u16, sector_count);
+    command[13] = 0;
+    command[14] = 0;
+    command[15] = 0;
+
+    nvme.io_submission_queue_tail = new_tail;
+    log.debug("Sending the command", .{});
+    @fence(.SeqCst);
+    nvme.write_sqtdbl(1, new_tail);
+    asm volatile ("hlt");
 
     return true;
 }
