@@ -206,3 +206,5 @@ pub const fields = std.meta.fields;
 
 pub const reference_all_declarations = std.testing.refAllDecls;
 pub const Type = std.builtin.Type;
+
+pub const Allocator = std.mem.Allocator;

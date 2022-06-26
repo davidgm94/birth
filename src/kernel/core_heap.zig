@@ -22,6 +22,7 @@ const Region = struct {
 regions: [region_count]Region,
 // TODO: use another synchronization primitive
 lock: kernel.Spinlock,
+allocator: kernel.Allocator,
 
 const region_size = 2 * kernel.mb;
 const region_count = kernel.core_memory_region.size / region_size;
@@ -67,3 +68,33 @@ pub fn allocate_extended(heap: *Heap, size: u64, alignment: u64) ?Virtual.Addres
 
     return Virtual.Address.new(result_address);
 }
+
+var allocator = struct {
+    vtab: kernel.Allocator.VTable = .{ .alloc = alloc, .resize = resize, .free = free },
+
+    fn alloc(heap: *Heap, len: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8 {
+        _ = heap;
+        _ = len;
+        _ = ptr_align;
+        _ = len_align;
+        _ = return_address;
+
+        TODO(@src());
+    }
+    fn resize(heap: *Heap, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {
+        _ = heap;
+        _ = old_mem;
+        _ = old_align;
+        _ = new_size;
+        _ = len_align;
+        _ = return_address;
+        TODO(@src());
+    }
+    fn free(heap: *Heap, old_mem: []u8, old_align: u29, return_address: usize) void {
+        _ = heap;
+        _ = old_mem;
+        _ = old_align;
+        _ = return_address;
+        TODO(@src());
+    }
+}{};
