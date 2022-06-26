@@ -154,18 +154,25 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
 const sector_size = 0x200;
 
-const Operation = enum {
+pub const Operation = enum {
     read,
     write,
 };
-pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operation) bool {
+
+pub const DiskWork = struct {
+    offset: u64,
+    size: u64,
+    operation: Operation,
+};
+
+pub fn access(nvme: *NVMe, disk_work: DiskWork) bool {
     // TODO: @Lock
     const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
     const submission_queue_full = new_tail == nvme.io_submission_queue_head;
 
     if (!submission_queue_full) {
-        const sector_offset = byte_offset / sector_size;
-        const sector_count = byte_count / sector_size;
+        const sector_offset = disk_work.offset / sector_size;
+        const sector_count = disk_work.size / sector_size;
         _ = sector_offset;
         _ = sector_count;
 
@@ -183,7 +190,7 @@ pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operati
         }
 
         var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
-        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (operation == .write) 0x01 else 0x02);
+        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
         // TODO:
         command[1] = device_nsid;
         command[2] = 0;
@@ -206,16 +213,16 @@ pub fn access(nvme: *NVMe, byte_offset: u64, byte_count: u64, operation: Operati
         @fence(.SeqCst);
         nvme.write_sqtdbl(1, new_tail);
         asm volatile ("hlt");
-        //for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
-        //if (byte != 0) {
-        //log.debug("[{}]: 0x{x}", .{ i, byte });
-        //}
-        //}
-        //for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
-        //if (byte != 0) {
-        //log.debug("[{}]: 0x{x}", .{ i, byte });
-        //}
-        //}
+        for (prp1_virtual_address.access([*]u8)[0..0x1000]) |byte, i| {
+            if (byte != 0) {
+                log.debug("[{}]: 0x{x}", .{ i, byte });
+            }
+        }
+        for (prp2_physical_address.to_higher_half_virtual_address().access([*]u8)[0..0x1000]) |byte, i| {
+            if (byte != 0) {
+                log.debug("[{}]: 0x{x}", .{ i, byte });
+            }
+        }
         TODO(@src());
     } else @panic("queue full");
 
