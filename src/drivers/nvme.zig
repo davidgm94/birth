@@ -6,6 +6,10 @@ const PCI = @import("pci.zig");
 
 const x86_64 = @import("../kernel/arch/x86_64.zig");
 
+const DMA = kernel.DMA;
+const Physical = kernel.Physical;
+const Virtual = kernel.Virtual;
+
 const NVMe = @This();
 pub var controller: NVMe = undefined;
 
@@ -165,7 +169,27 @@ pub const DiskWork = struct {
     operation: Operation,
 };
 
-pub fn access(nvme: *NVMe, disk_work: DiskWork) bool {
+const PRPs = [2]Physical.Address;
+
+fn setup_buffer(buffer: *DMA.Buffer) PRPs {
+    const offset = buffer.address.value % kernel.arch.page_size;
+    if (offset + buffer.total_size <= 2 * kernel.arch.page_size) {
+        const prp1 = buffer.address.translate(&kernel.address_space) orelse TODO(@src());
+        const first_prp_length = kernel.arch.page_size - offset;
+        log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
+        var prp2: u64 = 0;
+        if (buffer.size > first_prp_length) {
+            TODO(@src());
+        }
+
+        return [2]Physical.Address{ prp1, Physical.Address.new(prp2) };
+    }
+
+    TODO(@src());
+}
+
+pub fn access(nvme: *NVMe, buffer: *DMA.Buffer, disk_work: DiskWork) bool {
+    _ = buffer;
     // TODO: @Lock
     const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
     const submission_queue_full = new_tail == nvme.io_submission_queue_head;
@@ -173,8 +197,6 @@ pub fn access(nvme: *NVMe, disk_work: DiskWork) bool {
     if (!submission_queue_full) {
         const sector_offset = disk_work.offset / sector_size;
         const sector_count = disk_work.size / sector_size;
-        _ = sector_offset;
-        _ = sector_count;
 
         const prp1_physical_address = kernel.Physical.Memory.allocate_pages(1) orelse @panic("ph");
         const prp1_virtual_address = prp1_physical_address.to_higher_half_virtual_address();
