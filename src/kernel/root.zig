@@ -1,19 +1,17 @@
-const std = @import("std");
-const builtin = @import("builtin");
-const kernel = @import("../kernel.zig");
+const kernel = @import("kernel");
 /// Define root.log_level to override the default
-pub const log_level: std.log.Level = switch (builtin.mode) {
+pub const log_level: kernel.log.Level = switch (kernel.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
     .ReleaseFast, .ReleaseSmall => .info,
 };
 
-pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn log(comptime level: kernel.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
 
     //var time: [20]u8 = undefined; // 20 should be enough for 64 bit system
     //const buffer = time[0..];
-    //const time_str = std.fmt.bufPrint(buffer, "{d:>6}", .{@intToFloat(f64, kernel.arch.Clock.TICK) / @intToFloat(f64, kernel.arch.HZ)}) catch @panic("Unexpected format error in root.log");
+    //const time_str = kernel.fmt.bufPrint(buffer, "{d:>6}", .{@intToFloat(f64, kernel.arch.Clock.TICK) / @intToFloat(f64, kernel.arch.HZ)}) catch @panic("Unexpected format error in root.log");
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
 
     //kernel.arch.writer.writeAll("[") catch unreachable;
@@ -25,6 +23,6 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
 }
 
 //var panicking: usize = 0;
-pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace) noreturn {
+pub fn panic(message: []const u8, _: ?*kernel.StackTrace) noreturn {
     kernel.panic("{s}", .{message});
 }

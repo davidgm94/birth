@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 
 pub const Spinlock = @import("spinlock.zig");
 pub const sync = @import("sync.zig");

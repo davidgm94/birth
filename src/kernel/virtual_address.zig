@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("kernel");
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 const VirtualAddress = @This();

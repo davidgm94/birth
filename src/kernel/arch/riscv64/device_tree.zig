@@ -1,5 +1,5 @@
 const std = @import("std");
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 const assert = kernel.assert;
 const TODO = kernel.TODO;
 const align_forward = kernel.align_forward;

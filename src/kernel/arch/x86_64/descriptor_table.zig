@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 pub const Register = packed struct {
     limit: u16,
     address: u64,

@@ -1,9 +1,10 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("kernel");
 pub const Disk = @import("drivers/disk.zig");
 pub const Filesystem = @import("drivers/filesystem.zig");
 pub const RNUFS = @import("drivers/rnu_fs.zig");
 pub const graphics = @import("drivers/graphics.zig");
 pub const NVMe = @import("drivers/nvme.zig");
+pub const PCI = @import("drivers/pci.zig");
 
 pub fn Driver(comptime Generic: type, comptime Specific: type) type {
     return struct {

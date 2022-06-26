@@ -1,14 +1,16 @@
 const std = @import("std");
-const kernel = @import("../kernel.zig");
+const builtin = @import("builtin");
+const kernel = @import("kernel");
 const page_size = kernel.arch.page_size;
 const sector_size = kernel.arch.sector_size;
+
+pub const build_mode = builtin.mode;
 
 pub const kb = 1024;
 pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
-const log = kernel.log.scoped(.data_manipulation);
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
@@ -202,6 +204,9 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
     };
 }
 
+pub const log = std.log;
+pub const Writer = std.io.Writer;
+
 pub const fields = std.meta.fields;
 
 pub const reference_all_declarations = std.testing.refAllDecls;
@@ -211,3 +216,8 @@ pub const Allocator = std.mem.Allocator;
 pub const ArrayList = std.ArrayListUnmanaged;
 pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
 pub const MultiArrayList = std.MultiArrayList;
+pub const StackTrace = std.builtin.StackTrace;
+pub const SourceLocation = std.builtin.SourceLocation;
+pub const AtomicRmwOp = std.builtin.AtomicRmwOp;
+pub const AtomicOrder = std.builtin.AtomicOrder;
+pub const cpu = builtin.cpu;

@@ -10,6 +10,7 @@ const LibExeObjStep = std.build.LibExeObjStep;
 const Step = std.build.Step;
 const RunStep = std.build.RunStep;
 const FileSource = std.build.FileSource;
+const Package = std.build.Pkg;
 
 const building_os = builtin.target.os.tag;
 const building_arch = builtin.target.cpu.arch;
@@ -65,7 +66,7 @@ const Kernel = struct {
     }
 
     fn create_executable(kernel: *Kernel) void {
-        kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/root.zig");
+        kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel.zig");
         var target = get_target_base(kernel.options.arch);
 
         switch (kernel.options.arch) {
@@ -104,9 +105,11 @@ const Kernel = struct {
         }
 
         kernel.executable.setTarget(target);
-        kernel.executable.setMainPkgPath("src");
+        //kernel.executable.setMainPkgPath("src");
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
+
+        kernel.executable.addPackagePath("drivers", "src/drivers.zig");
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
@@ -215,14 +218,8 @@ const Kernel = struct {
                     kernel.run_argument_list.append("stdio") catch unreachable;
                 }
 
-                //"-drive", "if=none,format=raw,file=zig-cache/hdd.bin,id=foo",
-                //"-global", "virtio-mmio.force-legacy=false",
-                //"-device", "virtio-blk-device,drive=foo",
-                //"-device", "virtio-gpu-device",
                 kernel.run_argument_list.append("-global") catch unreachable;
                 kernel.run_argument_list.append("virtio-mmio.force-legacy=false") catch unreachable;
-                //kernel.run_argument_list.append("-global") catch unreachable;
-                //kernel.run_argument_list.append("virtio-pci.force-legacy=false") catch unreachable;
 
                 if (kernel.options.run.disk_interface) |disk_interface| {
                     kernel.run_argument_list.append("-drive") catch unreachable;

@@ -1,4 +1,4 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("kernel");
 fn PackedOptional(IntegerType: type) type {
     const backed_type = @typeInfo(IntegerType);
     comptime kernel.assert_unsafe(backed_type == .Int);

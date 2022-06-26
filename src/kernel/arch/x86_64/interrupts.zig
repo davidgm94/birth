@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
 const GDT = @import("gdt.zig");

@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 const TODO = kernel.TODO;
 
 // TODO: make possible to instantiate more than one same-class virtio driver

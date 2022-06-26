@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 const arch = kernel.arch;
 
 _lock: usize align(64),

@@ -1,11 +1,6 @@
-const std = @import("std");
-const builtin = @import("builtin");
-
 const kernel = @This();
 
 pub const arch = @import("kernel/arch.zig");
-pub const log = std.log;
-pub const build_mode = builtin.mode;
 pub const Physical = @import("kernel/physical.zig");
 pub const Virtual = @import("kernel/virtual.zig");
 pub usingnamespace @import("kernel/assertion.zig");
@@ -13,7 +8,6 @@ pub usingnamespace @import("kernel/data_manipulation.zig");
 const panic_file = @import("kernel/panic.zig");
 pub const panic = panic_file.panic;
 pub const TODO = panic_file.TODO;
-pub const SourceLocation = panic_file.SourceLocation;
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
@@ -21,10 +15,8 @@ pub const Heap = @import("kernel/heap.zig");
 pub const CoreHeap = @import("kernel/core_heap.zig");
 pub const PSF1 = @import("kernel/psf1.zig");
 pub const scheduler = @import("kernel/scheduler.zig");
-pub const drivers = @import("drivers.zig");
 pub const ELF = @import("kernel/elf.zig");
 pub const Syscall = @import("kernel/syscall.zig");
-pub const DMA = @import("drivers/dma.zig");
 comptime {
     kernel.reference_all_declarations(Syscall);
 }
@@ -35,7 +27,6 @@ pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xF
 
 pub var core_heap: CoreHeap = undefined;
 pub var font: PSF1.Font = undefined;
-pub const Writer = std.io.Writer;
 pub var higher_half_direct_map: Virtual.Address = undefined;
 pub var file: File = undefined;
 pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;

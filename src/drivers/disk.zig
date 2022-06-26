@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("kernel");
 const Driver = @This();
 
 const Type = enum(u32) {

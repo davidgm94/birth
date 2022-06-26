@@ -1,7 +1,8 @@
-const kernel = @import("../../kernel.zig");
-const PCI = @import("../../drivers/pci.zig");
-const NVMe = @import("../../drivers/nvme.zig");
-const Virtio = @import("../../drivers/virtio.zig");
+const kernel = @import("kernel");
+const drivers = @import("drivers");
+const PCI = drivers.PCI;
+const NVMe = drivers.NVMe;
+const Virtio = drivers.Virtio;
 const TODO = kernel.TODO;
 
 const log = kernel.log.scoped(.x86_64);
@@ -69,7 +70,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     preinit_scheduler();
     init_scheduler();
     prepare_drivers(rsdp);
-    kernel.drivers.init() catch |driver_init_error| kernel.panic("Failed to initialize drivers: {}", .{driver_init_error});
+    drivers.init() catch |driver_init_error| kernel.panic("Failed to initialize drivers: {}", .{driver_init_error});
     // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
     // TODO: harden

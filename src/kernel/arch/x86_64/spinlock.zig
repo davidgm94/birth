@@ -1,9 +1,8 @@
 const Spinlock = @This();
 
-const kernel = @import("../../../kernel.zig");
-const builtin = @import("builtin");
+const kernel = @import("kernel");
 const log = kernel.log.scoped(.Spinlock_x86_64);
-const AtomicRmwOp = builtin.AtomicRmwOp;
+const AtomicRmwOp = kernel.AtomicRmwOp;
 status: bool,
 were_interrupts_enabled: bool,
 

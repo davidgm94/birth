@@ -1,9 +1,10 @@
-const std = @import("std");
-const builtin = @import("builtin");
-const current_arch = builtin.cpu.arch;
+const kernel = @import("kernel");
+const current_arch = kernel.cpu.arch;
+pub const riscv64 = @import("arch/riscv64/riscv64.zig");
+pub const x86_64 = @import("arch/x86_64.zig");
 const arch = switch (current_arch) {
-    .riscv64 => @import("arch/riscv64/riscv64.zig"),
-    .x86_64 => @import("arch/x86_64.zig"),
+    .riscv64 => riscv64,
+    .x86_64 => x86_64,
     else => @compileError("CPU architecture not supported"),
 };
 
@@ -48,7 +49,7 @@ pub const Writer = struct {
     }
 };
 
-pub var writer = std.io.Writer(void, Writer.Error, Writer.write){ .context = {} };
+pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} };
 
 pub fn check_page_size(asked_page_size: u64) u64 {
     for (arch.valid_page_sizes) |valid_page_size| {

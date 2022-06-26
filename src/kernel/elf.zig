@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("kernel");
 const log = kernel.log.scoped(.ELF);
 
 const FileHeader = extern struct {

@@ -1,9 +1,6 @@
-const std = @import("std");
-const kernel = @import("../kernel.zig");
-
+const kernel = @import("root");
 const log = kernel.log.scoped(.PANIC);
-
-pub const SourceLocation = std.builtin.SourceLocation;
+const SourceLocation = kernel.SourceLocation;
 
 pub fn panic(comptime format: []const u8, args: anytype) noreturn {
     @setCold(true);

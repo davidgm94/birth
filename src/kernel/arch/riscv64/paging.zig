@@ -1,4 +1,4 @@
-const kernel = @import("../../../kernel.zig");
+const kernel = @import("kernel");
 const Physical = @import("physical.zig");
 const Virtual = @import("virtual.zig");
 
