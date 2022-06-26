@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
 

@@ -1,7 +1,7 @@
-const kernel = @import("kernel");
+const kernel = @import("../kernel.zig");
 const Font = kernel.PSF1.Font;
 
-const log = kernel.log.scoped(.graphics);
+const log = kernel.log_scoped(.graphics);
 const Driver = @This();
 
 const Type = enum(u64) {

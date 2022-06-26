@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
 const GDT = @import("gdt.zig");
@@ -11,7 +11,7 @@ const Context = x86_64.Context;
 const TODO = kernel.TODO;
 const Thread = kernel.scheduler.Thread;
 const Virtual = kernel.Virtual;
-const log = kernel.log.scoped(.interrupts);
+const log = kernel.log_scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;
 
 export var idt: IDT = undefined;

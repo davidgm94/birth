@@ -1,6 +1,6 @@
 // This has been implemented with NVMe Specification 2.0b
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.NVMe);
+const kernel = @import("../kernel.zig");
+const log = kernel.log_scoped(.NVMe);
 const TODO = kernel.TODO;
 const PCI = @import("pci.zig");
 

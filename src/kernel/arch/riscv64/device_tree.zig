@@ -1,5 +1,5 @@
 const std = @import("std");
-const kernel = @import("kernel");
+const kernel = @import("root");
 const assert = kernel.assert;
 const TODO = kernel.TODO;
 const align_forward = kernel.align_forward;
@@ -208,7 +208,7 @@ const StructureBlock = struct {
                             self.parse_node(1, address_cells, size_cells);
                         },
                         .end_node => break,
-                        else => kernel.panic("Unexpected token: {}\n", .{token}),
+                        else => kernel.crash("Unexpected token: {}\n", .{token}),
                     }
                 }
             }
@@ -498,7 +498,7 @@ const StructureBlock = struct {
                     },
                     .begin_node => self.parse_node(attribute_identation + 1, address_cells, size_cells),
                     .end_node => break,
-                    else => kernel.panic("NI: {s}\n", .{@tagName(token)}),
+                    else => kernel.crash("NI: {s}\n", .{@tagName(token)}),
                 }
             }
         }
@@ -521,7 +521,7 @@ const StructureBlock = struct {
                             };
                         }
                     },
-                    else => kernel.panic("NI find: {}\n", .{token}),
+                    else => kernel.crash("NI find: {}\n", .{token}),
                 }
             }
 
@@ -585,7 +585,7 @@ const StructureBlock = struct {
                     .end_node => {
                         break;
                     },
-                    else => kernel.panic("token unimplemented: {}\n", .{skip_token}),
+                    else => kernel.crash("token unimplemented: {}\n", .{skip_token}),
                 }
             }
         }
@@ -694,7 +694,7 @@ const StructureBlock = struct {
                     },
                     .property => self.skip_property(),
                     .end_node => break,
-                    else => kernel.panic("NI: {}\n", .{token}),
+                    else => kernel.crash("NI: {}\n", .{token}),
                 }
             }
 

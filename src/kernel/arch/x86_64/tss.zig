@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 
 pub const Descriptor = packed struct {
     limit_low: u16,

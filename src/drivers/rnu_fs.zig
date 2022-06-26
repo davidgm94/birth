@@ -1,5 +1,5 @@
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.RNUFS);
+const kernel = @import("../kernel.zig");
+const log = kernel.log_scoped(.RNUFS);
 const Filesystem = @import("filesystem.zig");
 const RNUFS = @import("../common/fs.zig");
 const GenericDriver = kernel.driver;

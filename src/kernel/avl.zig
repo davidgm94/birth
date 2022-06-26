@@ -1,5 +1,5 @@
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.AVL);
+const kernel = @import("root");
+const log = kernel.log_scoped(.AVL);
 
 pub fn Tree(comptime T: type) type {
     return struct {
@@ -28,7 +28,7 @@ pub fn Tree(comptime T: type) type {
             //log.debug("Validated before insertion of {*} with key 0x{x}", .{ item, key });
 
             if (item.tree != null) {
-                kernel.panic("item with key 0x{x} already in tree {*}", .{ key, item.tree });
+                kernel.crash("item with key 0x{x} already in tree {*}", .{ key, item.tree });
             }
 
             item.tree = self;
@@ -321,8 +321,8 @@ pub fn Tree(comptime T: type) type {
 
             fn validate(self: *@This(), tree: *Self, parent: ?*@This()) i32 {
                 //log.debug("Validating node with key 0x{x}", .{self.key});
-                if (self.parent != parent) kernel.panic("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
-                if (self.tree != tree) kernel.panic("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
+                if (self.parent != parent) kernel.crash("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
+                if (self.tree != tree) kernel.crash("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
 
                 const left_height = blk: {
                     if (self.children[0]) |left| {

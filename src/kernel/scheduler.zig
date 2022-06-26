@@ -1,6 +1,6 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const TODO = kernel.TODO;
-const log = kernel.log.scoped(.Scheduler);
+const log = kernel.log_scoped(.Scheduler);
 
 const Virtual = kernel.Virtual;
 const PrivilegeLevel = kernel.PrivilegeLevel;

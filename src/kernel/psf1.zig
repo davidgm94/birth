@@ -1,5 +1,5 @@
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.PSF1);
+const kernel = @import("root");
+const log = kernel.log_scoped(.PSF1);
 const TODO = kernel.TODO;
 
 pub const Header = struct {

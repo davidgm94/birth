@@ -1,5 +1,5 @@
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.CoreHeap);
+const kernel = @import("root");
+const log = kernel.log_scoped(.CoreHeap);
 const TODO = kernel.TODO;
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;

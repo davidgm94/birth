@@ -1,7 +1,7 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const Virtual = @This();
 const Physical = kernel.Physical;
-const log = kernel.log.scoped(.Virtual);
+const log = kernel.log_scoped(.Virtual);
 pub const Memory = @import("virtual_memory.zig");
 pub const Address = @import("virtual_address.zig");
 

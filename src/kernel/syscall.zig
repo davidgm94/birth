@@ -1,5 +1,5 @@
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.Syscall);
+const kernel = @import("root");
+const log = kernel.log_scoped(.Syscall);
 const TODO = kernel.TODO;
 const x86_64 = @import("arch/x86_64.zig");
 

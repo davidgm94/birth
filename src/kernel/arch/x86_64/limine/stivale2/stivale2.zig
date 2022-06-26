@@ -1,8 +1,8 @@
+const kernel = @import("root");
 const std = @import("std");
-const assert = std.debug.assert;
 const stivale = @import("header.zig");
-const log = std.log.scoped(.stivale2);
-const kernel = @import("kernel");
+const log = kernel.log_scoped(.stivale);
+const assert = kernel.assert_unsafe;
 const x86_64 = @import("../../../x86_64.zig");
 pub const Struct = stivale.Struct;
 

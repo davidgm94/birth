@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 var frequency: u32 = 0;
 
 pub fn init() void {

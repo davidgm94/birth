@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const arch = kernel.arch;
 
 _lock: usize align(64),

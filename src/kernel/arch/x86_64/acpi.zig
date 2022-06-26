@@ -1,6 +1,6 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const x86_64 = @import("../x86_64.zig");
-const log = kernel.log.scoped(.ACPI);
+const log = kernel.log_scoped(.ACPI);
 const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
@@ -103,7 +103,7 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                                 log.debug("LAPIC_NMI: {}", .{lapic_nmi});
                                 kernel.assert(@src(), @sizeOf(MADT.LAPIC_NMI) == entry_length);
                             },
-                            else => kernel.panic("ni: {}", .{entry_type}),
+                            else => kernel.crash("ni: {}", .{entry_type}),
                         }
                     }
                 },

@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const virtio = @import("virtio.zig");
 const SplitQueue = virtio.SplitQueue;
 const MMIO = virtio.MMIO;
@@ -14,7 +14,7 @@ queue: *volatile SplitQueue,
 mmio: *volatile MMIO,
 batch_read_byte_count: u64,
 
-const log = kernel.log.scoped(.VirtioBlock);
+const log = kernel.log_scoped(.VirtioBlock);
 pub const Initialization = struct {
     pub const Context = u64;
     pub const Error = error{
@@ -144,7 +144,7 @@ pub fn handler() u64 {
     const status_descriptor = driver.queue.get_descriptor(sector_descriptor.next) orelse @panic("unable to get descriptor");
     const status = @intToPtr([*]u8, kernel.arch.Virtual.AddressSpace.physical_to_virtual(status_descriptor.address))[0];
     //log.debug("Disk operation status: {}", .{status});
-    if (status != 0) kernel.panic("Disk operation failed: {}", .{status});
+    if (status != 0) kernel.crash("Disk operation failed: {}", .{status});
 
     driver.batch_read_byte_count += sector_size;
 

@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const arch = kernel.arch;
 const Physical = kernel.arch.Physical;
 const page_size = kernel.arch.page_size;
@@ -6,7 +6,7 @@ const AddressPair = kernel.Memory.AddressPair;
 /// Kernel pagetable before KPTI enabled
 pub var kernel_init_pagetable: [*]usize = undefined; // use optional type
 
-const log = kernel.log.scoped(.Virtual);
+const log = kernel.log_scoped(.Virtual);
 const pagetable_t = [*]usize;
 const pte_t = usize;
 const MAXVA: usize = (1 << (9 + 9 + 9 + 12 - 1));

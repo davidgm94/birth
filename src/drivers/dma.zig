@@ -1,6 +1,6 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const TODO = kernel.TODO;
-const log = kernel.log.scoped(.DMA);
+const log = kernel.log_scoped(.DMA);
 
 pub const Buffer = struct {
     address: kernel.Virtual.Address,

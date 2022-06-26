@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const current_arch = kernel.cpu.arch;
 pub const riscv64 = @import("arch/riscv64/riscv64.zig");
 pub const x86_64 = @import("arch/x86_64.zig");

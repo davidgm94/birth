@@ -1,7 +1,7 @@
 const Spinlock = @This();
 
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.Spinlock_x86_64);
+const kernel = @import("root");
+const log = kernel.log_scoped(.Spinlock_x86_64);
 const AtomicRmwOp = kernel.AtomicRmwOp;
 status: bool,
 were_interrupts_enabled: bool,
@@ -45,6 +45,6 @@ pub fn release(spinlock: *volatile Spinlock) void {
 
 inline fn assert_lock_status(spinlock: *volatile Spinlock, expected_status: bool) void {
     if (expected_status != spinlock.status or kernel.arch.are_interrupts_enabled()) {
-        kernel.panic("Spinlock not in a desired state", .{});
+        kernel.crash("Spinlock not in a desired state", .{});
     }
 }

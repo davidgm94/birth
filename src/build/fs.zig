@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fs = @import("../common/fs.zig");
 
-const log = std.log.scoped(.build_fs);
+const log = std.log_scoped(.build_fs);
 
 pub const MemoryDisk = struct {
     bytes: []u8,

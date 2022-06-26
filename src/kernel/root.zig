@@ -1,4 +1,3 @@
-const kernel = @import("kernel");
 /// Define root.log_level to override the default
 pub const log_level: kernel.log.Level = switch (kernel.build_mode) {
     .Debug => .debug,
@@ -24,5 +23,5 @@ pub fn log(comptime level: kernel.log.Level, comptime scope: @TypeOf(.EnumLitera
 
 //var panicking: usize = 0;
 pub fn panic(message: []const u8, _: ?*kernel.StackTrace) noreturn {
-    kernel.panic("{s}", .{message});
+    kernel.crash("{s}", .{message});
 }

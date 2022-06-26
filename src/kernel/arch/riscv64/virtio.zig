@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const TODO = kernel.TODO;
 
 // TODO: make possible to instantiate more than one same-class virtio driver
@@ -213,7 +213,7 @@ pub const MMIO = struct {
         notification_data = 38,
     };
 
-    const log = kernel.log.scoped(.MMIO);
+    const log = kernel.log_scoped(.MMIO);
 
     pub fn debug_device_status(mmio: *volatile MMIO) void {
         log.debug("Reading device status...", .{});

@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const TODO = kernel.TODO;
 
 var plic_base: u64 = 0;
@@ -60,8 +60,8 @@ pub fn init(hart_id: u64) void {
     log.debug("PLIC initialized", .{});
 }
 
-const log = kernel.log.scoped(.Interrupts_init);
-const ilog = kernel.log.scoped(.Interrupts_PLIC);
+const log = kernel.log_scoped(.Interrupts_init);
+const ilog = kernel.log_scoped(.Interrupts_PLIC);
 
 // TODO: should this be locked?
 pub fn handle_external_interrupt(hart_id: u64) void {

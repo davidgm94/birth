@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const TODO = kernel.TODO;
 const AddresPair = kernel.Memory.AddressPair;
 const Physical = kernel.arch.Physical;

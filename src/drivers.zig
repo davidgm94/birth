@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("kernel.zig");
 pub const Disk = @import("drivers/disk.zig");
 pub const Filesystem = @import("drivers/filesystem.zig");
 pub const RNUFS = @import("drivers/rnu_fs.zig");
@@ -8,7 +8,7 @@ pub const PCI = @import("drivers/pci.zig");
 
 pub fn Driver(comptime Generic: type, comptime Specific: type) type {
     return struct {
-        const log = kernel.log.scoped(.DriverInitialization);
+        const log = kernel.log_scoped(.DriverInitialization);
         const Initialization = Specific.Initialization;
 
         pub fn init(allocator: kernel.Allocator, context: Initialization.Context) Initialization.Error!void {
@@ -25,7 +25,7 @@ pub fn Driver(comptime Generic: type, comptime Specific: type) type {
 pub const AllocationCallback = fn (size: u64) ?u64;
 
 pub fn init() !void {
-    const log = kernel.log.scoped(.drivers);
+    const log = kernel.log_scoped(.drivers);
     const allocator = kernel.core_heap.allocator;
     try kernel.arch.init_block_drivers(allocator);
     log.debug("Initialized block drivers", .{});

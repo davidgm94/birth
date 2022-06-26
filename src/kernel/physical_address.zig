@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const PhysicalAddress = @This();
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
@@ -13,7 +13,7 @@ pub inline fn new(value: u64) PhysicalAddress {
     };
 
     if (!physical_address.is_valid()) {
-        kernel.panic("physical address 0x{x} is invalid", .{physical_address.value});
+        kernel.crash("physical address 0x{x} is invalid", .{physical_address.value});
     }
 
     return physical_address;

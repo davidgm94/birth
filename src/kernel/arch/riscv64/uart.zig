@@ -1,6 +1,6 @@
 // UART Driver
 const std = @import("std");
-const kernel = @import("kernel");
+const kernel = @import("root");
 const Spinlock = kernel.arch.Spinlock;
 
 // the UART control registers.

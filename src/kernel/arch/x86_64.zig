@@ -1,11 +1,11 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const drivers = @import("drivers");
 const PCI = drivers.PCI;
 const NVMe = drivers.NVMe;
 const Virtio = drivers.Virtio;
 const TODO = kernel.TODO;
 
-const log = kernel.log.scoped(.x86_64);
+const log = kernel.log_scoped(.x86_64);
 
 pub const page_size = kernel.arch.check_page_size(0x1000);
 
@@ -70,7 +70,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     preinit_scheduler();
     init_scheduler();
     prepare_drivers(rsdp);
-    drivers.init() catch |driver_init_error| kernel.panic("Failed to initialize drivers: {}", .{driver_init_error});
+    drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
     // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
     // TODO: harden
@@ -1209,7 +1209,7 @@ pub const Context = struct {
         // TODO: more checking
         if (failed) {
             context.debug();
-            kernel.panic("check failed: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+            kernel.crash("check failed: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
         }
     }
 };

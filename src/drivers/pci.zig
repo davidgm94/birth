@@ -1,6 +1,6 @@
 // TODO: batch PCI register access
-const kernel = @import("kernel");
-const log = kernel.log.scoped(.PCI);
+const kernel = @import("../kernel.zig");
+const log = kernel.log_scoped(.PCI);
 const TODO = kernel.TODO;
 const Controller = @This();
 const x86_64 = @import("../kernel/arch/x86_64.zig");
@@ -181,7 +181,7 @@ fn enumerate(pci: *Controller) void {
 
     const original_bus_to_scan_count = buses_to_scan;
 
-    if (buses_to_scan == 0) kernel.panic("unable to find any PCI bus", .{});
+    if (buses_to_scan == 0) kernel.crash("unable to find any PCI bus", .{});
 
     base_function = Function.new(0);
     kernel.assert(@src(), @enumToInt(base_function) == 0);

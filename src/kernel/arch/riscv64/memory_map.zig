@@ -1,7 +1,7 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const Physical = kernel.arch.Physical;
 const TODO = kernel.TODO;
-const log = kernel.log.scoped(.memory_map);
+const log = kernel.log_scoped(.memory_map);
 
 var available: BootloaderMemoryRegionGroup = undefined;
 var reserved: BootloaderMemoryRegionGroup = undefined;

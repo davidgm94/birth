@@ -1,11 +1,11 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const virtio = @import("virtio.zig");
 const MMIO = virtio.MMIO;
 const SplitQueue = virtio.SplitQueue;
 const Descriptor = virtio.Descriptor;
 
 const Graphics = kernel.graphics;
-const log = kernel.log.scoped(.VirtioGPU);
+const log = kernel.log_scoped(.VirtioGPU);
 const TODO = kernel.TODO;
 
 const GenericDriver = kernel.driver;
@@ -144,7 +144,7 @@ fn pending_operations_handler() void {
     var device_status = driver.mmio.device_status;
     //log.debug("Device status: {}", .{device_status});
     if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
-        kernel.panic("Unrecoverable device status: {}", .{device_status});
+        kernel.crash("Unrecoverable device status: {}", .{device_status});
     }
     //const interrupt_status = driver.mmio.interrupt_status;
     //log.debug("Interrupt status: {}", .{interrupt_status});
@@ -374,7 +374,7 @@ fn handler() u64 {
     var device_status = driver.mmio.device_status;
     log.debug("Device status: {}", .{device_status});
     if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
-        kernel.panic("Unrecoverable device status: {}", .{device_status});
+        kernel.crash("Unrecoverable device status: {}", .{device_status});
     }
     const interrupt_status = driver.mmio.interrupt_status;
     log.debug("Interrupt status: {}", .{interrupt_status});
@@ -396,9 +396,9 @@ fn handler() u64 {
     } else {
         const descriptor = driver.control_queue.pop_used() orelse {
             if (device_status.contains(.failed) or device_status.contains(.device_needs_reset)) {
-                kernel.panic("Unrecoverable device status: {}", .{device_status});
+                kernel.crash("Unrecoverable device status: {}", .{device_status});
             }
-            kernel.panic("virtio GPU descriptor corrupted", .{});
+            kernel.crash("virtio GPU descriptor corrupted", .{});
         };
         const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
         const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
@@ -418,7 +418,7 @@ fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descripto
     switch (header.type) {
         .cmd_get_display_info => {
             if (control_header.type != ControlType.resp_ok_display_info) {
-                kernel.panic("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
+                kernel.crash("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
             }
             const display_info = @ptrCast(*ResponseDisplayInfo, control_header).*;
             log.debug("Display info changed", .{});
@@ -429,7 +429,7 @@ fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descripto
         },
         else => {
             if (control_header.type != ControlType.resp_ok_nodata) {
-                kernel.panic("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
+                kernel.crash("Unable to process {s} request successfully: {s}", .{ @tagName(header.type), @tagName(control_header.type) });
             }
         },
     }

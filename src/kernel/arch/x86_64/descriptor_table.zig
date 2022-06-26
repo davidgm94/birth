@@ -1,4 +1,4 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 pub const Register = packed struct {
     limit: u16,
     address: u64,

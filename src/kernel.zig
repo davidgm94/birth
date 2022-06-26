@@ -5,9 +5,6 @@ pub const Physical = @import("kernel/physical.zig");
 pub const Virtual = @import("kernel/virtual.zig");
 pub usingnamespace @import("kernel/assertion.zig");
 pub usingnamespace @import("kernel/data_manipulation.zig");
-const panic_file = @import("kernel/panic.zig");
-pub const panic = panic_file.panic;
-pub const TODO = panic_file.TODO;
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
@@ -42,3 +39,43 @@ pub const PrivilegeLevel = enum(u1) {
     kernel = 0,
     user = 1,
 };
+
+/// Define root.log_level to override the default
+pub const log_level: kernel.LogLevel = switch (kernel.build_mode) {
+    .Debug => .debug,
+    .ReleaseSafe => .debug,
+    .ReleaseFast, .ReleaseSmall => .info,
+};
+
+pub fn log(comptime level: kernel.LogLevel, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+
+    //var time: [20]u8 = undefined; // 20 should be enough for 64 bit system
+    //const buffer = time[0..];
+    //const time_str = kernel.fmt.bufPrint(buffer, "{d:>6}", .{@intToFloat(f64, kernel.arch.Clock.TICK) / @intToFloat(f64, kernel.arch.HZ)}) catch @panic("Unexpected format error in root.log");
+    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+
+    //kernel.arch.writer.writeAll("[") catch unreachable;
+    //kernel.arch.writer.writeAll(time_str) catch unreachable;
+    //kernel.arch.writer.writeAll("] ") catch unreachable;
+    kernel.arch.Writer.lock.acquire();
+    kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+    kernel.arch.Writer.lock.release();
+}
+
+//var panicking: usize = 0;
+pub fn panic(message: []const u8, _: ?*kernel.StackTrace) noreturn {
+    kernel.crash("{s}", .{message});
+}
+
+pub fn crash(comptime format: []const u8, args: anytype) noreturn {
+    const crash_log = kernel.log_scoped(.PANIC);
+    @setCold(true);
+    kernel.arch.disable_interrupts();
+    crash_log.err(format, args);
+    while (true) {}
+}
+
+pub fn TODO(src: kernel.SourceLocation) noreturn {
+    crash("TODO: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+}

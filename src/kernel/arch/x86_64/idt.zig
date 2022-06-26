@@ -1,9 +1,9 @@
-const kernel = @import("kernel");
+const kernel = @import("root");
 const Interrupt = @import("interrupts.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const IDT = @This();
 
-const log = kernel.log.scoped(.IDT);
+const log = kernel.log_scoped(.IDT);
 
 entries: [256]Descriptor,
 

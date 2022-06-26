@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const kernel = @import("kernel");
+const kernel = @import("root");
 const page_size = kernel.arch.page_size;
 const sector_size = kernel.arch.sector_size;
 
@@ -86,7 +86,7 @@ pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, compti
     const quotient = dividend / divisor;
     const remainder = dividend % divisor;
     const remainder_not_zero = remainder != 0;
-    if (must_be_exact and remainder_not_zero) kernel.panic("remainder not exact when asked to be exact: {} / {}", .{ dividend, divisor });
+    if (must_be_exact and remainder_not_zero) kernel.crash("remainder not exact when asked to be exact: {} / {}", .{ dividend, divisor });
 
     return quotient + @boolToInt(remainder_not_zero);
 }
@@ -204,7 +204,6 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
     };
 }
 
-pub const log = std.log;
 pub const Writer = std.io.Writer;
 
 pub const fields = std.meta.fields;
@@ -221,3 +220,6 @@ pub const SourceLocation = std.builtin.SourceLocation;
 pub const AtomicRmwOp = std.builtin.AtomicRmwOp;
 pub const AtomicOrder = std.builtin.AtomicOrder;
 pub const cpu = builtin.cpu;
+
+pub const LogLevel = std.log.Level;
+pub const log_scoped = std.log.scoped;
