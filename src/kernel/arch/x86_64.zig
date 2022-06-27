@@ -76,6 +76,10 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
     kernel.assert(@src(), Disk.drivers.items.len > 0);
     kernel.assert(@src(), Filesystem.drivers.items.len > 0);
+    const file = Filesystem.drivers.items[0].read_file_callback(Filesystem.drivers.items[0], "font.psf");
+    for (file) |byte, i| {
+        log.debug("[{}] 0x{x}", .{ i, byte });
+    }
     // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
     // TODO: harden

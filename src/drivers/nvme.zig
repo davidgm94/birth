@@ -81,9 +81,14 @@ const Drive = struct {
     }
 
     pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
+        kernel.assert(@src(), buffer.completed_size == 0);
+        kernel.assert(@src(), buffer.address.is_page_aligned());
         const drive = @fieldParentPtr(Drive, "disk", disk);
         const nvme = driver;
-        const bytes_to_read = disk_work.sector_count * disk.sector_size;
+        log.debug("NVMe access", .{});
+        log.debug("NVMe drive: {}", .{drive});
+        log.debug("Buffer: (0x{x}, {})", .{ buffer.address.value, buffer.total_size });
+        log.debug("Work: {}", .{disk_work});
         // TODO: @Lock
         const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
         const submission_queue_full = new_tail == nvme.io_submission_queue_head;
@@ -97,7 +102,7 @@ const Drive = struct {
             // Release lock
         }
 
-        const prps = setup_buffer(buffer);
+        const prps = setup_buffer(buffer, disk_work, disk.sector_size);
 
         var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
         command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
@@ -123,8 +128,32 @@ const Drive = struct {
         @fence(.SeqCst);
         nvme.write_sqtdbl(1, new_tail);
         asm volatile ("hlt");
+        kernel.assert(@src(), buffer.address.access([*]const u8)[0] != 0xaa);
 
-        return bytes_to_read;
+        return disk_work.sector_count;
+    }
+
+    fn setup_buffer(buffer: *DMA.Buffer, disk_work: Disk.Work, sector_size: u64) PRPs {
+        if (true) @panic("rework this");
+        const request_byte_count = disk_work.sector_count * sector_size;
+        log.debug("Request byte count: 0x{x}", .{request_byte_count});
+        const offset = buffer.address.value % kernel.arch.page_size;
+        kernel.assert(@src(), offset == 0);
+        log.debug("Offset: 0x{x}", .{offset});
+        if (request_byte_count <= 2 * kernel.arch.page_size) {
+            log.debug("Buffer address: 0x{x}", .{buffer.address.value});
+            const prp1 = buffer.address.translate(&kernel.address_space) orelse TODO(@src());
+            const first_prp_length = kernel.arch.page_size - offset;
+            log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
+            var prp2: u64 = 0;
+            if (buffer.total_size > first_prp_length) {
+                TODO(@src());
+            }
+
+            return [2]Physical.Address{ prp1, Physical.Address.maybe_invalid(prp2) };
+        }
+
+        TODO(@src());
     }
 };
 
@@ -146,7 +175,6 @@ pub const Initialization = struct {
         driver.init(allocator);
 
         log.debug("Driver initialized", .{});
-        log.debug("Looking for drives...", .{});
 
         return driver;
     }
@@ -247,23 +275,6 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 }
 
 const PRPs = [2]Physical.Address;
-
-fn setup_buffer(buffer: *DMA.Buffer) PRPs {
-    const offset = buffer.address.value % kernel.arch.page_size;
-    if (offset + buffer.total_size <= 2 * kernel.arch.page_size) {
-        const prp1 = buffer.address.translate(&kernel.address_space) orelse TODO(@src());
-        const first_prp_length = kernel.arch.page_size - offset;
-        log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
-        var prp2: u64 = 0;
-        if (buffer.total_size > first_prp_length) {
-            TODO(@src());
-        }
-
-        return [2]Physical.Address{ prp1, Physical.Address.maybe_invalid(prp2) };
-    }
-
-    TODO(@src());
-}
 
 pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
     nvme.capabilities = nvme.read(cap);
@@ -551,13 +562,13 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
     }
 
     while (nvme.io_completion_queue != null and ((nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 14] & (1 << 0) != 0) != nvme.io_completion_queue_phase)) {
+        log.debug("NVMe IO queue sucess", .{});
         from_io = true;
 
         const index = @ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 12])).*;
         const status = (@ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 14])).*) & 0xfffe;
 
         if (index < io_queue_entry_count) {
-            log.debug("Success: {}", .{status == 0});
             if (status != 0) {
                 @panic("failed");
             }

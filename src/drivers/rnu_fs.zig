@@ -19,18 +19,28 @@ pub const Initialization = struct {
 
     pub fn callback(allocator: kernel.Allocator, initialization_context: Context) Filesystem.InitializationError!*Driver {
         const driver = allocator.create(Driver) catch return Error.allocation_failure;
-        driver.fs.disk = initialization_context;
-        driver.fs.read_file_callback = read_file;
+        driver.* = Driver{
+            .fs = Filesystem{
+                .type = .RNU,
+                .disk = initialization_context,
+                .read_file_callback = read_file,
+                .allocator = allocator,
+            },
+        };
 
         return driver;
     }
 };
 
 pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
+    log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
-    var search_buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = sector_size, .alignment = sector_size }) catch @panic("unable to initialize buffer");
+    log.debug("Initializing search buffer", .{});
+    // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
+    var search_buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = kernel.align_forward(sector_size, kernel.arch.page_size), .alignment = kernel.align_forward(sector_size, kernel.arch.page_size) }) catch @panic("unable to initialize buffer");
+    log.debug("Done initializing search buffer", .{});
 
     while (true) {
         log.debug("FS driver asking read", .{});
@@ -40,8 +50,11 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
             .operation = .read,
         });
         log.debug("FS driver ending read", .{});
-        if (sectors_read != sectors_to_read_at_time) @panic("driver failure");
-        var node = @ptrCast(*RNUFS.Node, @alignCast(@alignOf(RNUFS.Node), &search_buffer));
+        if (sectors_read != sectors_to_read_at_time) kernel.crash("Driver internal error: cannot seek file", .{});
+        for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
+            if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
+        }
+        var node = search_buffer.address.access(*RNUFS.Node);
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
         const node_name = node_name_cstr[0..kernel.cstr_len(node_name_cstr)];
         if (node_name.len == 0) @panic("file not found: no files");
@@ -69,7 +82,8 @@ pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
         const sector_size = fs_driver.disk.sector_size;
         const bytes_to_read = kernel.align_forward(node_size, sector_size);
         // TODO: @Bug @maybebug maybe allocate in the heap?
-        var buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = bytes_to_read, .alignment = sector_size }) catch @panic("unable to initialize buffer");
+        // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
+        var buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = kernel.align_forward(bytes_to_read, kernel.arch.page_size), .alignment = kernel.align_forward(sector_size, kernel.arch.page_size) }) catch @panic("unable to initialize buffer");
         const sectors_to_read = kernel.bytes_to_sector(bytes_to_read, sector_size, .must_be_exact);
         // Add one to skip the metadata
         const sectors_read = fs_driver.disk.access(fs_driver.disk, &buffer, Disk.Work{
@@ -78,7 +92,7 @@ pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
             .operation = .read,
         });
 
-        if (sectors_read != sectors_to_read) @panic("driver failure");
+        if (sectors_read != sectors_to_read) kernel.crash("Driver internal error: cannot read file", .{});
 
         return buffer.address.access([*]const u8)[0..node_size];
     } else {

@@ -20,6 +20,7 @@ pub const Buffer = struct {
 
     pub fn new(allocator: kernel.Allocator, initialization: Initialization) !Buffer {
         const allocation_slice = try allocator.allocBytes(@intCast(u29, initialization.alignment), initialization.size, 0, 0);
+        kernel.assert(@src(), allocation_slice[0] == 0xaa);
         return Buffer{
             .address = Virtual.Address.new(@ptrToInt(allocation_slice.ptr)),
             .total_size = initialization.size,

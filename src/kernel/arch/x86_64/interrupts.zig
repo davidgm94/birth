@@ -371,7 +371,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
 
                         x86_64.disable_interrupts();
                     },
-                    else => @panic("ni"),
+                    else => kernel.crash("{s}", .{@tagName(exception)}),
                 }
                 log.debug("Exception: {s}", .{@tagName(exception)});
             }
