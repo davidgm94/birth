@@ -108,9 +108,6 @@ const Kernel = struct {
         //kernel.executable.setMainPkgPath("src");
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
-
-        kernel.executable.addPackagePath("drivers", "src/drivers.zig");
-
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
 

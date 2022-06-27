@@ -1,12 +1,13 @@
 // This has been implemented with NVMe Specification 2.0b
-const kernel = @import("../kernel.zig");
+const kernel = @import("root");
 const log = kernel.log_scoped(.NVMe);
 const TODO = kernel.TODO;
-const PCI = @import("pci.zig");
+const Disk = kernel.drivers.Disk;
+const PCI = kernel.drivers.PCI;
+const DMA = kernel.drivers.DMA;
 
 const x86_64 = @import("../kernel/arch/x86_64.zig");
 
-const DMA = kernel.DMA;
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 
@@ -43,6 +44,8 @@ io_completion_queue_phase: bool,
 prp_list_pages: [io_queue_entry_count]kernel.Physical.Address,
 prp_list_virtual: kernel.Virtual.Address,
 
+drives: []Drive,
+
 const general_timeout = 5000;
 const admin_queue_entry_count = 2;
 const io_queue_entry_count = 256;
@@ -50,8 +53,79 @@ const submission_queue_entry_bytes = 64;
 const completion_queue_entry_bytes = 16;
 const Command = [16]u32;
 
-const FindError = error{
-    not_found,
+const Drive = struct {
+    disk: Disk,
+    nsid: u32,
+
+    pub const Initialization = struct {
+        pub const Context = *NVMe.Drive;
+        pub const Error = error{
+            allocation_failure,
+        };
+
+        pub fn callback(allocator: kernel.Allocator, drive: *NVMe.Drive) Error!*Drive {
+            _ = allocator;
+            return drive;
+        }
+    };
+
+    pub fn new(sector_size: u64, nsid: u32) Drive {
+        return Drive{
+            .disk = Disk{
+                .type = .nvme,
+                .sector_size = sector_size,
+                .access = access,
+            },
+            .nsid = nsid,
+        };
+    }
+
+    pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
+        const drive = @fieldParentPtr(Drive, "disk", disk);
+        const nvme = driver;
+        const bytes_to_read = disk_work.sector_count * disk.sector_size;
+        // TODO: @Lock
+        const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
+        const submission_queue_full = new_tail == nvme.io_submission_queue_head;
+
+        // TODO: @Lock
+        while (submission_queue_full) : ({
+            // Acquire lock
+        }) {
+            // TODO: @Hack
+            TODO(@src());
+            // Release lock
+        }
+
+        const prps = setup_buffer(buffer);
+
+        var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
+        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
+        // TODO:
+        command[1] = drive.nsid;
+        command[2] = 0;
+        command[3] = 0;
+        command[4] = 0;
+        command[5] = 0;
+        command[6] = @truncate(u32, prps[0].value);
+        command[7] = @truncate(u32, prps[0].value >> 32);
+        command[8] = @truncate(u32, prps[1].value);
+        command[9] = @truncate(u32, prps[1].value >> 32);
+        command[10] = @truncate(u32, disk_work.sector_offset);
+        command[11] = @truncate(u32, disk_work.sector_offset >> 32);
+        command[12] = @truncate(u16, disk_work.sector_count);
+        command[13] = 0;
+        command[14] = 0;
+        command[15] = 0;
+
+        nvme.io_submission_queue_tail = new_tail;
+        log.debug("Sending the command", .{});
+        @fence(.SeqCst);
+        nvme.write_sqtdbl(1, new_tail);
+        asm volatile ("hlt");
+
+        return bytes_to_read;
+    }
 };
 
 pub const Initialization = struct {
@@ -62,16 +136,17 @@ pub const Initialization = struct {
     };
 
     pub fn callback(allocator: kernel.Allocator, pci: *PCI) Error!*Driver {
-        const nvme_device = find(pci) orelse return FindError.not_found;
-        log.debug("Found NVMe controller", .{});
+        const nvme_device = find(pci) orelse return Error.not_found;
+        log.debug("Found controller", .{});
         driver = allocator.create(Driver) catch return Error.allocation_failure;
         driver.* = NVMe.new(nvme_device);
         const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
         kernel.assert(@src(), result);
         log.debug("Device features enabled", .{});
-        driver.init();
+        driver.init(allocator);
 
-        log.debug("NVMe driver initialized", .{});
+        log.debug("Driver initialized", .{});
+        log.debug("Looking for drives...", .{});
 
         return driver;
     }
@@ -103,6 +178,7 @@ pub fn new(device: *PCI.Device) NVMe {
         .io_completion_queue_phase = false,
         .prp_list_pages = undefined,
         .prp_list_virtual = undefined,
+        .drives = &.{},
     };
 }
 
@@ -170,19 +246,6 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
     return true;
 }
 
-const sector_size = 0x200;
-
-pub const Operation = enum {
-    read,
-    write,
-};
-
-pub const DiskWork = struct {
-    offset: u64,
-    size: u64,
-    operation: Operation,
-};
-
 const PRPs = [2]Physical.Address;
 
 fn setup_buffer(buffer: *DMA.Buffer) PRPs {
@@ -202,72 +265,7 @@ fn setup_buffer(buffer: *DMA.Buffer) PRPs {
     TODO(@src());
 }
 
-pub fn access(nvme: *NVMe, buffer: *DMA.Buffer, disk_work: DiskWork) bool {
-    _ = buffer;
-    // TODO: @Lock
-    const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
-    const submission_queue_full = new_tail == nvme.io_submission_queue_head;
-
-    // TODO: @Lock
-    while (submission_queue_full) : ({
-        // Acquire lock
-    }) {
-        // TODO: @Hack
-        TODO(@src());
-        // Release lock
-    }
-
-    const sector_offset = disk_work.offset / sector_size;
-    const sector_count = disk_work.size / sector_size;
-    if (false) {
-
-        //const prp1_physical_address = kernel.Physical.Memory.allocate_pages(1) orelse @panic("ph");
-        //const prp1_virtual_address = prp1_physical_address.to_higher_half_virtual_address();
-        //kernel.address_space.map(prp1_physical_address, prp1_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
-        //// if (!prp2)
-        //// TODO: @Hack
-        //var prp2_physical_address: kernel.Physical.Address = undefined;
-        //if (true) {
-        //prp2_physical_address = nvme.prp_list_pages[nvme.io_submission_queue_tail];
-        //kernel.address_space.map(prp2_physical_address, nvme.prp_list_virtual, kernel.Virtual.AddressSpace.Flags.from_flags(&.{.read_write}));
-        //const index = 0;
-        //nvme.prp_list_virtual.access([*]kernel.Virtual.Address)[index] = kernel.address_space.allocate(0x1000) orelse @panic("asdjkajsdk");
-        //}
-    }
-
-    const prps = setup_buffer(buffer);
-
-    var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
-    command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
-    // TODO:
-    command[1] = device_nsid;
-    command[2] = 0;
-    command[3] = 0;
-    command[4] = 0;
-    command[5] = 0;
-    command[6] = @truncate(u32, prps[0].value);
-    command[7] = @truncate(u32, prps[0].value >> 32);
-    command[8] = @truncate(u32, prps[1].value);
-    command[9] = @truncate(u32, prps[1].value >> 32);
-    command[10] = @truncate(u32, sector_offset);
-    command[11] = @truncate(u32, sector_offset >> 32);
-    command[12] = @truncate(u16, sector_count);
-    command[13] = 0;
-    command[14] = 0;
-    command[15] = 0;
-
-    nvme.io_submission_queue_tail = new_tail;
-    log.debug("Sending the command", .{});
-    @fence(.SeqCst);
-    nvme.write_sqtdbl(1, new_tail);
-    asm volatile ("hlt");
-
-    return true;
-}
-
-pub var device_nsid: u32 = 0;
-
-pub fn init(nvme: *NVMe) void {
+pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
     nvme.capabilities = nvme.read(cap);
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
@@ -473,7 +471,8 @@ pub fn init(nvme: *NVMe) void {
     }
 
     var nsid: u32 = 0;
-    var device_count: u64 = 0;
+    var drive_count: u64 = 0;
+    var drives: [64]Drive = undefined;
     namespace: while (true) {
         {
             var command = kernel.zeroes(Command);
@@ -510,16 +509,22 @@ pub fn init(nvme: *NVMe) void {
 
             const sector_bytes_exponent = @truncate(u5, lba_format >> 16);
             if (sector_bytes_exponent < 9 or sector_bytes_exponent > 16) continue;
-            const sector_bytes = @as(u64, 1) << sector_bytes_exponent;
-            log.debug("sector bytes: {}", .{sector_bytes});
-
-            device_nsid = nsid;
-            device_count += 1;
-            log.debug("Device NSID: {}", .{nsid});
+            const sector_size = @as(u64, 1) << sector_bytes_exponent;
+            const drive = &drives[drive_count];
+            drive_count += 1;
+            kernel.assert(@src(), drive_count < drives.len);
+            drive.* = Drive.new(sector_size, nsid);
+            log.debug("New drive registered: {}", .{drive});
         }
     }
 
-    kernel.assert(@src(), device_count == 1);
+    nvme.drives = allocator.alloc(Drive, drive_count) catch kernel.crash("unable to allocate for NVMe drives", .{});
+    kernel.copy(Drive, nvme.drives, drives[0..drive_count]);
+    for (nvme.drives) |*drive| {
+        kernel.drivers.Driver(Disk, Drive).init(allocator, drive) catch kernel.crash("Failed to initialized device", .{});
+    }
+
+    kernel.assert(@src(), drive_count == 1);
 }
 
 pub const Callback = fn (nvme: *NVMe, line: u64) bool;

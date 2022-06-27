@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("root");
 const fs = @import("../common/fs.zig");
 const TODO = kernel.TODO;
 const log = kernel.log_scoped(.FS);

@@ -1,4 +1,6 @@
-const kernel = @import("kernel.zig");
+const kernel = @import("root");
+pub const DMA = @import("drivers/dma.zig");
+
 pub const Disk = @import("drivers/disk.zig");
 pub const Filesystem = @import("drivers/filesystem.zig");
 pub const RNUFS = @import("drivers/rnu_fs.zig");
@@ -7,6 +9,12 @@ pub const NVMe = @import("drivers/nvme.zig");
 pub const PCI = @import("drivers/pci.zig");
 
 pub fn Driver(comptime Generic: type, comptime Specific: type) type {
+    // TODO: improve safety
+    const child_fields = kernel.fields(Specific);
+    kernel.assert_unsafe(child_fields.len > 0);
+    const first_field = child_fields[0];
+    kernel.assert_unsafe(first_field.field_type == Generic);
+
     return struct {
         const log = kernel.log_scoped(.DriverInitialization);
         const Initialization = Specific.Initialization;

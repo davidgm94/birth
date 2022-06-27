@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const drivers = @import("drivers");
+const drivers = kernel.drivers;
 const PCI = drivers.PCI;
 const NVMe = drivers.NVMe;
 const Virtio = drivers.Virtio;

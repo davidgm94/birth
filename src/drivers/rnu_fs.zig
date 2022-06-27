@@ -1,4 +1,4 @@
-const kernel = @import("../kernel.zig");
+const kernel = @import("root");
 const log = kernel.log_scoped(.RNUFS);
 const Filesystem = @import("filesystem.zig");
 const RNUFS = @import("../common/fs.zig");

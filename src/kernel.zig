@@ -1,5 +1,6 @@
 const kernel = @This();
 
+pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
 pub const Physical = @import("kernel/physical.zig");
 pub const Virtual = @import("kernel/virtual.zig");
