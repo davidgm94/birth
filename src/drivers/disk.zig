@@ -7,9 +7,9 @@ pub const Type = enum(u32) {
     nvme = 1,
 };
 
-type: Type,
 sector_size: u64,
 access: fn (driver: *Driver, buffer: *DMA.Buffer, disk_work: Work) u64,
+type: Type,
 
 pub const Work = struct {
     sector_offset: u64,

@@ -96,7 +96,7 @@ pub const Thread = struct {
             .kernel => kernel_stack,
             .user => blk: {
                 // TODO: lock
-                const user_stack_physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(user_stack_reserve, true)) orelse unreachable;
+                const user_stack_physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(user_stack_reserve, .must_be_exact)) orelse unreachable;
                 const user_stack_physical_region = kernel.Physical.Memory.Region.new(user_stack_physical_address, user_stack_reserve);
                 const user_stack_base_virtual_address = kernel.Virtual.Address.new(0x5000_0000_0000);
                 user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));

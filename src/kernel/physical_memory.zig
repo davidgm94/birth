@@ -80,14 +80,14 @@ pub const Map = struct {
         }
 
         pub fn get_bitset_from_address_and_size(address: Physical.Address, size: u64) []BitsetBaseType {
-            const page_count = kernel.bytes_to_pages(size, true);
-            const bitset_len = kernel.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), false);
+            const page_count = kernel.bytes_to_pages(size, .must_be_exact);
+            const bitset_len = kernel.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
             return if (kernel.Virtual.initialized) address.access_higher_half([*]BitsetBaseType)[0..bitset_len] else address.access_identity([*]BitsetBaseType)[0..bitset_len];
         }
 
         pub fn setup_bitset(entry: *Entry) void {
             log.debug("Setting up bitset", .{});
-            const page_count = kernel.bytes_to_pages(entry.allocated_size, true);
+            const page_count = kernel.bytes_to_pages(entry.allocated_size, .must_be_exact);
             log.debug("Set up bitset", .{});
             const bitsize = @bitSizeOf(Map.Entry.BitsetBaseType);
             const quotient = page_count / bitsize;

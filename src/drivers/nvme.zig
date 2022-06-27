@@ -425,7 +425,7 @@ pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
 
     {
         const size = kernel.align_forward(io_queue_entry_count * completion_queue_entry_bytes, kernel.arch.page_size);
-        const page_count = kernel.bytes_to_pages(size, true);
+        const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
 
         const physical_region = kernel.Physical.Memory.Region.new(queue_physical_address, size);
@@ -444,7 +444,7 @@ pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
 
     {
         const size = kernel.align_forward(io_queue_entry_count * submission_queue_entry_bytes, kernel.arch.page_size);
-        const page_count = kernel.bytes_to_pages(size, true);
+        const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
 
         const physical_region = kernel.Physical.Memory.Region.new(queue_physical_address, size);

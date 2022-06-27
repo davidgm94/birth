@@ -1,21 +1,24 @@
 const kernel = @import("root");
 const log = kernel.log_scoped(.RNUFS);
-const Filesystem = @import("filesystem.zig");
+const drivers = kernel.drivers;
+const Filesystem = drivers.Filesystem;
 const RNUFS = @import("../common/fs.zig");
-const GenericDriver = kernel.driver;
+const GenericDriver = drivers.Driver;
+const Disk = drivers.Disk;
+const DMA = drivers.DMA;
 
 const Driver = @This();
 
 fs: Filesystem,
 
 pub const Initialization = struct {
-    pub const Context = *kernel.Disk;
+    pub const Context = *Disk;
     pub const Error = error{
         allocation_failure,
     };
-    pub fn callback(allocate: GenericDriver.AllocationCallback, initialization_context: Context) Filesystem.InitializationError!*Driver {
-        const driver_allocation = allocate(@sizeOf(Driver)) orelse return Error.allocation_failure;
-        const driver = @intToPtr(*Driver, driver_allocation);
+
+    pub fn callback(allocator: kernel.Allocator, initialization_context: Context) Filesystem.InitializationError!*Driver {
+        const driver = allocator.create(Driver) catch return Error.allocation_failure;
         driver.fs.disk = initialization_context;
         driver.fs.read_file_callback = read_file;
 
@@ -26,11 +29,16 @@ pub const Initialization = struct {
 pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
-    var search_buffer: [kernel.arch.sector_size]u8 = undefined;
+    const sector_size = fs_driver.disk.sector_size;
+    var search_buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = sector_size, .alignment = sector_size }) catch @panic("unable to initialize buffer");
 
     while (true) {
         log.debug("FS driver asking read", .{});
-        const sectors_read = fs_driver.disk.read_callback(fs_driver.disk, &search_buffer, sector, sectors_to_read_at_time);
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, Disk.Work{
+            .sector_offset = sector,
+            .sector_count = sectors_to_read_at_time,
+            .operation = .read,
+        });
         log.debug("FS driver ending read", .{});
         if (sectors_read != sectors_to_read_at_time) @panic("driver failure");
         var node = @ptrCast(*RNUFS.Node, @alignCast(@alignOf(RNUFS.Node), &search_buffer));
@@ -48,7 +56,7 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
         }
 
         log.debug("Node size: {}", .{node.size});
-        const sectors_to_add = 1 + kernel.bytes_to_sector(node.size);
+        const sectors_to_add = 1 + kernel.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
         log.debug("Sectors to add: {}", .{sectors_to_add});
         sector += sectors_to_add;
     }
@@ -57,14 +65,22 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
 pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
     log.debug("About to read a file...", .{});
     if (seek_file(fs_driver, name)) |seek_result| {
-        const file_allocation = kernel.heap.allocate(seek_result.node.size, true, true) orelse @panic("unable to allocate file buffer");
-        const file_buffer = @intToPtr([*]u8, file_allocation.virtual)[0..file_allocation.given_size];
-        const sectors_to_read = kernel.bytes_to_sector(seek_result.node.size);
+        const node_size = seek_result.node.size;
+        const sector_size = fs_driver.disk.sector_size;
+        const bytes_to_read = kernel.align_forward(node_size, sector_size);
+        // TODO: @Bug @maybebug maybe allocate in the heap?
+        var buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = bytes_to_read, .alignment = sector_size }) catch @panic("unable to initialize buffer");
+        const sectors_to_read = kernel.bytes_to_sector(bytes_to_read, sector_size, .must_be_exact);
         // Add one to skip the metadata
-        const sectors_read = fs_driver.disk.read_callback(fs_driver.disk, file_buffer, seek_result.sector + 1, sectors_to_read);
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, &buffer, Disk.Work{
+            .sector_offset = seek_result.sector + 1,
+            .sector_count = sectors_to_read,
+            .operation = .read,
+        });
+
         if (sectors_read != sectors_to_read) @panic("driver failure");
 
-        return file_buffer[0..seek_result.node.size];
+        return buffer.address.access([*]const u8)[0..node_size];
     } else {
         @panic("unable to find file");
     }

@@ -124,7 +124,7 @@ pub const AddressSpace = struct {
     const Indices = [kernel.enum_values(PageIndex).len]u16;
 
     pub inline fn new() ?AddressSpace {
-        const page_count = kernel.bytes_to_pages(@sizeOf(PML4Table), true);
+        const page_count = kernel.bytes_to_pages(@sizeOf(PML4Table), .must_be_exact);
         const cr3_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse return null;
         return AddressSpace{
             .cr3 = cr3_physical_address.value,
@@ -183,7 +183,7 @@ pub const AddressSpace = struct {
             if (pml4_entry_value.contains(.present)) {
                 pdp = get_address_from_entry_bits(pml4_entry_value.bits).access(@TypeOf(pdp));
             } else {
-                const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), true)) orelse @panic("unable to alloc pdp");
+                const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), .must_be_exact)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access(@TypeOf(pdp));
                 pdp.* = kernel.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
@@ -203,7 +203,7 @@ pub const AddressSpace = struct {
             if (pdp_entry_value.contains(.present)) {
                 pd = get_address_from_entry_bits(pdp_entry_value.bits).access(@TypeOf(pd));
             } else {
-                const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), true)) orelse @panic("unable to alloc pd");
+                const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), .must_be_exact)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access(@TypeOf(pd));
                 pd.* = kernel.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
@@ -222,7 +222,7 @@ pub const AddressSpace = struct {
             if (pd_entry_value.contains(.present)) {
                 pt = get_address_from_entry_bits(pd_entry_value.bits).access(@TypeOf(pt));
             } else {
-                const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), true)) orelse @panic("unable to alloc pt");
+                const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), .must_be_exact)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access(@TypeOf(pt));
                 pt.* = kernel.zeroes(PTable);
                 pd_entry_value.or_flag(.present);

@@ -3,6 +3,9 @@ const drivers = kernel.drivers;
 const PCI = drivers.PCI;
 const NVMe = drivers.NVMe;
 const Virtio = drivers.Virtio;
+const Disk = drivers.Disk;
+const Filesystem = drivers.Filesystem;
+const RNUFS = drivers.RNUFS;
 const TODO = kernel.TODO;
 
 const log = kernel.log_scoped(.x86_64);
@@ -71,6 +74,8 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     init_scheduler();
     prepare_drivers(rsdp);
     drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    kernel.assert(@src(), Disk.drivers.items.len > 0);
+    kernel.assert(@src(), Filesystem.drivers.items.len > 0);
     // TODO: report this to Zig
     //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
     // TODO: harden
@@ -118,6 +123,8 @@ pub fn init_block_drivers(allocator: kernel.Allocator) !void {
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
     NVMe.driver = try NVMe.Initialization.callback(allocator, &PCI.controller);
+    kernel.assert(@src(), Disk.drivers.items.len > 0);
+    try drivers.Driver(Filesystem, RNUFS).init(allocator, Disk.drivers.items[0]);
 }
 
 pub fn init_graphics_drivers(allocator: kernel.Allocator) !void {

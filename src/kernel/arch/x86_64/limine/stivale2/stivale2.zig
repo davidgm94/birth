@@ -60,10 +60,10 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
                 const bitset = kernel.Physical.Memory.Map.Entry.get_bitset_from_address_and_size(kernel.Physical.Address.new(entry.address), entry.size);
                 const bitset_size = bitset.len * @sizeOf(kernel.Physical.Memory.Map.Entry.BitsetBaseType);
                 // INFO: this is separated since the bitset needs to be in a different page than the memory map
-                const bitset_page_count = kernel.bytes_to_pages(bitset_size, false);
+                const bitset_page_count = kernel.bytes_to_pages(bitset_size, .can_be_not_exact);
                 // Allocate a bit more memory than needed just in case
                 const memory_map_allocation_size = memory_map_struct.entry_count * @sizeOf(kernel.Physical.Memory.Map.Entry);
-                const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, false);
+                const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
                 const total_allocation_size = kernel.arch.page_size * total_allocated_page_count;
                 kernel.assert(@src(), entry.size > total_allocation_size);
@@ -253,7 +253,7 @@ pub fn process_smp(stivale2_struct: *Struct) Error![]kernel.arch.CPU {
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
-    const page_count = kernel.bytes_to_pages(smp_struct.cpu_count * @sizeOf(kernel.arch.CPU), false);
+    const page_count = kernel.bytes_to_pages(smp_struct.cpu_count * @sizeOf(kernel.arch.CPU), .can_be_not_exact);
     const allocation = kernel.Physical.Memory.allocate_pages(page_count) orelse return Error.smp;
     const cpus = allocation.access_higher_half([*]kernel.arch.CPU)[0..smp_struct.cpu_count];
     const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];

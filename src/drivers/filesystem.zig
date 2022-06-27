@@ -11,7 +11,8 @@ const Type = enum(u32) {
 };
 
 type: Type,
-disk: *kernel.Disk,
+allocator: kernel.Allocator,
+disk: *kernel.drivers.Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
 read_file_callback: fn read(driver: *Driver, name: []const u8) []const u8,
 

@@ -1,9 +1,10 @@
 const kernel = @import("root");
 const TODO = kernel.TODO;
 const log = kernel.log_scoped(.DMA);
+const Virtual = kernel.Virtual;
 
 pub const Buffer = struct {
-    address: kernel.Virtual.Address,
+    address: Virtual.Address,
     total_size: u64,
     completed_size: u64,
 
@@ -11,6 +12,20 @@ pub const Buffer = struct {
         can_write,
         cannot_write,
     };
+
+    pub const Initialization = struct {
+        size: u64,
+        alignment: u64,
+    };
+
+    pub fn new(allocator: kernel.Allocator, initialization: Initialization) !Buffer {
+        const allocation_slice = try allocator.allocBytes(@intCast(u29, initialization.alignment), initialization.size, 0, 0);
+        return Buffer{
+            .address = Virtual.Address.new(@ptrToInt(allocation_slice.ptr)),
+            .total_size = initialization.size,
+            .completed_size = 0,
+        };
+    }
 
     pub fn next_segment(buffer: *Buffer, comptime write_option: WriteOption) Slice {
         if (buffer.completed_size >= buffer.total_size) {

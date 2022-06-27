@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const kernel = @import("root");
 const page_size = kernel.arch.page_size;
-const sector_size = kernel.arch.sector_size;
 
 pub const build_mode = builtin.mode;
 
@@ -73,20 +72,24 @@ pub inline fn zero_a_page(page_address: u64) void {
     zero(@intToPtr([*]u8, page_address)[0..kernel.arch.page_size]);
 }
 
-pub inline fn bytes_to_pages(bytes: u64, comptime must_be_exact: bool) u64 {
+pub const MustBeExact = enum {
+    must_be_exact,
+    can_be_not_exact,
+};
+pub inline fn bytes_to_pages(bytes: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
 }
 
-pub inline fn bytes_to_sector(bytes: u64, comptime must_be_exact: bool) u64 {
+pub inline fn bytes_to_sector(bytes: u64, sector_size: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, sector_size, must_be_exact);
 }
 
-pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: bool) u64 {
+pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: MustBeExact) u64 {
     if (divisor == 0) unreachable;
     const quotient = dividend / divisor;
     const remainder = dividend % divisor;
     const remainder_not_zero = remainder != 0;
-    if (must_be_exact and remainder_not_zero) kernel.crash("remainder not exact when asked to be exact: {} / {}", .{ dividend, divisor });
+    if (must_be_exact == .must_be_exact and remainder_not_zero) kernel.crash("remainder not exact when asked to be exact: {} / {}", .{ dividend, divisor });
 
     return quotient + @boolToInt(remainder_not_zero);
 }
