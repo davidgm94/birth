@@ -632,3 +632,12 @@ pub const Device = struct {
 
     //}
 };
+
+// TODO: report this to Zig
+//_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
+// TODO: harden
+//if (PCI.controller.find_virtio_device()) |virtio_block_pci| {
+//Virtio.init_from_pci(virtio_block_pci);
+//} else {
+//@panic("virtio device not found");
+//}

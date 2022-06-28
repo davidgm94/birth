@@ -19,6 +19,7 @@ comptime {
     kernel.reference_all_declarations(Syscall);
 }
 
+pub var main_storage: *drivers.Filesystem = undefined;
 pub var address_space = Virtual.AddressSpace.from_context(undefined);
 pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);

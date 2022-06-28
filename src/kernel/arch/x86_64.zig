@@ -76,41 +76,11 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
     kernel.assert(@src(), Disk.drivers.items.len > 0);
     kernel.assert(@src(), Filesystem.drivers.items.len > 0);
-    const file = Filesystem.drivers.items[0].read_file_callback(Filesystem.drivers.items[0], "font.psf");
-    for (file) |byte, i| {
-        log.debug("[{}] 0x{x}", .{ i, byte });
-    }
-    // TODO: report this to Zig
-    //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
-    // TODO: harden
-    //if (PCI.controller.find_virtio_device()) |virtio_block_pci| {
-    //Virtio.init_from_pci(virtio_block_pci);
-    //} else {
-    //@panic("virtio device not found");
-    //}
+    register_main_storage();
+    _ = kernel.main_storage.read_file_callback(Filesystem.drivers.items[0], "font.psf");
 
-    // TODO:
-    //NVMe.find_and_init(&PCI.controller) catch @panic("nvme drive not found");
-    //const buffer_size = 0x1000;
-    //var buffer = kernel.DMA.Buffer{
-    //.address = kernel.address_space.allocate(buffer_size) orelse TODO(@src()),
-    //.total_size = buffer_size,
-    //.completed_size = 0,
-    //};
-
-    //_ = NVMe.controller.access(&buffer, .{
-    //.offset = 0,
-    //.size = buffer.total_size,
-    //.operation = .read,
-    //});
-    //for (buffer.address.access([*]u8)[0..buffer.total_size]) |byte, i| {
-    //if (byte != 0) log.debug("[{}]: 0x{x}", .{ i, byte });
-    //}
-    asm volatile ("int $0x40");
-    //kernel.scheduler.yield(undefined);
-
+    log.debug("Read file font.psf", .{});
     log.debug("Everything OK", .{});
-    log.debug("CR8: 0x{x}", .{cr8.read()});
 
     //next_timer(1);
     while (true) {
@@ -120,6 +90,10 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
         );
         kernel.spinloop_hint();
     }
+}
+
+fn register_main_storage() void {
+    kernel.main_storage = Filesystem.drivers.items[0];
 }
 
 pub fn init_block_drivers(allocator: kernel.Allocator) !void {
