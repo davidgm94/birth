@@ -102,58 +102,54 @@ const Drive = struct {
             // Release lock
         }
 
-        const prps = setup_buffer(buffer, disk_work, disk.sector_size);
-
-        var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
-        command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
-        // TODO:
-        command[1] = drive.nsid;
-        command[2] = 0;
-        command[3] = 0;
-        command[4] = 0;
-        command[5] = 0;
-        command[6] = @truncate(u32, prps[0].value);
-        command[7] = @truncate(u32, prps[0].value >> 32);
-        command[8] = @truncate(u32, prps[1].value);
-        command[9] = @truncate(u32, prps[1].value >> 32);
-        command[10] = @truncate(u32, disk_work.sector_offset);
-        command[11] = @truncate(u32, disk_work.sector_offset >> 32);
-        command[12] = @truncate(u16, disk_work.sector_count);
-        command[13] = 0;
-        command[14] = 0;
-        command[15] = 0;
-
-        nvme.io_submission_queue_tail = new_tail;
-        log.debug("Sending the command", .{});
-        @fence(.SeqCst);
-        nvme.write_sqtdbl(1, new_tail);
-        asm volatile ("hlt");
-        kernel.assert(@src(), buffer.address.access([*]const u8)[0] != 0xaa);
-
-        return disk_work.sector_count;
-    }
-
-    fn setup_buffer(buffer: *DMA.Buffer, disk_work: Disk.Work, sector_size: u64) PRPs {
-        if (true) @panic("rework this");
-        const request_byte_count = disk_work.sector_count * sector_size;
-        log.debug("Request byte count: 0x{x}", .{request_byte_count});
+        const request_byte_size = disk_work.sector_count * disk.sector_size;
         const offset = buffer.address.value % kernel.arch.page_size;
         kernel.assert(@src(), offset == 0);
         log.debug("Offset: 0x{x}", .{offset});
-        if (request_byte_count <= 2 * kernel.arch.page_size) {
+
+        if (request_byte_size <= 2 * kernel.arch.page_size) {
             log.debug("Buffer address: 0x{x}", .{buffer.address.value});
             const prp1 = buffer.address.translate(&kernel.address_space) orelse TODO(@src());
             const first_prp_length = kernel.arch.page_size - offset;
             log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
-            var prp2: u64 = 0;
-            if (buffer.total_size > first_prp_length) {
-                TODO(@src());
+            var prp2 = Physical.Address.temporary_invalid();
+
+            if (request_byte_size > first_prp_length) {
+                prp2 = buffer.address.offset(first_prp_length).translate(&kernel.address_space) orelse TODO(@src());
             }
 
-            return [2]Physical.Address{ prp1, Physical.Address.maybe_invalid(prp2) };
-        }
+            const prps = [2]Physical.Address{ prp1, prp2 };
 
-        TODO(@src());
+            var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
+            command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
+            // TODO:
+            command[1] = drive.nsid;
+            command[2] = 0;
+            command[3] = 0;
+            command[4] = 0;
+            command[5] = 0;
+            command[6] = @truncate(u32, prps[0].value);
+            command[7] = @truncate(u32, prps[0].value >> 32);
+            command[8] = @truncate(u32, prps[1].value);
+            command[9] = @truncate(u32, prps[1].value >> 32);
+            command[10] = @truncate(u32, disk_work.sector_offset);
+            command[11] = @truncate(u32, disk_work.sector_offset >> 32);
+            // TODO: what size is really this?
+            command[12] = @intCast(u16, disk_work.sector_count);
+            command[13] = 0;
+            command[14] = 0;
+            command[15] = 0;
+
+            nvme.io_submission_queue_tail = new_tail;
+            log.debug("Sending the command", .{});
+            @fence(.SeqCst);
+            nvme.write_sqtdbl(1, new_tail);
+            asm volatile ("hlt");
+
+            return disk_work.sector_count;
+        } else {
+            TODO(@src());
+        }
     }
 };
 
