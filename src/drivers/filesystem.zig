@@ -1,8 +1,8 @@
-const kernel = @import("root");
+const Drivers = @import("../drivers.zig");
+const Disk = Drivers.Disk;
 const common = @import("common");
 
-const fs = @import("../common/fs.zig");
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const log = common.log.scoped(.FS);
 const Allocator = common.Allocator;
 
@@ -15,27 +15,12 @@ const Type = enum(u32) {
 
 type: Type,
 allocator: Allocator,
-disk: *kernel.drivers.Disk,
+disk: *Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
 read_file_callback: fn read(driver: *Driver, name: []const u8) []const u8,
 
 pub const InitializationError = error{
     allocation_failure,
 };
-
-pub fn init(comptime SpecificDriver: type, comptime InitializationContext: type, comptime init_callback: fn (driver: *SpecificDriver, context: InitializationContext) InitializationError!void, context: InitializationContext) InitializationError!void {
-    const driver_allocation = kernel.heap.allocate(@sizeOf(SpecificDriver), true, true) orelse return InitializationError.allocation_failure;
-    const driver = @intToPtr(*SpecificDriver, driver_allocation.virtual);
-    init_callback(driver, context) catch |err| return err;
-
-    // Register the driver
-    //if (drivers.len == 0) {
-    //drivers.ptr = &_drivers_array;
-    //}
-    //const index = drivers.len;
-    //drivers.len += 1;
-    //drivers[index] = @ptrCast(*Driver, driver);
-    TODO(@src());
-}
 
 pub var drivers: common.ArrayList(*Driver) = undefined;

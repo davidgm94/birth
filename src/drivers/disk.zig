@@ -1,7 +1,7 @@
-const kernel = @import("root");
 const common = @import("common");
+const Drivers = @import("../drivers.zig");
+const DMA = Drivers.DMA;
 
-const DMA = kernel.drivers.DMA;
 const Driver = @This();
 
 pub const Type = enum(u32) {

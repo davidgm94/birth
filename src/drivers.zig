@@ -1,4 +1,3 @@
-const kernel = @import("root");
 const common = @import("common");
 pub const DMA = @import("drivers/dma.zig");
 
@@ -31,16 +30,4 @@ pub fn Driver(comptime Generic: type, comptime Specific: type) type {
             Generic.drivers.append(allocator, @ptrCast(*Generic, driver)) catch return Initialization.Error.allocation_failure;
         }
     };
-}
-
-pub const AllocationCallback = fn (size: u64) ?u64;
-
-pub fn init() !void {
-    const log = common.log.scoped(.drivers);
-    const allocator = kernel.core_heap.allocator;
-    try kernel.arch.init_block_drivers(allocator);
-    log.debug("Initialized block drivers", .{});
-
-    try kernel.arch.init_graphics_drivers(allocator);
-    log.debug("Initialized graphics drivers", .{});
 }

@@ -75,7 +75,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     preinit_scheduler();
     init_scheduler();
     prepare_drivers(rsdp);
-    drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    drivers_init(kernel.core_heap.allocator) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
     common.runtime_assert(@src(), Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), Filesystem.drivers.items.len > 0);
     register_main_storage();
@@ -96,6 +96,14 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
 
 fn register_main_storage() void {
     kernel.main_storage = Filesystem.drivers.items[0];
+}
+
+pub fn drivers_init(allocator: Allocator) !void {
+    try kernel.arch.init_block_drivers(allocator);
+    log.debug("Initialized block drivers", .{});
+
+    try kernel.arch.init_graphics_drivers(allocator);
+    log.debug("Initialized graphics drivers", .{});
 }
 
 pub fn init_block_drivers(allocator: Allocator) !void {
