@@ -1,5 +1,5 @@
 /// Define root.log_level to override the default
-pub const log_level: kernel.log.Level = switch (kernel.build_mode) {
+pub const log_level: kernel.log.Level = switch (common.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
     .ReleaseFast, .ReleaseSmall => .info,

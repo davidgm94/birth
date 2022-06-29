@@ -337,10 +337,10 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
 
     const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
     const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
-    const admin_queue_page_count = kernel.align_forward(admin_submission_queue_size, kernel.arch.page_size) + kernel.align_forward(admin_completion_queue_size, kernel.arch.page_size);
+    const admin_queue_page_count = common.align_forward(admin_submission_queue_size, kernel.arch.page_size) + common.align_forward(admin_completion_queue_size, kernel.arch.page_size);
     const admin_queue_physical_address = kernel.Physical.Memory.allocate_pages(admin_queue_page_count) orelse @panic("admin queue");
     const admin_submission_queue_physical_address = admin_queue_physical_address;
-    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(kernel.align_forward(admin_submission_queue_size, kernel.arch.page_size));
+    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(common.align_forward(admin_submission_queue_size, kernel.arch.page_size));
 
     nvme.write(asq, ASQ{
         .reserved = 0,
@@ -390,7 +390,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     const identify_data = identify_data_virtual_address.access([*]u8);
 
     {
-        var command = kernel.zeroes(Command);
+        var command = common.zeroes(Command);
         command[0] = 0x06;
         command[6] = @truncate(u32, identify_data_physical_address.value);
         command[7] = @truncate(u32, identify_data_physical_address.value >> 32);
@@ -409,7 +409,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
 
         nvme.rtd3_entry_latency_us = @ptrCast(*u32, @alignCast(@alignOf(u32), &identify_data[88])).*;
         nvme.maximum_data_outstanding_commands = @ptrCast(*u16, @alignCast(@alignOf(u16), &identify_data[514])).*;
-        kernel.copy(u8, &nvme.model, identify_data[24 .. 24 + @sizeOf(@TypeOf(nvme.model))]);
+        common.copy(u8, &nvme.model, identify_data[24 .. 24 + @sizeOf(@TypeOf(nvme.model))]);
         log.debug("NVMe model: {s}", .{nvme.model});
 
         if (nvme.rtd3_entry_latency_us > 250 * 1000) {
@@ -424,7 +424,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     }
 
     {
-        var command = kernel.zeroes(Command);
+        var command = common.zeroes(Command);
         command[0] = 0x09;
         command[10] = 0x80;
         command[11] = 0;
@@ -433,7 +433,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     }
 
     {
-        const size = kernel.align_forward(io_queue_entry_count * completion_queue_entry_bytes, kernel.arch.page_size);
+        const size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, kernel.arch.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
 
@@ -441,7 +441,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
         physical_region.map(&kernel.address_space, queue_physical_address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
         nvme.io_completion_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
 
-        var command = kernel.zeroes(Command);
+        var command = common.zeroes(Command);
         command[0] = 0x05;
         command[6] = @truncate(u32, queue_physical_address.value);
         command[7] = @truncate(u32, queue_physical_address.value >> 32);
@@ -452,7 +452,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     }
 
     {
-        const size = kernel.align_forward(io_queue_entry_count * submission_queue_entry_bytes, kernel.arch.page_size);
+        const size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, kernel.arch.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
 
@@ -460,7 +460,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
         physical_region.map(&kernel.address_space, queue_physical_address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flag(.read_write));
         nvme.io_submission_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
 
-        var command = kernel.zeroes(Command);
+        var command = common.zeroes(Command);
         command[0] = 0x01;
         command[6] = @truncate(u32, queue_physical_address.value);
         command[7] = @truncate(u32, queue_physical_address.value >> 32);
@@ -484,7 +484,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     var drives: [64]Drive = undefined;
     namespace: while (true) {
         {
-            var command = kernel.zeroes(Command);
+            var command = common.zeroes(Command);
             command[0] = 0x06;
             command[1] = nsid;
             command[6] = @truncate(u32, identify_data_physical_address.value);
@@ -501,7 +501,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
             log.debug("nsid", .{});
 
             {
-                var command = kernel.zeroes(Command);
+                var command = common.zeroes(Command);
                 command[0] = 0x06;
                 command[1] = nsid;
                 command[6] = @truncate(u32, identify_data_physical_address.value + 0x1000);
@@ -528,7 +528,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     }
 
     nvme.drives = allocator.alloc(Drive, drive_count) catch kernel.crash("unable to allocate for NVMe drives", .{});
-    kernel.copy(Drive, nvme.drives, drives[0..drive_count]);
+    common.copy(Drive, nvme.drives, drives[0..drive_count]);
     for (nvme.drives) |*drive| {
         kernel.drivers.Driver(Disk, Drive).init(allocator, drive) catch kernel.crash("Failed to initialized device", .{});
     }
@@ -636,7 +636,7 @@ const QueueType = enum(u2) {
     fabrics = 1,
     io = 2,
 
-    const count = kernel.enum_values(QueueType).len;
+    const count = common.enum_values(QueueType).len;
 };
 const AdminOpcode = enum(u8) {
     delete_io_submission_queue = 0x00,

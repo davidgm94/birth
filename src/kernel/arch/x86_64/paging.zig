@@ -26,7 +26,7 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     log.debug("About to dereference memory regions", .{});
     var bootloader_address_space = kernel.address_space;
     kernel.address_space = kernel.Virtual.AddressSpace.new() orelse unreachable;
-    kernel.zero(kernel.address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
+    common.zero(kernel.address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
 
     // Map the kernel and do some tests
     {
@@ -86,7 +86,7 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     for (kernel.Physical.Memory.map.reclaimable) |*region| {
         const bitset = region.get_bitset();
         const bitset_size = bitset.len * @sizeOf(kernel.Physical.Memory.Map.Entry.BitsetBaseType);
-        region.allocated_size = kernel.align_forward(bitset_size, kernel.arch.page_size);
+        region.allocated_size = common.align_forward(bitset_size, kernel.arch.page_size);
         region.setup_bitset();
     }
 
@@ -123,7 +123,7 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
 pub const AddressSpace = struct {
     cr3: u64 = 0,
 
-    const Indices = [kernel.enum_values(PageIndex).len]u16;
+    const Indices = [common.enum_values(PageIndex).len]u16;
 
     pub inline fn new() ?AddressSpace {
         const page_count = kernel.bytes_to_pages(@sizeOf(PML4Table), .must_be_exact);
@@ -160,8 +160,8 @@ pub const AddressSpace = struct {
         const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
         kernel.address_space.map(cr3_physical_address, cr3_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
         const pml4 = cr3_virtual_address.access(*PML4Table);
-        kernel.zero_slice(pml4[0..0x100]);
-        kernel.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+        common.zero_slice(pml4[0..0x100]);
+        common.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
         const used_memory_after = kernel.Physical.Memory.map.get_used_memory();
         const memory_overhead = used_memory_after - used_memory_before;
         log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
@@ -187,7 +187,7 @@ pub const AddressSpace = struct {
             } else {
                 const pdp_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDPTable), .must_be_exact)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access(@TypeOf(pdp));
-                pdp.* = kernel.zeroes(PDPTable);
+                pdp.* = common.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
                 pml4_entry_value.or_flag(.read_write);
                 pml4_entry_value.or_flag(.user);
@@ -207,7 +207,7 @@ pub const AddressSpace = struct {
             } else {
                 const pd_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PDTable), .must_be_exact)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access(@TypeOf(pd));
-                pd.* = kernel.zeroes(PDTable);
+                pd.* = common.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
                 pdp_entry_value.or_flag(.read_write);
                 pdp_entry_value.or_flag(.user);
@@ -226,7 +226,7 @@ pub const AddressSpace = struct {
             } else {
                 const pt_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(@sizeOf(PTable), .must_be_exact)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access(@TypeOf(pt));
-                pt.* = kernel.zeroes(PTable);
+                pt.* = common.zeroes(PTable);
                 pd_entry_value.or_flag(.present);
                 pd_entry_value.or_flag(.read_write);
                 pd_entry_value.or_flag(.user);
@@ -256,7 +256,7 @@ pub const AddressSpace = struct {
     }
 
     pub fn translate_address(address_space: *AddressSpace, asked_virtual_address: Virtual.Address) ?Physical.Address {
-        const virtual_address = if (asked_virtual_address.is_page_aligned()) asked_virtual_address else Virtual.Address.new(kernel.align_backward(asked_virtual_address.value, kernel.arch.page_size));
+        const virtual_address = if (asked_virtual_address.is_page_aligned()) asked_virtual_address else Virtual.Address.new(common.align_backward(asked_virtual_address.value, kernel.arch.page_size));
 
         const indices = compute_indices(virtual_address);
 
@@ -344,7 +344,7 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address
 fn get_address_from_entry_bits(entry_bits: u64) Physical.Address {
     common.runtime_assert(@src(), kernel.Physical.Address.max_bit == 40);
     const address = entry_bits & address_mask;
-    common.runtime_assert(@src(), kernel.is_aligned(address, kernel.arch.page_size));
+    common.runtime_assert(@src(), common.is_aligned(address, kernel.arch.page_size));
 
     return Physical.Address.new(address);
 }
@@ -359,7 +359,7 @@ const PageIndex = enum(u3) {
 const PML4E = struct {
     value: Flags,
 
-    const Flags = kernel.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, enum(u64) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -374,7 +374,7 @@ const PML4E = struct {
 const PDPTE = struct {
     value: Flags,
 
-    const Flags = kernel.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, enum(u64) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -390,7 +390,7 @@ const PDPTE = struct {
 const PDE = struct {
     value: Flags,
 
-    const Flags = kernel.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, enum(u64) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -406,7 +406,7 @@ const PDE = struct {
 const PTE = struct {
     value: Flags,
 
-    const Flags = kernel.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, enum(u64) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -422,7 +422,7 @@ const PTE = struct {
     });
 };
 
-pub const HandlePageFaultFlags = kernel.Bitflag(false, enum(u32) {
+pub const HandlePageFaultFlags = common.Bitflag(false, enum(u32) {
     write = 0,
     supervisor = 1,
 });

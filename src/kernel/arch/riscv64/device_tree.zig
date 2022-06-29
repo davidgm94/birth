@@ -4,8 +4,8 @@ const std = @import("std");
 
 const assert = common.runtime_assert;
 const TODO = kernel.TODO;
-const align_forward = kernel.align_forward;
-const string_eq = kernel.string_eq;
+const align_forward = common.align_forward;
+const string_eq = common.string_eq;
 const starts_with = kernel.string_starts_with;
 const ends_with = kernel.string_ends_with;
 const read_big_endian = std.mem.readIntSliceBig;

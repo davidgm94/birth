@@ -4,7 +4,7 @@ fn PackedOptional(IntegerType: type) type {
     comptime common.comptime_assert(backed_type == .Int);
     comptime common.comptime_assert(backed_type.Int.bits > 1);
     return packed struct {
-        value: kernel.IntType(backed_type.Int.signedness, backed_type.Int.bits - 1),
+        value: common.IntType(backed_type.Int.signedness, backed_type.Int.bits - 1),
         optional: u1,
     };
 }

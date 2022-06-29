@@ -158,7 +158,7 @@ pub const HeaderType0x00 = Header(packed struct {
 
 fn check_vendor(bus: Bus, slot: Slot, function: Function) bool {
     const vendor_id = CommonHeader.read("vendor_id", bus, slot, function);
-    return vendor_id != kernel.max_int(u16);
+    return vendor_id != common.max_int(u16);
 }
 
 const HeaderType = enum(u8) {
@@ -494,7 +494,7 @@ pub const Device = struct {
         }
     }
 
-    pub const Features = kernel.Bitflag(false, enum(u64) {
+    pub const Features = common.Bitflag(false, enum(u64) {
         bar0 = 0,
         bar1 = 1,
         bar2 = 2,
@@ -538,8 +538,8 @@ pub const Device = struct {
             var size: u64 = 0;
 
             if (is_size_64) {
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i));
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
+                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
                 size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
                 size |= @intCast(u64, device.read_config(u32, 0x10 + 4 * @intCast(u8, i + 1))) << 32;
                 device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
@@ -547,9 +547,9 @@ pub const Device = struct {
                 address = base_address;
                 address |= @intCast(u64, device.base_addresses[i + 1]) << 32;
             } else {
-                device.write_config(u32, kernel.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i));
                 size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
-                size |= @as(u64, kernel.max_int(u32)) << 32;
+                size |= @as(u64, common.max_int(u32)) << 32;
                 device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
                 address = base_address;
             }

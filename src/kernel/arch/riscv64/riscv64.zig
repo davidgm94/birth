@@ -370,7 +370,7 @@ export fn riscv_start(boot_hart_id: u64, fdt_address: u64) callconv(.C) noreturn
     current_cpu = boot_hart_id;
     register_trap_handler(@ptrToInt(trap));
     init_logger();
-    log.debug("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}", .{ @tagName(kernel.current_arch), @tagName(kernel.build_mode), boot_hart_id, fdt_address });
+    log.debug("Hello RNU. Arch: {s}. Build mode: {s}. Boot HART id: {}. Device tree address: 0x{x}", .{ @tagName(kernel.current_arch), @tagName(common.build_mode), boot_hart_id, fdt_address });
     device_tree.base_address = fdt_address;
     device_tree.parse();
     init_cpu_count();

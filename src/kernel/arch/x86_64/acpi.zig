@@ -129,7 +129,7 @@ pub fn check_valid_sdt(rsdt: *align(1) Header) void {
     if (rsdt.revision != 1) {
         @panic("bad revision");
     }
-    if (!kernel.string_eq(&rsdt.signature, &rsdt_signature)) {
+    if (!common.string_eq(&rsdt.signature, &rsdt_signature)) {
         @panic("bad signature");
     }
     if (rsdt.length >= 16384) {

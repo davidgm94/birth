@@ -120,7 +120,7 @@ fn attach_backing(driver: *Driver) void {
 }
 
 fn set_scanout(driver: *Driver) void {
-    var set_scanout_descriptor = kernel.zeroes(SetScanout);
+    var set_scanout_descriptor = common.zeroes(SetScanout);
     set_scanout_descriptor.header.type = ControlType.cmd_set_scanout;
     set_scanout_descriptor.rect = driver.pmode.rect;
     set_scanout_descriptor.resource_id = driver.framebuffer_id;
@@ -129,7 +129,7 @@ fn set_scanout(driver: *Driver) void {
 }
 
 fn create_resource_2d(driver: *Driver) void {
-    var create = kernel.zeroes(ResourceCreate2D);
+    var create = common.zeroes(ResourceCreate2D);
     create.header.type = ControlType.cmd_resource_create_2d;
     create.format = Format.R8G8B8A8_UNORM;
     driver.framebuffer_id +%= 1;
@@ -164,7 +164,7 @@ fn pending_operations_handler() void {
 
 fn request_display_info(driver: *Driver) void {
     common.runtime_assert(@src(), driver.pending_display_info_request);
-    var header = kernel.zeroes(ControlHeader);
+    var header = common.zeroes(ControlHeader);
     header.type = ControlType.cmd_get_display_info;
 
     driver.send_request_and_wait(header, ResponseDisplayInfo);
@@ -173,7 +173,7 @@ fn request_display_info(driver: *Driver) void {
 }
 
 fn transfer_to_host(driver: *Driver) void {
-    var transfer_to_host_descriptor = kernel.zeroes(TransferControlToHost2D);
+    var transfer_to_host_descriptor = common.zeroes(TransferControlToHost2D);
     transfer_to_host_descriptor.header.type = ControlType.cmd_transfer_to_host_2d;
     transfer_to_host_descriptor.rect = driver.pmode.rect;
     transfer_to_host_descriptor.resource_id = driver.framebuffer_id;
@@ -182,7 +182,7 @@ fn transfer_to_host(driver: *Driver) void {
 }
 
 fn flush(driver: *Driver) void {
-    var flush_operation = kernel.zeroes(ResourceFlush);
+    var flush_operation = common.zeroes(ResourceFlush);
     flush_operation.header.type = ControlType.cmd_resource_flush;
     flush_operation.rect = driver.pmode.rect;
     flush_operation.resource_id = driver.framebuffer_id;
@@ -199,7 +199,7 @@ const Configuration = struct {
     reserved: u32,
 };
 
-const Event = kernel.Bitflag(true, enum(u32) {
+const Event = common.Bitflag(true, enum(u32) {
     display = 0,
 });
 
@@ -347,7 +347,7 @@ pub fn send_and_flush_framebuffer(driver: *Driver) void {
 
 pub fn operate(driver: *Driver, request_bytes: []const u8, response_size: u32) void {
     const request = kernel.heap.allocate(request_bytes.len, true, true) orelse @panic("unable to allocate memory for gpu request");
-    kernel.copy(u8, @intToPtr([*]u8, request.virtual)[0..request_bytes.len], request_bytes);
+    common.copy(u8, @intToPtr([*]u8, request.virtual)[0..request_bytes.len], request_bytes);
 
     var descriptor1: u16 = 0;
     var descriptor2: u16 = 0;
@@ -462,7 +462,7 @@ fn send_request_and_wait(driver: *Driver, request_descriptor: anytype, comptime 
     driver.operate(request_bytes, response_size);
 
     while (driver.request_counters[request_counter_index] != request_counter) {
-        kernel.spinloop_hint();
+        //kernel.spinloop_hint();
     }
 
     log.debug("{s} #{} processed successfully", .{ @tagName(control_header_type), request_counter });

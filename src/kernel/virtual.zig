@@ -67,7 +67,7 @@ pub const AddressSpace = struct {
         common.runtime_assert(@src(), checked_physical_address.value == physical_address.value);
     }
 
-    pub const Flags = kernel.Bitflag(true, enum(u64) {
+    pub const Flags = common.Bitflag(true, enum(u64) {
         read_write = 1,
         user = 2,
         write_through = 3,

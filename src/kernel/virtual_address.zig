@@ -1,4 +1,5 @@
 const kernel = @import("root");
+const common = @import("common");
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 const VirtualAddress = @This();
@@ -24,15 +25,15 @@ pub inline fn page_up(virtual_address: *VirtualAddress) void {
 }
 
 pub inline fn page_align_backward(virtual_address: *VirtualAddress) void {
-    virtual_address.value = kernel.align_backward(virtual_address.value, kernel.arch.page_size);
+    virtual_address.value = common.align_backward(virtual_address.value, kernel.arch.page_size);
 }
 
 pub inline fn page_align_forward(virtual_address: *VirtualAddress) void {
-    virtual_address.value = kernel.align_forward(virtual_address.value, kernel.arch.page_size);
+    virtual_address.value = common.align_forward(virtual_address.value, kernel.arch.page_size);
 }
 
 pub inline fn is_page_aligned(virtual_address: VirtualAddress) bool {
-    return kernel.is_aligned(virtual_address.value, kernel.arch.page_size);
+    return common.is_aligned(virtual_address.value, kernel.arch.page_size);
 }
 
 pub inline fn belongs_to_region(virtual_address: VirtualAddress, region: Virtual.Memory.Region) bool {

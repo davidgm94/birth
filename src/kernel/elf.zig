@@ -148,6 +148,6 @@ const SectionHeader = extern struct {
 pub fn parse(file: []const u8) void {
     const file_header = @ptrCast(*align(1) const FileHeader, file.ptr);
     if (file_header.magic != FileHeader.magic) @panic("magic");
-    if (!kernel.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
+    if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
     log.debug("Parsed so far the kernel ELF file\n{}", .{file_header});
 }

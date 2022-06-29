@@ -20,7 +20,7 @@ lock: kernel.Spinlock,
 regions: [region_count]Region,
 address_space: *Virtual.AddressSpace,
 
-const region_size = 2 * kernel.mb;
+const region_size = 2 * common.mb;
 pub const region_count = kernel.core_memory_region.size / region_size;
 
 pub fn init(heap: *Heap, address_space: *Virtual.AddressSpace) void {
@@ -48,7 +48,7 @@ var allocator_interface = struct {
         const region = blk: {
             for (heap.regions) |*region| {
                 if (region.size > 0) {
-                    region.allocated = kernel.align_forward(region.allocated, alignment);
+                    region.allocated = common.align_forward(region.allocated, alignment);
                     common.runtime_assert(@src(), (region.size - region.allocated) >= size);
                     break :blk region;
                 } else {

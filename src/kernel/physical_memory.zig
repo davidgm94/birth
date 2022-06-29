@@ -83,7 +83,7 @@ pub const Map = struct {
 
         pub fn get_bitset_from_address_and_size(address: Physical.Address, size: u64) []BitsetBaseType {
             const page_count = kernel.bytes_to_pages(size, .must_be_exact);
-            const bitset_len = kernel.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
+            const bitset_len = common.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
             return if (kernel.Virtual.initialized) address.access_higher_half([*]BitsetBaseType)[0..bitset_len] else address.access_identity([*]BitsetBaseType)[0..bitset_len];
         }
 
@@ -95,12 +95,12 @@ pub const Map = struct {
             const quotient = page_count / bitsize;
             const remainder_bitsize_max: u64 = bitsize - 1;
             const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
-            const remainder = @intCast(kernel.IntType(.unsigned, popcount), page_count % bitsize);
+            const remainder = @intCast(common.IntType(.unsigned, popcount), page_count % bitsize);
 
             const bitset = entry.get_bitset();
 
             for (bitset[0..quotient]) |*bitset_elem| {
-                bitset_elem.* = kernel.max_int(Map.Entry.BitsetBaseType);
+                bitset_elem.* = common.max_int(Map.Entry.BitsetBaseType);
             }
 
             var remainder_i: @TypeOf(remainder) = 0;
@@ -235,7 +235,7 @@ pub const Region = struct {
         if (!is_page_aligned) {
             physical_address.page_align_backward();
             virtual_address.page_align_backward();
-            region_size = kernel.align_forward(region_size, kernel.arch.page_size);
+            region_size = common.align_forward(region_size, kernel.arch.page_size);
         }
         log.debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.value + region_size, virtual_address.value, virtual_address.value + region_size });
         var size_it: u64 = 0;

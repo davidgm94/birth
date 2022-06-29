@@ -75,15 +75,15 @@ pub inline fn page_down(physical_address: *PhysicalAddress) void {
 }
 
 pub inline fn page_align_forward(physical_address: *PhysicalAddress) void {
-    physical_address.value = kernel.align_forward(physical_address.value, kernel.arch.page_size);
+    physical_address.value = common.align_forward(physical_address.value, kernel.arch.page_size);
 }
 
 pub inline fn page_align_backward(physical_address: *PhysicalAddress) void {
-    physical_address.value = kernel.align_backward(physical_address.value, kernel.arch.page_size);
+    physical_address.value = common.align_backward(physical_address.value, kernel.arch.page_size);
 }
 
 pub inline fn is_page_aligned(physical_address: PhysicalAddress) bool {
-    return kernel.is_aligned(physical_address.value, kernel.arch.page_size);
+    return common.is_aligned(physical_address.value, kernel.arch.page_size);
 }
 
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: Physical.Memory.Region) bool {

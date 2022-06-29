@@ -5,7 +5,6 @@ pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
 pub const Physical = @import("kernel/physical.zig");
 pub const Virtual = @import("kernel/virtual.zig");
-pub usingnamespace @import("kernel/data_manipulation.zig");
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
@@ -42,7 +41,7 @@ pub const PrivilegeLevel = enum(u1) {
 };
 
 /// Define root.log_level to override the default
-pub const log_level: common.log.Level = switch (kernel.build_mode) {
+pub const log_level: common.log.Level = switch (common.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
     .ReleaseFast, .ReleaseSmall => .info,
@@ -79,4 +78,8 @@ pub fn crash(comptime format: []const u8, args: anytype) noreturn {
 
 pub fn TODO(src: common.SourceLocation) noreturn {
     crash("TODO: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+}
+
+pub inline fn bytes_to_pages(bytes: u64, comptime must_be_exact: common.MustBeExact) u64 {
+    return common.remainder_division_maybe_exact(bytes, kernel.arch.page_size, must_be_exact);
 }

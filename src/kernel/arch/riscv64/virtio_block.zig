@@ -168,7 +168,7 @@ pub fn read_callback(disk_driver: *Disk, buffer: []u8, start_sector: u64, sector
         driver.operate(.read, sector_i, sector_physical);
         bytes_asked += sector_size;
         while (driver.batch_read_byte_count != bytes_asked) {
-            kernel.spinloop_hint();
+            //kernel.spinloop_hint();
         }
     }
 

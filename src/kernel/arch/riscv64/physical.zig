@@ -31,7 +31,7 @@ pub fn init() void {
     const memory_map = MemoryMap.get();
     reserved_regions.ptr = &_reserved;
     reserved_regions.len = memory_map.reserved.len;
-    kernel.copy(Region.Descriptor, reserved_regions, memory_map.reserved);
+    common.copy(Region.Descriptor, reserved_regions, memory_map.reserved);
 
     const kernel_start = kernel.bounds.get_start();
     const kernel_end = kernel.bounds.get_end();
@@ -45,7 +45,7 @@ pub fn init() void {
     reserved_regions.len += 1;
     device_tree_region = &reserved_regions[reserved_regions.len - 1];
     device_tree_region.address = kernel.arch.device_tree.base_address;
-    device_tree_region.page_count = kernel.align_forward(kernel.arch.device_tree.header.size, kernel.arch.page_size) / kernel.arch.page_size;
+    device_tree_region.page_count = common.align_forward(kernel.arch.device_tree.header.size, kernel.arch.page_size) / kernel.arch.page_size;
 
     log.debug("Reserved regions", .{});
     for (reserved_regions) |reserved, i| {
@@ -103,7 +103,7 @@ pub fn init() void {
         // Align to u64
         const bitset_len = (region.descriptor.page_count / @bitSizeOf(u64)) + @boolToInt(region.descriptor.page_count % @bitSizeOf(u64) != 0);
         const bytes_to_allocate = bitset_len * @sizeOf(u64);
-        bitset_byte_count = kernel.align_forward(bitset_byte_count, kernel.arch.page_size);
+        bitset_byte_count = common.align_forward(bitset_byte_count, kernel.arch.page_size);
         region.bitset.ptr = @ptrCast([*]u64, @alignCast(kernel.arch.page_size, &bitset_memory[bitset_byte_count]));
         region.bitset.len = bytes_to_allocate / @sizeOf(u64);
         bitset_byte_count += bytes_to_allocate;

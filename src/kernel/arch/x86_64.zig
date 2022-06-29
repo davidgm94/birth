@@ -90,7 +90,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
             \\cli
             \\hlt
         );
-        kernel.spinloop_hint();
+        asm volatile ("pause" ::: "memory");
     }
 }
 
@@ -129,7 +129,7 @@ fn init_timer() void {
     disable_interrupts();
     const bsp = &kernel.cpus[0];
     const timer_calibration_start = read_timestamp();
-    bsp.lapic.write(.TIMER_INITCNT, kernel.max_int(u32));
+    bsp.lapic.write(.TIMER_INITCNT, common.max_int(u32));
     var times_i: u64 = 0;
     const times = 8;
 
@@ -143,7 +143,7 @@ fn init_timer() void {
             if (io_read(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
         }
     }
-    bsp.lapic.ticks_per_ms = kernel.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
+    bsp.lapic.ticks_per_ms = common.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
     const timer_calibration_end = read_timestamp();
     timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
     enable_interrupts();
@@ -836,7 +836,7 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     return struct {
         pub const BitEnum = _BitEnum;
 
-        pub const Flags = kernel.Bitflag(false, BitEnum);
+        pub const Flags = common.Bitflag(false, BitEnum);
         pub inline fn read() Flags {
             var low: u32 = undefined;
             var high: u32 = undefined;
@@ -895,7 +895,7 @@ fn get_apic_base(ia32_apic_base: IA32_APIC_BASE.Flags) u32 {
 }
 
 pub const RFLAGS = struct {
-    pub const Flags = kernel.Bitflag(false, enum(u64) {
+    pub const Flags = common.Bitflag(false, enum(u64) {
         CF = 0,
         PF = 2,
         AF = 4,
@@ -1272,7 +1272,7 @@ inline fn notify_config_op(bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function,
 }
 
 pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) T {
-    const IntType = kernel.IntType(.unsigned, @bitSizeOf(T));
+    const IntType = common.IntType(.unsigned, @bitSizeOf(T));
     comptime common.comptime_assert(IntType == u8 or IntType == u16 or IntType == u32);
     pci_lock.acquire();
     defer pci_lock.release();
@@ -1282,12 +1282,12 @@ pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function:
 }
 
 pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
-    const IntType = kernel.IntType(.unsigned, @bitSizeOf(T));
+    const IntType = common.IntType(.unsigned, @bitSizeOf(T));
     comptime common.comptime_assert(IntType == u8 or IntType == u16 or IntType == u32);
     pci_lock.acquire();
     defer pci_lock.release();
 
-    common.runtime_assert(@src(), kernel.is_aligned(offset, 4));
+    common.runtime_assert(@src(), common.is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
 
     io_write(IntType, IOPort.PCI_data + @intCast(u16, offset % 4), value);

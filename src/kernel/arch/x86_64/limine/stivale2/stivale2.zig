@@ -69,7 +69,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
                 const total_allocation_size = kernel.arch.page_size * total_allocated_page_count;
                 common.runtime_assert(@src(), entry.size > total_allocation_size);
-                result.usable = @intToPtr([*]kernel.Physical.Memory.Map.Entry, entry.address + kernel.align_forward(bitset_size, kernel.arch.page_size))[0..1];
+                result.usable = @intToPtr([*]kernel.Physical.Memory.Map.Entry, entry.address + common.align_forward(bitset_size, kernel.arch.page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = kernel.Physical.Memory.Map.Entry{
                     .descriptor = kernel.Physical.Memory.Region{
@@ -108,7 +108,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
 
             const bitset = result_entry.get_bitset();
             const bitset_size = bitset.len * @sizeOf(kernel.Physical.Memory.Map.Entry.BitsetBaseType);
-            result_entry.allocated_size = kernel.align_forward(bitset_size, kernel.arch.page_size);
+            result_entry.allocated_size = common.align_forward(bitset_size, kernel.arch.page_size);
             result_entry.setup_bitset();
         }
     }
@@ -203,7 +203,7 @@ pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Virtual.Memory.Regi
     log.debug("past this", .{});
 
     common.runtime_assert(@src(), kernel.Virtual.initialized);
-    const kernel_section_allocation_size = kernel.align_forward(@sizeOf(kernel.Virtual.Memory.RegionWithPermissions) * pmrs.len, kernel.arch.page_size);
+    const kernel_section_allocation_size = common.align_forward(@sizeOf(kernel.Virtual.Memory.RegionWithPermissions) * pmrs.len, kernel.arch.page_size);
     const kernel_section_allocation = kernel.address_space.allocate(kernel_section_allocation_size) orelse return Error.pmrs;
     const kernel_sections = kernel_section_allocation.access([*]kernel.Virtual.Memory.RegionWithPermissions)[0..pmrs.len];
 
@@ -231,11 +231,11 @@ pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
     const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
     const file_address = kernel.Physical.Address.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
-    const allocation = kernel.address_space.allocate(kernel.align_forward(file_size, kernel.arch.page_size)) orelse return Error.kernel_file;
+    const allocation = kernel.address_space.allocate(common.align_forward(file_size, kernel.arch.page_size)) orelse return Error.kernel_file;
     const dst = allocation.access([*]u8)[0..file_size];
     const src = file_address.access_higher_half([*]u8)[0..file_size];
     log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
-    kernel.copy(u8, dst, src);
+    common.copy(u8, dst, src);
     return kernel.File{
         .address = allocation,
         .size = file_size,

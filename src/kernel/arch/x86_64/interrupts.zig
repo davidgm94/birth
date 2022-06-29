@@ -318,7 +318,7 @@ const Exception = enum(u5) {
     security_exception = 0x1e,
 };
 
-const PageFaultErrorCode = kernel.Bitflag(false, enum(u64) {
+const PageFaultErrorCode = common.Bitflag(false, enum(u64) {
     present = 0,
     write = 1,
     user = 2,
