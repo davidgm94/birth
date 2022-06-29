@@ -1,15 +1,14 @@
 const kernel = @This();
+pub const common = @import("common");
 
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
 pub const Physical = @import("kernel/physical.zig");
 pub const Virtual = @import("kernel/virtual.zig");
-pub usingnamespace @import("kernel/assertion.zig");
 pub usingnamespace @import("kernel/data_manipulation.zig");
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
-pub const Heap = @import("kernel/heap.zig");
 pub const CoreHeap = @import("kernel/core_heap.zig");
 pub const PSF1 = @import("kernel/psf1.zig");
 pub const scheduler = @import("kernel/scheduler.zig");

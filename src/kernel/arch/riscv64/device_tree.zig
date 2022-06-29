@@ -1,6 +1,8 @@
-const std = @import("std");
 const kernel = @import("root");
-const assert = kernel.assert;
+const common = @import("common");
+const std = @import("std");
+
+const assert = common.runtime_assert;
 const TODO = kernel.TODO;
 const align_forward = kernel.align_forward;
 const string_eq = kernel.string_eq;
@@ -59,7 +61,7 @@ pub fn find_property(self: *@This(), main_node: []const u8, property_name: []con
                     const intermediate_search_type = intermediate_search_types[i];
                     last_node = parser.find_node_from_current_offset(node, intermediate_search_type) != null;
                 }
-                kernel.assert(@src(), last_node);
+                common.runtime_assert(@src(), last_node);
                 return parser.find_property_in_current_node(property_name);
             }
         } else {

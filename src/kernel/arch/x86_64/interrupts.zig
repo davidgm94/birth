@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
 const GDT = @import("gdt.zig");
@@ -386,7 +388,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             // TODO: dont hard code
             const handler = irq_handlers[0];
             const result = handler.callback(handler.context, line);
-            kernel.assert(@src(), result);
+            common.runtime_assert(@src(), result);
             x86_64.get_current_cpu().?.lapic.end_of_interrupt();
         },
         0x80 => {
@@ -454,7 +456,7 @@ pub fn get_handler(comptime interrupt_number: u64, comptime has_error_code: bool
 }
 
 pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
-    kernel.assert(@src(), interrupt_number == IDT.interrupt_i);
+    common.runtime_assert(@src(), interrupt_number == IDT.interrupt_i);
     const handler_function = get_handler(interrupt_number, has_error_code);
 
     const handler_address = @ptrToInt(handler_function);

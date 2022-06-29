@@ -1,5 +1,6 @@
 // TODO: batch PCI register access
 const kernel = @import("root");
+const common = @import("common");
 const log = kernel.log_scoped(.PCI);
 const TODO = kernel.TODO;
 const Controller = @This();
@@ -114,7 +115,7 @@ pub const CommonHeader = Header(packed struct {
     bist: u8,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(@This()) == 0x10);
+        common.comptime_assert(@sizeOf(@This()) == 0x10);
     }
 });
 
@@ -151,7 +152,7 @@ pub const HeaderType0x00 = Header(packed struct {
     max_latency: u8,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(@This()) == 0x40);
+        common.comptime_assert(@sizeOf(@This()) == 0x40);
     }
 });
 
@@ -170,7 +171,7 @@ fn enumerate(pci: *Controller) void {
     var base_function = Function.new(0);
     const base_header_type = CommonHeader.read_from_function("header_type", base_function);
     log.debug("Base header type: 0x{x}", .{base_header_type});
-    kernel.assert(@src(), base_header_type == 0x0);
+    common.runtime_assert(@src(), base_header_type == 0x0);
     const base_function_count: u8 = if (base_header_type & 0x80 != 0) 8 else 1;
     var buses_to_scan: u8 = 0;
     while (@enumToInt(base_function) < base_function_count) : (base_function.inc()) {
@@ -184,7 +185,7 @@ fn enumerate(pci: *Controller) void {
     if (buses_to_scan == 0) kernel.crash("unable to find any PCI bus", .{});
 
     base_function = Function.new(0);
-    kernel.assert(@src(), @enumToInt(base_function) == 0);
+    common.runtime_assert(@src(), @enumToInt(base_function) == 0);
     var device_count: u64 = 0;
     // First scan the buses to find out how many PCI devices the computer has
     while (buses_to_scan > 0) {
@@ -230,7 +231,7 @@ fn enumerate(pci: *Controller) void {
         pci.bus_scan_states[@enumToInt(base_function)] = .scan_next;
     }
 
-    kernel.assert(@src(), device_count > 0);
+    common.runtime_assert(@src(), device_count > 0);
     if (device_count > 0) {
         log.debug("Device count: {}", .{device_count});
 
@@ -242,7 +243,7 @@ fn enumerate(pci: *Controller) void {
         log.debug("Buses to scan: {}", .{buses_to_scan});
 
         base_function = Function.new(0);
-        kernel.assert(@src(), @enumToInt(base_function) == 0);
+        common.runtime_assert(@src(), @enumToInt(base_function) == 0);
 
         while (buses_to_scan > 0) {
             var bus_i: u9 = 0;
@@ -578,7 +579,7 @@ pub const Device = struct {
         if (device.interrupt_pin > 4) return false;
 
         const result = device.enable_features(Features.from_flag(.interrupts));
-        kernel.assert(@src(), result);
+        common.runtime_assert(@src(), result);
 
         // TODO: consider some stuff Essence does?
         const interrupt_line: ?u64 = null;

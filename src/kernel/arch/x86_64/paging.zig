@@ -6,6 +6,8 @@
 // • The “enable HLAT” VM-execution control (tertiary processor-based VM-execution control bit 1; see Section 24.6.2, “Processor-Based VM-Execution Controls,” in the Intel® 64 and IA-32 Architectures Software Developer’s Manual, Volume 3C).
 
 const kernel = @import("root");
+const common = @import("common");
+
 const x86_64 = @import("../x86_64.zig");
 
 const Physical = kernel.Physical;
@@ -42,7 +44,7 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
                 if (!executable) {
                     flags.or_flag(.execute_disable);
                 }
-                kernel.assert(@src(), readable);
+                common.runtime_assert(@src(), readable);
                 //if (writable) {
                 flags.or_flag(.read_write);
                 //}
@@ -96,9 +98,9 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
 
     var insertion_result = false;
     insertion_result = kernel.address_space.free_regions_by_address.insert(&kernel.memory_region.item_address, &kernel.memory_region, kernel.memory_region.address.value, .panic);
-    kernel.assert(@src(), insertion_result);
+    common.runtime_assert(@src(), insertion_result);
     insertion_result = kernel.address_space.free_regions_by_size.insert(&kernel.memory_region.item_size, &kernel.memory_region, kernel.memory_region.size, .allow);
-    kernel.assert(@src(), insertion_result);
+    common.runtime_assert(@src(), insertion_result);
     log.debug("Set root for Virtual Memory Manager tree", .{});
     log.debug("Tree address (free/addr): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_address)});
     log.debug("Tree address (free/size): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_size)});
@@ -139,7 +141,7 @@ pub const AddressSpace = struct {
 
     pub inline fn from_context(context: anytype) AddressSpace {
         // This is taking a u64 instead of a physical address to easily put here the value of the CR3 register
-        comptime kernel.assert_unsafe(@TypeOf(context) == u64);
+        comptime common.comptime_assert(@TypeOf(context) == u64);
         const cr3 = context;
         return AddressSpace{
             .cr3 = cr3,
@@ -169,8 +171,8 @@ pub const AddressSpace = struct {
 
     pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
         if (should_log) log.debug("Init mapping", .{});
-        kernel.assert(@src(), virtual_address.is_page_aligned());
-        kernel.assert(@src(), physical_address.is_page_aligned());
+        common.runtime_assert(@src(), virtual_address.is_page_aligned());
+        common.runtime_assert(@src(), physical_address.is_page_aligned());
 
         const indices = compute_indices(virtual_address);
 
@@ -331,8 +333,8 @@ pub const AddressSpace = struct {
 
 const address_mask: u64 = 0x000000fffffff000;
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address) u64 {
-    kernel.assert(@src(), kernel.Physical.Address.max_bit == 40);
-    kernel.assert(@src(), new_address.is_page_aligned());
+    common.runtime_assert(@src(), kernel.Physical.Address.max_bit == 40);
+    common.runtime_assert(@src(), new_address.is_page_aligned());
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
     const result = address_masked | old_entry_value_masked;
@@ -340,9 +342,9 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address
 }
 
 fn get_address_from_entry_bits(entry_bits: u64) Physical.Address {
-    kernel.assert(@src(), kernel.Physical.Address.max_bit == 40);
+    common.runtime_assert(@src(), kernel.Physical.Address.max_bit == 40);
     const address = entry_bits & address_mask;
-    kernel.assert(@src(), kernel.is_aligned(address, kernel.arch.page_size));
+    common.runtime_assert(@src(), kernel.is_aligned(address, kernel.arch.page_size));
 
     return Physical.Address.new(address);
 }

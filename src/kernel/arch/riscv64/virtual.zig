@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const arch = kernel.arch;
 const Physical = kernel.arch.Physical;
 const page_size = kernel.arch.page_size;
@@ -97,9 +99,9 @@ pub fn map(start: u64, page_count: u64) void {
 }
 
 fn map_pages(pagetable: pagetable_t, virtual_addr: usize, physical_addr: usize, page_count: usize, permission: usize, allow_remap: bool) void {
-    kernel.assert(@src(), page_count != 0);
-    kernel.assert(@src(), kernel.is_aligned(virtual_addr, page_size));
-    kernel.assert(@src(), kernel.is_aligned(physical_addr, page_size));
+    common.runtime_assert(@src(), page_count != 0);
+    common.runtime_assert(@src(), kernel.is_aligned(virtual_addr, page_size));
+    common.runtime_assert(@src(), kernel.is_aligned(physical_addr, page_size));
 
     // Security check for permission
     if (permission & ~(arch.PTE_FLAG_MASK) != 0) {
@@ -236,7 +238,7 @@ pub const AddressSpace = struct {
         const needed_page_count = kernel.bytes_to_pages(size);
 
         if (needed_page_count == 0) @panic("Reserved called without needing memory");
-        kernel.assert(@src(), self.lock.is_locked());
+        common.runtime_assert(@src(), self.lock.is_locked());
 
         // TODO: This is wrong in so many ways
         const physical = Physical.allocate(needed_page_count) orelse return null;

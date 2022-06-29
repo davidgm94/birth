@@ -1,4 +1,5 @@
 const kernel = @import("root");
+const common = @import("common");
 const x86_64 = @import("../x86_64.zig");
 
 const log = kernel.log_scoped(.Syscall_x86_64);
@@ -30,8 +31,8 @@ pub fn enable() void {
 
 export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
-        kernel.assert_unsafe(@offsetOf(kernel.arch.CPU, "current_thread") == 0x08);
-        kernel.assert_unsafe(@offsetOf(kernel.scheduler.Thread, "kernel_stack") == 0);
+        common.comptime_assert(@offsetOf(kernel.arch.CPU, "current_thread") == 0x08);
+        common.comptime_assert(@offsetOf(kernel.scheduler.Thread, "kernel_stack") == 0);
     }
     asm volatile (
         \\mov %%gs:[0], %%r15

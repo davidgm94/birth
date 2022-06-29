@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const TODO = kernel.TODO;
 const log = kernel.log_scoped(.Scheduler);
 
@@ -32,7 +34,7 @@ pub fn yield(context: *Context) noreturn {
 
     //log.debug("RSP: 0x{x}", .{context.rsp});
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
-    //kernel.assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
     //kernel.arch.next_timer(1);
     kernel.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
@@ -117,7 +119,7 @@ pub const Thread = struct {
         thread.user_stack_commit = user_stack_commit;
         thread.id = new_thread_id;
         thread.type = .normal;
-        kernel.assert(@src(), thread.type == .normal);
+        common.runtime_assert(@src(), thread.type == .normal);
 
         if (thread.type != .idle) {
             log.debug("Creating arch-specific thread initialization", .{});
@@ -153,7 +155,7 @@ pub const Thread = struct {
 fn pick_thread() *Thread {
     const current_cpu = kernel.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
-    kernel.assert(@src(), current_thread_id < thread_id);
+    common.runtime_assert(@src(), current_thread_id < thread_id);
     //const next_thread_index = kernel.arch.read_timestamp() % thread_id;
     const next_thread_index = 0;
     const new_thread = &thread_pool[next_thread_index];

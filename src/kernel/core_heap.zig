@@ -1,4 +1,5 @@
 const kernel = @import("root");
+const common = @import("common");
 const log = kernel.log_scoped(.CoreHeap);
 const TODO = kernel.TODO;
 const Physical = kernel.Physical;
@@ -37,7 +38,7 @@ var allocator_interface = struct {
     fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8 {
         heap.lock.acquire();
         defer heap.lock.release();
-        kernel.assert(@src(), size < region_size);
+        common.runtime_assert(@src(), size < region_size);
 
         log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
         var alignment: u64 = len_align;
@@ -47,7 +48,7 @@ var allocator_interface = struct {
             for (heap.regions) |*region| {
                 if (region.size > 0) {
                     region.allocated = kernel.align_forward(region.allocated, alignment);
-                    kernel.assert(@src(), (region.size - region.allocated) >= size);
+                    common.runtime_assert(@src(), (region.size - region.allocated) >= size);
                     break :blk region;
                 } else {
                     log.debug("have to allocate region", .{});

@@ -1,5 +1,6 @@
 // This has been implemented with NVMe Specification 2.0b
 const kernel = @import("root");
+const common = @import("common");
 const log = kernel.log_scoped(.NVMe);
 const TODO = kernel.TODO;
 const Disk = kernel.drivers.Disk;
@@ -81,8 +82,8 @@ const Drive = struct {
     }
 
     pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
-        kernel.assert(@src(), buffer.completed_size == 0);
-        kernel.assert(@src(), buffer.address.is_page_aligned());
+        common.runtime_assert(@src(), buffer.completed_size == 0);
+        common.runtime_assert(@src(), buffer.address.is_page_aligned());
         const drive = @fieldParentPtr(Drive, "disk", disk);
         const nvme = driver;
         log.debug("NVMe access", .{});
@@ -104,7 +105,7 @@ const Drive = struct {
 
         const request_byte_size = disk_work.sector_count * disk.sector_size;
         const offset = buffer.address.value % kernel.arch.page_size;
-        kernel.assert(@src(), offset == 0);
+        common.runtime_assert(@src(), offset == 0);
         log.debug("Offset: 0x{x}", .{offset});
 
         if (request_byte_size <= 2 * kernel.arch.page_size) {
@@ -166,7 +167,7 @@ pub const Initialization = struct {
         driver = allocator.create(Driver) catch return Error.allocation_failure;
         driver.* = NVMe.new(nvme_device);
         const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
-        kernel.assert(@src(), result);
+        common.runtime_assert(@src(), result);
         log.debug("Device features enabled", .{});
         driver.init(allocator);
 
@@ -243,7 +244,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
     // TODO: reset event
     @fence(.SeqCst); // best memory barrier?
-    kernel.assert(@src(), kernel.arch.are_interrupts_enabled());
+    common.runtime_assert(@src(), kernel.arch.are_interrupts_enabled());
     log.debug("Entering in a wait state", .{});
     nvme.write_sqtdbl(0, nvme.admin_submission_queue_tail);
     asm volatile ("hlt");
@@ -277,12 +278,11 @@ pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
 
-    kernel.assert(@src(), nvme.version.major == 1 and nvme.version.minor == 4);
+    common.runtime_assert(@src(), nvme.version.major == 1 and nvme.version.minor == 4);
     if (nvme.version.major > 1) @panic("version too new");
     if (nvme.version.major < 1) @panic("f1");
     if (nvme.version.major == 1 and nvme.version.minor < 1) @panic("f2");
     if (nvme.capabilities.mqes == 0) @panic("f3");
-    kernel.assert_unsafe(@bitOffsetOf(CAP, "nssrs") == 36);
     if (!nvme.capabilities.css.nvm_command_set) @panic("f4");
     if (nvme.capabilities.mpsmin < kernel.arch.page_shifter - 12) @panic("f5");
     if (nvme.capabilities.mpsmax < kernel.arch.page_shifter - 12) @panic("f6");
@@ -519,7 +519,7 @@ pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
             const sector_size = @as(u64, 1) << sector_bytes_exponent;
             const drive = &drives[drive_count];
             drive_count += 1;
-            kernel.assert(@src(), drive_count < drives.len);
+            common.runtime_assert(@src(), drive_count < drives.len);
             drive.* = Drive.new(sector_size, nsid);
             log.debug("New drive registered: {}", .{drive});
         }
@@ -531,7 +531,7 @@ pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
         kernel.drivers.Driver(Disk, Drive).init(allocator, drive) catch kernel.crash("Failed to initialized device", .{});
     }
 
-    kernel.assert(@src(), drive_count == 1);
+    common.runtime_assert(@src(), drive_count == 1);
 }
 
 pub const Callback = fn (nvme: *NVMe, line: u64) bool;
@@ -624,7 +624,7 @@ fn CommandDword0(comptime Opcode: type) type {
         };
 
         comptime {
-            kernel.assert_unsafe(@sizeOf(CommandDword0) == @sizeOf(u32));
+            common.comptime_assert(@sizeOf(CommandDword0) == @sizeOf(u32));
         }
     };
 }
@@ -721,7 +721,7 @@ const AdminCommonCommandFormat = packed struct {
     command_dword15: u4,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(AdminCommonCommandFormat) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(AdminCommonCommandFormat) == @sizeOf(u64));
     }
 };
 
@@ -735,7 +735,7 @@ const CommonCompletionQueueEntry = packed struct {
         sqid: u16,
 
         comptime {
-            kernel.assert_unsafe(@sizeOf(DW2) == @sizeOf(u32));
+            common.comptime_assert(@sizeOf(DW2) == @sizeOf(u32));
         }
     };
 
@@ -745,7 +745,7 @@ const CommonCompletionQueueEntry = packed struct {
         status_field: StatusField,
 
         comptime {
-            kernel.assert_unsafe(@sizeOf(DW3) == @sizeOf(u32));
+            common.comptime_assert(@sizeOf(DW3) == @sizeOf(u32));
         }
     };
 
@@ -972,7 +972,8 @@ const CAP = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CAP) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(CAP) == @sizeOf(u64));
+        common.comptime_assert(@bitOffsetOf(CAP, "nssrs") == 36);
     }
 };
 
@@ -1016,7 +1017,7 @@ const CC = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CC) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CC) == @sizeOf(u32));
     }
 };
 
@@ -1036,7 +1037,7 @@ const CSTS = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CSTS) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CSTS) == @sizeOf(u32));
     }
 };
 
@@ -1047,7 +1048,7 @@ const AQA = packed struct {
     reserved2: u4,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(AQA) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(AQA) == @sizeOf(u32));
     }
 };
 
@@ -1056,7 +1057,7 @@ const ASQ = packed struct {
     asqb: u52,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(ASQ) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(ASQ) == @sizeOf(u64));
     }
 };
 
@@ -1065,7 +1066,7 @@ const ACQ = packed struct {
     acqb: u52,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(ACQ) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(ACQ) == @sizeOf(u64));
     }
 };
 
@@ -1081,7 +1082,7 @@ const CMBLOC = packed struct {
     offset: u20,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBLOC) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CMBLOC) == @sizeOf(u32));
     }
 };
 
@@ -1107,7 +1108,7 @@ const CMBSZ = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBSZ) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CMBSZ) == @sizeOf(u32));
     }
 };
 
@@ -1126,7 +1127,7 @@ const BPINFO = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(BPINFO) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(BPINFO) == @sizeOf(u32));
     }
 };
 
@@ -1137,7 +1138,7 @@ const BPRSEL = packed struct {
     bpid: bool,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(BPRSEL) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(BPRSEL) == @sizeOf(u32));
     }
 };
 
@@ -1146,7 +1147,7 @@ const BPMBL = packed struct {
     bmbba: u52,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(BPMBL) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(BPMBL) == @sizeOf(u64));
     }
 };
 
@@ -1157,7 +1158,7 @@ const CMBMSC = packed struct {
     cba: u52,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBMSC) == @sizeOf(u64));
+        common.comptime_assert(@sizeOf(CMBMSC) == @sizeOf(u64));
     }
 };
 
@@ -1166,7 +1167,7 @@ const CMBSTS = packed struct {
     reserved: u31,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBSTS) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CMBSTS) == @sizeOf(u32));
     }
 };
 
@@ -1185,7 +1186,7 @@ const CMBEBS = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBEBS) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CMBEBS) == @sizeOf(u32));
     }
 };
 
@@ -1203,7 +1204,7 @@ const CMBSWTP = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CMBSWTP) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CMBSWTP) == @sizeOf(u32));
     }
 };
 
@@ -1212,7 +1213,7 @@ const CRTO = packed struct {
     crimt: u16,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(CRTO) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(CRTO) == @sizeOf(u32));
     }
 };
 
@@ -1235,7 +1236,7 @@ const PMRCAP = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMRCAP) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMRCAP) == @sizeOf(u32));
     }
 };
 
@@ -1244,7 +1245,7 @@ const PMRCTL = packed struct {
     reserved: u31,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMRCTL) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMRCTL) == @sizeOf(u32));
     }
 };
 
@@ -1263,7 +1264,7 @@ const PMRSTS = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMRSTS) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMRSTS) == @sizeOf(u32));
     }
 };
 
@@ -1281,7 +1282,7 @@ const PMREBS = packed struct {
         _,
     };
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMREBS) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMREBS) == @sizeOf(u32));
     }
 };
 
@@ -1299,7 +1300,7 @@ const PMRSWTP = packed struct {
     };
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMRSWTP) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMRSWTP) == @sizeOf(u32));
     }
 };
 
@@ -1310,6 +1311,6 @@ const PMRMSCL = packed struct {
     cba: u20,
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(PMRMSCL) == @sizeOf(u32));
+        common.comptime_assert(@sizeOf(PMRMSCL) == @sizeOf(u32));
     }
 };

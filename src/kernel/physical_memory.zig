@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 const log = kernel.log_scoped(.PhysicalMemory);
@@ -145,7 +147,7 @@ pub fn allocate_pages(page_count: u64) ?Physical.Address {
             const region_page_count = region.descriptor.size / kernel.arch.page_size;
             const supposed_bitset_size = region_page_count / @bitSizeOf(Map.Entry.BitsetBaseType);
             const bitset = region.get_bitset();
-            kernel.assert(@src(), bitset.len >= supposed_bitset_size);
+            common.runtime_assert(@src(), bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
             const allocated_page_count = region.allocated_size / kernel.arch.page_size;
 
@@ -176,18 +178,18 @@ pub fn allocate_pages(page_count: u64) ?Physical.Address {
             if (region_allocated_page_count == page_count) {
                 const result = first_address;
                 region.allocated_size += region_allocated_page_count * kernel.arch.page_size;
-                kernel.assert(@src(), result != 0);
+                common.runtime_assert(@src(), result != 0);
                 return Physical.Address.new(result);
             }
 
-            kernel.assert(@src(), region.allocated_size + size > region.descriptor.size);
-            kernel.assert(@src(), first_address != 0);
+            common.runtime_assert(@src(), region.allocated_size + size > region.descriptor.size);
+            common.runtime_assert(@src(), first_address != 0);
             const original_allocated_size = region.allocated_size - (region_allocated_page_count * kernel.arch.page_size);
             const original_allocated_page_count = original_allocated_size / kernel.arch.page_size;
             var byte = original_allocated_page_count / @bitSizeOf(u64);
             var bit = original_allocated_page_count % @bitSizeOf(u64);
 
-            kernel.assert(@src(), region_allocated_page_count > 0);
+            common.runtime_assert(@src(), region_allocated_page_count > 0);
 
             if (bit > 0) {
                 while (bit < @bitSizeOf(u64)) : (bit += 1) {

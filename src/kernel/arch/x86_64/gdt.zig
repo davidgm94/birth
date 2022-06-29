@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const x86_64 = @import("../x86_64.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
@@ -17,12 +19,12 @@ pub const Table = packed struct {
     tss: TSS.Descriptor, // 0x48
 
     comptime {
-        kernel.assert_unsafe(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
-        kernel.assert_unsafe(@offsetOf(Table, "code_64") == 0x28);
-        kernel.assert_unsafe(@offsetOf(Table, "data_64") == 0x30);
-        kernel.assert_unsafe(@offsetOf(Table, "user_code_64") == 0x38);
-        kernel.assert_unsafe(@offsetOf(Table, "user_data_64") == 0x40);
-        kernel.assert_unsafe(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
+        common.comptime_assert(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        common.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
+        common.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
+        common.comptime_assert(@offsetOf(Table, "user_code_64") == 0x38);
+        common.comptime_assert(@offsetOf(Table, "user_data_64") == 0x40);
+        common.comptime_assert(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
     }
 
     pub fn initial_setup(gdt: *Table) void {

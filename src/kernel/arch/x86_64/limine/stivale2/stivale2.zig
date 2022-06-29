@@ -1,8 +1,10 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const std = @import("std");
 const stivale = @import("header.zig");
 const log = kernel.log_scoped(.stivale);
-const assert = kernel.assert_unsafe;
+const assert = common.comptime_assert;
 const x86_64 = @import("../../../x86_64.zig");
 pub const Struct = stivale.Struct;
 
@@ -66,7 +68,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
                 const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
                 const total_allocation_size = kernel.arch.page_size * total_allocated_page_count;
-                kernel.assert(@src(), entry.size > total_allocation_size);
+                common.runtime_assert(@src(), entry.size > total_allocation_size);
                 result.usable = @intToPtr([*]kernel.Physical.Memory.Map.Entry, entry.address + kernel.align_forward(bitset_size, kernel.arch.page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = kernel.Physical.Memory.Map.Entry{
@@ -163,7 +165,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!kernel.Physical.Memory
         }
     }
 
-    kernel.assert(@src(), result.kernel_and_modules.len == 1);
+    common.runtime_assert(@src(), result.kernel_and_modules.len == 1);
 
     result.reserved.ptr = @intToPtr(@TypeOf(result.reserved.ptr), @ptrToInt(result.kernel_and_modules.ptr) + (@sizeOf(kernel.Physical.Memory.Region) * result.kernel_and_modules.len));
 
@@ -200,7 +202,7 @@ pub fn process_pmrs(stivale2_struct: *Struct) Error![]kernel.Virtual.Memory.Regi
     if (pmrs.len == 0) return Error.pmrs;
     log.debug("past this", .{});
 
-    kernel.assert(@src(), kernel.Virtual.initialized);
+    common.runtime_assert(@src(), kernel.Virtual.initialized);
     const kernel_section_allocation_size = kernel.align_forward(@sizeOf(kernel.Virtual.Memory.RegionWithPermissions) * pmrs.len, kernel.arch.page_size);
     const kernel_section_allocation = kernel.address_space.allocate(kernel_section_allocation_size) orelse return Error.pmrs;
     const kernel_sections = kernel_section_allocation.access([*]kernel.Virtual.Memory.RegionWithPermissions)[0..pmrs.len];
@@ -225,7 +227,7 @@ pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
 
 /// This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
 pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
-    kernel.assert(@src(), kernel.Virtual.initialized);
+    common.runtime_assert(@src(), kernel.Virtual.initialized);
     const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
     const file_address = kernel.Physical.Address.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
@@ -249,7 +251,7 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!kernel.Physical.Address {
 }
 
 pub fn process_smp(stivale2_struct: *Struct) Error![]kernel.arch.CPU {
-    kernel.assert(@src(), kernel.Virtual.initialized);
+    common.runtime_assert(@src(), kernel.Virtual.initialized);
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
@@ -257,7 +259,7 @@ pub fn process_smp(stivale2_struct: *Struct) Error![]kernel.arch.CPU {
     const allocation = kernel.Physical.Memory.allocate_pages(page_count) orelse return Error.smp;
     const cpus = allocation.access_higher_half([*]kernel.arch.CPU)[0..smp_struct.cpu_count];
     const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];
-    kernel.assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
+    common.runtime_assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
     cpus[0].is_bootstrap = true;
 
     for (smps) |smp, cpu_index| {
