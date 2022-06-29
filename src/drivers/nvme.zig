@@ -1,11 +1,13 @@
 // This has been implemented with NVMe Specification 2.0b
 const kernel = @import("root");
 const common = @import("common");
-const log = kernel.log_scoped(.NVMe);
+const log = common.log.scoped(.NVMe);
 const TODO = kernel.TODO;
 const Disk = kernel.drivers.Disk;
 const PCI = kernel.drivers.PCI;
 const DMA = kernel.drivers.DMA;
+
+const Allocator = common.Allocator;
 
 const x86_64 = @import("../kernel/arch/x86_64.zig");
 
@@ -64,7 +66,7 @@ const Drive = struct {
             allocation_failure,
         };
 
-        pub fn callback(allocator: kernel.Allocator, drive: *NVMe.Drive) Error!*Drive {
+        pub fn callback(allocator: Allocator, drive: *NVMe.Drive) Error!*Drive {
             _ = allocator;
             return drive;
         }
@@ -161,7 +163,7 @@ pub const Initialization = struct {
         not_found,
     };
 
-    pub fn callback(allocator: kernel.Allocator, pci: *PCI) Error!*Driver {
+    pub fn callback(allocator: Allocator, pci: *PCI) Error!*Driver {
         const nvme_device = find(pci) orelse return Error.not_found;
         log.debug("Found controller", .{});
         driver = allocator.create(Driver) catch return Error.allocation_failure;
@@ -273,7 +275,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
 const PRPs = [2]Physical.Address;
 
-pub fn init(nvme: *NVMe, allocator: kernel.Allocator) void {
+pub fn init(nvme: *NVMe, allocator: Allocator) void {
     nvme.capabilities = nvme.read(cap);
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });

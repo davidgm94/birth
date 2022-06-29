@@ -1,11 +1,15 @@
 const kernel = @import("root");
-const log = kernel.log_scoped(.RNUFS);
+const common = @import("common");
+
+const log = common.log.scoped(.RNUFS);
 const drivers = kernel.drivers;
 const Filesystem = drivers.Filesystem;
 const RNUFS = @import("../common/fs.zig");
 const GenericDriver = drivers.Driver;
 const Disk = drivers.Disk;
 const DMA = drivers.DMA;
+
+const Allocator = common.Allocator;
 
 const Driver = @This();
 
@@ -17,7 +21,7 @@ pub const Initialization = struct {
         allocation_failure,
     };
 
-    pub fn callback(allocator: kernel.Allocator, initialization_context: Context) Filesystem.InitializationError!*Driver {
+    pub fn callback(allocator: Allocator, initialization_context: Context) Filesystem.InitializationError!*Driver {
         const driver = allocator.create(Driver) catch return Error.allocation_failure;
         driver.* = Driver{
             .fs = Filesystem{

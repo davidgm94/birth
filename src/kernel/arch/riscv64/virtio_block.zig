@@ -16,7 +16,7 @@ queue: *volatile SplitQueue,
 mmio: *volatile MMIO,
 batch_read_byte_count: u64,
 
-const log = kernel.log_scoped(.VirtioBlock);
+const log = common.log.scoped(.VirtioBlock);
 pub const Initialization = struct {
     pub const Context = u64;
     pub const Error = error{

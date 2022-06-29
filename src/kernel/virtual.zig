@@ -3,7 +3,7 @@ const common = @import("common");
 
 const Virtual = @This();
 const Physical = kernel.Physical;
-const log = kernel.log_scoped(.Virtual);
+const log = common.log.scoped(.Virtual);
 pub const Memory = @import("virtual_memory.zig");
 pub const Address = @import("virtual_address.zig");
 

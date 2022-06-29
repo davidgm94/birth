@@ -1,7 +1,10 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const fs = @import("../common/fs.zig");
 const TODO = kernel.TODO;
-const log = kernel.log_scoped(.FS);
+const log = common.log.scoped(.FS);
+const Allocator = common.Allocator;
 
 const Driver = @This();
 
@@ -11,7 +14,7 @@ const Type = enum(u32) {
 };
 
 type: Type,
-allocator: kernel.Allocator,
+allocator: Allocator,
 disk: *kernel.drivers.Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
 read_file_callback: fn read(driver: *Driver, name: []const u8) []const u8,
@@ -35,4 +38,4 @@ pub fn init(comptime SpecificDriver: type, comptime InitializationContext: type,
     TODO(@src());
 }
 
-pub var drivers: kernel.ArrayList(*Driver) = undefined;
+pub var drivers: common.ArrayList(*Driver) = undefined;

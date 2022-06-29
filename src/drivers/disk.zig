@@ -1,4 +1,6 @@
 const kernel = @import("root");
+const common = @import("common");
+
 const DMA = kernel.drivers.DMA;
 const Driver = @This();
 
@@ -22,4 +24,4 @@ pub const Operation = enum {
     write,
 };
 
-pub var drivers: kernel.ArrayList(*Driver) = undefined;
+pub var drivers: common.ArrayList(*Driver) = undefined;

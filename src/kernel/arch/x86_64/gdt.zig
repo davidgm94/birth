@@ -4,7 +4,7 @@ const common = @import("common");
 const x86_64 = @import("../x86_64.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
-const log = kernel.log_scoped(.GDT);
+const log = common.log.scoped(.GDT);
 
 pub const Table = packed struct {
     null_entry: Entry = 0, // 0x00

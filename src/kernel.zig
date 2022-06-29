@@ -15,7 +15,7 @@ pub const scheduler = @import("kernel/scheduler.zig");
 pub const ELF = @import("kernel/elf.zig");
 pub const Syscall = @import("kernel/syscall.zig");
 comptime {
-    kernel.reference_all_declarations(Syscall);
+    common.reference_all_declarations(Syscall);
 }
 
 pub var main_storage: *drivers.Filesystem = undefined;
@@ -42,13 +42,13 @@ pub const PrivilegeLevel = enum(u1) {
 };
 
 /// Define root.log_level to override the default
-pub const log_level: kernel.LogLevel = switch (kernel.build_mode) {
+pub const log_level: common.log.Level = switch (kernel.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
     .ReleaseFast, .ReleaseSmall => .info,
 };
 
-pub fn log(comptime level: kernel.LogLevel, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
 
     //var time: [20]u8 = undefined; // 20 should be enough for 64 bit system
@@ -65,18 +65,18 @@ pub fn log(comptime level: kernel.LogLevel, comptime scope: @TypeOf(.EnumLiteral
 }
 
 //var panicking: usize = 0;
-pub fn panic(message: []const u8, _: ?*kernel.StackTrace) noreturn {
+pub fn panic(message: []const u8, _: ?*common.StackTrace) noreturn {
     kernel.crash("{s}", .{message});
 }
 
 pub fn crash(comptime format: []const u8, args: anytype) noreturn {
-    const crash_log = kernel.log_scoped(.PANIC);
+    const crash_log = common.log.scoped(.PANIC);
     @setCold(true);
     kernel.arch.disable_interrupts();
     crash_log.err(format, args);
     while (true) {}
 }
 
-pub fn TODO(src: kernel.SourceLocation) noreturn {
+pub fn TODO(src: common.SourceLocation) noreturn {
     crash("TODO: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
 }

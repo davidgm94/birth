@@ -1,12 +1,15 @@
 const kernel = @import("root");
-const current_arch = kernel.cpu.arch;
-pub const riscv64 = @import("arch/riscv64/riscv64.zig");
-pub const x86_64 = @import("arch/x86_64.zig");
+const common = @import("common");
+
+const current_arch = common.cpu.arch;
 const arch = switch (current_arch) {
     .riscv64 => riscv64,
     .x86_64 => x86_64,
     else => @compileError("CPU architecture not supported"),
 };
+
+pub const riscv64 = @import("arch/riscv64/riscv64.zig");
+pub const x86_64 = @import("arch/x86_64.zig");
 
 const Virtual = @import("virtual.zig");
 const scheduler = @import("scheduler.zig");
@@ -49,7 +52,7 @@ pub const Writer = struct {
     }
 };
 
-pub var writer = kernel.Writer(void, Writer.Error, Writer.write){ .context = {} };
+pub var writer = common.Writer(void, Writer.Error, Writer.write){ .context = {} };
 
 pub fn check_page_size(asked_page_size: u64) u64 {
     for (arch.valid_page_sizes) |valid_page_size| {

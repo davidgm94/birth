@@ -13,7 +13,7 @@ const Context = x86_64.Context;
 const TODO = kernel.TODO;
 const Thread = kernel.scheduler.Thread;
 const Virtual = kernel.Virtual;
-const log = kernel.log_scoped(.interrupts);
+const log = common.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;
 
 export var idt: IDT = undefined;

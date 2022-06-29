@@ -8,8 +8,9 @@ const Disk = drivers.Disk;
 const Filesystem = drivers.Filesystem;
 const RNUFS = drivers.RNUFS;
 const TODO = kernel.TODO;
+const Allocator = common.Allocator;
 
-const log = kernel.log_scoped(.x86_64);
+const log = common.log.scoped(.x86_64);
 
 pub const page_size = kernel.arch.check_page_size(0x1000);
 
@@ -97,7 +98,7 @@ fn register_main_storage() void {
     kernel.main_storage = Filesystem.drivers.items[0];
 }
 
-pub fn init_block_drivers(allocator: kernel.Allocator) !void {
+pub fn init_block_drivers(allocator: Allocator) !void {
     // TODO: make ACPI and PCI controller standard
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
@@ -106,7 +107,7 @@ pub fn init_block_drivers(allocator: kernel.Allocator) !void {
     try drivers.Driver(Filesystem, RNUFS).init(allocator, Disk.drivers.items[0]);
 }
 
-pub fn init_graphics_drivers(allocator: kernel.Allocator) !void {
+pub fn init_graphics_drivers(allocator: Allocator) !void {
     _ = allocator;
     log.debug("TODO: initialize graphics drivers", .{});
 }
@@ -1183,12 +1184,12 @@ pub const Context = struct {
 
     pub fn debug(context: *Context) void {
         log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
-        inline for (kernel.fields(Context)) |field| {
+        inline for (common.fields(Context)) |field| {
             log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
         }
     }
 
-    pub fn check(context: *Context, src: kernel.SourceLocation) void {
+    pub fn check(context: *Context, src: common.SourceLocation) void {
         var failed = false;
         failed = failed or context.cs > 0x100;
         failed = failed or context.ss > 0x100;

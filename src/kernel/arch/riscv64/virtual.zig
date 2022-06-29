@@ -8,7 +8,7 @@ const AddressPair = kernel.Memory.AddressPair;
 /// Kernel pagetable before KPTI enabled
 pub var kernel_init_pagetable: [*]usize = undefined; // use optional type
 
-const log = kernel.log_scoped(.Virtual);
+const log = common.log.scoped(.Virtual);
 const pagetable_t = [*]usize;
 const pte_t = usize;
 const MAXVA: usize = (1 << (9 + 9 + 9 + 12 - 1));

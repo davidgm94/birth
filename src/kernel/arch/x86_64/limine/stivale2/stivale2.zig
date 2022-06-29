@@ -3,7 +3,7 @@ const common = @import("common");
 
 const std = @import("std");
 const stivale = @import("header.zig");
-const log = kernel.log_scoped(.stivale);
+const log = common.log.scoped(.stivale);
 const assert = common.comptime_assert;
 const x86_64 = @import("../../../x86_64.zig");
 pub const Struct = stivale.Struct;

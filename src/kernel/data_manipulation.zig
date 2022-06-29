@@ -208,23 +208,3 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
         }
     };
 }
-
-pub const Writer = std.io.Writer;
-
-pub const fields = std.meta.fields;
-
-pub const reference_all_declarations = std.testing.refAllDecls;
-pub const Type = std.builtin.Type;
-
-pub const Allocator = std.mem.Allocator;
-pub const ArrayList = std.ArrayListUnmanaged;
-pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
-pub const MultiArrayList = std.MultiArrayList;
-pub const StackTrace = std.builtin.StackTrace;
-pub const SourceLocation = std.builtin.SourceLocation;
-pub const AtomicRmwOp = std.builtin.AtomicRmwOp;
-pub const AtomicOrder = std.builtin.AtomicOrder;
-pub const cpu = builtin.cpu;
-
-pub const LogLevel = std.log.Level;
-pub const log_scoped = std.log.scoped;

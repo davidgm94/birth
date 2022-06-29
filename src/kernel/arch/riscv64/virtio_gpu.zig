@@ -7,7 +7,7 @@ const SplitQueue = virtio.SplitQueue;
 const Descriptor = virtio.Descriptor;
 
 const Graphics = kernel.graphics;
-const log = kernel.log_scoped(.VirtioGPU);
+const log = common.log.scoped(.VirtioGPU);
 const TODO = kernel.TODO;
 
 const GenericDriver = kernel.driver;

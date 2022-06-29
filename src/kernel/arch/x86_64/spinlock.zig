@@ -1,7 +1,9 @@
 const Spinlock = @This();
 
 const kernel = @import("root");
-const log = kernel.log_scoped(.Spinlock_x86_64);
+const common = @import("common");
+
+const log = common.log.scoped(.Spinlock_x86_64);
 const AtomicRmwOp = kernel.AtomicRmwOp;
 status: bool,
 were_interrupts_enabled: bool,

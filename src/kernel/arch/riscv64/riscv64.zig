@@ -20,7 +20,7 @@ pub const dt_read_int = kernel.read_int_big;
 pub var cpu_count: u64 = 0;
 pub var current_cpu: u64 = 0;
 
-const log = kernel.log_scoped(.RISCV64);
+const log = common.log.scoped(.RISCV64);
 
 const TODO = kernel.TODO;
 
@@ -104,7 +104,7 @@ const Scause = enum(u64) {
     supervisor_external_interrupt = 0x8000_0000_0000_0009,
 };
 
-const ilog = kernel.log_scoped(.Interrupt);
+const ilog = common.log.scoped(.Interrupt);
 
 export fn kernel_interrupt_handler(context: *OldContext, scause: Scause, stval: usize) void {
     kernel.arch.writer.should_lock = false;

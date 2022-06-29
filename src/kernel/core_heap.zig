@@ -1,9 +1,10 @@
 const kernel = @import("root");
 const common = @import("common");
-const log = kernel.log_scoped(.CoreHeap);
+const log = common.log.scoped(.CoreHeap);
 const TODO = kernel.TODO;
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
+const Allocator = common.Allocator;
 
 const Heap = @This();
 
@@ -13,7 +14,7 @@ pub const Region = struct {
     allocated: u64,
 };
 
-allocator: kernel.Allocator,
+allocator: Allocator,
 // TODO: use another synchronization primitive
 lock: kernel.Spinlock,
 regions: [region_count]Region,
@@ -29,13 +30,13 @@ pub fn init(heap: *Heap, address_space: *Virtual.AddressSpace) void {
 }
 
 var allocator_interface = struct {
-    vtable: kernel.Allocator.VTable = .{
-        .alloc = @ptrCast(fn alloc(heap: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8, alloc),
+    vtable: Allocator.VTable = .{
+        .alloc = @ptrCast(fn alloc(heap: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8, alloc),
         .resize = @ptrCast(fn resize(heap: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, resize),
         .free = @ptrCast(fn free(heap: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
     },
 
-    fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) kernel.Allocator.Error![]u8 {
+    fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
         heap.lock.acquire();
         defer heap.lock.release();
         common.runtime_assert(@src(), size < region_size);
@@ -52,7 +53,7 @@ var allocator_interface = struct {
                     break :blk region;
                 } else {
                     log.debug("have to allocate region", .{});
-                    const virtual_address = heap.address_space.allocate(region_size) orelse return kernel.Allocator.Error.OutOfMemory;
+                    const virtual_address = heap.address_space.allocate(region_size) orelse return Allocator.Error.OutOfMemory;
 
                     region.* = Region{
                         .virtual = virtual_address,

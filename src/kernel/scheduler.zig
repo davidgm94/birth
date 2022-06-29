@@ -2,7 +2,7 @@ const kernel = @import("root");
 const common = @import("common");
 
 const TODO = kernel.TODO;
-const log = kernel.log_scoped(.Scheduler);
+const log = common.log.scoped(.Scheduler);
 
 const Virtual = kernel.Virtual;
 const PrivilegeLevel = kernel.PrivilegeLevel;

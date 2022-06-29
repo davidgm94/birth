@@ -2,7 +2,7 @@ const kernel = @import("root");
 const common = @import("common");
 
 const x86_64 = @import("../x86_64.zig");
-const log = kernel.log_scoped(.ACPI);
+const log = common.log.scoped(.ACPI);
 const TODO = kernel.TODO;
 const Virtual = kernel.Virtual;
 const Physical = kernel.Physical;
