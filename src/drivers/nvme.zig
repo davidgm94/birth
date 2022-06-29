@@ -78,6 +78,7 @@ const Drive = struct {
                 .type = .nvme,
                 .sector_size = sector_size,
                 .access = access,
+                .get_dma_buffer = get_dma_buffer,
             },
             .nsid = nsid,
         };
@@ -153,6 +154,13 @@ const Drive = struct {
         } else {
             TODO(@src());
         }
+    }
+
+    pub fn get_dma_buffer(disk: *Disk, allocator: common.Allocator, sector_count: u64) common.Allocator.Error!DMA.Buffer {
+        const sector_size = disk.sector_size;
+        const byte_size = sector_count * sector_size;
+        log.debug("Initializing search buffer", .{});
+        return DMA.Buffer.new(allocator, .{ .size = common.align_forward(byte_size, kernel.arch.page_size), .alignment = common.align_forward(sector_size, kernel.arch.page_size) }) catch @panic("unable to initialize buffer");
     }
 };
 

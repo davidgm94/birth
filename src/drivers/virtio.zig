@@ -1,8 +1,7 @@
-const kernel = @import("root");
 const common = @import("common");
 
 const log = common.log.scoped(.Virtio);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const PCI = @import("pci.zig");
 
 fn next(caps: *u8, device: *PCI.Device) ?u8 {

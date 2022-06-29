@@ -79,7 +79,11 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     common.runtime_assert(@src(), Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), Filesystem.drivers.items.len > 0);
     register_main_storage();
-    _ = kernel.main_storage.read_file_callback(Filesystem.drivers.items[0], "font.psf");
+    const file = kernel.main_storage.read_file_callback(Filesystem.drivers.items[0], "font.psf");
+    _ = file;
+    //for (file[0..10]) |byte, i| {
+    //log.debug("[{}] 0x{x}", .{ i, byte });
+    //}
 
     log.debug("File font.psf read successfully", .{});
     log.debug("Everything OK", .{});

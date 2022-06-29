@@ -9,7 +9,6 @@ pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
 pub const CoreHeap = @import("kernel/core_heap.zig");
-pub const PSF1 = @import("kernel/psf1.zig");
 pub const scheduler = @import("kernel/scheduler.zig");
 pub const ELF = @import("kernel/elf.zig");
 pub const Syscall = @import("kernel/syscall.zig");
@@ -23,7 +22,7 @@ pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF9000
 pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
 pub var core_heap: CoreHeap = undefined;
-pub var font: PSF1.Font = undefined;
+pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: Virtual.Address = undefined;
 pub var file: File = undefined;
 pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;

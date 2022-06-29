@@ -1,7 +1,6 @@
-const kernel = @import("root");
 const common = @import("common");
 
-const Font = kernel.PSF1.Font;
+const Font = common.PSF1.Font;
 
 const log = common.log.scoped(.graphics);
 const Driver = @This();
@@ -13,10 +12,10 @@ const Type = enum(u64) {
 type: Type,
 framebuffer: Framebuffer,
 
-pub fn draw_char(driver: *Driver, color: Color, point: Point, character: u8) void {
+pub fn draw_char(driver: *Driver, font: Font, color: Color, point: Point, character: u8) void {
     const framebuffer = driver.framebuffer.buffer[0 .. driver.framebuffer.width * driver.framebuffer.height];
-    const font_buffer_char_offset = @intCast(u64, character) * kernel.font.header.char_size;
-    const font_buffer = kernel.font.glyph_buffer[font_buffer_char_offset .. font_buffer_char_offset + kernel.font.header.char_size];
+    const font_buffer_char_offset = @intCast(u64, character) * font.header.char_size;
+    const font_buffer = font.glyph_buffer[font_buffer_char_offset .. font_buffer_char_offset + font.header.char_size];
 
     for (font_buffer[0..16]) |font_byte, offset_from_y| {
         const y = point.y + offset_from_y;
@@ -32,10 +31,10 @@ pub fn draw_char(driver: *Driver, color: Color, point: Point, character: u8) voi
     }
 }
 
-pub fn draw_string(driver: *Driver, color: Color, string: []const u8) void {
+pub fn draw_string(driver: *Driver, font: Font, color: Color, string: []const u8) void {
     const framebuffer = &driver.framebuffer;
     for (string) |char| {
-        driver.draw_char(color, framebuffer.cursor, char);
+        driver.draw_char(font, color, framebuffer.cursor, char);
         framebuffer.cursor.x += 8;
 
         if (driver.framebuffer.cursor.x + 8 > driver.framebuffer.width) {

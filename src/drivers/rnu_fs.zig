@@ -1,10 +1,9 @@
-const kernel = @import("root");
 const common = @import("common");
 
 const log = common.log.scoped(.RNUFS);
-const drivers = kernel.drivers;
+const drivers = @import("../drivers.zig");
 const Filesystem = drivers.Filesystem;
-const RNUFS = @import("../common/fs.zig");
+const RNUFS = common.RNUFS;
 const GenericDriver = drivers.Driver;
 const Disk = drivers.Disk;
 const DMA = drivers.DMA;
@@ -43,7 +42,10 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
     const sector_size = fs_driver.disk.sector_size;
     log.debug("Initializing search buffer", .{});
     // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
-    var search_buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = common.align_forward(sector_size, kernel.arch.page_size), .alignment = common.align_forward(sector_size, kernel.arch.page_size) }) catch @panic("unable to initialize buffer");
+    var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
+        log.err("Unable to allocate search buffer", .{});
+        return null;
+    };
     log.debug("Done initializing search buffer", .{});
 
     while (true) {
@@ -54,7 +56,7 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
             .operation = .read,
         });
         log.debug("FS driver ending read", .{});
-        if (sectors_read != sectors_to_read_at_time) kernel.crash("Driver internal error: cannot seek file", .{});
+        if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
         for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
             if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
         }
@@ -82,21 +84,22 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
 pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
     log.debug("About to read a file...", .{});
     if (seek_file(fs_driver, name)) |seek_result| {
-        const node_size = seek_result.node.size;
         const sector_size = fs_driver.disk.sector_size;
+        const node_size = seek_result.node.size;
         const bytes_to_read = common.align_forward(node_size, sector_size);
+        const sector_count = common.bytes_to_sector(bytes_to_read, sector_size, .can_be_not_exact);
         // TODO: @Bug @maybebug maybe allocate in the heap?
-        // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
-        var buffer = DMA.Buffer.new(fs_driver.allocator, .{ .size = common.align_forward(bytes_to_read, kernel.arch.page_size), .alignment = common.align_forward(sector_size, kernel.arch.page_size) }) catch @panic("unable to initialize buffer");
-        const sectors_to_read = common.bytes_to_sector(bytes_to_read, sector_size, .must_be_exact);
+        var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
+            @panic("Unable to allocate read buffer");
+        };
         // Add one to skip the metadata
         const sectors_read = fs_driver.disk.access(fs_driver.disk, &buffer, Disk.Work{
             .sector_offset = seek_result.sector + 1,
-            .sector_count = sectors_to_read,
+            .sector_count = sector_count,
             .operation = .read,
         });
 
-        if (sectors_read != sectors_to_read) kernel.crash("Driver internal error: cannot read file", .{});
+        if (sectors_read != sector_count) common.panic(@src(), "Driver internal error: cannot read file", .{});
 
         return buffer.address.access([*]const u8)[0..node_size];
     } else {
