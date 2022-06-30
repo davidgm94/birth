@@ -1,13 +1,13 @@
 // TODO: batch PCI register access
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../common.zig");
 const log = common.log.scoped(.PCI);
 const TODO = common.TODO;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const PhysicalAddress = common.PhysicalAddress;
 const Controller = @This();
-const x86_64 = kernel.arch.x86_64;
+const x86_64 = common.arch.x86_64;
 
 devices: []Device,
 bus_scan_states: [256]BusScanState,
@@ -63,8 +63,8 @@ pub const Slot = enum(u8) {
     }
 };
 
-const pci_read_config = kernel.arch.pci_read_config;
-const pci_write_config = kernel.arch.pci_read_config;
+const pci_read_config = common.arch.pci_read_config;
+const pci_write_config = common.arch.pci_read_config;
 
 fn Header(comptime HeaderT: type) type {
     return struct {
@@ -439,11 +439,11 @@ pub const Device = struct {
     //uint32_t baseAddresses[6];
 
     pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
-        return kernel.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
+        return common.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
     }
 
     pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8) void {
-        return kernel.arch.pci_write_config(T, value, device.bus, device.slot, device.function, offset);
+        return common.arch.pci_write_config(T, value, device.bus, device.slot, device.function, offset);
     }
 
     pub inline fn read_bar(device: *Device, comptime T: type, index: u64, offset: u64) T {
@@ -453,7 +453,7 @@ pub const Device = struct {
             if (base_address & 1 != 0) {
                 log.debug("Using base address for read", .{});
                 const port = @intCast(u16, (base_address & ~@as(u32, 3)) + offset);
-                return kernel.arch.io_read(T, port);
+                return common.arch.io_read(T, port);
             } else {
                 log.debug("Using base virtual address for read", .{});
                 return device.base_virtual_addresses[index].offset(offset).access(*volatile T).*;
@@ -476,7 +476,7 @@ pub const Device = struct {
             if (base_address & 1 != 0) {
                 const port = @intCast(u16, (base_address & ~@as(@TypeOf(base_address), 3)) + offset);
                 log.debug("Writing to port 0x{x}", .{port});
-                kernel.arch.io_write(T, port, value);
+                common.arch.io_write(T, port, value);
             } else {
                 log.debug("index: {}", .{index});
                 const virtual_address = device.base_virtual_addresses[index].offset(offset);

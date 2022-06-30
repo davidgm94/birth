@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
 pub const Descriptor = packed struct {
     limit_low: u16,

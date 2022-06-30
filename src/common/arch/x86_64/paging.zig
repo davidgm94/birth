@@ -135,7 +135,7 @@ pub const AddressSpace = struct {
         };
     }
 
-    pub inline fn from_current() AddressSpace {
+    pub inline fn bootstrapping() AddressSpace {
         return AddressSpace{
             .cr3 = x86_64.cr3.read_raw(),
         };

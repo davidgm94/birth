@@ -1,6 +1,6 @@
 const Drivers = @import("../drivers.zig");
 const Disk = Drivers.Disk;
-const common = @import("common");
+const common = @import("../common.zig");
 
 const TODO = common.TODO;
 const log = common.log.scoped(.FS);

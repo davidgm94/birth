@@ -32,7 +32,7 @@ pub fn enable() void {
 export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
         common.comptime_assert(@offsetOf(kernel.arch.CPU, "current_thread") == 0x08);
-        common.comptime_assert(@offsetOf(kernel.scheduler.Thread, "kernel_stack") == 0);
+        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 0);
     }
     asm volatile (
         \\mov %%gs:[0], %%r15

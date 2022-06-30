@@ -35,7 +35,7 @@ pub fn build(b: *Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = null,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
+                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },

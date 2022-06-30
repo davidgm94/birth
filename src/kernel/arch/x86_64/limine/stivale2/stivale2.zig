@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../../../common.zig");
 const stivale = @import("header.zig");
 
 const log = common.log.scoped(.stivale);

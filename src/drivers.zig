@@ -1,4 +1,4 @@
-const common = @import("common");
+const common = @import("common.zig");
 pub const DMA = @import("drivers/dma.zig");
 
 pub const Disk = @import("drivers/disk.zig");

@@ -1,5 +1,4 @@
-const kernel = @import("root");
-const common = @import("common");
+const common = @import("../common.zig");
 
 const TODO = common.TODO;
 const log = common.log.scoped(.DMA);

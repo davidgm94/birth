@@ -4,9 +4,6 @@ const VirtualAddress = common.VirtualAddress;
 
 value: u64,
 
-pub var max: u64 = 0;
-pub var max_bit: u6 = 0;
-
 pub inline fn new(value: u64) PhysicalAddress {
     const physical_address = PhysicalAddress{
         .value = value,
@@ -29,9 +26,10 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
     };
 }
 
-pub inline fn is_valid(physical_address: PhysicalAddress) bool {
+pub inline fn is_valid(physical_address: PhysicalAddress, max_bit: u6) bool {
     common.runtime_assert(@src(), physical_address.value != 0);
     common.runtime_assert(@src(), max_bit != 0);
+    const max = @as(u64, 1) << max_bit;
     common.runtime_assert(@src(), max > 1000);
     return physical_address.value <= max;
 }

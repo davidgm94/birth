@@ -1,6 +1,6 @@
 // This has been implemented with NVMe Specification 2.0b
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../common.zig");
 const log = common.log.scoped(.NVMe);
 const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;

@@ -19,6 +19,9 @@ pub fn from_context(context: anytype) VirtualAddressSpace {
     };
 }
 
-pub fn from_current() ?VirtualAddressSpace {
-    TODO(@src());
+pub fn bootstrapping() ?VirtualAddressSpace {
+    return VirtualAddressSpace{
+        .arch = arch.AddressSpace.bootstrapping(),
+        .allocator = undefined, // INFO: the allocator is not needed so it's not initialized
+    };
 }

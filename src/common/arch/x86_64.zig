@@ -32,7 +32,7 @@ pub const ACPI = @import("x86_64/acpi.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
-const Thread = common.scheduler.Thread;
+const Thread = common.Thread;
 
 pub const IOAPIC = struct {
     address: PhysicalAddress,
@@ -61,57 +61,16 @@ pub var ioapic: IOAPIC = undefined;
 pub var iso: []ISO = undefined;
 
 var _zero: u64 = 0;
-pub export fn start(stivale2_struct_address: u64) noreturn {
-    // We just need GS base to point to something so it doesn't crash
-    IA32_GS_BASE.write(@ptrToInt(&_zero));
-    log.debug("Hello kernel!", .{});
-    log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
-    kernel.virtual_address_space = VirtualAddressSpace.from_current() orelse unreachable;
-    kernel.core_heap.init(&kernel.virtual_address_space);
-    enable_cpu_features();
-    const stivale2_struct_physical_address = PhysicalAddress.new(stivale2_struct_address);
-    kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
-    const region_type = kernel.physical_address_space.find_address(stivale2_struct_physical_address);
-    log.debug("Region type: {}", .{region_type});
-    Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
-    preinit_scheduler();
-    init_scheduler();
-    prepare_drivers(rsdp);
-    drivers_init(kernel.core_heap.allocator) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
-    common.runtime_assert(@src(), Disk.drivers.items.len > 0);
-    common.runtime_assert(@src(), Filesystem.drivers.items.len > 0);
-    register_main_storage();
-    const file = kernel.main_storage.read_file_callback(Filesystem.drivers.items[0], "font.psf");
-    _ = file;
-    //for (file[0..10]) |byte, i| {
-    //log.debug("[{}] 0x{x}", .{ i, byte });
-    //}
-
-    log.debug("File font.psf read successfully", .{});
-    log.debug("Everything OK", .{});
-
-    //next_timer(1);
-    while (true) {
-        asm volatile (
-            \\cli
-            \\hlt
-        );
-        asm volatile ("pause" ::: "memory");
-    }
-}
 
 fn register_main_storage() void {
     kernel.main_storage = Filesystem.drivers.items[0];
 }
 
 pub fn drivers_init(allocator: Allocator) !void {
-    try kernel.arch.init_block_drivers(allocator);
+    try init_block_drivers(allocator);
     log.debug("Initialized block drivers", .{});
 
-    try kernel.arch.init_graphics_drivers(allocator);
+    try init_graphics_drivers(allocator);
     log.debug("Initialized graphics drivers", .{});
 }
 
@@ -179,25 +138,30 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub inline fn set_current_cpu(cpu: *kernel.arch.CPU) void {
-    cpu.base = cpu;
+pub inline fn set_local_storage(local_storage: *common.arch.LocalStorage) void {
     //log.debug("Setting current CPU: 0x{x}", .{@ptrToInt(cpu)});
-    IA32_GS_BASE.write(@ptrToInt(cpu));
+    IA32_GS_BASE.write(@ptrToInt(local_storage));
 }
 
-pub inline fn get_current_cpu() ?*CPU {
+pub inline fn get_local_storage() ?*common.arch.LocalStorage {
     //return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
     return asm volatile (
         \\mov %%gs:[0], %[result]
-        : [result] "=r" (-> ?*common.arch.CPU),
+        : [result] "=r" (-> ?*common.arch.LocalStorage),
     );
 }
-pub inline fn read_gs() ?*kernel.arch.CPU {
-    return asm volatile (
-        \\mov %%gs:[0], %[result]
-        : [result] "=r" (-> ?*kernel.arch.CPU),
-    );
+
+pub inline fn get_current_cpu() ?*CPU {
+    const local_storage = get_local_storage() orelse return null;
+    return local_storage.cpu;
 }
+
+//pub inline fn read_gs() ?*kernel.arch.CPU {
+//return asm volatile (
+//\\mov %%gs:[0], %[result]
+//: [result] "=r" (-> ?*kernel.arch.CPU),
+//);
+//}
 
 pub const timer_interrupt = 0x40;
 pub const interrupt_vector_msi_start = 0x70;
@@ -226,20 +190,22 @@ pub export fn foo() callconv(.C) void {
 }
 
 pub fn preinit_scheduler() void {
-    const bsp = &kernel.cpus[0];
-    set_current_cpu(bsp);
-    IA32_KERNEL_GS_BASE.write(0);
-    bsp.gdt.initial_setup();
-    interrupts.init();
-    enable_apic();
-    Syscall.enable();
+    TODO(@src());
+    // TODO:
+    //const bsp = &kernel.cpus[0];
+    //set_current_cpu(bsp);
+    //IA32_KERNEL_GS_BASE.write(0);
+    //bsp.gdt.initial_setup();
+    //interrupts.init();
+    //enable_apic();
+    //Syscall.enable();
 
-    bsp.shared_tss = TSS.Struct{};
-    bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
-    bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
-    bsp.gdt.update_tss(&bsp.shared_tss);
+    //bsp.shared_tss = TSS.Struct{};
+    //bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
+    //bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
+    //bsp.gdt.update_tss(&bsp.shared_tss);
 
-    log.debug("Scheduler pre-initialization finished!", .{});
+    //log.debug("Scheduler pre-initialization finished!", .{});
 }
 
 //pub fn init_all_cores() void {
@@ -792,9 +758,12 @@ fn get_task_priority_level() u4 {
     return @truncate(u4, cr8.read());
 }
 
-fn enable_cpu_features() void {
-    PhysicalAddress.max_bit = CPUID.get_max_physical_address_bit();
-    PhysicalAddress.max = @as(u64, 1) << PhysicalAddress.max_bit;
+pub const CPUFeatures = struct {
+    physical_address_max_bit: u6,
+};
+
+pub fn enable_cpu_features() CPUFeatures {
+    const physical_address_max_bit = CPUID.get_max_physical_address_bit();
 
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -819,6 +788,10 @@ fn enable_cpu_features() void {
     log.debug("Making sure the cache is initialized properly", .{});
     common.runtime_assert(@src(), !cr0.get_bit(.CD));
     common.runtime_assert(@src(), !cr0.get_bit(.NW));
+
+    return CPUFeatures{
+        .physical_address_max_bit = physical_address_max_bit,
+    };
 }
 
 pub fn SimpleMSR(comptime msr: u32) type {
@@ -1102,7 +1075,7 @@ const stack_size = 0x10000;
 const guard_stack_size = 0x1000;
 pub const CPU = struct {
     base: *CPU,
-    current_thread: ?*kernel.scheduler.Thread,
+    current_thread: ?*common.Thread,
     gdt: GDT.Table,
     shared_tss: TSS.Struct,
     int_stack: u64,
@@ -1127,7 +1100,9 @@ pub const CPU = struct {
 };
 
 export fn thread_terminate(thread: *Thread) void {
-    thread.terminate();
+    _ = thread;
+    TODO(@src());
+    // thread.terminate();
 }
 
 fn thread_terminate_stack() callconv(.Naked) void {
@@ -1164,7 +1139,7 @@ pub const Context = struct {
     rsp: u64,
     ss: u64,
 
-    pub fn new(thread: *kernel.scheduler.Thread, entry_point: kernel.scheduler.Thread.EntryPoint) *Context {
+    pub fn new(thread: *common.Thread, entry_point: common.Thread.EntryPoint) *Context {
         const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
         log.debug("thread user stack base: 0x{x}", .{thread.user_stack_base.value});
         const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
@@ -1255,7 +1230,7 @@ export fn switch_context() callconv(.Naked) void {
     unreachable;
 }
 
-export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
+export fn post_context_switch(context: *Context, new_thread: *common.Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});
     if (kernel.scheduler.lock.were_interrupts_enabled) {
         @panic("interrupts were enabled");
@@ -1282,7 +1257,7 @@ export fn post_context_switch(context: *Context, new_thread: *kernel.scheduler.T
     if (should_swap_gs) asm volatile ("swapgs");
 }
 
-var pci_lock: kernel.Spinlock = undefined;
+var pci_lock: Spinlock = undefined;
 
 inline fn notify_config_op(bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
     io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, @enumToInt(bus)) << 16) | (@as(u32, @enumToInt(slot)) << 11) | (@as(u32, @enumToInt(function)) << 8) | offset);
@@ -1308,4 +1283,14 @@ pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot
     notify_config_op(bus, slot, function, offset);
 
     io_write(IntType, IOPort.PCI_data + @intCast(u16, offset % 4), value);
+}
+
+pub inline fn spinloop_without_wasting_cpu() noreturn {
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+        );
+        asm volatile ("pause" ::: "memory");
+    }
 }

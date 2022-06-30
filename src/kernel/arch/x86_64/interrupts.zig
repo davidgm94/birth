@@ -11,7 +11,7 @@ const interrupts = @This();
 const Context = x86_64.Context;
 
 const TODO = common.TODO;
-const Thread = kernel.scheduler.Thread;
+const Thread = common.Thread;
 const Virtual = kernel.Virtual;
 const log = common.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;

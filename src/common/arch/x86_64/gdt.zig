@@ -1,7 +1,7 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
-const x86_64 = @import("../x86_64.zig");
+const x86_64 = common.arch.x86_64;
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
 const log = common.log.scoped(.GDT);

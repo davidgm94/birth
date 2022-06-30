@@ -5,6 +5,7 @@ const TODO = common.TODO;
 const Allocator = common.Allocator;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
+const Spinlock = common.arch.Spinlock;
 
 const Heap = @This();
 
@@ -16,7 +17,7 @@ pub const Region = struct {
 
 allocator: Allocator,
 // TODO: use another synchronization primitive
-lock: kernel.Spinlock,
+lock: Spinlock,
 regions: [region_count]Region,
 virtual_address_space: *VirtualAddressSpace,
 

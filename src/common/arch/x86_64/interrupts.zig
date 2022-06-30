@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
 const PIC = @import("pic.zig");
 const IDT = @import("idt.zig");
@@ -11,7 +11,7 @@ const interrupts = @This();
 const Context = x86_64.Context;
 
 const TODO = common.TODO;
-const Thread = kernel.scheduler.Thread;
+const Thread = common.Thread;
 const Virtual = kernel.Virtual;
 const log = common.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;

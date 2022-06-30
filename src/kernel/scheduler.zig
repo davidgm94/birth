@@ -1,8 +1,10 @@
+const kernel = @import("root");
 const common = @import("common");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
+const Thread = common.Thread;
 
 const TODO = common.TODO;
 const log = common.log.scoped(.Scheduler);
@@ -28,7 +30,7 @@ pub fn yield(context: *Context) noreturn {
         current_thread.context = context;
         old_address_space = current_thread.address_space;
     } else {
-        old_address_space = &common.virtual_address_space;
+        old_address_space = &kernel.virtual_address_space;
     }
     const new_thread = pick_thread();
     new_thread.time_slices += 1;
@@ -42,117 +44,90 @@ pub fn yield(context: *Context) noreturn {
     common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
-pub const Thread = struct {
-    kernel_stack: VirtualAddress,
-    privilege_level: PrivilegeLevel,
-    type: Type,
-    kernel_stack_base: VirtualAddress,
-    kernel_stack_size: u64,
-    user_stack_base: VirtualAddress,
-    user_stack_reserve: u64,
-    user_stack_commit: u64,
-    id: u64,
-    context: *common.arch.Context,
-    time_slices: u64,
-    last_known_execution_address: u64,
-    address_space: *VirtualAddressSpace,
+pub fn spawn(privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
+    // TODO: lock
+    const new_thread_id = thread_id;
+    const thread_index = new_thread_id % thread_pool.len;
+    var thread = &thread_pool[thread_index];
+    thread_id += 1;
 
-    // TODO: idle thread
-    const Type = enum(u1) {
-        normal = 0,
-        idle = 1,
+    log.debug("here", .{});
+    // TODO: should we always use the same address space for kernel tasks?
+    thread.address_space = switch (privilege_level) {
+        .kernel => kernel_virtual_address_space,
+        .user => VirtualAddressSpace.new_for_user() orelse unreachable,
     };
 
-    pub const EntryPoint = struct {
-        start_address: u64,
-        argument: u64,
+    var kernel_stack_size: u64 = 0x5000;
+    const user_stack_reserve: u64 = switch (privilege_level) {
+        .kernel => kernel_stack_size,
+        .user => 0x400000,
     };
+    const user_stack_commit: u64 = switch (privilege_level) {
+        .kernel => 0,
+        .user => 0x10000,
+    };
+    var user_stack: VirtualAddress = undefined;
+    // TODO: implemented idle thread
 
-    pub fn spawn(privilege_level: PrivilegeLevel, entry_point: EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
-        // TODO: lock
-        const new_thread_id = thread_id;
-        const thread_index = new_thread_id % thread_pool.len;
-        var thread = &thread_pool[thread_index];
-        thread_id += 1;
+    const kernel_stack = kernel_virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
+    log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
+    user_stack = switch (privilege_level) {
+        .kernel => kernel_stack,
+        .user => blk: {
+            // TODO: lock
+            const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
+            const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
+            const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
+            user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
 
-        log.debug("here", .{});
-        // TODO: should we always use the same address space for kernel tasks?
-        thread.address_space = switch (privilege_level) {
-            .kernel => kernel_virtual_address_space,
-            .user => VirtualAddressSpace.new_for_user() orelse unreachable,
-        };
+            break :blk user_stack_base_virtual_address;
+        },
+    };
+    thread.privilege_level = privilege_level;
+    log.debug("Thread privilege: {}", .{thread.privilege_level});
+    thread.kernel_stack_base = kernel_stack;
+    thread.kernel_stack_size = kernel_stack_size;
+    thread.user_stack_base = switch (privilege_level) {
+        .kernel => VirtualAddress.new(0),
+        .user => user_stack,
+    };
+    log.debug("USB: 0x{x}", .{thread.user_stack_base.value});
+    thread.user_stack_reserve = user_stack_reserve;
+    thread.user_stack_commit = user_stack_commit;
+    thread.id = new_thread_id;
+    thread.type = .normal;
+    common.runtime_assert(@src(), thread.type == .normal);
 
-        var kernel_stack_size: u64 = 0x5000;
-        const user_stack_reserve: u64 = switch (privilege_level) {
-            .kernel => kernel_stack_size,
-            .user => 0x400000,
-        };
-        const user_stack_commit: u64 = switch (privilege_level) {
-            .kernel => 0,
-            .user => 0x10000,
-        };
-        var user_stack: VirtualAddress = undefined;
-        // TODO: implemented idle thread
-
-        const kernel_stack = kernel_virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
-        log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
-        user_stack = switch (privilege_level) {
-            .kernel => kernel_stack,
+    if (thread.type != .idle) {
+        log.debug("Creating arch-specific thread initialization", .{});
+        // TODO: hack
+        thread.context = switch (privilege_level) {
+            .kernel => common.arch.Context.new(thread, entry_point),
             .user => blk: {
-                // TODO: lock
-                const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
-                const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
-                const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
-                user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
-
-                break :blk user_stack_base_virtual_address;
+                var kernel_entry_point_virtual_address_page = VirtualAddress.new(entry_point.start_address);
+                kernel_entry_point_virtual_address_page.page_align_backward();
+                const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
+                log.debug("Offset: 0x{x}", .{offset});
+                const entry_point_physical_address_page = kernel_virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
+                const user_entry_point_virtual_address_page = VirtualAddress.new(0x6000_0000_0000);
+                thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, VirtualAddressSpace.Flags.from_flags(&.{ .user, .read_write }));
+                const user_entry_point_virtual_address = VirtualAddress.new(user_entry_point_virtual_address_page.value + offset);
+                break :blk common.arch.Context.new(thread, Thread.EntryPoint{
+                    .start_address = user_entry_point_virtual_address.value,
+                    .argument = entry_point.argument,
+                });
             },
         };
-        thread.privilege_level = privilege_level;
-        log.debug("Thread privilege: {}", .{thread.privilege_level});
-        thread.kernel_stack_base = kernel_stack;
-        thread.kernel_stack_size = kernel_stack_size;
-        thread.user_stack_base = switch (privilege_level) {
-            .kernel => VirtualAddress.new(0),
-            .user => user_stack,
-        };
-        log.debug("USB: 0x{x}", .{thread.user_stack_base.value});
-        thread.user_stack_reserve = user_stack_reserve;
-        thread.user_stack_commit = user_stack_commit;
-        thread.id = new_thread_id;
-        thread.type = .normal;
-        common.runtime_assert(@src(), thread.type == .normal);
-
-        if (thread.type != .idle) {
-            log.debug("Creating arch-specific thread initialization", .{});
-            // TODO: hack
-            thread.context = switch (privilege_level) {
-                .kernel => common.arch.Context.new(thread, entry_point),
-                .user => blk: {
-                    var kernel_entry_point_virtual_address_page = VirtualAddress.new(entry_point.start_address);
-                    kernel_entry_point_virtual_address_page.page_align_backward();
-                    const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
-                    log.debug("Offset: 0x{x}", .{offset});
-                    const entry_point_physical_address_page = kernel_virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
-                    const user_entry_point_virtual_address_page = VirtualAddress.new(0x6000_0000_0000);
-                    thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, VirtualAddressSpace.Flags.from_flags(&.{ .user, .read_write }));
-                    const user_entry_point_virtual_address = VirtualAddress.new(user_entry_point_virtual_address_page.value + offset);
-                    break :blk common.arch.Context.new(thread, EntryPoint{
-                        .start_address = user_entry_point_virtual_address.value,
-                        .argument = entry_point.argument,
-                    });
-                },
-            };
-        }
-
-        return thread;
     }
 
-    pub fn terminate(thread: *Thread) void {
-        _ = thread;
-        TODO(@src());
-    }
-};
+    return thread;
+}
+
+pub fn terminate(thread: *Thread) void {
+    _ = thread;
+    TODO(@src());
+}
 
 fn pick_thread() *Thread {
     const current_cpu = common.arch.get_current_cpu().?;

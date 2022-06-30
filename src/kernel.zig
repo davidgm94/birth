@@ -4,7 +4,6 @@ pub const common = @import("common");
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
 pub const bounds = arch.Bounds;
-pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
 pub const CoreHeap = @import("kernel/core_heap.zig");
 pub const scheduler = @import("kernel/scheduler.zig");
@@ -12,6 +11,7 @@ pub const ELF = @import("kernel/elf.zig");
 pub const Syscall = @import("kernel/syscall.zig");
 comptime {
     common.reference_all_declarations(Syscall);
+    common.reference_all_declarations(arch);
 }
 
 const PhysicalAddress = common.PhysicalAddress;
@@ -32,6 +32,7 @@ pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF
 pub var core_heap: CoreHeap = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;
+pub var cpu_features: common.arch.CPUFeatures = undefined;
 pub var file: File = undefined;
 pub var sections_in_memory: []VirtualMemoryRegionWithPermissions = undefined;
 
@@ -40,7 +41,8 @@ pub const File = struct {
     size: u64,
 };
 
-pub var cpus: []arch.CPU = undefined;
+pub var cpus: []common.arch.CPU = undefined;
+pub var local_storages: []common.arch.LocalStorage = undefined;
 
 /// Define root.log_level to override the default
 pub const log_level: common.log.Level = switch (common.build_mode) {
