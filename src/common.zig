@@ -5,7 +5,11 @@ const root = @import("root");
 pub const RNUFS = @import("common/fs.zig");
 pub const VirtualAddress = @import("common/virtual_address.zig");
 pub const PhysicalAddress = @import("common/physical_address.zig");
+pub const VirtualMemoryRegion = @import("common/virtual_memory_region.zig");
 pub const PhysicalMemoryRegion = @import("common/physical_memory_region.zig");
+pub const PhysicalAddressSpace = @import("common/physical_address_space.zig");
+pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
+
 pub const PSF1 = @import("common/psf1.zig");
 
 // ARCH
