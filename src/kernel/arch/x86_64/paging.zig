@@ -256,7 +256,8 @@ pub const AddressSpace = struct {
     }
 
     pub fn translate_address(address_space: *AddressSpace, asked_virtual_address: Virtual.Address) ?Physical.Address {
-        const virtual_address = if (asked_virtual_address.is_page_aligned()) asked_virtual_address else Virtual.Address.new(common.align_backward(asked_virtual_address.value, kernel.arch.page_size));
+        kernel.assert(@src(), asked_virtual_address.is_valid());
+        const virtual_address = asked_virtual_address.aligned_backward(kernel.arch.page_size);
 
         const indices = compute_indices(virtual_address);
 
@@ -301,12 +302,10 @@ pub const AddressSpace = struct {
         const pte = pt[indices[@enumToInt(PageIndex.PT)]];
         if (!pte.value.contains(.present)) return null;
 
-        var physical_address = get_address_from_entry_bits(pte.value.bits);
-        if (asked_virtual_address.is_page_aligned()) {
-            physical_address.page_align_backward();
-        }
+        const base_physical_address = get_address_from_entry_bits(pte.value.bits);
+        const offset = asked_virtual_address.value - virtual_address.value;
 
-        return physical_address;
+        return Physical.Address.new(base_physical_address.value + offset);
     }
 
     fn compute_indices(virtual_address: Virtual.Address) Indices {
