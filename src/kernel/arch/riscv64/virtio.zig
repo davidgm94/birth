@@ -1,7 +1,7 @@
 const kernel = @import("root");
 const common = @import("common");
 
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 
 // TODO: make possible to instantiate more than one same-class virtio driver
 
@@ -156,7 +156,7 @@ pub const MMIO = struct {
         const page_count = total_size / page_size + @boolToInt(total_size % page_size != 0);
         // All physical address space is identity-mapped so mapping is not needed here
         const queue_physical = kernel.arch.Physical.allocate1(page_count) orelse @panic("unable to allocate memory for virtio block device queue");
-        const queue = @intToPtr(*volatile SplitQueue, kernel.arch.Virtual.AddressSpace.physical_to_virtual(queue_physical));
+        const queue = @intToPtr(*volatile SplitQueue, kernel.arch.VirtualAddressSpace.physical_to_virtual(queue_physical));
         // TODO: distinguist between physical and virtual
         queue.num = 0;
         queue.last_seen_used = 0;

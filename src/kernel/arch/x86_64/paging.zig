@@ -10,10 +10,12 @@ const common = @import("common");
 
 const x86_64 = @import("../x86_64.zig");
 
-const Physical = kernel.Physical;
-const Virtual = kernel.Virtual;
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const log = common.log.scoped(.Paging_x86_64);
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
+const VirtualMemoryRegion = common.VirtualMemoryRegion;
+const PhysicalAddress = common.PhysicalAddress;
 
 const PML4Table = [512]PML4E;
 const PDPTable = [512]PDPTE;
@@ -24,18 +26,18 @@ pub var should_log = false;
 
 pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     log.debug("About to dereference memory regions", .{});
-    var bootloader_address_space = kernel.address_space;
-    kernel.address_space = kernel.Virtual.AddressSpace.new() orelse unreachable;
-    common.zero(kernel.address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
+    var bootloader_address_space = kernel.virtual_address_space;
+    kernel.virtual_address_space = VirtualAddressSpace.new() orelse unreachable;
+    common.zero(kernel.virtual_address_space.arch.get_pml4().access([*]u8)[0..@sizeOf(PML4Table)]);
 
     // Map the kernel and do some tests
     {
         for (stivale_pmrs) |pmr| {
-            const section_virtual_address = Virtual.Address.new(pmr.address);
-            const kernel_section_virtual_region = Virtual.Memory.Region.new(section_virtual_address, pmr.size);
+            const section_virtual_address = VirtualAddress.new(pmr.address);
+            const kernel_section_virtual_region = VirtualMemoryRegion.new(section_virtual_address, pmr.size);
             const section_physical_address = bootloader_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
-            kernel_section_virtual_region.map(&kernel.address_space, section_physical_address, blk: {
-                var flags = kernel.Virtual.AddressSpace.Flags.empty();
+            kernel_section_virtual_region.map(&kernel.virtual_address_space, section_physical_address, blk: {
+                var flags = VirtualAddressSpace.Flags.empty();
                 const permissions = pmr.permissions;
                 const executable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.executable != 0;
                 const readable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.readable != 0;
@@ -55,25 +57,25 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     }
 
     for (kernel.Physical.Memory.map.usable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
+        region.descriptor.map(&kernel.virtual_address_space, region.descriptor.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped usable", .{});
 
     for (kernel.Physical.Memory.map.reclaimable) |region| {
-        region.descriptor.map(&kernel.address_space, region.descriptor.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
+        region.descriptor.map(&kernel.virtual_address_space, region.descriptor.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped reclaimable", .{});
 
     for (kernel.Physical.Memory.map.framebuffer) |region| {
-        region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
+        region.map(&kernel.virtual_address_space, region.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
     }
     log.debug("Mapped framebuffer", .{});
 
     //for (kernel.Physical.Memory.map.reserved) |region| {
-    //region.map(&kernel.address_space, region.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+    //region.map(&kernel.virtual_address_space, region.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
     //}
 
-    kernel.address_space.make_current();
+    kernel.virtual_address_space.make_current();
     // Update physical pointers to virtual ones
     kernel.Physical.Memory.map.usable.ptr = @intToPtr(@TypeOf(kernel.Physical.Memory.map.usable.ptr), @ptrToInt(kernel.Physical.Memory.map.usable.ptr) + kernel.higher_half_direct_map.value);
     kernel.Physical.Memory.map.reclaimable.ptr = @intToPtr(@TypeOf(kernel.Physical.Memory.map.reclaimable.ptr), @ptrToInt(kernel.Physical.Memory.map.reclaimable.ptr) + kernel.higher_half_direct_map.value);
@@ -97,24 +99,24 @@ pub fn init(stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR) void {
     log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
 
     var insertion_result = false;
-    insertion_result = kernel.address_space.free_regions_by_address.insert(&kernel.memory_region.item_address, &kernel.memory_region, kernel.memory_region.address.value, .panic);
+    insertion_result = kernel.virtual_address_space.free_regions_by_address.insert(&kernel.memory_region.item_address, &kernel.memory_region, kernel.memory_region.address.value, .panic);
     common.runtime_assert(@src(), insertion_result);
-    insertion_result = kernel.address_space.free_regions_by_size.insert(&kernel.memory_region.item_size, &kernel.memory_region, kernel.memory_region.size, .allow);
+    insertion_result = kernel.virtual_address_space.free_regions_by_size.insert(&kernel.memory_region.item_size, &kernel.memory_region, kernel.memory_region.size, .allow);
     common.runtime_assert(@src(), insertion_result);
     log.debug("Set root for Virtual Memory Manager tree", .{});
-    log.debug("Tree address (free/addr): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_address)});
-    log.debug("Tree address (free/size): 0x{x}", .{@ptrToInt(&kernel.address_space.free_regions_by_size)});
-    log.debug("Tree address (used): 0x{x}", .{@ptrToInt(&kernel.address_space.used_regions)});
+    log.debug("Tree address (free/addr): 0x{x}", .{@ptrToInt(&kernel.virtual_address_space.free_regions_by_address)});
+    log.debug("Tree address (free/size): 0x{x}", .{@ptrToInt(&kernel.virtual_address_space.free_regions_by_size)});
+    log.debug("Tree address (used): 0x{x}", .{@ptrToInt(&kernel.virtual_address_space.used_regions)});
 
-    for (Physical.Memory.map.usable) |physical_entry| {
-        kernel.address_space.integrate_mapped_physical_entry(physical_entry, physical_entry.descriptor.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
+    for (kernel.physical_address_space.usable) |physical_entry| {
+        kernel.virtual_address_space.integrate_mapped_physical_entry(physical_entry, physical_entry.descriptor.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
     }
     log.debug("Finished the integration of usable regions into the kernel address space successfully!", .{});
-    for (Physical.Memory.map.framebuffer) |physical_region| {
-        kernel.address_space.integrate_mapped_physical_region(physical_region, physical_region.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
+    for (kernel.physical_address_space.framebuffer) |physical_region| {
+        kernel.virtual_address_space.integrate_mapped_physical_region(physical_region, physical_region.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
     }
     log.debug("Finished the integration of framebuffer regions into the kernel address space successfully!", .{});
-    for (Physical.Memory.map.usable) |physical_entry| {
+    for (kernel.physical_address_space.usable) |physical_entry| {
         log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
     }
     log.debug("Paging initialized", .{});
@@ -148,20 +150,20 @@ pub const AddressSpace = struct {
         };
     }
 
-    pub fn get_pml4(address_space: AddressSpace) Physical.Address {
-        return Physical.Address.new(address_space.cr3);
+    pub fn get_pml4(address_space: AddressSpace) PhysicalAddress {
+        return PhysicalAddress.new(address_space.cr3);
     }
 
     pub fn map_kernel_address_space_higher_half(address_space: AddressSpace) void {
         const used_memory_before = kernel.Physical.Memory.map.get_used_memory();
         const cr3 = address_space.cr3;
         // TODO: proper address
-        const cr3_physical_address = kernel.Physical.Address.new(cr3);
+        const cr3_physical_address = PhysicalAddress.new(cr3);
         const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
-        kernel.address_space.map(cr3_physical_address, cr3_virtual_address, kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .user }));
+        kernel.virtual_address_space.map(cr3_physical_address, cr3_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
         const pml4 = cr3_virtual_address.access(*PML4Table);
         common.zero_slice(pml4[0..0x100]);
-        common.copy(PML4E, pml4[0x100..], kernel.Physical.Address.new(kernel.address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+        common.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel.virtual_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
         const used_memory_after = kernel.Physical.Memory.map.get_used_memory();
         const memory_overhead = used_memory_after - used_memory_before;
         log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
@@ -169,7 +171,7 @@ pub const AddressSpace = struct {
         log.debug("Kernel mapping memory overhead: {}", .{memory_overhead});
     }
 
-    pub fn map(arch_address_space: *AddressSpace, physical_address: Physical.Address, virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
+    pub fn map(arch_address_space: *AddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
         if (should_log) log.debug("Init mapping", .{});
         common.runtime_assert(@src(), virtual_address.is_page_aligned());
         common.runtime_assert(@src(), physical_address.is_page_aligned());
@@ -255,7 +257,7 @@ pub const AddressSpace = struct {
         if (should_log) log.debug("Ended mapping", .{});
     }
 
-    pub fn translate_address(address_space: *AddressSpace, asked_virtual_address: Virtual.Address) ?Physical.Address {
+    pub fn translate_address(address_space: *AddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
         kernel.assert(@src(), asked_virtual_address.is_valid());
         const virtual_address = asked_virtual_address.aligned_backward(kernel.arch.page_size);
 
@@ -305,10 +307,10 @@ pub const AddressSpace = struct {
         const base_physical_address = get_address_from_entry_bits(pte.value.bits);
         const offset = asked_virtual_address.value - virtual_address.value;
 
-        return Physical.Address.new(base_physical_address.value + offset);
+        return PhysicalAddress.new(base_physical_address.value + offset);
     }
 
-    fn compute_indices(virtual_address: Virtual.Address) Indices {
+    fn compute_indices(virtual_address: VirtualAddress) Indices {
         var indices: Indices = undefined;
         var va = virtual_address.value;
         va = va >> 12;
@@ -331,8 +333,8 @@ pub const AddressSpace = struct {
 };
 
 const address_mask: u64 = 0x000000fffffff000;
-fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address) u64 {
-    common.runtime_assert(@src(), kernel.Physical.Address.max_bit == 40);
+fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
+    common.runtime_assert(@src(), PhysicalAddress.max_bit == 40);
     common.runtime_assert(@src(), new_address.is_page_aligned());
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
@@ -340,12 +342,12 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: Physical.Address
     return result;
 }
 
-fn get_address_from_entry_bits(entry_bits: u64) Physical.Address {
-    common.runtime_assert(@src(), kernel.Physical.Address.max_bit == 40);
+fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
+    common.runtime_assert(@src(), PhysicalAddress.max_bit == 40);
     const address = entry_bits & address_mask;
     common.runtime_assert(@src(), common.is_aligned(address, kernel.arch.page_size));
 
-    return Physical.Address.new(address);
+    return PhysicalAddress.new(address);
 }
 
 const PageIndex = enum(u3) {
@@ -427,7 +429,7 @@ pub const HandlePageFaultFlags = common.Bitflag(false, enum(u32) {
 });
 
 pub const HandlePageFaultError = error{};
-pub fn handle_page_fault(virtual_address: Virtual.Address, flags: HandlePageFaultFlags) !void {
+pub fn handle_page_fault(virtual_address: VirtualAddress, flags: HandlePageFaultFlags) !void {
     log.debug("Handling page fault", .{});
     if (flags.contains(.supervisor)) {
         if (virtual_address.belongs_to_region(kernel.memory_region)) {} else {

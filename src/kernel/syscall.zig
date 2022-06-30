@@ -2,7 +2,7 @@ const kernel = @import("root");
 const common = @import("common");
 
 const log = common.log.scoped(.Syscall);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const x86_64 = @import("arch/x86_64.zig");
 
 pub const ID = enum(u64) {

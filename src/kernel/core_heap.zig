@@ -1,15 +1,15 @@
 const kernel = @import("root");
 const common = @import("common");
 const log = common.log.scoped(.CoreHeap);
-const TODO = kernel.TODO;
-const Physical = kernel.Physical;
-const Virtual = kernel.Virtual;
+const TODO = common.TODO;
 const Allocator = common.Allocator;
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Heap = @This();
 
 pub const Region = struct {
-    virtual: Virtual.Address,
+    virtual: VirtualAddress,
     size: u64,
     allocated: u64,
 };
@@ -18,15 +18,15 @@ allocator: Allocator,
 // TODO: use another synchronization primitive
 lock: kernel.Spinlock,
 regions: [region_count]Region,
-address_space: *Virtual.AddressSpace,
+virtual_address_space: *VirtualAddressSpace,
 
 const region_size = 2 * common.mb;
 pub const region_count = kernel.core_memory_region.size / region_size;
 
-pub fn init(heap: *Heap, address_space: *Virtual.AddressSpace) void {
+pub fn init(heap: *Heap, address_space: *VirtualAddressSpace) void {
     heap.allocator.ptr = heap;
     heap.allocator.vtable = &allocator_interface.vtable;
-    heap.address_space = address_space;
+    heap.virtual_address_space = address_space;
 }
 
 var allocator_interface = struct {
@@ -53,10 +53,11 @@ var allocator_interface = struct {
                     break :blk region;
                 } else {
                     log.debug("have to allocate region", .{});
-                    const virtual_address = heap.address_space.allocate(region_size) orelse return Allocator.Error.OutOfMemory;
+                    // TODO: revisit arguments
+                    const allocation_slice = heap.virtual_address_space.allocator.allocBytes(0, region_size, 0, 0) catch return Allocator.Error.OutOfMemory;
 
                     region.* = Region{
-                        .virtual = virtual_address,
+                        .virtual = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
                         .size = region_size,
                         .allocated = 0,
                     };

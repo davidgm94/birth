@@ -2,7 +2,7 @@ const kernel = @import("root");
 const common = @import("common");
 
 const log = common.log.scoped(.PSF1);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 
 pub const Header = struct {
     magic: [2]u8,

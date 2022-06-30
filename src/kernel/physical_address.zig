@@ -31,13 +31,13 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
     };
 }
 
-pub inline fn identity_virtual_address(physical_address: PhysicalAddress) Virtual.Address {
+pub inline fn identity_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     return physical_address.identity_virtual_address_extended(false);
 }
 
-pub inline fn identity_virtual_address_extended(physical_address: PhysicalAddress, comptime override: bool) Virtual.Address {
-    if (!override and kernel.Virtual.initialized) kernel.TODO(@src());
-    return Virtual.Address.new(physical_address.value);
+pub inline fn identity_virtual_address_extended(physical_address: PhysicalAddress, comptime override: bool) VirtualAddress {
+    if (!override and kernel.Virtual.initialized) common.TODO(@src());
+    return VirtualAddress.new(physical_address.value);
 }
 
 pub inline fn access_identity(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
@@ -49,8 +49,8 @@ pub inline fn access(physical_address: PhysicalAddress, comptime Ptr: type) Ptr 
     return if (kernel.Virtual.initialized) physical_address.access_higher_half(Ptr) else physical_address.access_identity(Ptr);
 }
 
-pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) Virtual.Address {
-    return Virtual.Address.new(physical_address.value + kernel.higher_half_direct_map.value);
+pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
+    return VirtualAddress.new(physical_address.value + kernel.higher_half_direct_map.value);
 }
 
 pub inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
@@ -62,28 +62,6 @@ pub inline fn is_valid(physical_address: PhysicalAddress) bool {
     common.runtime_assert(@src(), max_bit != 0);
     common.runtime_assert(@src(), max > 1000);
     return physical_address.value <= max;
-}
-
-pub inline fn page_up(physical_address: *PhysicalAddress) void {
-    common.runtime_assert(@src(), physical_address.is_page_aligned());
-    physical_address.value += kernel.arch.page_size;
-}
-
-pub inline fn page_down(physical_address: *PhysicalAddress) void {
-    common.runtime_assert(@src(), physical_address.is_page_aligned());
-    physical_address.value -= kernel.arch.page_size;
-}
-
-pub inline fn page_align_forward(physical_address: *PhysicalAddress) void {
-    physical_address.value = common.align_forward(physical_address.value, kernel.arch.page_size);
-}
-
-pub inline fn page_align_backward(physical_address: *PhysicalAddress) void {
-    physical_address.value = common.align_backward(physical_address.value, kernel.arch.page_size);
-}
-
-pub inline fn is_page_aligned(physical_address: PhysicalAddress) bool {
-    return common.is_aligned(physical_address.value, kernel.arch.page_size);
 }
 
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: Physical.Memory.Region) bool {

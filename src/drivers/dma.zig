@@ -3,7 +3,7 @@ const common = @import("common");
 
 const TODO = common.TODO;
 const log = common.log.scoped(.DMA);
-const VirtualAddress = kernel.Virtual.Address;
+const VirtualAddress = common.VirtualAddress;
 
 const Allocator = common.Allocator;
 
@@ -74,6 +74,6 @@ pub const Buffer = struct {
 };
 
 //pub const Slice = struct {
-//address: Physical.Address,
+//address: PhysicalAddress,
 //size: u64,
 //};

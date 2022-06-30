@@ -1,7 +1,7 @@
 const kernel = @import("root");
 const common = @import("common");
 
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 
 var plic_base: u64 = 0;
 var plic_size: u64 = 0;

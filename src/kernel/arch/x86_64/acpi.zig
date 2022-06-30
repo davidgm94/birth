@@ -3,9 +3,10 @@ const common = @import("common");
 
 const x86_64 = @import("../x86_64.zig");
 const log = common.log.scoped(.ACPI);
-const TODO = kernel.TODO;
-const Virtual = kernel.Virtual;
-const Physical = kernel.Physical;
+const TODO = common.TODO;
+const PhysicalAddress = common.PhysicalAddress;
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Signature = enum(u32) {
     APIC = @ptrCast(*const u32, "APIC").*,
@@ -16,19 +17,18 @@ const Signature = enum(u32) {
 };
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
-    var rsdp_physical_page = rsdp_physical_address;
+pub fn init(rsdp_physical_address: PhysicalAddress) void {
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    rsdp_physical_page.page_align_backward();
-    kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+    const rsdp_physical_page = rsdp_physical_address.align_backward(kernel.arch.page_size);
+    kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
     const rsdp1 = rsdp_physical_address.access_higher_half(*align(1) RSDP1);
+
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
-        const rsdt_physical_address = Physical.Address.new(rsdp1.RSDT_address);
-        var rsdt_physical_page = rsdt_physical_address;
-        rsdt_physical_page.page_align_backward();
-        kernel.address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+        const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
+        const rsdt_physical_page = rsdt_physical_address.aligned_backward(kernel.arch.page_size);
+        kernel.address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
         const rsdt = rsdt_physical_address.access_higher_half(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
@@ -37,10 +37,9 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
         const tables = @intToPtr([*]align(1) u32, @ptrToInt(rsdt) + @sizeOf(Header))[0..rsdt_table_count];
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
-            const table_physical_address = kernel.Physical.Address.new(table_address);
-            var table_physical_page = table_physical_address;
-            table_physical_page.page_align_backward();
-            kernel.address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.empty());
+            const table_physical_address = PhysicalAddress.new(table_address);
+            const table_physical_page = table_physical_address.aligned_backward(kernel.arch.page_size);
+            kernel.address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
             const header = table_physical_address.access_higher_half(*align(1) Header);
 
             switch (header.signature) {
@@ -85,8 +84,8 @@ pub fn init(rsdp_physical_address: kernel.Physical.Address) void {
                                 log.debug("IO_APIC: {}", .{ioapic});
                                 common.runtime_assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
                                 x86_64.ioapic.gsi = ioapic.global_system_interrupt_base;
-                                x86_64.ioapic.address = kernel.Physical.Address.new(ioapic.IO_APIC_address);
-                                kernel.address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .read_write, .cache_disable }));
+                                x86_64.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
+                                kernel.address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .cache_disable }));
                                 x86_64.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {

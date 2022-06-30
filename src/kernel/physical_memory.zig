@@ -4,8 +4,9 @@ const common = @import("common");
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;
 const log = common.log.scoped(.PhysicalMemory);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 pub var map: Map = undefined;
+pub const Region = common.PhysicalMemoryRegion;
 
 /// This contains physical memory regions
 pub const Map = struct {
@@ -32,7 +33,7 @@ pub const Map = struct {
         return allocated_memory;
     }
 
-    pub fn find_address(mmap: *Map, physical_address: Physical.Address) ?RegionType {
+    pub fn find_address(mmap: *Map, physical_address: PhysicalAddress) ?RegionType {
         for (mmap.usable) |region| {
             if (physical_address.belongs_to_region(region.descriptor)) {
                 return .usable;
@@ -81,7 +82,7 @@ pub const Map = struct {
             return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
         }
 
-        pub fn get_bitset_from_address_and_size(address: Physical.Address, size: u64) []BitsetBaseType {
+        pub fn get_bitset_from_address_and_size(address: PhysicalAddress, size: u64) []BitsetBaseType {
             const page_count = kernel.bytes_to_pages(size, .must_be_exact);
             const bitset_len = common.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
             return if (kernel.Virtual.initialized) address.access_higher_half([*]BitsetBaseType)[0..bitset_len] else address.access_identity([*]BitsetBaseType)[0..bitset_len];
@@ -138,7 +139,7 @@ pub const Map = struct {
     }
 };
 
-pub fn allocate_pages(page_count: u64) ?Physical.Address {
+pub fn allocate_pages(page_count: u64) ?PhysicalAddress {
     const take_hint = true;
     const size = page_count * kernel.arch.page_size;
     // TODO: don't allocate if they are different regions (this can cause issues?)
@@ -179,7 +180,7 @@ pub fn allocate_pages(page_count: u64) ?Physical.Address {
                 const result = first_address;
                 region.allocated_size += region_allocated_page_count * kernel.arch.page_size;
                 common.runtime_assert(@src(), result != 0);
-                return Physical.Address.new(result);
+                return PhysicalAddress.new(result);
             }
 
             common.runtime_assert(@src(), region.allocated_size + size > region.descriptor.size);
@@ -213,36 +214,36 @@ pub fn allocate_pages(page_count: u64) ?Physical.Address {
     @panic("allocation failed, no memory");
 }
 
-pub const Region = struct {
-    address: Physical.Address,
-    size: u64,
+//pub const Region = struct {
+//address: PhysicalAddress,
+//size: u64,
 
-    pub fn new(address: Physical.Address, size: u64) Region {
-        return Region{
-            .address = address,
-            .size = size,
-        };
-    }
+//pub fn new(address: PhysicalAddress, size: u64) Region {
+//return Region{
+//.address = address,
+//.size = size,
+//};
+//}
 
-    pub fn map(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, flags: kernel.Virtual.AddressSpace.Flags) void {
-        return region.map_extended(address_space, base_virtual_address, true, flags);
-    }
+//pub fn map(region: Region, address_space: *VirtualAddressSpace, base_virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
+//return region.map_extended(address_space, base_virtual_address, true, flags);
+//}
 
-    pub fn map_extended(region: Region, address_space: *Virtual.AddressSpace, base_virtual_address: Virtual.Address, comptime is_page_aligned: bool, flags: kernel.Virtual.AddressSpace.Flags) void {
-        var physical_address = region.address;
-        var virtual_address = base_virtual_address;
-        var region_size = region.size;
-        if (!is_page_aligned) {
-            physical_address.page_align_backward();
-            virtual_address.page_align_backward();
-            region_size = common.align_forward(region_size, kernel.arch.page_size);
-        }
-        log.debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.value + region_size, virtual_address.value, virtual_address.value + region_size });
-        var size_it: u64 = 0;
-        while (size_it < region_size) : (size_it += kernel.arch.page_size) {
-            address_space.arch.map(physical_address, virtual_address, flags);
-            physical_address.page_up();
-            virtual_address.page_up();
-        }
-    }
-};
+//pub fn map_extended(region: Region, address_space: *VirtualAddressSpace, base_virtual_address: VirtualAddress, comptime is_page_aligned: bool, flags: VirtualAddressSpace.Flags) void {
+//var physical_address = region.address;
+//var virtual_address = base_virtual_address;
+//var region_size = region.size;
+//if (!is_page_aligned) {
+//physical_address.page_align_backward();
+//virtual_address.page_align_backward();
+//region_size = common.align_forward(region_size, kernel.arch.page_size);
+//}
+//log.debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.value + region_size, virtual_address.value, virtual_address.value + region_size });
+//var size_it: u64 = 0;
+//while (size_it < region_size) : (size_it += kernel.arch.page_size) {
+//address_space.arch.map(physical_address, virtual_address, flags);
+//physical_address.page_up();
+//virtual_address.page_up();
+//}
+//}
+//};

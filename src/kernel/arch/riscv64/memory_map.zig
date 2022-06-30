@@ -2,7 +2,7 @@ const kernel = @import("root");
 const common = @import("common");
 
 const Physical = kernel.arch.Physical;
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const log = common.log.scoped(.memory_map);
 
 var available: BootloaderMemoryRegionGroup = undefined;

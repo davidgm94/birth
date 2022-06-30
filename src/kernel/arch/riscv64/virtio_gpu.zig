@@ -8,7 +8,7 @@ const Descriptor = virtio.Descriptor;
 
 const Graphics = kernel.graphics;
 const log = common.log.scoped(.VirtioGPU);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 
 const GenericDriver = kernel.driver;
 
@@ -402,7 +402,7 @@ fn handler() u64 {
             }
             kernel.crash("virtio GPU descriptor corrupted", .{});
         };
-        const header = @intToPtr(*volatile ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
+        const header = @intToPtr(*volatile ControlHeader, kernel.arch.VirtualAddressSpace.physical_to_virtual(descriptor.address));
         const request_descriptor = driver.control_queue.get_descriptor(descriptor.next) orelse @panic("unable to request descriptor");
 
         handle_ex(driver, header, request_descriptor);
@@ -415,7 +415,7 @@ fn handler() u64 {
 }
 
 fn handle_ex(driver: *Driver, header: *volatile ControlHeader, request_descriptor: *volatile Descriptor) void {
-    const control_header = @intToPtr(*ControlHeader, kernel.arch.Virtual.AddressSpace.physical_to_virtual(request_descriptor.address));
+    const control_header = @intToPtr(*ControlHeader, kernel.arch.VirtualAddressSpace.physical_to_virtual(request_descriptor.address));
 
     switch (header.type) {
         .cmd_get_display_info => {

@@ -134,7 +134,7 @@ pub fn handler() u64 {
     const driver = @ptrCast(*Driver, kernel.Disk.drivers[0]);
     const descriptor = driver.queue.pop_used() orelse @panic("virtio block descriptor corrupted");
     // TODO Get virtual of this physical address @Virtual @Physical
-    const header = @intToPtr(*volatile Request.Header, kernel.arch.Virtual.AddressSpace.physical_to_virtual(descriptor.address));
+    const header = @intToPtr(*volatile Request.Header, kernel.arch.VirtualAddressSpace.physical_to_virtual(descriptor.address));
     const operation: Operation = switch (header.block_type) {
         .in => .read,
         .out => .write,
@@ -144,7 +144,7 @@ pub fn handler() u64 {
     const sector_descriptor = driver.queue.get_descriptor(descriptor.next) orelse @panic("unable to get descriptor");
 
     const status_descriptor = driver.queue.get_descriptor(sector_descriptor.next) orelse @panic("unable to get descriptor");
-    const status = @intToPtr([*]u8, kernel.arch.Virtual.AddressSpace.physical_to_virtual(status_descriptor.address))[0];
+    const status = @intToPtr([*]u8, kernel.arch.VirtualAddressSpace.physical_to_virtual(status_descriptor.address))[0];
     //log.debug("Disk operation status: {}", .{status});
     if (status != 0) kernel.crash("Disk operation failed: {}", .{status});
 
@@ -163,7 +163,7 @@ pub fn read_callback(disk_driver: *Disk, buffer: []u8, start_sector: u64, sector
     while (sector_i < sector_count + start_sector) : ({
         sector_i += 1;
     }) {
-        const sector_physical = kernel.arch.Virtual.AddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
+        const sector_physical = kernel.arch.VirtualAddressSpace.virtual_to_physical(@ptrToInt(&buffer[bytes_asked]));
         log.debug("Sending request for sector {}", .{sector_i});
         driver.operate(.read, sector_i, sector_physical);
         bytes_asked += sector_size;

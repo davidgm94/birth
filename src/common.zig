@@ -1,8 +1,8 @@
+const root = @import("root");
 const std = @import("std");
 const builtin = @import("builtin");
-const root = @import("root");
 
-pub const RNUFS = @import("common/fs.zig");
+pub const arch = @import("common/arch.zig");
 pub const VirtualAddress = @import("common/virtual_address.zig");
 pub const PhysicalAddress = @import("common/physical_address.zig");
 pub const VirtualMemoryRegion = @import("common/virtual_memory_region.zig");
@@ -10,6 +10,7 @@ pub const PhysicalMemoryRegion = @import("common/physical_memory_region.zig");
 pub const PhysicalAddressSpace = @import("common/physical_address_space.zig");
 pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
 
+pub const RNUFS = @import("common/fs.zig");
 pub const PSF1 = @import("common/psf1.zig");
 
 // ARCH
@@ -70,8 +71,8 @@ pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
-fn get_page_size(arch: Cpu.Arch) comptime_int {
-    return switch (arch) {
+fn get_page_size(target_arch: Cpu.Arch) comptime_int {
+    return switch (target_arch) {
         .x86_64 => 0x1000,
         .riscv64 => 0x1000,
     };
@@ -155,6 +156,10 @@ pub inline fn bytes_to_pages_extended(bytes: u64, page_size: u64, comptime must_
 
 pub inline fn bytes_to_sector(bytes: u64, sector_size: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, sector_size, must_be_exact);
+}
+
+pub inline fn bytes_to_pages(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
+    return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
 }
 
 pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: MustBeExact) u64 {
@@ -289,3 +294,8 @@ pub fn is_comptime() bool {
     var a: bool = false;
     return @TypeOf(@boolToInt(a)) == comptime_int;
 }
+
+pub const PrivilegeLevel = enum(u1) {
+    kernel = 0,
+    user = 1,
+};

@@ -157,7 +157,7 @@ fn walk(pagetable: pagetable_t, virtual_addr: usize, alloc: bool) ?pte_t {
                 // Allocate a new page if not valid and need to allocate
                 // This already identity maps the page as it has to zero the page out
                 if (Physical.allocate1(1)) |page_physical| {
-                    common.zero_range(kernel.arch.Virtual.AddressSpace.physical_to_virtual(page_physical), kernel.arch.page_size);
+                    common.zero_range(kernel.arch.VirtualAddressSpace.physical_to_virtual(page_physical), kernel.arch.page_size);
                     pg_iter = @intToPtr([*]usize, page_physical);
                     pte.* = arch.PA_TO_PTE(page_physical) | arch.PTE_VALID;
                 } else {

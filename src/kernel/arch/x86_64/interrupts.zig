@@ -10,7 +10,7 @@ const PCI = @import("../../../drivers/pci.zig");
 const interrupts = @This();
 const Context = x86_64.Context;
 
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const Thread = kernel.scheduler.Thread;
 const Virtual = kernel.Virtual;
 const log = common.log.scoped(.interrupts);

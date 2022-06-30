@@ -36,28 +36,6 @@ pub inline fn is_valid(physical_address: PhysicalAddress) bool {
     return physical_address.value <= max;
 }
 
-pub inline fn page_up(physical_address: *PhysicalAddress, comptime page_size: u64) void {
-    common.runtime_assert(@src(), physical_address.is_page_aligned(page_size));
-    physical_address.value += page_size;
-}
-
-pub inline fn page_down(physical_address: *PhysicalAddress, comptime page_size: u64) void {
-    common.runtime_assert(@src(), physical_address.is_page_aligned(page_size));
-    physical_address.value -= page_size;
-}
-
-pub inline fn page_align_forward(physical_address: *PhysicalAddress, comptime page_size: u64) void {
-    physical_address.value = common.align_forward(physical_address.value, page_size);
-}
-
-pub inline fn page_align_backward(physical_address: *PhysicalAddress, comptime page_size: u64) void {
-    physical_address.value = common.align_backward(physical_address.value, page_size);
-}
-
-pub inline fn is_page_aligned(physical_address: PhysicalAddress, comptime page_size: u64) bool {
-    return common.is_aligned(physical_address.value, page_size);
-}
-
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: common.PhysicalMemoryRegion) bool {
     return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
 }
@@ -104,4 +82,20 @@ pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) 
 
 pub inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
     return @intToPtr(Ptr, physical_address.to_higher_half_virtual_address().value);
+}
+
+pub inline fn aligned_forward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
+    return VirtualAddress{ .value = common.align_forward(virtual_address.value, alignment) };
+}
+
+pub inline fn aligned_backward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
+    return VirtualAddress{ .value = common.align_backward(virtual_address.value, alignment) };
+}
+
+pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) void {
+    virtual_address.* = virtual_address.aligned_forward(alignment);
+}
+
+pub inline fn align_backward(virtual_address: *VirtualAddress, alignment: u64) void {
+    virtual_address.* = virtual_address.aligned_backward(alignment);
 }

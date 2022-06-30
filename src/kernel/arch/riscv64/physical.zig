@@ -1,7 +1,7 @@
 const kernel = @import("root");
 const common = @import("common");
 
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const log = common.log.scoped(.Physical);
 
 const MemoryMap = @import("memory_map.zig");

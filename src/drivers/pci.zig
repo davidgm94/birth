@@ -2,11 +2,12 @@
 const kernel = @import("root");
 const common = @import("common");
 const log = common.log.scoped(.PCI);
-const TODO = kernel.TODO;
+const TODO = common.TODO;
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
+const PhysicalAddress = common.PhysicalAddress;
 const Controller = @This();
-const x86_64 = @import("../kernel/arch/x86_64.zig");
-const Physical = kernel.Physical;
-const Virtual = kernel.Virtual;
+const x86_64 = kernel.arch.x86_64;
 
 devices: []Device,
 bus_scan_states: [256]BusScanState,
@@ -426,8 +427,8 @@ pub const Device = struct {
     interrupt_pin: u8,
     interrupt_line: u8,
 
-    base_virtual_addresses: [6]kernel.Virtual.Address,
-    base_physical_addresses: [6]kernel.Physical.Address,
+    base_virtual_addresses: [6]VirtualAddress,
+    base_physical_addresses: [6]PhysicalAddress,
     base_addresses_size: [6]u64,
     base_addresses: [6]u32,
 
@@ -561,10 +562,10 @@ pub const Device = struct {
             address &= ~@as(u64, 0xf);
             log.debug("Address: 0x{x}. Size: {}", .{ address, size });
 
-            device.base_physical_addresses[i] = kernel.Physical.Address.new(address);
+            device.base_physical_addresses[i] = PhysicalAddress.new(address);
             device.base_virtual_addresses[i] = device.base_physical_addresses[i].to_higher_half_virtual_address();
             const physical_region = kernel.Physical.Memory.Region.new(device.base_physical_addresses[i], size);
-            physical_region.map(&kernel.address_space, device.base_virtual_addresses[i], kernel.Virtual.AddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
+            physical_region.map(&kernel.address_space, device.base_virtual_addresses[i], VirtualAddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
 
             log.debug("Virtual 0x{x}. Physical 0x{x}", .{ device.base_virtual_addresses[i].value, device.base_physical_addresses[i].value });
             device.base_addresses_size[i] = size;

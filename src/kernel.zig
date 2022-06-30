@@ -3,8 +3,6 @@ pub const common = @import("common");
 
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
-pub const Physical = @import("kernel/physical.zig");
-pub const Virtual = @import("kernel/virtual.zig");
 pub const bounds = arch.Bounds;
 pub const Spinlock = arch.Spinlock;
 pub const AVL = @import("kernel/avl.zig");
@@ -16,28 +14,33 @@ comptime {
     common.reference_all_declarations(Syscall);
 }
 
+const PhysicalAddress = common.PhysicalAddress;
+const PhysicalAddressSpace = common.PhysicalAddressSpace;
+const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
+
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
+const VirtualMemoryRegion = common.VirtualMemoryRegion;
+const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegionWithPermissions;
+
 pub var main_storage: *drivers.Filesystem = undefined;
-pub var address_space = Virtual.AddressSpace.from_context(undefined);
-pub var memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
-pub const core_memory_region = Virtual.Memory.Region.new(Virtual.Address.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
+pub var physical_address_space = PhysicalAddressSpace.new();
+pub var virtual_address_space = VirtualAddressSpace.from_context(undefined);
+pub var memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
+pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
 pub var core_heap: CoreHeap = undefined;
 pub var font: common.PSF1.Font = undefined;
-pub var higher_half_direct_map: Virtual.Address = undefined;
+pub var higher_half_direct_map: VirtualAddress = undefined;
 pub var file: File = undefined;
-pub var sections_in_memory: []Virtual.Memory.RegionWithPermissions = undefined;
+pub var sections_in_memory: []VirtualMemoryRegionWithPermissions = undefined;
 
 pub const File = struct {
-    address: Virtual.Address,
+    address: VirtualAddress,
     size: u64,
 };
 
 pub var cpus: []arch.CPU = undefined;
-
-pub const PrivilegeLevel = enum(u1) {
-    kernel = 0,
-    user = 1,
-};
 
 /// Define root.log_level to override the default
 pub const log_level: common.log.Level = switch (common.build_mode) {

@@ -3,7 +3,7 @@ const common = @import("common");
 const std = @import("std");
 
 const assert = common.runtime_assert;
-const TODO = kernel.TODO;
+const TODO = common.TODO;
 const align_forward = common.align_forward;
 const string_eq = common.string_eq;
 const starts_with = kernel.string_starts_with;
