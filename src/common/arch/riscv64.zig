@@ -1,17 +1,17 @@
 const kernel = @import("root");
 const common = @import("common");
 
-pub const Spinlock = @import("spinlock.zig");
-pub const sync = @import("sync.zig");
-pub const DeviceTree = @import("device_tree.zig");
-pub const Timer = @import("timer.zig");
-pub const Paging = @import("paging.zig");
-pub const Physical = @import("physical.zig");
-pub const Virtual = @import("virtual.zig");
-pub const Interrupts = @import("interrupts.zig");
-pub const SBI = @import("opensbi.zig");
-pub const virtio = @import("virtio.zig");
-const UART = @import("uart.zig").UART;
+pub const Spinlock = @import("riscv64/spinlock.zig");
+pub const sync = @import("riscv64/sync.zig");
+pub const DeviceTree = @import("riscv64/device_tree.zig");
+pub const Timer = @import("riscv64/timer.zig");
+pub const Paging = @import("riscv64/paging.zig");
+pub const Physical = @import("riscv64/physical.zig");
+pub const Virtual = @import("riscv64/virtual.zig");
+pub const Interrupts = @import("riscv64/interrupts.zig");
+pub const SBI = @import("riscv64/opensbi.zig");
+pub const virtio = @import("riscv64/virtio.zig");
+const UART = @import("riscv64/uart.zig").UART;
 
 pub const page_size = 0x1000;
 pub const sector_size = 0x200;

@@ -60,9 +60,9 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
     //kernel.arch.writer.writeAll("[") catch unreachable;
     //kernel.arch.writer.writeAll(time_str) catch unreachable;
     //kernel.arch.writer.writeAll("] ") catch unreachable;
-    kernel.arch.Writer.lock.acquire();
+    common.arch.Writer.lock.acquire();
     kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
-    kernel.arch.Writer.lock.release();
+    common.arch.Writer.lock.release();
 }
 
 //var panicking: usize = 0;
@@ -73,7 +73,7 @@ pub fn panic(message: []const u8, _: ?*common.StackTrace) noreturn {
 pub fn crash(comptime format: []const u8, args: anytype) noreturn {
     const crash_log = common.log.scoped(.PANIC);
     @setCold(true);
-    kernel.arch.disable_interrupts();
+    common.arch.disable_interrupts();
     crash_log.err(format, args);
     while (true) {}
 }

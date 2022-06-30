@@ -1,10 +1,9 @@
 const Spinlock = @This();
 
-const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
 const log = common.log.scoped(.Spinlock_x86_64);
-const AtomicRmwOp = kernel.AtomicRmwOp;
+const AtomicRmwOp = common.AtomicRmwOp;
 status: bool,
 were_interrupts_enabled: bool,
 
@@ -16,11 +15,11 @@ pub fn new() Spinlock {
 }
 
 pub fn acquire(spinlock: *volatile Spinlock) void {
-    const are_interrupts_enabled = kernel.arch.are_interrupts_enabled();
-    kernel.arch.disable_interrupts();
+    const are_interrupts_enabled = common.arch.are_interrupts_enabled();
+    common.arch.disable_interrupts();
     const expected = false;
     //spinlock.assert_lock_status(expected);
-    if (kernel.arch.get_current_cpu()) |current_cpu| {
+    if (common.arch.get_current_cpu()) |current_cpu| {
         current_cpu.spinlock_count += 1;
     }
     while (@cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Acquire, .Monotonic) != null) {}
@@ -31,7 +30,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
 
 pub fn release(spinlock: *volatile Spinlock) void {
     const expected = true;
-    if (kernel.arch.get_current_cpu()) |current_cpu| {
+    if (common.arch.get_current_cpu()) |current_cpu| {
         current_cpu.spinlock_count -= 1;
     }
     spinlock.assert_lock_status(expected);
@@ -41,12 +40,12 @@ pub fn release(spinlock: *volatile Spinlock) void {
     spinlock.status = false;
     //common.runtime_assert(@src(), result == null);
     if (were_interrupts_enabled) {
-        kernel.arch.enable_interrupts();
+        common.arch.enable_interrupts();
     }
 }
 
 inline fn assert_lock_status(spinlock: *volatile Spinlock, expected_status: bool) void {
-    if (expected_status != spinlock.status or kernel.arch.are_interrupts_enabled()) {
-        kernel.crash("Spinlock not in a desired state", .{});
+    if (expected_status != spinlock.status or common.arch.are_interrupts_enabled()) {
+        common.panic(@src(), "Spinlock not in a desired state", .{});
     }
 }

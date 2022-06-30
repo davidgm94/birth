@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../common.zig");
 const drivers = @import("../../drivers.zig");
 const PCI = drivers.PCI;
 const NVMe = drivers.NVMe;
@@ -19,7 +19,7 @@ const VirtualMemoryRegion = common.VirtualMemoryRegion;
 
 const log = common.log.scoped(.x86_64);
 
-pub const page_size = kernel.arch.check_page_size(0x1000);
+pub const page_size = common.arch.check_page_size(0x1000);
 
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
@@ -32,7 +32,7 @@ pub const ACPI = @import("x86_64/acpi.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
 pub const AddressSpace = Paging.AddressSpace;
-const Thread = kernel.scheduler.Thread;
+const Thread = common.scheduler.Thread;
 
 pub const IOAPIC = struct {
     address: PhysicalAddress,
@@ -189,7 +189,7 @@ pub inline fn get_current_cpu() ?*CPU {
     //return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
     return asm volatile (
         \\mov %%gs:[0], %[result]
-        : [result] "=r" (-> ?*kernel.arch.CPU),
+        : [result] "=r" (-> ?*common.arch.CPU),
     );
 }
 pub inline fn read_gs() ?*kernel.arch.CPU {

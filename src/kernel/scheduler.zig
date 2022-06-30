@@ -1,4 +1,3 @@
-const kernel = @import("root");
 const common = @import("common");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
@@ -10,18 +9,18 @@ const log = common.log.scoped(.Scheduler);
 
 const PrivilegeLevel = common.PrivilegeLevel;
 
-pub const Context = kernel.arch.Context;
+pub const Context = common.arch.Context;
 
-pub var lock: kernel.arch.Spinlock = undefined;
+pub var lock: common.arch.Spinlock = undefined;
 var thread_pool: [8192]Thread = undefined;
 var thread_id: u64 = 0;
 
 pub fn yield(context: *Context) noreturn {
-    const current_cpu = kernel.arch.get_current_cpu().?;
+    const current_cpu = common.arch.get_current_cpu().?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
     }
-    kernel.arch.disable_interrupts();
+    common.arch.disable_interrupts();
     lock.acquire();
     var old_address_space: *VirtualAddressSpace = undefined;
     if (lock.were_interrupts_enabled) @panic("ffff");
@@ -29,7 +28,7 @@ pub fn yield(context: *Context) noreturn {
         current_thread.context = context;
         old_address_space = current_thread.address_space;
     } else {
-        old_address_space = &kernel.virtual_address_space;
+        old_address_space = &common.virtual_address_space;
     }
     const new_thread = pick_thread();
     new_thread.time_slices += 1;
@@ -39,8 +38,8 @@ pub fn yield(context: *Context) noreturn {
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
     //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
-    //kernel.arch.next_timer(1);
-    kernel.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
+    //common.arch.next_timer(1);
+    common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
 pub const Thread = struct {
@@ -53,7 +52,7 @@ pub const Thread = struct {
     user_stack_reserve: u64,
     user_stack_commit: u64,
     id: u64,
-    context: *kernel.arch.Context,
+    context: *common.arch.Context,
     time_slices: u64,
     last_known_execution_address: u64,
     address_space: *VirtualAddressSpace,
@@ -69,7 +68,7 @@ pub const Thread = struct {
         argument: u64,
     };
 
-    pub fn spawn(privilege_level: PrivilegeLevel, entry_point: EntryPoint) *Thread {
+    pub fn spawn(privilege_level: PrivilegeLevel, entry_point: EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
         // TODO: lock
         const new_thread_id = thread_id;
         const thread_index = new_thread_id % thread_pool.len;
@@ -79,7 +78,7 @@ pub const Thread = struct {
         log.debug("here", .{});
         // TODO: should we always use the same address space for kernel tasks?
         thread.address_space = switch (privilege_level) {
-            .kernel => &kernel.virtual_address_space,
+            .kernel => kernel_virtual_address_space,
             .user => VirtualAddressSpace.new_for_user() orelse unreachable,
         };
 
@@ -95,13 +94,13 @@ pub const Thread = struct {
         var user_stack: VirtualAddress = undefined;
         // TODO: implemented idle thread
 
-        const kernel_stack = kernel.virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
+        const kernel_stack = kernel_virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
         log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
         user_stack = switch (privilege_level) {
             .kernel => kernel_stack,
             .user => blk: {
                 // TODO: lock
-                const user_stack_physical_address = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(user_stack_reserve, .must_be_exact)) orelse unreachable;
+                const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
                 const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
                 const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
                 user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
@@ -128,17 +127,17 @@ pub const Thread = struct {
             log.debug("Creating arch-specific thread initialization", .{});
             // TODO: hack
             thread.context = switch (privilege_level) {
-                .kernel => kernel.arch.Context.new(thread, entry_point),
+                .kernel => common.arch.Context.new(thread, entry_point),
                 .user => blk: {
                     var kernel_entry_point_virtual_address_page = VirtualAddress.new(entry_point.start_address);
                     kernel_entry_point_virtual_address_page.page_align_backward();
                     const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
                     log.debug("Offset: 0x{x}", .{offset});
-                    const entry_point_physical_address_page = kernel.virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
+                    const entry_point_physical_address_page = kernel_virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
                     const user_entry_point_virtual_address_page = VirtualAddress.new(0x6000_0000_0000);
                     thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, VirtualAddressSpace.Flags.from_flags(&.{ .user, .read_write }));
                     const user_entry_point_virtual_address = VirtualAddress.new(user_entry_point_virtual_address_page.value + offset);
-                    break :blk kernel.arch.Context.new(thread, EntryPoint{
+                    break :blk common.arch.Context.new(thread, EntryPoint{
                         .start_address = user_entry_point_virtual_address.value,
                         .argument = entry_point.argument,
                     });
@@ -156,7 +155,7 @@ pub const Thread = struct {
 };
 
 fn pick_thread() *Thread {
-    const current_cpu = kernel.arch.get_current_cpu().?;
+    const current_cpu = common.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
     common.runtime_assert(@src(), current_thread_id < thread_id);
     //const next_thread_index = kernel.arch.read_timestamp() % thread_id;

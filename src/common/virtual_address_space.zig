@@ -3,8 +3,9 @@ const VirtualAddressSpace = @This();
 const common = @import("../common.zig");
 const TODO = common.TODO;
 const Allocator = common.Allocator;
+const arch = common.arch;
 
-arch: u64,
+arch: arch.AddressSpace,
 allocator: Allocator,
 
 pub fn new() ?VirtualAddressSpace {
