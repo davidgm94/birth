@@ -17,6 +17,3 @@ pub const riscv64 = @import("arch/riscv64.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
 
 pub var writer = common.Writer(void, common.arch.Writer.Error, common.arch.Writer.write){ .context = {} };
-
-var bootstrap_cpu: common.arch.CPU = undefined;
-var bootstrap_thread: common.Thread = undefined;
