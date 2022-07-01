@@ -36,8 +36,6 @@ pub const Table = packed struct {
         gdt.load();
         log.debug("GDT loaded", .{});
         x86_64.flush_segments_kernel();
-        x86_64.set_current_cpu(&kernel.cpus[0]);
-        _ = x86_64.get_current_cpu();
     }
 
     pub inline fn load(gdt: *Table) void {

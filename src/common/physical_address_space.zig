@@ -133,9 +133,7 @@ pub const MapEntry = struct {
     }
 
     pub fn setup_bitset(entry: *MapEntry, page_size: u64) void {
-        log.debug("Setting up bitset", .{});
         const page_count = common.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
-        log.debug("Set up bitset", .{});
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
         const remainder_bitsize_max: u64 = bitsize - 1;

@@ -3,6 +3,7 @@ pub const common = @import("common");
 
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
+pub const syscall = @import("kernel/syscall.zig");
 pub const bounds = arch.Bounds;
 pub const Heap = common.Heap;
 comptime {

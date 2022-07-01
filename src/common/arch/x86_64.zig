@@ -166,7 +166,7 @@ pub const interrupt_vector_msi_start = 0x70;
 pub const interrupt_vector_msi_count = 0x40;
 pub const spurious_vector: u8 = 0xFF;
 
-pub fn enable_apic() void {
+pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
     const cpu = get_current_cpu() orelse @panic("cannot get cpu");
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
@@ -174,7 +174,7 @@ pub fn enable_apic() void {
     const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
     log.debug("APIC physical address: 0{x}", .{apic_physical_address});
-    cpu.lapic = LAPIC.new(PhysicalAddress.new(apic_physical_address));
+    cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address));
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
     common.runtime_assert(@src(), lapic_id == cpu.lapic_id);
@@ -187,23 +187,23 @@ pub export fn foo() callconv(.C) void {
     //log.debug("RSP: 0x{x}", .{myrsp});
 }
 
-pub fn preinit_scheduler() void {
-    TODO(@src());
-    // TODO:
-    //const bsp = &kernel.cpus[0];
-    //set_current_cpu(bsp);
-    //IA32_KERNEL_GS_BASE.write(0);
-    //bsp.gdt.initial_setup();
-    //interrupts.init();
-    //enable_apic();
-    //Syscall.enable();
+pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace, syscall_entry_point: fn () callconv(.Naked) void) void {
+    // This assumes the BSP processor is already properly setup here
+    const local_storage = get_local_storage().?;
+    const bsp = local_storage.cpu;
+    bsp.gdt.initial_setup();
+    // Flush GS as well
+    set_local_storage(local_storage);
+    interrupts.init();
+    enable_apic(virtual_address_space);
+    Syscall.enable(syscall_entry_point);
 
-    //bsp.shared_tss = TSS.Struct{};
-    //bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
-    //bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
-    //bsp.gdt.update_tss(&bsp.shared_tss);
+    bsp.shared_tss = TSS.Struct{};
+    bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
+    bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
+    bsp.gdt.update_tss(&bsp.shared_tss);
 
-    //log.debug("Scheduler pre-initialization finished!", .{});
+    log.debug("Scheduler pre-initialization finished!", .{});
 }
 
 //pub fn init_all_cores() void {
@@ -1031,11 +1031,11 @@ pub const LAPIC = struct {
         TIMER_CURRENT_COUNT = 0x390,
     };
 
-    pub inline fn new(lapic_physical_address: PhysicalAddress) LAPIC {
+    pub inline fn new(virtual_address_space: *common.VirtualAddressSpace, lapic_physical_address: PhysicalAddress) LAPIC {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        kernel.virtual_address_space.map(lapic_physical_address, lapic_virtual_address, common.VirtualAddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
+        virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
         const lapic = LAPIC{
             .address = lapic_virtual_address,
         };

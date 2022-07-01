@@ -60,7 +60,6 @@ var allocator_interface = struct {
                         common.runtime_assert(@src(), (region.size - region.allocated) >= size);
                         break :blk region;
                     } else {
-                        log.debug("have to allocate region", .{});
                         // TODO: revisit arguments @MaybeBug
                         const allocation_slice = virtual_address_space.allocator.allocBytes(0, region_size, 0, 0) catch return Allocator.Error.OutOfMemory;
 

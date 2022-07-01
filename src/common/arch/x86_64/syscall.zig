@@ -1,10 +1,10 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 const x86_64 = @import("../x86_64.zig");
 
 const log = common.log.scoped(.Syscall_x86_64);
 
-pub fn enable() void {
+pub fn enable(syscall_entry_point: fn () callconv(.Naked) void) void {
     x86_64.IA32_LSTAR.write(@ptrToInt(syscall_entry_point));
     // TODO: figure out what this does
     x86_64.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
@@ -29,25 +29,3 @@ pub fn enable() void {
 //);
 //}
 
-export fn syscall_entry_point() callconv(.Naked) void {
-    comptime {
-        common.comptime_assert(@offsetOf(kernel.arch.CPU, "current_thread") == 0x08);
-        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 0);
-    }
-    asm volatile (
-        \\mov %%gs:[0], %%r15
-        \\add %[offset], %%r15
-        \\mov (%%r15), %%r15
-        \\mov (%%r15), %%r15
-        \\mov %%r15, %%rbp
-        \\push %%rbp
-        \\mov %%rbp, %%rsp
-        \\sub $0x10, %%rsp
-        :
-        : [offset] "i" (@intCast(u8, @offsetOf(kernel.arch.CPU, "current_thread"))),
-    );
-
-    const syscall_number = x86_64.rax.read();
-    _ = kernel.Syscall.syscall_handlers[syscall_number](0, 0, 0, 0);
-    asm volatile ("sysret");
-}

@@ -214,12 +214,10 @@ pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!VirtualAdd
 }
 
 pub fn process_pmrs(allocator: Allocator, stivale2_struct: *Struct) Error![]VirtualMemoryRegion {
-    log.debug("Here", .{});
     const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
     log.debug("PMRS struct: 0x{x}", .{@ptrToInt(pmrs_struct)});
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
-    log.debug("past this", .{});
 
     const kernel_sections = allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 

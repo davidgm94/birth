@@ -39,7 +39,6 @@ pub fn preinit_bsp() void {
 export fn switch_context() callconv(.Naked) void {
     asm volatile (
         \\cli
-        \\
         // Compare address spaces and switch if they are not the same
         \\mov (%%rsi), %%rsi
         \\mov %%cr3, %%rax
@@ -86,4 +85,27 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     if (new_thread.local_storage.cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
     if (should_swap_gs) asm volatile ("swapgs");
+}
+
+pub export fn syscall_entry_point() callconv(.Naked) void {
+    comptime {
+        common.comptime_assert(@offsetOf(common.arch.CPU, "current_thread") == 0x08);
+        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 0);
+    }
+    asm volatile (
+        \\mov %%gs:[0], %%r15
+        \\add %[offset], %%r15
+        \\mov (%%r15), %%r15
+        \\mov (%%r15), %%r15
+        \\mov %%r15, %%rbp
+        \\push %%rbp
+        \\mov %%rbp, %%rsp
+        \\sub $0x10, %%rsp
+        :
+        : [offset] "i" (@intCast(u8, @offsetOf(common.arch.CPU, "current_thread"))),
+    );
+
+    const syscall_number = x86_64.rax.read();
+    _ = kernel.syscall.syscall_handlers[syscall_number](0, 0, 0, 0);
+    asm volatile ("sysret");
 }
