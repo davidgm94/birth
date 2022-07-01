@@ -4,13 +4,9 @@ pub const common = @import("common");
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
 pub const bounds = arch.Bounds;
-pub const AVL = @import("kernel/avl.zig");
-pub const CoreHeap = @import("kernel/core_heap.zig");
-pub const scheduler = @import("kernel/scheduler.zig");
-pub const ELF = @import("kernel/elf.zig");
-pub const Syscall = @import("kernel/syscall.zig");
+pub const Heap = common.Heap;
 comptime {
-    common.reference_all_declarations(Syscall);
+    //common.reference_all_declarations(Syscall);
     common.reference_all_declarations(arch);
 }
 
@@ -23,13 +19,16 @@ const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualMemoryRegion = common.VirtualMemoryRegion;
 const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegionWithPermissions;
 
+const Scheduler = common.Scheduler;
+
 pub var main_storage: *drivers.Filesystem = undefined;
 pub var physical_address_space = PhysicalAddressSpace.new();
 pub var virtual_address_space = VirtualAddressSpace.from_context(undefined);
 pub var memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
-pub var core_heap: CoreHeap = undefined;
+pub var scheduler: Scheduler = undefined;
+pub var core_heap: Heap = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;
 pub var cpu_features: common.arch.CPUFeatures = undefined;

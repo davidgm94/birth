@@ -1,6 +1,10 @@
-const common = @import("../common.zig");
 const PhysicalAddress = @This();
+
+const common = @import("../common.zig");
+const TODO = common.TODO;
+
 const VirtualAddress = common.VirtualAddress;
+const log = common.log.scoped(.PhysicalAddress);
 
 value: u64,
 
@@ -26,12 +30,20 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
     };
 }
 
-pub inline fn is_valid(physical_address: PhysicalAddress, max_bit: u6) bool {
-    common.runtime_assert(@src(), physical_address.value != 0);
-    common.runtime_assert(@src(), max_bit != 0);
-    const max = @as(u64, 1) << max_bit;
-    common.runtime_assert(@src(), max > 1000);
-    return physical_address.value <= max;
+pub inline fn is_valid(physical_address: PhysicalAddress) bool {
+    const root = @import("root");
+    const is_kernel = @hasDecl(root, "cpu_features");
+    if (is_kernel) {
+        const cpu_features = root.cpu_features;
+        common.runtime_assert(@src(), physical_address.value != 0);
+        common.runtime_assert(@src(), cpu_features.physical_address_max_bit != 0);
+        const max = @as(u64, 1) << cpu_features.physical_address_max_bit;
+        common.runtime_assert(@src(), max > 1000);
+        log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
+        return physical_address.value <= max;
+    } else {
+        TODO(@src());
+    }
 }
 
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: common.PhysicalMemoryRegion) bool {
@@ -55,18 +67,21 @@ pub inline fn identity_virtual_address_extended(physical_address: PhysicalAddres
 }
 
 pub inline fn access_identity(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    const root = @import("root");
-    if (@hasDecl(root, "Virtual")) {
-        common.runtime_assert(@src(), !root.Virtual.initialized);
-    }
+    //const root = @import("root");
+    //if (@hasDecl(root, "Virtual")) {
+    //common.runtime_assert(@src(), !root.Virtual.initialized);
+    //}
 
     return @intToPtr(Ptr, identity_virtual_address(physical_address).value);
 }
 
 pub inline fn access(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    const root = @import("root");
-    const initialized_virtual = @hasDecl(root, "Virtual") and root.Virtual.initialized;
-    return if (initialized_virtual) physical_address.access_higher_half(Ptr) else physical_address.access_identity(Ptr);
+    _ = Ptr;
+    _ = physical_address;
+    TODO(@src());
+    //const root = @import("root");
+    //const initialized_virtual = @hasDecl(root, "Virtual") and root.Virtual.initialized;
+    //return if (initialized_virtual) physical_address.access_higher_half(Ptr) else physical_address.access_identity(Ptr);
 }
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
@@ -75,6 +90,7 @@ pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) 
     if (@hasDecl(root, "higher_half_direct_map")) {
         higher_half = root.higher_half_direct_map.value;
     }
+    log.debug("Using higher half address 0x{x} for physical address 0x{x}", .{ higher_half, physical_address.value });
     return VirtualAddress.new(physical_address.value + higher_half);
 }
 

@@ -1,5 +1,7 @@
+const Scheduler = @This();
+
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../common.zig");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;
@@ -13,26 +15,26 @@ const PrivilegeLevel = common.PrivilegeLevel;
 
 pub const Context = common.arch.Context;
 
-pub var lock: common.arch.Spinlock = undefined;
-var thread_pool: [8192]Thread = undefined;
-var thread_id: u64 = 0;
+lock: common.arch.Spinlock,
+thread_pool: [8192]Thread,
+thread_id: u64,
 
-pub fn yield(context: *Context) noreturn {
+pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
     const current_cpu = common.arch.get_current_cpu().?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
     }
     common.arch.disable_interrupts();
-    lock.acquire();
+    scheduler.lock.acquire();
     var old_address_space: *VirtualAddressSpace = undefined;
-    if (lock.were_interrupts_enabled) @panic("ffff");
+    if (scheduler.lock.were_interrupts_enabled) @panic("ffff");
     if (current_cpu.current_thread) |current_thread| {
         current_thread.context = context;
         old_address_space = current_thread.address_space;
     } else {
         old_address_space = &kernel.virtual_address_space;
     }
-    const new_thread = pick_thread();
+    const new_thread = scheduler.pick_thread();
     new_thread.time_slices += 1;
     // TODO: idle
 
@@ -44,12 +46,12 @@ pub fn yield(context: *Context) noreturn {
     common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
-pub fn spawn(privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
+pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
     // TODO: lock
-    const new_thread_id = thread_id;
-    const thread_index = new_thread_id % thread_pool.len;
-    var thread = &thread_pool[thread_index];
-    thread_id += 1;
+    const new_thread_id = scheduler.thread_id;
+    const thread_index = new_thread_id % scheduler.thread_pool.len;
+    var thread = &scheduler.thread_pool[thread_index];
+    scheduler.thread_id += 1;
 
     log.debug("here", .{});
     // TODO: should we always use the same address space for kernel tasks?
@@ -129,13 +131,13 @@ pub fn terminate(thread: *Thread) void {
     TODO(@src());
 }
 
-fn pick_thread() *Thread {
+fn pick_thread(scheduler: *Scheduler) *Thread {
     const current_cpu = common.arch.get_current_cpu().?;
     const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
-    common.runtime_assert(@src(), current_thread_id < thread_id);
+    common.runtime_assert(@src(), current_thread_id < scheduler.thread_id);
     //const next_thread_index = kernel.arch.read_timestamp() % thread_id;
     const next_thread_index = 0;
-    const new_thread = &thread_pool[next_thread_index];
+    const new_thread = &scheduler.thread_pool[next_thread_index];
     return new_thread;
 }
 

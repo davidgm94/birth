@@ -3,6 +3,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const arch = @import("common/arch.zig");
+pub const Heap = @import("common/heap.zig");
 pub const VirtualAddress = @import("common/virtual_address.zig");
 pub const PhysicalAddress = @import("common/physical_address.zig");
 pub const VirtualMemoryRegion = @import("common/virtual_memory_region.zig");
@@ -10,6 +11,7 @@ pub const PhysicalMemoryRegion = @import("common/physical_memory_region.zig");
 pub const PhysicalAddressSpace = @import("common/physical_address_space.zig");
 pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
 pub const Thread = @import("common/thread.zig");
+pub const Scheduler = @import("common/scheduler.zig");
 
 pub const RNUFS = @import("common/fs.zig");
 pub const PSF1 = @import("common/psf1.zig");
@@ -299,4 +301,9 @@ pub fn is_comptime() bool {
 pub const PrivilegeLevel = enum(u1) {
     kernel = 0,
     user = 1,
+};
+
+pub const IsHigherHalfMappedAlready = enum(u1) {
+    no = 0,
+    yes = 1,
 };

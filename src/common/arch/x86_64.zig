@@ -1204,59 +1204,6 @@ pub inline fn flush_segments_kernel() void {
     );
 }
 
-//pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void;
-export fn switch_context() callconv(.Naked) void {
-    asm volatile (
-        \\cli
-        \\
-        // Compare address spaces and switch if they are not the same
-        \\mov (%%rsi), %%rsi
-        \\mov %%cr3, %%rax
-        \\cmp %%rsi, %%rax
-        \\je 0f
-        \\mov %%rsi, %%cr3
-        \\0:
-        \\mov %%rdi, %%rsp
-        \\mov %%rcx, %%rsi
-        \\mov %%r8, %%rdx
-    );
-
-    asm volatile (
-        \\call post_context_switch
-    );
-
-    interrupts.epilogue();
-
-    unreachable;
-}
-
-export fn post_context_switch(context: *Context, new_thread: *common.Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
-    log.debug("Context switching", .{});
-    if (kernel.scheduler.lock.were_interrupts_enabled) {
-        @panic("interrupts were enabled");
-    }
-    kernel.scheduler.lock.release();
-    //common.runtime_assert(@src(), context == new_thread.context);
-    //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
-    context.check(@src());
-    const current_cpu = get_current_cpu().?;
-    current_cpu.current_thread = new_thread;
-    const should_swap_gs = cs.read() != 0x28;
-    log.debug("Should swap GS: {}", .{should_swap_gs});
-    // TODO: checks
-    //const new_thread = current_thread.time_slices == 1;
-
-    // TODO: close reference or dettach address space
-    _ = old_address_space;
-    new_thread.last_known_execution_address = context.rip;
-
-    current_cpu.lapic.end_of_interrupt();
-    if (are_interrupts_enabled()) @panic("interrupts enabled");
-    if (current_cpu.spinlock_count > 0) @panic("spinlocks active");
-    // TODO: profiling
-    if (should_swap_gs) asm volatile ("swapgs");
-}
-
 var pci_lock: Spinlock = undefined;
 
 inline fn notify_config_op(bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {

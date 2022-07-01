@@ -5,6 +5,8 @@ const print = std.debug.print;
 const assert = std.debug.assert;
 
 const fs = @import("src/build/fs.zig");
+
+pub const sector_size = 0x200;
 const Builder = std.build.Builder;
 const LibExeObjStep = std.build.LibExeObjStep;
 const Step = std.build.Step;
@@ -300,9 +302,10 @@ const Kernel = struct {
     const BootImage = struct {
         const x86_64 = struct {
             const Limine = struct {
-                const installer = @import("src/kernel/arch/x86_64/limine/installer.zig");
-                const base_path = "src/kernel/arch/x86_64/limine/";
-                const to_install_path = base_path ++ "to_install/";
+                const build_installer_path = "src/build/arch/x86_64/limine/";
+                const installer = @import("src/build/arch/x86_64/limine/installer.zig");
+                const base_path = "src/common/arch/x86_64/limine/";
+                const to_install_path = build_installer_path ++ "to_install/";
                 const image_path = "zig-cache/universal.iso";
 
                 fn new(kernel: *Kernel) Step {

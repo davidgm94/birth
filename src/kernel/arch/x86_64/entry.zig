@@ -2,6 +2,9 @@ const common = @import("common");
 const log = common.log.scoped(.Entry);
 const kernel = @import("root");
 const x86_64 = common.arch.x86_64;
+const PhysicalAddress = common.PhysicalAddress;
+const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
+const Stivale2 = x86_64.Stivale2;
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 pub export fn start(stivale2_struct_address: u64) noreturn {
@@ -11,11 +14,12 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     kernel.virtual_address_space = VirtualAddressSpace.bootstrapping() orelse unreachable;
     kernel.core_heap.init(&kernel.virtual_address_space);
     kernel.cpu_features = x86_64.enable_cpu_features();
+    const stivale2_struct_physical_address = PhysicalAddress.new(stivale2_struct_address);
+    kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no) catch @panic("Unable to get higher_half_direct_map");
+    const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no) catch @panic("Unable to get RSDP");
+    _ = rsdp;
+    kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no, kernel.arch.page_size) catch unreachable;
     success_and_end();
-    //const stivale2_struct_physical_address = PhysicalAddress.new(stivale2_struct_address);
-    //kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    //const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
-    //kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)) catch unreachable;
     //Paging.init(Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct)));
     //const region_type = kernel.physical_address_space.find_address(stivale2_struct_physical_address);
     //log.debug("Region type: {}", .{region_type});

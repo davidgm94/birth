@@ -1,13 +1,11 @@
-const kernel = @import("root");
-const common = @import("common");
+const Heap = @This();
+const common = @import("../common.zig");
 const log = common.log.scoped(.CoreHeap);
 const TODO = common.TODO;
 const Allocator = common.Allocator;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const Spinlock = common.arch.Spinlock;
-
-const Heap = @This();
 
 pub const Region = struct {
     virtual: VirtualAddress,
@@ -22,7 +20,7 @@ regions: [region_count]Region,
 virtual_address_space: *VirtualAddressSpace,
 
 const region_size = 2 * common.mb;
-pub const region_count = kernel.core_memory_region.size / region_size;
+pub const region_count = 0x1000_0000 / region_size;
 
 pub fn init(heap: *Heap, address_space: *VirtualAddressSpace) void {
     heap.allocator.ptr = heap;

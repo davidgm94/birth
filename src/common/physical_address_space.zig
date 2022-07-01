@@ -5,6 +5,7 @@ const log = common.log.scoped(.PhysicalAddressSpace);
 const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
+const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
 
 usable: []MapEntry,
 reclaimable: []MapEntry,
@@ -42,15 +43,18 @@ pub const MapEntry = struct {
         reserved = 4,
     };
     pub const BitsetBaseType = u64;
-    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64) []BitsetBaseType {
-        _ = physical_address;
-        _ = size;
-        TODO(@src());
+
+    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64, comptime is_higher_half_map_already: IsHigherHalfMappedAlready, comptime page_size: u64) []BitsetBaseType {
+        const page_count = common.bytes_to_pages(size, page_size, .must_be_exact);
+        const bitset_len = common.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
+        return if (is_higher_half_map_already == .yes) physical_address.access_higher_half([*]BitsetBaseType)[0..bitset_len] else physical_address.access_identity([*]BitsetBaseType)[0..bitset_len];
     }
-    pub fn get_bitset(entry: *MapEntry) []BitsetBaseType {
-        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
+
+    pub fn get_bitset_extended(entry: *MapEntry, comptime is_higher_half_map_already: IsHigherHalfMappedAlready, comptime page_size: u64) []BitsetBaseType {
+        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size, is_higher_half_map_already, page_size);
     }
-    pub fn setup_bitset(entry: *MapEntry, comptime page_size: u64) void {
+
+    pub fn setup_bitset(entry: *MapEntry, comptime page_size: u64, comptime is_higher_half_map_already: IsHigherHalfMappedAlready) void {
         log.debug("Setting up bitset", .{});
         const page_count = common.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
         log.debug("Set up bitset", .{});
@@ -60,7 +64,7 @@ pub const MapEntry = struct {
         const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
         const remainder = @intCast(common.IntType(.unsigned, popcount), page_count % bitsize);
 
-        const bitset = entry.get_bitset();
+        const bitset = entry.get_bitset_extended(is_higher_half_map_already, page_size);
 
         for (bitset[0..quotient]) |*bitset_elem| {
             bitset_elem.* = common.max_int(BitsetBaseType);

@@ -10,6 +10,7 @@ const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegion;
+const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
 
 const x86_64 = kernel.arch.x86_64;
 
@@ -33,28 +34,29 @@ pub fn process_bootloader_information(stivale2_struct: *Struct) Error!void {
     log.debug("Process SMP info", .{});
 }
 
-pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
-    var tag_opt = get_tag_from_physical(PhysicalAddress.new(stivale2_struct.tags));
+pub fn find(comptime StructT: type, stivale2_struct: *Struct, comptime is_higher_half_mapped_already: IsHigherHalfMappedAlready) ?*align(1) StructT {
+    var tag_opt = get_tag_from_physical(PhysicalAddress.new(stivale2_struct.tags), is_higher_half_mapped_already);
 
     while (tag_opt) |tag| {
         if (tag.identifier == StructT.id) {
             return @ptrCast(*align(1) StructT, tag);
         }
 
-        tag_opt = get_tag_from_physical(PhysicalAddress.new(tag.next));
+        tag_opt = get_tag_from_physical(PhysicalAddress.new(tag.next), is_higher_half_mapped_already);
     }
 
     return null;
 }
 
-fn get_tag_from_physical(physical_address: PhysicalAddress) ?*align(1) stivale.Tag {
-    _ = physical_address;
-    TODO(@src());
-    //return if (kernel.Virtual.initialized) physical_address.access_higher_half(?*align(1) stivale.Tag) else physical_address.access_identity(?*align(1) stivale.Tag);
+fn get_tag_from_physical(physical_address: PhysicalAddress, comptime is_higher_half_mapped_already: IsHigherHalfMappedAlready) ?*align(1) stivale.Tag {
+    return switch (is_higher_half_mapped_already) {
+        .no => physical_address.access_identity(?*align(1) stivale.Tag),
+        .yes => physical_address.access_higher_half(?*align(1) stivale.Tag),
+    };
 }
 
-pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
-    const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
+pub fn process_memory_map(stivale2_struct: *Struct, comptime is_higher_half_mapped_already: IsHigherHalfMappedAlready, comptime page_size: u64) Error!PhysicalAddressSpace {
+    const memory_map_struct = find(Struct.MemoryMap, stivale2_struct, is_higher_half_mapped_already) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
     var result = PhysicalAddressSpace{
         .usable = &[_]PhysicalAddressSpace.MapEntry{},
@@ -68,7 +70,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
     const host_entry = blk: {
         for (memory_map_entries) |*entry| {
             if (entry.type == .usable) {
-                const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size);
+                const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size, is_higher_half_mapped_already, page_size);
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 // INFO: this is separated since the bitset needs to be in a different page than the memory map
                 const bitset_page_count = kernel.bytes_to_pages(bitset_size, .can_be_not_exact);
@@ -89,7 +91,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                     .type = .usable,
                 };
 
-                block.setup_bitset(kernel.arch.page_size);
+                block.setup_bitset(kernel.arch.page_size, is_higher_half_mapped_already);
 
                 break :blk block;
             }
@@ -115,10 +117,10 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                 .type = .usable,
             };
 
-            const bitset = result_entry.get_bitset();
+            const bitset = result_entry.get_bitset_extended(is_higher_half_mapped_already, page_size);
             const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
             result_entry.allocated_size = common.align_forward(bitset_size, kernel.arch.page_size);
-            result_entry.setup_bitset(kernel.arch.page_size);
+            result_entry.setup_bitset(kernel.arch.page_size, is_higher_half_mapped_already);
         }
     }
 
@@ -197,8 +199,8 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
     return result;
 }
 
-pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!VirtualAddress {
-    const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse return Error.higher_half_direct_map;
+pub fn process_higher_half_direct_map(stivale2_struct: *Struct, comptime is_higher_half_mapped_already: common.IsHigherHalfMappedAlready) Error!VirtualAddress {
+    const hhdm_struct = find(Struct.HHDM, stivale2_struct, is_higher_half_mapped_already) orelse return Error.higher_half_direct_map;
     log.debug("HHDM: 0x{x}", .{hhdm_struct.addr});
     return VirtualAddress.new(hhdm_struct.addr);
 }
@@ -251,8 +253,8 @@ pub fn process_kernel_file(stivale2_struct: *Struct) Error!kernel.File {
     };
 }
 
-pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
-    const rsdp_struct = find(stivale.Struct.RSDP, stivale2_struct) orelse return Error.rsdp;
+pub fn process_rsdp(stivale2_struct: *Struct, comptime is_higher_half_mapped_already: IsHigherHalfMappedAlready) Error!PhysicalAddress {
+    const rsdp_struct = find(stivale.Struct.RSDP, stivale2_struct, is_higher_half_mapped_already) orelse return Error.rsdp;
     const rsdp = rsdp_struct.rsdp;
     log.debug("RSDP struct: 0x{x}", .{rsdp});
     const rsdp_address = PhysicalAddress.new(rsdp);
