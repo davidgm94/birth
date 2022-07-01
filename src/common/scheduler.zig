@@ -202,7 +202,9 @@ pub fn test_userspace() void {
     });
 }
 
-pub fn init() void {
+pub fn init(scheduler: *Scheduler) void {
+    _ = scheduler;
+    log.debug("TODO: initialize scheduler", .{});
     //test_threads(1);
-    test_userspace();
+    //test_userspace();
 }

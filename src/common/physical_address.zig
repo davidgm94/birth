@@ -85,12 +85,12 @@ inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: ty
     return @intToPtr(Ptr, address);
 }
 
-pub inline fn aligned_forward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
-    return VirtualAddress{ .value = common.align_forward(virtual_address.value, alignment) };
+pub inline fn aligned_forward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {
+    return PhysicalAddress{ .value = common.align_forward(virtual_address.value, alignment) };
 }
 
-pub inline fn aligned_backward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
-    return VirtualAddress{ .value = common.align_backward(virtual_address.value, alignment) };
+pub inline fn aligned_backward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {
+    return PhysicalAddress{ .value = common.align_backward(virtual_address.value, alignment) };
 }
 
 pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) void {

@@ -1,5 +1,5 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
 const x86_64 = common.arch.x86_64;
 const log = common.log.scoped(.ACPI);
@@ -17,20 +17,20 @@ const Signature = enum(u32) {
 };
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(rsdp_physical_address: PhysicalAddress) void {
+pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    const rsdp_physical_page = rsdp_physical_address.align_backward(kernel.arch.page_size);
-    kernel.address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
-    const rsdp1 = rsdp_physical_address.access_higher_half(*align(1) RSDP1);
+    const rsdp_physical_page = rsdp_physical_address.aligned_backward(kernel.arch.page_size);
+    virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
+    const rsdp1 = rsdp_physical_address.access_kernel(*align(1) RSDP1);
 
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
         const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
         const rsdt_physical_page = rsdt_physical_address.aligned_backward(kernel.arch.page_size);
-        kernel.address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
+        virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
-        const rsdt = rsdt_physical_address.access_higher_half(*align(1) Header);
+        const rsdt = rsdt_physical_address.access_kernel(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
         const rsdt_table_count = (rsdt.length - @sizeOf(Header)) / @sizeOf(u32);
         log.debug("RSDT table count: {}", .{rsdt_table_count});
@@ -39,8 +39,8 @@ pub fn init(rsdp_physical_address: PhysicalAddress) void {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_physical_address = PhysicalAddress.new(table_address);
             const table_physical_page = table_physical_address.aligned_backward(kernel.arch.page_size);
-            kernel.address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
-            const header = table_physical_address.access_higher_half(*align(1) Header);
+            virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
+            const header = table_physical_address.access_kernel(*align(1) Header);
 
             switch (header.signature) {
                 .APIC => {
@@ -85,7 +85,7 @@ pub fn init(rsdp_physical_address: PhysicalAddress) void {
                                 common.runtime_assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
                                 x86_64.ioapic.gsi = ioapic.global_system_interrupt_base;
                                 x86_64.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
-                                kernel.address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .cache_disable }));
+                                virtual_address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), .{ .write = true, .cache_disable = true });
                                 x86_64.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {

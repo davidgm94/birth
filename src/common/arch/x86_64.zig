@@ -86,12 +86,12 @@ pub fn init_graphics_drivers(allocator: Allocator) !void {
     log.debug("TODO: initialize graphics drivers", .{});
 }
 
-fn prepare_drivers(rsdp: PhysicalAddress) void {
-    ACPI.init(rsdp);
+pub fn prepare_drivers(virtual_address_space: *common.VirtualAddressSpace, rsdp: PhysicalAddress) void {
+    ACPI.init(virtual_address_space, rsdp);
     PCI.init();
 }
 
-fn init_scheduler() void {
+pub fn init_scheduler() void {
     defer init_timer();
 
     kernel.scheduler.init();
@@ -1196,11 +1196,13 @@ pub const Context = struct {
 pub inline fn flush_segments_kernel() void {
     asm volatile (
         \\xor %%rax, %%rax
-        \\mov $0x30, %%rax
+        \\mov %[data_segment_selector], %%rax
         \\mov %%rax, %%ds
         \\mov %%rax, %%es
         \\mov %%rax, %%fs
         \\mov %%rax, %%gs
+        :
+        : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
     );
 }
 

@@ -32,7 +32,6 @@ pub const Table = packed struct {
         gdt.* = Table{
             .tss = bootstrap_tss.get_descriptor(),
         };
-        log.debug("GDT loaded", .{});
         gdt.load();
         log.debug("GDT loaded", .{});
         x86_64.flush_segments_kernel();
