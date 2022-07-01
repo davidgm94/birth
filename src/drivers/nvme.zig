@@ -1,4 +1,6 @@
+const NVMe = @This();
 // This has been implemented with NVMe Specification 2.0b
+
 const kernel = @import("root");
 const common = @import("../common.zig");
 const log = common.log.scoped(.NVMe);
@@ -6,6 +8,7 @@ const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
+const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 
 const drivers = @import("../drivers.zig");
 const Disk = drivers.Disk;
@@ -16,10 +19,6 @@ const Allocator = common.Allocator;
 
 const x86_64 = common.arch.x86_64;
 
-const Physical = kernel.Physical;
-const Virtual = kernel.Virtual;
-
-const NVMe = @This();
 const Driver = NVMe;
 
 pub var driver: *Driver = undefined;
@@ -89,9 +88,9 @@ const Drive = struct {
         };
     }
 
-    pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
+    pub fn access(disk: *Disk, virtual_address_space: *VirtualAddressSpace, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
         common.runtime_assert(@src(), buffer.completed_size == 0);
-        common.runtime_assert(@src(), buffer.address.is_page_aligned());
+        common.runtime_assert(@src(), common.is_aligned(buffer.address.value, kernel.arch.page_size));
         const drive = @fieldParentPtr(Drive, "disk", disk);
         const nvme = driver;
         log.debug("NVMe access", .{});
@@ -118,13 +117,13 @@ const Drive = struct {
 
         if (request_byte_size <= 2 * kernel.arch.page_size) {
             log.debug("Buffer address: 0x{x}", .{buffer.address.value});
-            const prp1 = buffer.address.translate(&kernel.address_space) orelse TODO(@src());
+            const prp1 = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
             const first_prp_length = kernel.arch.page_size - offset;
             log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
             var prp2 = PhysicalAddress.temporary_invalid();
 
             if (request_byte_size > first_prp_length) {
-                prp2 = buffer.address.offset(first_prp_length).translate(&kernel.address_space) orelse TODO(@src());
+                prp2 = virtual_address_space.translate_address(buffer.address.offset(first_prp_length)) orelse TODO(@src());
             }
 
             const prps = [2]PhysicalAddress{ prp1, prp2 };
@@ -176,15 +175,15 @@ pub const Initialization = struct {
         not_found,
     };
 
-    pub fn callback(allocator: Allocator, pci: *PCI) Error!*Driver {
+    pub fn callback(virtual_address_space: *VirtualAddressSpace, allocator: Allocator, pci: *PCI) Error!*Driver {
         const nvme_device = find(pci) orelse return Error.not_found;
         log.debug("Found controller", .{});
         driver = allocator.create(Driver) catch return Error.allocation_failure;
         driver.* = NVMe.new(nvme_device);
-        const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }));
+        const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }), virtual_address_space);
         common.runtime_assert(@src(), result);
         log.debug("Device features enabled", .{});
-        driver.init(allocator);
+        driver.init(virtual_address_space, allocator);
 
         log.debug("Driver initialized", .{});
 
@@ -259,7 +258,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
     // TODO: reset event
     @fence(.SeqCst); // best memory barrier?
-    common.runtime_assert(@src(), kernel.arch.are_interrupts_enabled());
+    common.runtime_assert(@src(), common.arch.are_interrupts_enabled());
     log.debug("Entering in a wait state", .{});
     nvme.write_sqtdbl(0, nvme.admin_submission_queue_tail);
     asm volatile ("hlt");
@@ -288,7 +287,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
 const PRPs = [2]PhysicalAddress;
 
-pub fn init(nvme: *NVMe, allocator: Allocator) void {
+pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator: Allocator) void {
     nvme.capabilities = nvme.read(cap);
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
@@ -351,7 +350,7 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
     const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
     const admin_queue_page_count = common.align_forward(admin_submission_queue_size, kernel.arch.page_size) + common.align_forward(admin_completion_queue_size, kernel.arch.page_size);
-    const admin_queue_physical_address = kernel.Physical.Memory.allocate_pages(admin_queue_page_count) orelse @panic("admin queue");
+    const admin_queue_physical_address = virtual_address_space.physical_address_space.allocate(admin_queue_page_count) orelse @panic("admin queue");
     const admin_submission_queue_physical_address = admin_queue_physical_address;
     const admin_completion_queue_physical_address = admin_queue_physical_address.offset(common.align_forward(admin_submission_queue_size, kernel.arch.page_size));
 
@@ -366,8 +365,8 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
 
     const admin_submission_queue_virtual_address = admin_submission_queue_physical_address.to_higher_half_virtual_address();
     const admin_completion_queue_virtual_address = admin_completion_queue_physical_address.to_higher_half_virtual_address();
-    kernel.address_space.map(admin_submission_queue_physical_address, admin_submission_queue_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{.read_write}));
-    kernel.address_space.map(admin_completion_queue_physical_address, admin_completion_queue_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{.read_write}));
+    virtual_address_space.map(admin_submission_queue_physical_address, admin_submission_queue_virtual_address, .{ .write = true });
+    virtual_address_space.map(admin_completion_queue_physical_address, admin_completion_queue_virtual_address, .{ .write = true });
 
     nvme.admin_submission_queue = admin_submission_queue_virtual_address.access([*]u8);
     nvme.admin_completion_queue = admin_completion_queue_virtual_address.access([*]u8);
@@ -390,16 +389,16 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
         }
     }
 
-    if (!nvme.device.enable_single_interrupt(x86_64.interrupts.HandlerInfo.new(nvme, handle_irq))) {
+    if (!nvme.device.enable_single_interrupt(virtual_address_space, x86_64.interrupts.HandlerInfo.new(nvme, handle_irq))) {
         @panic("f hanlder");
     }
 
     nvme.write(intmc, 1 << 0);
 
     // TODO: @Hack remove that 3 for a proper value
-    const identify_data_physical_address = kernel.Physical.Memory.allocate_pages(3) orelse @panic("identify");
+    const identify_data_physical_address = virtual_address_space.physical_address_space.allocate(3) orelse @panic("identify");
     const identify_data_virtual_address = identify_data_physical_address.to_higher_half_virtual_address();
-    kernel.address_space.map(identify_data_physical_address, identify_data_virtual_address, VirtualAddressSpace.Flags.from_flag(.read_write));
+    virtual_address_space.map(identify_data_physical_address, identify_data_virtual_address, .{ .write = true });
     const identify_data = identify_data_virtual_address.access([*]u8);
 
     {
@@ -448,10 +447,10 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     {
         const size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, kernel.arch.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
-        const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
+        const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
 
-        const physical_region = kernel.Physical.Memory.Region.new(queue_physical_address, size);
-        physical_region.map(&kernel.address_space, queue_physical_address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flag(.read_write));
+        const physical_region = PhysicalMemoryRegion.new(queue_physical_address, size);
+        virtual_address_space.map_physical_region(physical_region, queue_physical_address.to_higher_half_virtual_address(), .{ .write = true }, virtual_address_space.physical_address_space.page_size);
         nvme.io_completion_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
 
         var command = common.zeroes(Command);
@@ -467,10 +466,10 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
     {
         const size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, kernel.arch.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
-        const queue_physical_address = kernel.Physical.Memory.allocate_pages(page_count) orelse @panic("ph comp");
+        const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
 
-        const physical_region = kernel.Physical.Memory.Region.new(queue_physical_address, size);
-        physical_region.map(&kernel.address_space, queue_physical_address.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flag(.read_write));
+        const physical_region = PhysicalMemoryRegion.new(queue_physical_address, size);
+        virtual_address_space.map_physical_region(physical_region, queue_physical_address.to_higher_half_virtual_address(), .{ .write = true }, virtual_address_space.physical_address_space.page_size);
         nvme.io_submission_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
 
         var command = common.zeroes(Command);
@@ -485,10 +484,10 @@ pub fn init(nvme: *NVMe, allocator: Allocator) void {
 
     {
         for (nvme.prp_list_pages) |*prp_list_page| {
-            prp_list_page.* = kernel.Physical.Memory.allocate_pages(1) orelse @panic("prp physical");
+            prp_list_page.* = virtual_address_space.physical_address_space.allocate(1) orelse @panic("prp physical");
         }
 
-        kernel.address_space.map(nvme.prp_list_pages[0], nvme.prp_list_pages[0].to_higher_half_virtual_address(), VirtualAddressSpace.Flags.from_flag(.read_write));
+        virtual_address_space.map(nvme.prp_list_pages[0], nvme.prp_list_pages[0].to_higher_half_virtual_address(), .{ .write = true });
         nvme.prp_list_virtual = nvme.prp_list_pages[0].to_higher_half_virtual_address();
     }
 

@@ -38,13 +38,13 @@ pub const IOAPIC = struct {
     id: u8,
 
     pub inline fn read(apic: IOAPIC, register: u32) u32 {
-        apic.address.access([*]volatile u32)[0] = register;
-        return apic.address.access([*]volatile u32)[4];
+        apic.address.access_kernel([*]volatile u32)[0] = register;
+        return apic.address.access_kernel([*]volatile u32)[4];
     }
 
     pub inline fn write(apic: IOAPIC, register: u32, value: u32) void {
-        apic.address.access([*]volatile u32)[0] = register;
-        apic.address.access([*]volatile u32)[4] = value;
+        apic.address.access_kernel([*]volatile u32)[0] = register;
+        apic.address.access_kernel([*]volatile u32)[4] = value;
     }
 };
 
@@ -60,23 +60,23 @@ pub var iso: []ISO = undefined;
 
 var _zero: u64 = 0;
 
-fn register_main_storage() void {
+pub fn register_main_storage() void {
     kernel.main_storage = Filesystem.drivers.items[0];
 }
 
-pub fn drivers_init(allocator: Allocator) !void {
-    try init_block_drivers(allocator);
+pub fn drivers_init(virtual_address_space: *common.VirtualAddressSpace, allocator: Allocator) !void {
+    try init_block_drivers(virtual_address_space, allocator);
     log.debug("Initialized block drivers", .{});
 
     try init_graphics_drivers(allocator);
     log.debug("Initialized graphics drivers", .{});
 }
 
-pub fn init_block_drivers(allocator: Allocator) !void {
+pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace, allocator: Allocator) !void {
     // TODO: make ACPI and PCI controller standard
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
-    NVMe.driver = try NVMe.Initialization.callback(allocator, &PCI.controller);
+    NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, allocator, &PCI.controller);
     common.runtime_assert(@src(), Disk.drivers.items.len > 0);
     try drivers.Driver(Filesystem, RNUFS).init(allocator, Disk.drivers.items[0]);
 }

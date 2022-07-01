@@ -508,7 +508,7 @@ pub const Device = struct {
         io_port_access = 11,
     });
 
-    pub fn enable_features(device: *Device, features: Features) bool {
+    pub fn enable_features(device: *Device, features: Features, virtual_address_space: *VirtualAddressSpace) bool {
         log.debug("Enabling features for device {}", .{device});
         var config = device.read_config(u32, 4);
         if (features.contains(.interrupts)) config &= ~@as(u32, 1 << 10);
@@ -564,8 +564,8 @@ pub const Device = struct {
 
             device.base_physical_addresses[i] = PhysicalAddress.new(address);
             device.base_virtual_addresses[i] = device.base_physical_addresses[i].to_higher_half_virtual_address();
-            const physical_region = kernel.Physical.Memory.Region.new(device.base_physical_addresses[i], size);
-            physical_region.map(&kernel.address_space, device.base_virtual_addresses[i], VirtualAddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
+            const physical_region = common.PhysicalMemoryRegion.new(device.base_physical_addresses[i], size);
+            virtual_address_space.map_physical_region(physical_region, device.base_virtual_addresses[i], .{ .write = true, .cache_disable = true }, virtual_address_space.physical_address_space.page_size);
 
             log.debug("Virtual 0x{x}. Physical 0x{x}", .{ device.base_virtual_addresses[i].value, device.base_physical_addresses[i].value });
             device.base_addresses_size[i] = size;
@@ -574,12 +574,12 @@ pub const Device = struct {
         return true;
     }
 
-    pub fn enable_single_interrupt(device: *Device, handler: x86_64.interrupts.HandlerInfo) bool {
+    pub fn enable_single_interrupt(device: *Device, virtual_address_space: *VirtualAddressSpace, handler: x86_64.interrupts.HandlerInfo) bool {
         if (device.enable_MSI(handler)) return true;
         if (device.interrupt_pin == 0) return false;
         if (device.interrupt_pin > 4) return false;
 
-        const result = device.enable_features(Features.from_flag(.interrupts));
+        const result = device.enable_features(Features.from_flag(.interrupts), virtual_address_space);
         common.runtime_assert(@src(), result);
 
         // TODO: consider some stuff Essence does?

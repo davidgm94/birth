@@ -29,19 +29,17 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     x86_64.preinit_scheduler(kernel.virtual_address_space, kernel.arch.x86_64.syscall_entry_point);
     x86_64.init_scheduler();
     x86_64.prepare_drivers(kernel.virtual_address_space, rsdp);
-    success_and_end();
-    //drivers_init(kernel.core_heap.allocator) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
-    //common.runtime_assert(@src(), Disk.drivers.items.len > 0);
-    //common.runtime_assert(@src(), Filesystem.drivers.items.len > 0);
-    //register_main_storage();
-    //const file = kernel.main_storage.read_file_callback(Filesystem.drivers.items[0], "font.psf");
-    //_ = file;
-    //for (file[0..10]) |byte, i| {
-    //log.debug("[{}] 0x{x}", .{ i, byte });
-    //}
+    x86_64.drivers_init(kernel.virtual_address_space, kernel.core_heap.allocator) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);
+    common.runtime_assert(@src(), kernel.drivers.Filesystem.drivers.items.len > 0);
+    x86_64.register_main_storage();
+    const file = kernel.main_storage.read_file_callback(kernel.drivers.Filesystem.drivers.items[0], kernel.virtual_address_space, "font.psf");
+    for (file[0..10]) |byte, i| {
+        log.debug("[{}] 0x{x}", .{ i, byte });
+    }
 
-    //log.debug("File font.psf read successfully", .{});
-    //log.debug("Everything OK", .{});
+    log.debug("File font.psf read successfully", .{});
+    success_and_end();
 
     //next_timer(1);
     //while (true) {

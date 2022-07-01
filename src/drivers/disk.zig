@@ -10,7 +10,7 @@ pub const Type = enum(u32) {
 };
 
 sector_size: u64,
-access: fn (driver: *Driver, buffer: *DMA.Buffer, disk_work: Work) u64,
+access: fn (driver: *Driver, virtual_address_space: *common.VirtualAddressSpace, buffer: *DMA.Buffer, disk_work: Work) u64,
 get_dma_buffer: fn (driver: *Driver, allocator: common.Allocator, sector_count: u64) common.Allocator.Error!DMA.Buffer,
 
 type: Type,

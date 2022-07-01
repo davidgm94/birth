@@ -1,4 +1,4 @@
-const common = @import("common");
+const common = @import("../common.zig");
 
 const log = common.log.scoped(.RNUFS);
 const drivers = @import("../drivers.zig");
@@ -9,6 +9,7 @@ const Disk = drivers.Disk;
 const DMA = drivers.DMA;
 
 const Allocator = common.Allocator;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Driver = @This();
 
@@ -35,7 +36,7 @@ pub const Initialization = struct {
     }
 };
 
-pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
+pub fn seek_file(fs_driver: *Filesystem, virtual_address_space: *VirtualAddressSpace, name: []const u8) ?SeekResult {
     log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
@@ -50,7 +51,7 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
 
     while (true) {
         log.debug("FS driver asking read", .{});
-        const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, Disk.Work{
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, virtual_address_space, &search_buffer, Disk.Work{
             .sector_offset = sector,
             .sector_count = sectors_to_read_at_time,
             .operation = .read,
@@ -81,9 +82,9 @@ pub fn seek_file(fs_driver: *Filesystem, name: []const u8) ?SeekResult {
     }
 }
 
-pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
+pub fn read_file(fs_driver: *Filesystem, virtual_address_space: *VirtualAddressSpace, name: []const u8) []const u8 {
     log.debug("About to read a file...", .{});
-    if (seek_file(fs_driver, name)) |seek_result| {
+    if (seek_file(fs_driver, virtual_address_space, name)) |seek_result| {
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         const bytes_to_read = common.align_forward(node_size, sector_size);
@@ -93,7 +94,7 @@ pub fn read_file(fs_driver: *Filesystem, name: []const u8) []const u8 {
             @panic("Unable to allocate read buffer");
         };
         // Add one to skip the metadata
-        const sectors_read = fs_driver.disk.access(fs_driver.disk, &buffer, Disk.Work{
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, virtual_address_space, &buffer, Disk.Work{
             .sector_offset = seek_result.sector + 1,
             .sector_count = sector_count,
             .operation = .read,

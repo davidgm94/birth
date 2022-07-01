@@ -5,6 +5,7 @@ const common = @import("../common.zig");
 const TODO = common.TODO;
 const log = common.log.scoped(.FS);
 const Allocator = common.Allocator;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Driver = @This();
 
@@ -17,7 +18,7 @@ type: Type,
 allocator: Allocator,
 disk: *Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
-read_file_callback: fn read(driver: *Driver, name: []const u8) []const u8,
+read_file_callback: fn read(driver: *Driver, virtual_address_space: *VirtualAddressSpace, name: []const u8) []const u8,
 
 pub const InitializationError = error{
     allocation_failure,
