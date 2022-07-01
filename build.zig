@@ -37,7 +37,7 @@ pub fn build(b: *Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = null,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
+                        .log = .{ .file = "logfile", .guest_errors = false, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },
@@ -263,19 +263,22 @@ const Kernel = struct {
                     kernel.run_argument_list.append(machine) catch unreachable;
 
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
-                        const log_flag = "-d";
-                        kernel.run_argument_list.append(log_flag) catch unreachable;
-                        kernel.debug_argument_list.append(log_flag) catch unreachable;
-
                         var log_what = std.ArrayList(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
                         if (log_options.cpu) log_what.appendSlice("cpu,") catch unreachable;
                         if (log_options.interrupts) log_what.appendSlice("int,") catch unreachable;
                         if (log_options.assembly) log_what.appendSlice("in_asm,") catch unreachable;
-                        // Delete the last comma
-                        _ = log_what.pop();
-                        kernel.run_argument_list.append(log_what.items) catch unreachable;
-                        kernel.debug_argument_list.append(log_what.items) catch unreachable;
+
+                        if (log_what.items.len > 0) {
+                            // Delete the last comma
+                            _ = log_what.pop();
+
+                            const log_flag = "-d";
+                            kernel.run_argument_list.append(log_flag) catch unreachable;
+                            kernel.debug_argument_list.append(log_flag) catch unreachable;
+                            kernel.run_argument_list.append(log_what.items) catch unreachable;
+                            kernel.debug_argument_list.append(log_what.items) catch unreachable;
+                        }
 
                         if (log_options.file) |log_file| {
                             const log_file_flag = "-D";

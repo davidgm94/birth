@@ -302,8 +302,3 @@ pub const PrivilegeLevel = enum(u1) {
     kernel = 0,
     user = 1,
 };
-
-pub const IsHigherHalfMappedAlready = enum(u1) {
-    no = 0,
-    yes = 1,
-};

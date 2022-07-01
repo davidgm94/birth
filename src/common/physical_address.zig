@@ -39,7 +39,7 @@ pub inline fn is_valid(physical_address: PhysicalAddress) bool {
         common.runtime_assert(@src(), cpu_features.physical_address_max_bit != 0);
         const max = @as(u64, 1) << cpu_features.physical_address_max_bit;
         common.runtime_assert(@src(), max > 1000);
-        log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
+        //log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
         return physical_address.value <= max;
     } else {
         TODO(@src());
@@ -58,48 +58,31 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
     return PhysicalAddress.new(physical_address.value + asked_offset);
 }
 
-pub inline fn identity_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    return physical_address.identity_virtual_address_extended(false);
-}
-
-pub inline fn identity_virtual_address_extended(physical_address: PhysicalAddress, comptime override: bool) VirtualAddress {
+/// This would return the correct address even before initializing the higher half and mapping. This would only fail if it's used with the kernel memory-mapped regions before setting up paging and higher-half
+pub inline fn access_kernel(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
     const root = @import("root");
-    if (@hasDecl(root, "Virtual")) {
-        if (!override and root.Virtual.initialized) common.TODO(@src());
-    }
-    return VirtualAddress.new(physical_address.value);
-}
-
-pub inline fn access_identity(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    //const root = @import("root");
-    //if (@hasDecl(root, "Virtual")) {
-    //common.runtime_assert(@src(), !root.Virtual.initialized);
-    //}
-
-    return @intToPtr(Ptr, identity_virtual_address(physical_address).value);
-}
-
-pub inline fn access(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    _ = Ptr;
-    _ = physical_address;
-    TODO(@src());
-    //const root = @import("root");
-    //const initialized_virtual = @hasDecl(root, "Virtual") and root.Virtual.initialized;
-    //return if (initialized_virtual) physical_address.access_higher_half(Ptr) else physical_address.access_identity(Ptr);
+    comptime common.comptime_assert(root.privilege_level != .user);
+    return physical_address.access_higher_half(Ptr);
 }
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const root = @import("root");
+    comptime common.comptime_assert(root.privilege_level != .user);
     var higher_half: u64 = 0;
     if (@hasDecl(root, "higher_half_direct_map")) {
         higher_half = root.higher_half_direct_map.value;
     }
-    log.debug("Using higher half address 0x{x} for physical address 0x{x}", .{ higher_half, physical_address.value });
-    return VirtualAddress.new(physical_address.value + higher_half);
+    const address = VirtualAddress.new(physical_address.value + higher_half);
+    return address;
+}
+
+pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, asked_offset: u64) VirtualAddress {
+    return VirtualAddress.new(physical_address.value + asked_offset);
 }
 
 pub inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    return @intToPtr(Ptr, physical_address.to_higher_half_virtual_address().value);
+    const address = physical_address.to_higher_half_virtual_address().value;
+    return @intToPtr(Ptr, address);
 }
 
 pub inline fn aligned_forward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {

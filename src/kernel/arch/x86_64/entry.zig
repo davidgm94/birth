@@ -3,7 +3,6 @@ const log = common.log.scoped(.Entry);
 const kernel = @import("root");
 const x86_64 = common.arch.x86_64;
 const PhysicalAddress = common.PhysicalAddress;
-const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
 const Stivale2 = x86_64.Stivale2;
 const paging = x86_64.paging;
 
@@ -12,14 +11,14 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     kernel.arch.x86_64.preinit_bsp();
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
-    kernel.core_heap.init(&kernel.virtual_address_space);
+    kernel.core_heap.init(&kernel.bootstrapping_memory);
     kernel.cpu_features = x86_64.enable_cpu_features(kernel.arch.page_size);
     const stivale2_struct_physical_address = PhysicalAddress.new(stivale2_struct_address);
-    kernel.higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no) catch @panic("Unable to get higher_half_direct_map");
-    const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no) catch @panic("Unable to get RSDP");
+    const higher_half_direct_map = Stivale2.process_higher_half_direct_map(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)) catch @panic("Unable to get higher_half_direct_map");
+    const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)) catch @panic("Unable to get RSDP");
     _ = rsdp;
-    kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no, kernel.arch.page_size) catch unreachable;
-    kernel.virtual_address_space = paging.init(&kernel.physical_address_space, Stivale2.get_pmrs(stivale2_struct_physical_address.access_identity(*Stivale2.Struct), IsHigherHalfMappedAlready.no), kernel.cpu_features);
+    kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), kernel.arch.page_size) catch unreachable;
+    kernel.virtual_address_space = paging.init(kernel.core_heap.allocator, &kernel.physical_address_space, Stivale2.get_pmrs(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)), kernel.cpu_features, higher_half_direct_map);
     success_and_end();
     //const region_type = kernel.physical_address_space.find_address(stivale2_struct_physical_address);
     //log.debug("Region type: {}", .{region_type});

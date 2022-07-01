@@ -3,6 +3,7 @@ const VirtualAddressSpace = @This();
 const common = @import("../common.zig");
 const TODO = common.TODO;
 const Allocator = common.Allocator;
+const log = common.log.scoped(.VirtualAddressSpace);
 
 const arch = common.arch;
 const VirtualAddress = common.VirtualAddress;
@@ -15,30 +16,29 @@ arch: arch.VirtualAddressSpace,
 allocator: Allocator,
 initialized: bool,
 
-pub fn new() ?VirtualAddressSpace {
-    const arch_virtual_space = arch.VirtualAddressSpace.new();
-    return new_extended(arch_virtual_space);
-}
-
-fn new_extended(arch_virtual_space: arch.VirtualAddressSpace) void {
-    return VirtualAddressSpace{
+pub fn new(heap_allocator: Allocator, physical_address_space: *PhysicalAddressSpace, cpu_features: common.arch.CPUFeatures) ?*VirtualAddressSpace {
+    // TODO: defer memory free when this produces an error
+    const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space, cpu_features) orelse return null;
+    const virtual_address_space = heap_allocator.create(VirtualAddressSpace) catch return null;
+    virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
-        .allocator = &allocator_interface.vtable,
+        .allocator = .{
+            .ptr = virtual_address_space,
+            .vtable = &allocator_interface.vtable,
+        },
         .initialized = false,
     };
-}
 
-pub fn from_context(context: anytype) VirtualAddressSpace {
-    return VirtualAddressSpace{
-        .arch = context,
-        .allocator = &allocator_interface.vtable,
-        .initialized = false,
-    };
+    return virtual_address_space;
 }
 
 pub fn bootstrapping(physical_address_space: *PhysicalAddressSpace, cpu_features: common.arch.CPUFeatures) ?VirtualAddressSpace {
     const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping(cpu_features, physical_address_space);
-    return new_extended(bootstrap_arch_specific_vas);
+    return VirtualAddressSpace{
+        .arch = bootstrap_arch_specific_vas,
+        .allocator = undefined,
+        .initialized = false,
+    };
 }
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags) void {
@@ -57,7 +57,7 @@ pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
 }
 
 // TODO: make this efficient
-pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_region: VirtualMemoryRegion, base_physical_address: PhysicalAddress, flags: Flags, comptime page_size: u64) void {
+pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_region: VirtualMemoryRegion, base_physical_address: PhysicalAddress, flags: Flags, page_size: u64) void {
     var physical_address = base_physical_address;
     var virtual_address = virtual_region.address;
     common.runtime_assert(@src(), common.is_aligned(physical_address.value, page_size));
@@ -73,7 +73,7 @@ pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_r
     }
 }
 
-pub fn map_physical_region(virtual_address_space: *VirtualAddressSpace, physical_region: PhysicalMemoryRegion, base_virtual_address: VirtualAddress, flags: Flags, comptime page_size: u64) void {
+pub fn map_physical_region(virtual_address_space: *VirtualAddressSpace, physical_region: PhysicalMemoryRegion, base_virtual_address: VirtualAddress, flags: Flags, page_size: u64) void {
     var physical_address = physical_region.address;
     var virtual_address = base_virtual_address;
     common.runtime_assert(@src(), common.is_aligned(physical_address.value, page_size));
@@ -97,13 +97,12 @@ pub const Flags = packed struct {
     execute: bool = false,
     user: bool = false,
 
-    pub fn empty() Flags {
+    pub inline fn empty() Flags {
         return common.zeroes(Flags);
     }
 
-    pub fn to_arch_specific(flags: Flags) arch.VirtualAddressSpace.Flags {
-        _ = flags;
-        TODO(@src());
+    pub inline fn to_arch_specific(flags: Flags) arch.VirtualAddressSpace.Flags {
+        return arch.VirtualAddressSpace.new_flags(flags);
     }
 };
 

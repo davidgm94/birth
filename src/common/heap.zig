@@ -24,10 +24,15 @@ initialized: bool,
 const region_size = 2 * common.mb;
 pub const region_count = 0x1000_0000 / region_size;
 
-pub fn init(heap: *Heap) void {
+pub fn init(heap: *Heap, bootstrapping_memory: []u8) void {
     heap.allocator.ptr = heap;
     heap.allocator.vtable = &allocator_interface.vtable;
     heap.virtual_address_space = null;
+    heap.bootstrap_region = Region{
+        .virtual = VirtualAddress.new(@ptrToInt(bootstrapping_memory.ptr)),
+        .size = bootstrapping_memory.len,
+        .allocated = 0,
+    };
     heap.initialized = false;
 }
 
@@ -42,14 +47,16 @@ var allocator_interface = struct {
         heap.lock.acquire();
         defer heap.lock.release();
 
+        common.runtime_assert(@src(), size < region_size);
+        log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
+
+        var alignment: u64 = len_align;
+        if (ptr_align > alignment) alignment = ptr_align;
+
+        // TODO: check if the region has enough available space
         if (heap.initialized) {
             common.runtime_assert(@src(), heap.virtual_address_space != null);
-            common.runtime_assert(@src(), size < region_size);
             const virtual_address_space = heap.virtual_address_space.?;
-
-            log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
-            var alignment: u64 = len_align;
-            if (ptr_align > alignment) alignment = ptr_align;
 
             const region = blk: {
                 for (heap.regions) |*region| {
@@ -79,7 +86,12 @@ var allocator_interface = struct {
             region.allocated += size;
             return @intToPtr([*]u8, result_address)[0..size];
         } else {
-            TODO(@src());
+            heap.bootstrap_region.allocated = common.align_forward(heap.bootstrap_region.allocated, alignment);
+            common.runtime_assert(@src(), (heap.bootstrap_region.size - heap.bootstrap_region.allocated) >= size);
+
+            const result_address = heap.bootstrap_region.virtual.value + heap.bootstrap_region.allocated;
+            heap.bootstrap_region.allocated += size;
+            return @intToPtr([*]u8, result_address)[0..size];
         }
     }
 

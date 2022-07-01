@@ -21,14 +21,16 @@ const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegionWithPermiss
 
 const Scheduler = common.Scheduler;
 
+pub const privilege_level = common.PrivilegeLevel.kernel;
 pub var main_storage: *drivers.Filesystem = undefined;
-pub var physical_address_space = PhysicalAddressSpace.new();
-pub var virtual_address_space = VirtualAddressSpace.from_context(undefined);
+pub var physical_address_space = PhysicalAddressSpace.new(0); // INFO: this makes easier to spot uninitialized stuff
+pub var virtual_address_space: *VirtualAddressSpace = undefined;
 pub var memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
 pub var scheduler: Scheduler = undefined;
 pub var core_heap: Heap = undefined;
+pub var bootstrapping_memory: [kernel.arch.page_size * 16]u8 = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;
 pub var cpu_features: common.arch.CPUFeatures = undefined;

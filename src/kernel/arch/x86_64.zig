@@ -30,8 +30,9 @@ pub fn preinit_bsp() void {
     // @ZigBug: @ptrCast here crashes the compiler
     kernel.cpus = @intToPtr([*]common.arch.CPU, @ptrToInt(&bootstrap_cpu))[0..1];
     bootstrap_thread.local_storage.cpu = &bootstrap_cpu;
+    bootstrap_thread.local_storage.local_storage = &bootstrap_thread.local_storage;
     x86_64.set_local_storage(&bootstrap_thread.local_storage);
-    x86_64.IA32_GS_BASE.write(0);
+    x86_64.IA32_KERNEL_GS_BASE.write(0);
 }
 //
 //pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void;
@@ -69,7 +70,8 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     //common.runtime_assert(@src(), context == new_thread.context);
     //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
     context.check(@src());
-    x86_64.set_local_storage(&new_thread.local_storage);
+    new_thread.local_storage.local_storage = &new_thread.local_storage;
+    x86_64.set_local_storage(new_thread.local_storage.local_storage);
     const should_swap_gs = x86_64.cs.read() != 0x28;
     log.debug("Should swap GS: {}", .{should_swap_gs});
     // TODO: checks
