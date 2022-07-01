@@ -19,7 +19,6 @@ lock: Spinlock,
 regions: [region_count]Region,
 virtual_address_space: ?*VirtualAddressSpace,
 bootstrap_region: Region,
-initialized: bool,
 
 const region_size = 2 * common.mb;
 pub const region_count = 0x1000_0000 / region_size;
@@ -33,7 +32,6 @@ pub fn init(heap: *Heap, bootstrapping_memory: []u8) void {
         .size = bootstrapping_memory.len,
         .allocated = 0,
     };
-    heap.initialized = false;
 }
 
 var allocator_interface = struct {
@@ -54,10 +52,7 @@ var allocator_interface = struct {
         if (ptr_align > alignment) alignment = ptr_align;
 
         // TODO: check if the region has enough available space
-        if (heap.initialized) {
-            common.runtime_assert(@src(), heap.virtual_address_space != null);
-            const virtual_address_space = heap.virtual_address_space.?;
-
+        if (heap.virtual_address_space) |virtual_address_space| {
             const region = blk: {
                 for (heap.regions) |*region| {
                     if (region.size > 0) {
@@ -87,6 +82,7 @@ var allocator_interface = struct {
             return @intToPtr([*]u8, result_address)[0..size];
         } else {
             heap.bootstrap_region.allocated = common.align_forward(heap.bootstrap_region.allocated, alignment);
+            log.debug("Allocated: {}. Size: {}", .{ heap.bootstrap_region.allocated, heap.bootstrap_region.size });
             common.runtime_assert(@src(), (heap.bootstrap_region.size - heap.bootstrap_region.allocated) >= size);
 
             const result_address = heap.bootstrap_region.virtual.value + heap.bootstrap_region.allocated;

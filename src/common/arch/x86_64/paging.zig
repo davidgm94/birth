@@ -30,7 +30,7 @@ pub fn init(allocator: Allocator, physical_address_space: *PhysicalAddressSpace,
 
     // Map the kernel and do some tests
     {
-        var bootloader_address_space = common.VirtualAddressSpace.bootstrapping(physical_address_space, cpu_features) orelse @panic("Unable to get bootstrapping address space");
+        var bootloader_address_space = common.VirtualAddressSpace.bootstrapping(cpu_features) orelse @panic("Unable to get bootstrapping address space");
         // TODO: better flags
         for (stivale_pmrs) |pmr| {
             const section_virtual_address = VirtualAddress.new(pmr.address);
@@ -133,7 +133,6 @@ pub fn init(allocator: Allocator, physical_address_space: *PhysicalAddressSpace,
 pub const VirtualAddressSpace = struct {
     cr3: u64 = 0,
     cpu_features: x86_64.CPUFeatures,
-    physical_address_space: *common.PhysicalAddressSpace,
 
     const Indices = [common.enum_values(PageIndex).len]u16;
 
@@ -143,18 +142,16 @@ pub const VirtualAddressSpace = struct {
         const virtual_address_space = VirtualAddressSpace{
             .cr3 = cr3_physical_address.value,
             .cpu_features = cpu_features,
-            .physical_address_space = physical_address_space,
         };
 
         common.zero(virtual_address_space.get_pml4().access_kernel([*]u8)[0..@sizeOf(PML4Table)]);
         return virtual_address_space;
     }
 
-    pub inline fn bootstrapping(cpu_features: x86_64.CPUFeatures, physical_address_space: *PhysicalAddressSpace) VirtualAddressSpace {
+    pub inline fn bootstrapping(cpu_features: x86_64.CPUFeatures) VirtualAddressSpace {
         return VirtualAddressSpace{
             .cr3 = x86_64.cr3.read_raw(),
             .cpu_features = cpu_features,
-            .physical_address_space = physical_address_space,
         };
     }
 
@@ -201,7 +198,7 @@ pub const VirtualAddressSpace = struct {
             if (pml4_entry_value.contains(.present)) {
                 pdp = get_address_from_entry_bits(pml4_entry_value.bits, arch_address_space.cpu_features).access_kernel(@TypeOf(pdp));
             } else {
-                const pdp_allocation = arch_address_space.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), arch_address_space.physical_address_space.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
+                const pdp_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), arch_address_space.cpu_features.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
                 pdp.* = common.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
@@ -222,7 +219,7 @@ pub const VirtualAddressSpace = struct {
             if (pdp_entry_value.contains(.present)) {
                 pd = get_address_from_entry_bits(pdp_entry_value.bits, arch_address_space.cpu_features).access_kernel(@TypeOf(pd));
             } else {
-                const pd_allocation = arch_address_space.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), arch_address_space.physical_address_space.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
+                const pd_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), arch_address_space.cpu_features.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access_kernel(@TypeOf(pd));
                 pd.* = common.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
@@ -241,7 +238,7 @@ pub const VirtualAddressSpace = struct {
             if (pd_entry_value.contains(.present)) {
                 pt = get_address_from_entry_bits(pd_entry_value.bits, arch_address_space.cpu_features).access_kernel(@TypeOf(pt));
             } else {
-                const pt_allocation = arch_address_space.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), arch_address_space.physical_address_space.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
+                const pt_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), arch_address_space.cpu_features.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access_kernel(@TypeOf(pt));
                 pt.* = common.zeroes(PTable);
                 pd_entry_value.or_flag(.present);
@@ -267,7 +264,7 @@ pub const VirtualAddressSpace = struct {
 
     pub fn translate_address(address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
         common.runtime_assert(@src(), asked_virtual_address.is_valid());
-        const virtual_address = asked_virtual_address.aligned_backward(address_space.physical_address_space.page_size);
+        const virtual_address = asked_virtual_address.aligned_backward(address_space.cpu_features.page_size);
 
         const indices = compute_indices(virtual_address);
 

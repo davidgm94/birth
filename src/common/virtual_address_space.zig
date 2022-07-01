@@ -13,6 +13,7 @@ const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
 
 arch: arch.VirtualAddressSpace,
+physical_address_space: *PhysicalAddressSpace,
 allocator: Allocator,
 initialized: bool,
 
@@ -26,18 +27,20 @@ pub fn new(heap_allocator: Allocator, physical_address_space: *PhysicalAddressSp
             .ptr = virtual_address_space,
             .vtable = &allocator_interface.vtable,
         },
+        .physical_address_space = physical_address_space,
         .initialized = false,
     };
 
     return virtual_address_space;
 }
 
-pub fn bootstrapping(physical_address_space: *PhysicalAddressSpace, cpu_features: common.arch.CPUFeatures) ?VirtualAddressSpace {
-    const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping(cpu_features, physical_address_space);
+pub fn bootstrapping(cpu_features: common.arch.CPUFeatures) ?VirtualAddressSpace {
+    const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping(cpu_features);
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,
         .allocator = undefined,
         .initialized = false,
+        .physical_address_space = undefined,
     };
 }
 
@@ -113,13 +116,15 @@ var allocator_interface = struct {
         .free = @ptrCast(fn free(virtual_address_space: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
     },
 
+    // TODO: manage virtual memory
     fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
-        _ = virtual_address_space;
-        _ = size;
-        _ = ptr_align;
-        _ = len_align;
+        // TODO: use these parameters
         _ = return_address;
-        TODO(@src());
+        _ = len_align;
+        _ = ptr_align;
+        const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
+        const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+        return physical_address.access_kernel([*]u8)[0..size];
     }
 
     fn resize(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {

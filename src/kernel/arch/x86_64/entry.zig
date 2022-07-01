@@ -19,10 +19,12 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     _ = rsdp;
     kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), kernel.arch.page_size) catch unreachable;
     kernel.virtual_address_space = paging.init(kernel.core_heap.allocator, &kernel.physical_address_space, Stivale2.get_pmrs(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)), kernel.cpu_features, higher_half_direct_map);
+    kernel.core_heap.virtual_address_space = kernel.virtual_address_space;
+    const bootloader_information = Stivale2.process_bootloader_information(kernel.core_heap.allocator, stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), kernel.cpus[0]) catch unreachable;
+    kernel.sections_in_memory = bootloader_information.kernel_sections_in_memory;
+    kernel.file = bootloader_information.kernel_file;
+    kernel.cpus = bootloader_information.cpus;
     success_and_end();
-    //const region_type = kernel.physical_address_space.find_address(stivale2_struct_physical_address);
-    //log.debug("Region type: {}", .{region_type});
-    //Stivale2.process_bootloader_information(stivale2_struct_physical_address.access_higher_half(*Stivale2.Struct)) catch unreachable;
     //preinit_scheduler();
     //init_scheduler();
     //prepare_drivers(rsdp);

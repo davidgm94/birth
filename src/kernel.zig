@@ -34,13 +34,8 @@ pub var bootstrapping_memory: [kernel.arch.page_size * 16]u8 = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;
 pub var cpu_features: common.arch.CPUFeatures = undefined;
-pub var file: File = undefined;
-pub var sections_in_memory: []VirtualMemoryRegionWithPermissions = undefined;
-
-pub const File = struct {
-    address: VirtualAddress,
-    size: u64,
-};
+pub var file: common.File = undefined;
+pub var sections_in_memory: []VirtualMemoryRegion = undefined;
 
 pub var cpus: []common.arch.CPU = undefined;
 pub var local_storages: []common.arch.LocalStorage = undefined;

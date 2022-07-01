@@ -80,7 +80,7 @@ pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, 
     return VirtualAddress.new(physical_address.value + asked_offset);
 }
 
-pub inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
+inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
     const address = physical_address.to_higher_half_virtual_address().value;
     return @intToPtr(Ptr, address);
 }
