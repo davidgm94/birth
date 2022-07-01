@@ -46,6 +46,10 @@ pub inline fn is_valid(physical_address: PhysicalAddress) bool {
     }
 }
 
+pub inline fn is_equal(physical_address: PhysicalAddress, other: PhysicalAddress) bool {
+    return physical_address.value == other.value;
+}
+
 pub inline fn belongs_to_region(physical_address: PhysicalAddress, region: common.PhysicalMemoryRegion) bool {
     return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
 }

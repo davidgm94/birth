@@ -3,7 +3,7 @@ const common = @import("common");
 
 const log = common.log.scoped(.Syscall);
 const TODO = common.TODO;
-const x86_64 = @import("arch/x86_64.zig");
+const x86_64 = common.arch.x86_64;
 
 pub const ID = enum(u64) {
     thread_exit = 0,

@@ -175,7 +175,7 @@ fn user_space() callconv(.Naked) noreturn {
     unreachable;
 }
 
-const x86_64 = @import("./arch/x86_64.zig");
+const x86_64 = common.arch.x86_64;
 
 export fn user_space_foo() callconv(.C) void {}
 

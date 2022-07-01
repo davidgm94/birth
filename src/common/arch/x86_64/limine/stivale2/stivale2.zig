@@ -230,8 +230,8 @@ pub fn process_pmrs(stivale2_struct: *Struct) Error![]VirtualMemoryRegionWithPer
 
     return kernel_sections;
 }
-pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
-    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse unreachable;
+pub fn get_pmrs(stivale2_struct: *Struct, comptime is_higher_half_mapped_already: IsHigherHalfMappedAlready) []Struct.PMRs.PMR {
+    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct, is_higher_half_mapped_already) orelse unreachable;
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     return pmrs;
 }

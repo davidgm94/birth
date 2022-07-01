@@ -27,7 +27,13 @@ pub fn new() PhysicalAddressSpace {
 pub fn find_address(physical_address_space: *PhysicalAddressSpace, address: PhysicalAddress) void {
     _ = physical_address_space;
     _ = address;
-    unreachable;
+    TODO(@src());
+}
+
+pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) ?PhysicalAddress {
+    _ = physical_address_space;
+    _ = page_count;
+    TODO(@src());
 }
 
 pub const MapEntry = struct {

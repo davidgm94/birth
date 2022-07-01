@@ -12,7 +12,7 @@ pub const riscv64 = @import("arch/riscv64.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
 
 /// Arch-specific part of the address space
-pub const AddressSpace = arch.AddressSpace;
+pub const VirtualAddressSpace = arch.VirtualAddressSpace;
 pub const Spinlock = arch.Spinlock;
 pub const CPU = arch.CPU;
 pub const Context = arch.Context;

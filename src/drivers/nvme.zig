@@ -14,7 +14,7 @@ const DMA = drivers.DMA;
 
 const Allocator = common.Allocator;
 
-const x86_64 = @import("../kernel/arch/x86_64.zig");
+const x86_64 = common.arch.x86_64;
 
 const Physical = kernel.Physical;
 const Virtual = kernel.Virtual;

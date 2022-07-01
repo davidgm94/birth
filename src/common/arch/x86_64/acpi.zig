@@ -1,7 +1,7 @@
 const kernel = @import("root");
 const common = @import("common");
 
-const x86_64 = @import("../x86_64.zig");
+const x86_64 = common.arch.x86_64;
 const log = common.log.scoped(.ACPI);
 const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;

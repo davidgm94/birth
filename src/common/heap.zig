@@ -17,15 +17,18 @@ allocator: Allocator,
 // TODO: use another synchronization primitive
 lock: Spinlock,
 regions: [region_count]Region,
-virtual_address_space: *VirtualAddressSpace,
+virtual_address_space: ?*VirtualAddressSpace,
+bootstrap_region: Region,
+initialized: bool,
 
 const region_size = 2 * common.mb;
 pub const region_count = 0x1000_0000 / region_size;
 
-pub fn init(heap: *Heap, address_space: *VirtualAddressSpace) void {
+pub fn init(heap: *Heap) void {
     heap.allocator.ptr = heap;
     heap.allocator.vtable = &allocator_interface.vtable;
-    heap.virtual_address_space = address_space;
+    heap.virtual_address_space = null;
+    heap.initialized = false;
 }
 
 var allocator_interface = struct {
@@ -38,39 +41,46 @@ var allocator_interface = struct {
     fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
         heap.lock.acquire();
         defer heap.lock.release();
-        common.runtime_assert(@src(), size < region_size);
 
-        log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
-        var alignment: u64 = len_align;
-        if (ptr_align > alignment) alignment = ptr_align;
+        if (heap.initialized) {
+            common.runtime_assert(@src(), heap.virtual_address_space != null);
+            common.runtime_assert(@src(), size < region_size);
+            const virtual_address_space = heap.virtual_address_space.?;
 
-        const region = blk: {
-            for (heap.regions) |*region| {
-                if (region.size > 0) {
-                    region.allocated = common.align_forward(region.allocated, alignment);
-                    common.runtime_assert(@src(), (region.size - region.allocated) >= size);
-                    break :blk region;
-                } else {
-                    log.debug("have to allocate region", .{});
-                    // TODO: revisit arguments
-                    const allocation_slice = heap.virtual_address_space.allocator.allocBytes(0, region_size, 0, 0) catch return Allocator.Error.OutOfMemory;
+            log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
+            var alignment: u64 = len_align;
+            if (ptr_align > alignment) alignment = ptr_align;
 
-                    region.* = Region{
-                        .virtual = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
-                        .size = region_size,
-                        .allocated = 0,
-                    };
+            const region = blk: {
+                for (heap.regions) |*region| {
+                    if (region.size > 0) {
+                        region.allocated = common.align_forward(region.allocated, alignment);
+                        common.runtime_assert(@src(), (region.size - region.allocated) >= size);
+                        break :blk region;
+                    } else {
+                        log.debug("have to allocate region", .{});
+                        // TODO: revisit arguments @MaybeBug
+                        const allocation_slice = virtual_address_space.allocator.allocBytes(0, region_size, 0, 0) catch return Allocator.Error.OutOfMemory;
 
-                    break :blk region;
+                        region.* = Region{
+                            .virtual = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
+                            .size = region_size,
+                            .allocated = 0,
+                        };
+
+                        break :blk region;
+                    }
                 }
-            }
 
-            @panic("unreachableeee");
-        };
+                @panic("unreachableeee");
+            };
 
-        const result_address = region.virtual.value + region.allocated;
-        region.allocated += size;
-        return @intToPtr([*]u8, result_address)[0..size];
+            const result_address = region.virtual.value + region.allocated;
+            region.allocated += size;
+            return @intToPtr([*]u8, result_address)[0..size];
+        } else {
+            TODO(@src());
+        }
     }
 
     fn resize(heap: *Heap, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {

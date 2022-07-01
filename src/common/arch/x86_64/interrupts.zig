@@ -1,10 +1,10 @@
 const kernel = @import("root");
 const common = @import("../../../common.zig");
 
-const PIC = @import("pic.zig");
-const IDT = @import("idt.zig");
-const GDT = @import("gdt.zig");
-const x86_64 = @import("../x86_64.zig");
+const x86_64 = common.arch.x86_64;
+const PIC = x86_64.PIC;
+const IDT = x86_64.IDT;
+const GDT = x86_64.GDT;
 const PCI = @import("../../../drivers/pci.zig");
 
 const interrupts = @This();

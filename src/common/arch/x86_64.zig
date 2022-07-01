@@ -14,24 +14,22 @@ const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualMemoryRegion = common.VirtualMemoryRegion;
 
 const log = common.log.scoped(.x86_64);
 
-pub const page_size = common.arch.check_page_size(0x1000);
-
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const PIC = @import("x86_64/pic.zig");
+pub const IDT = @import("x86_64/idt.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const TSS = @import("x86_64/tss.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
-pub const Paging = @import("x86_64/paging.zig");
+pub const paging = @import("x86_64/paging.zig");
 pub const ACPI = @import("x86_64/acpi.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
-pub const AddressSpace = Paging.AddressSpace;
+pub const VirtualAddressSpace = paging.VirtualAddressSpace;
 const Thread = common.Thread;
 
 pub const IOAPIC = struct {
@@ -759,10 +757,11 @@ fn get_task_priority_level() u4 {
 }
 
 pub const CPUFeatures = struct {
+    page_size: u64,
     physical_address_max_bit: u6,
 };
 
-pub fn enable_cpu_features() CPUFeatures {
+pub fn enable_cpu_features(page_size: u64) CPUFeatures {
     const physical_address_max_bit = CPUID.get_max_physical_address_bit();
 
     // Initialize FPU
@@ -790,6 +789,7 @@ pub fn enable_cpu_features() CPUFeatures {
     common.runtime_assert(@src(), !cr0.get_bit(.NW));
 
     return CPUFeatures{
+        .page_size = page_size,
         .physical_address_max_bit = physical_address_max_bit,
     };
 }
@@ -1035,7 +1035,7 @@ pub const LAPIC = struct {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        kernel.virtual_address_space.map(lapic_physical_address, lapic_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
+        kernel.virtual_address_space.map(lapic_physical_address, lapic_virtual_address, common.VirtualAddressSpace.Flags.from_flags(&.{ .cache_disable, .read_write }));
         const lapic = LAPIC{
             .address = lapic_virtual_address,
         };
