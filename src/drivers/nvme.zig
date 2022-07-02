@@ -382,7 +382,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
         while (true) {
             const status = nvme.read(csts);
             if (status.cfs) {
-                @panic("cfs");
+                @panic("Fatal error when enabling the controller");
             } else if (status.ready) {
                 break;
             }
