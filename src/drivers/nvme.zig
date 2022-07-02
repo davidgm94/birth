@@ -877,7 +877,6 @@ const CommonCompletionQueueEntry = packed struct {
         invalid_protection_information = 0x81,
         attempted_write_to_read_only_range = 0x82,
         command_size_limit_exceeded = 0x83,
-        _,
         zoned_boundary_error = 0xb8,
         zone_is_full = 0xb9,
         zone_is_read_only = 0xba,
@@ -886,6 +885,7 @@ const CommonCompletionQueueEntry = packed struct {
         too_many_active_zones = 0xbd,
         too_many_open_zones = 0xbe,
         invalid_zone_state_transition = 0xbf,
+        _,
     };
 
     const FabricsCommandSpecificStatus = enum(u8) {
