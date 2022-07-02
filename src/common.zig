@@ -13,7 +13,7 @@ pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
 pub const Thread = @import("common/thread.zig");
 pub const Scheduler = @import("common/scheduler.zig");
 
-pub const RNUFS = @import("common/fs.zig");
+pub const RNUFS = @import("common/rnufs.zig");
 pub const PSF1 = @import("common/psf1.zig");
 
 // ARCH

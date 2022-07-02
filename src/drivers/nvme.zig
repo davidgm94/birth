@@ -88,7 +88,8 @@ const Drive = struct {
         };
     }
 
-    pub fn access(disk: *Disk, virtual_address_space: *VirtualAddressSpace, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
+    pub fn access(disk: *Disk, special_context: u64, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
+        const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
         common.runtime_assert(@src(), buffer.completed_size == 0);
         common.runtime_assert(@src(), common.is_aligned(buffer.address.value, kernel.arch.page_size));
         const drive = @fieldParentPtr(Drive, "disk", disk);

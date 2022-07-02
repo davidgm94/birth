@@ -4,7 +4,9 @@ const log = std.log;
 const print = std.debug.print;
 const assert = std.debug.assert;
 
-const fs = @import("src/build/fs.zig");
+const common = @import("src/common.zig");
+const drivers = @import("src/drivers.zig");
+const BuildDisk = @import("src/build/disk.zig");
 
 pub const sector_size = 0x200;
 const Builder = std.build.Builder;
@@ -376,17 +378,27 @@ const Kernel = struct {
             const kernel = @fieldParentPtr(Kernel, "disk_step", step);
             const font_file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
             std.debug.print("Font file size: {} bytes\n", .{font_file.len});
-            var disk = fs.MemoryDisk{
-                .bytes = buffer[0..],
-            };
-            fs.add_file(disk, "font.psf", font_file);
-            var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
-            for (disk.bytes) |byte, i| {
-                try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
-            }
+            var build_disk = BuildDisk.new(buffer[0..]);
+            var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
+            build_fs.write_new_file(build_fs);
 
-            try std.fs.cwd().writeFile("debug_disk", debug_file.items);
-            try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
+            //var disk = fs.MemoryDisk{
+            //.bytes = buffer[0..],
+            //};
+            common.TODO(@src());
+            //fs.add_file(disk, "font.psf", font_file);
+            //for (kernel.userspace_programs) |userspace_program| {
+            //const exe_path = userspace_program.output_path_source.getPath();
+            //const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
+            //fs.add_file(disk, exe_path, exe_file_content);
+            //}
+            //var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
+            //for (disk.bytes) |byte, i| {
+            //try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
+            //}
+
+            //try std.fs.cwd().writeFile("debug_disk", debug_file.items);
+            //try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
         }
     };
 
