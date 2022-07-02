@@ -245,7 +245,9 @@ pub fn process_kernel_file(allocator: Allocator, stivale2_struct: *Struct) Error
     const file_address = PhysicalAddress.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
     // TODO: consider alignment?
+    log.debug("allocation about to happen", .{});
     const dst = allocator.alloc(u8, file_size) catch return Error.kernel_file;
+    log.debug("allocation did happen", .{});
     const src = file_address.access_kernel([*]u8)[0..file_size];
     log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
     common.copy(u8, dst, src);

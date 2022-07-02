@@ -24,9 +24,9 @@ const PTable = [512]PTE;
 
 pub var should_log = false;
 
-pub fn init(allocator: Allocator, physical_address_space: *PhysicalAddressSpace, stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR, cpu_features: x86_64.CPUFeatures, higher_half_direct_map: VirtualAddress) *common.VirtualAddressSpace {
+pub fn init(virtual_address_space: *common.VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR, cpu_features: x86_64.CPUFeatures, higher_half_direct_map: VirtualAddress) void {
     log.debug("About to dereference memory regions", .{});
-    var virtual_address_space = common.VirtualAddressSpace.new(allocator, physical_address_space, cpu_features) orelse @panic("Unable to create kernel address space");
+    common.VirtualAddressSpace.initialize_kernel_address_space(virtual_address_space, physical_address_space, cpu_features) orelse @panic("unable to initialize kernel address space");
 
     // Map the kernel and do some tests
     {
@@ -126,8 +126,6 @@ pub fn init(allocator: Allocator, physical_address_space: *PhysicalAddressSpace,
     //log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
     //}
     log.debug("Paging initialized", .{});
-
-    return virtual_address_space;
 }
 
 pub const VirtualAddressSpace = struct {

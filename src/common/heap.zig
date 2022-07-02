@@ -45,14 +45,14 @@ var allocator_interface = struct {
         heap.lock.acquire();
         defer heap.lock.release();
 
-        common.runtime_assert(@src(), size < region_size);
         log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
         var alignment: u64 = len_align;
         if (ptr_align > alignment) alignment = ptr_align;
 
         // TODO: check if the region has enough available space
-        if (heap.virtual_address_space) |virtual_address_space| {
+        const virtual_address_space = heap.virtual_address_space orelse unreachable;
+        if (size < region_size) {
             const region = blk: {
                 for (heap.regions) |*region| {
                     if (region.size > 0) {
@@ -61,7 +61,7 @@ var allocator_interface = struct {
                         break :blk region;
                     } else {
                         // TODO: revisit arguments @MaybeBug
-                        const allocation_slice = virtual_address_space.allocator.allocBytes(0, region_size, 0, 0) catch return Allocator.Error.OutOfMemory;
+                        const allocation_slice = try virtual_address_space.allocator.allocBytes(@intCast(u29, virtual_address_space.physical_address_space.page_size), region_size, 0, 0);
 
                         region.* = Region{
                             .virtual = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
@@ -75,18 +75,13 @@ var allocator_interface = struct {
 
                 @panic("unreachableeee");
             };
-
             const result_address = region.virtual.value + region.allocated;
             region.allocated += size;
             return @intToPtr([*]u8, result_address)[0..size];
         } else {
-            heap.bootstrap_region.allocated = common.align_forward(heap.bootstrap_region.allocated, alignment);
-            log.debug("Allocated: {}. Size: {}", .{ heap.bootstrap_region.allocated, heap.bootstrap_region.size });
-            common.runtime_assert(@src(), (heap.bootstrap_region.size - heap.bootstrap_region.allocated) >= size);
-
-            const result_address = heap.bootstrap_region.virtual.value + heap.bootstrap_region.allocated;
-            heap.bootstrap_region.allocated += size;
-            return @intToPtr([*]u8, result_address)[0..size];
+            const big_allocation = try virtual_address_space.allocator.allocBytes(@intCast(u29, virtual_address_space.physical_address_space.page_size), common.align_forward(size, virtual_address_space.physical_address_space.page_size), 0, 0);
+            log.debug("Big allocation happened!", .{});
+            return big_allocation[0..size];
         }
     }
 

@@ -17,21 +17,22 @@ physical_address_space: *PhysicalAddressSpace,
 allocator: Allocator,
 initialized: bool,
 
-pub fn new(heap_allocator: Allocator, physical_address_space: *PhysicalAddressSpace, cpu_features: common.arch.CPUFeatures) ?*VirtualAddressSpace {
+/// This is going to return an identitty-mapped virtual address pointer and it is only intended to use for the
+/// kernel address space
+pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, cpu_features: common.arch.CPUFeatures) ?void {
     // TODO: defer memory free when this produces an error
     const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space, cpu_features) orelse return null;
-    const virtual_address_space = heap_allocator.create(VirtualAddressSpace) catch return null;
+    // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
         .allocator = .{
+            // This should be updated
             .ptr = virtual_address_space,
             .vtable = &allocator_interface.vtable,
         },
         .physical_address_space = physical_address_space,
         .initialized = false,
     };
-
-    return virtual_address_space;
 }
 
 pub fn bootstrapping(cpu_features: common.arch.CPUFeatures) ?VirtualAddressSpace {
@@ -124,7 +125,9 @@ var allocator_interface = struct {
         _ = ptr_align;
         const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
         const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
-        return physical_address.access_kernel([*]u8)[0..size];
+        const slice = physical_address.access_kernel([*]u8)[0..size];
+        log.debug("Size asked: {}. Slice len: {}", .{ size, slice.len });
+        return slice;
     }
 
     fn resize(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {

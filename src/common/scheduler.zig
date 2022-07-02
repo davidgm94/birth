@@ -32,7 +32,7 @@ pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
         current_thread.context = context;
         old_address_space = current_thread.address_space;
     } else {
-        old_address_space = kernel.virtual_address_space;
+        old_address_space = &kernel.virtual_address_space;
     }
     const new_thread = scheduler.pick_thread();
     new_thread.time_slices += 1;

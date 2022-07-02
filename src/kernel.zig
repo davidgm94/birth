@@ -24,8 +24,8 @@ const Scheduler = common.Scheduler;
 
 pub const privilege_level = common.PrivilegeLevel.kernel;
 pub var main_storage: *drivers.Filesystem = undefined;
-pub var physical_address_space = PhysicalAddressSpace.new(0); // INFO: this makes easier to spot uninitialized stuff
-pub var virtual_address_space: *VirtualAddressSpace = undefined;
+pub var physical_address_space: PhysicalAddressSpace = undefined;
+pub var virtual_address_space: VirtualAddressSpace = undefined;
 pub var memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF900000000000), 0xFFFFF00000000000 - 0xFFFF900000000000);
 pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
