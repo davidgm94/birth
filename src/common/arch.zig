@@ -1,13 +1,15 @@
 const kernel = @import("root");
 const common = @import("../common.zig");
 
-const arch = switch (common.target_arch) {
-    //.riscv64 => riscv64,
+const arch = switch (common.cpu.arch) {
+    .aarch64 => aarch64,
+    .riscv64 => riscv64,
     .x86_64 => x86_64,
     else => @compileError("CPU architecture not supported"),
 };
 
-//pub const riscv64 = @import("arch/riscv64.zig");
+pub const aarch64 = @import("arch/aarch64.zig");
+pub const riscv64 = @import("arch/riscv64.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
 
 /// Arch-specific part of the address space

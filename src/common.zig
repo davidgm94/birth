@@ -18,8 +18,7 @@ pub const PSF1 = @import("common/psf1.zig");
 
 // ARCH
 pub const Cpu = std.Target.Cpu;
-pub const building_cpu = builtin.cpu;
-pub const target_arch = std.Target.Cpu.Arch.x86_64;
+pub const cpu = builtin.cpu;
 
 // BUILD
 pub const build_mode = builtin.mode;
