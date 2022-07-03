@@ -29,7 +29,11 @@ pub const Type = std.builtin.Type;
 pub const fields = std.meta.fields;
 pub const enum_values = std.enums.values;
 pub const IntType = std.meta.Int;
+
+// MATH
 pub const max_int = std.math.maxInt;
+pub const max = std.math.max;
+pub const min = std.math.min;
 
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;
