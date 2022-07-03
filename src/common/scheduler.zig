@@ -154,26 +154,26 @@ fn pick_thread(scheduler: *Scheduler) *Thread {
 //);
 //}
 
-fn user_space() callconv(.Naked) noreturn {
-    _ = asm volatile (
-        \\mov %%rsp, %%rbp
-    );
-    var a = [_]u8{ 'u', 's', 'e', 'r', '\n' };
-    _ = x86_64.writer_function(&a);
-    _ = asm volatile (
-        \\call user_space_foo
-        \\syscall
-        : [ret] "={rax}" (-> usize),
-        : [number] "{rax}" (@as(u64, 0)),
-          //[arg1] "{rdi}" (arg1),
-          //[arg2] "{rsi}" (arg2),
-          //[arg3] "{rdx}" (arg3),
-          //[arg4] "{r10}" (arg4),
-          //[arg5] "{r8}" (arg5),
-          //: "rcx", "r11", "memory"
-    );
-    unreachable;
-}
+//fn user_space() callconv(.Naked) noreturn {
+//_ = asm volatile (
+//\\mov %%rsp, %%rbp
+//);
+//var a = [_]u8{ 'u', 's', 'e', 'r', '\n' };
+//_ = x86_64.writer_function(&a);
+//_ = asm volatile (
+//\\call user_space_foo
+//\\syscall
+//: [ret] "={rax}" (-> usize),
+//: [number] "{rax}" (@as(u64, 0)),
+////[arg1] "{rdi}" (arg1),
+////[arg2] "{rsi}" (arg2),
+////[arg3] "{rdx}" (arg3),
+////[arg4] "{r10}" (arg4),
+////[arg5] "{r8}" (arg5),
+////: "rcx", "r11", "memory"
+//);
+//unreachable;
+//}
 
 const x86_64 = common.arch.x86_64;
 
@@ -195,12 +195,12 @@ pub fn test_threads(thread_count: u64) void {
     }
 }
 
-pub fn test_userspace() void {
-    _ = Thread.spawn(.user, Thread.EntryPoint{
-        .start_address = @ptrToInt(user_space),
-        .argument = 2,
-    });
-}
+//pub fn test_userspace() void {
+//_ = Thread.spawn(.user, Thread.EntryPoint{
+//.start_address = @ptrToInt(user_space),
+//.argument = 2,
+//});
+//}
 
 pub fn init(scheduler: *Scheduler) void {
     _ = scheduler;

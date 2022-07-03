@@ -380,7 +380,7 @@ const Kernel = struct {
             std.debug.print("Font file size: {} bytes\n", .{font_file.len});
             var build_disk = BuildDisk.new(buffer[0..]);
             var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
-            build_fs.write_new_file(build_fs);
+            build_fs.fs.write_new_file(&build_fs.fs, 0, "font.psf", font_file);
 
             //var disk = fs.MemoryDisk{
             //.bytes = buffer[0..],

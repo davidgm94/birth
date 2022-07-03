@@ -365,7 +365,7 @@ pub fn SimpleR64(comptime name: []const u8) type {
     return struct {
         pub inline fn read() u64 {
             return asm volatile ("mov %%" ++ name ++ ", %[result]"
-                : [result] "={rax}" (-> u64),
+                : [result] "=r" (-> u64),
             );
         }
 
@@ -383,7 +383,7 @@ pub fn ComplexR64(comptime name: []const u8, comptime _BitEnum: type) type {
         const BitEnum = _BitEnum;
         pub inline fn read_raw() u64 {
             return asm volatile ("mov %%" ++ name ++ ", %[result]"
-                : [result] "={rax}" (-> u64),
+                : [result] "=r" (-> u64),
             );
         }
 

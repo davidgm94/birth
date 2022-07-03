@@ -18,7 +18,8 @@ pub const PSF1 = @import("common/psf1.zig");
 
 // ARCH
 pub const Cpu = std.Target.Cpu;
-pub const cpu = builtin.cpu;
+pub const building_cpu = builtin.cpu;
+pub const target_arch = std.Target.Cpu.Arch.x86_64;
 
 // BUILD
 pub const build_mode = builtin.mode;
@@ -74,8 +75,8 @@ pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
-fn get_page_size(target_arch: Cpu.Arch) comptime_int {
-    return switch (target_arch) {
+fn get_page_size(architecture: Cpu.Arch) comptime_int {
+    return switch (architecture) {
         .x86_64 => 0x1000,
         .riscv64 => 0x1000,
     };

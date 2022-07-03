@@ -19,7 +19,7 @@ allocator: Allocator,
 disk: *Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
 read_file_callback: fn (driver: *Driver, special_context: u64, name: []const u8) []const u8,
-write_new_file: fn (driver: *Driver, filename: []const u8, file_content: []const u8) void,
+write_new_file: fn (driver: *Driver, special_context: u64, filename: []const u8, file_content: []const u8) void,
 
 pub const InitializationError = error{
     allocation_failure,
