@@ -382,23 +382,20 @@ const Kernel = struct {
             var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
             build_fs.fs.write_new_file(&build_fs.fs, 0, "font.psf", font_file);
 
-            //var disk = fs.MemoryDisk{
-            //.bytes = buffer[0..],
-            //};
-            common.TODO(@src());
-            //fs.add_file(disk, "font.psf", font_file);
-            //for (kernel.userspace_programs) |userspace_program| {
-            //const exe_path = userspace_program.output_path_source.getPath();
-            //const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
-            //fs.add_file(disk, exe_path, exe_file_content);
-            //}
-            //var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
-            //for (disk.bytes) |byte, i| {
-            //try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
-            //}
+            for (kernel.userspace_programs) |userspace_program| {
+                const exe_name = userspace_program.out_filename;
+                const exe_path = userspace_program.output_path_source.getPath();
+                const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
+                build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
+            }
 
-            //try std.fs.cwd().writeFile("debug_disk", debug_file.items);
-            //try std.fs.cwd().writeFile(Disk.path, &Disk.buffer);
+            var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
+            for (build_disk.memory) |byte, i| {
+                try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
+            }
+
+            try std.fs.cwd().writeFile("debug_disk", debug_file.items);
+            try std.fs.cwd().writeFile(Disk.path, build_disk.memory);
         }
     };
 

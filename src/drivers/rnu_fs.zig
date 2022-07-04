@@ -43,13 +43,11 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
-    log.debug("Initializing search buffer", .{});
     // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
     var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
         log.err("Unable to allocate search buffer", .{});
         return null;
     };
-    log.debug("Done initializing search buffer", .{});
 
     while (true) {
         log.debug("FS driver asking read", .{});
@@ -60,9 +58,9 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
         });
         log.debug("FS driver ending read", .{});
         if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
-        for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
-            if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
-        }
+        //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
+        //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
+        //}
         var node = search_buffer.address.access(*RNUFS.Node);
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
         const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
@@ -114,43 +112,42 @@ pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
 }
 
 pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []const u8, file_content: []const u8) void {
-    log.debug("Seeking file {s}", .{filename});
-    const sectors_to_read_at_time = 1;
+    log.debug("Writing new file: {s}", .{filename});
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
-    log.debug("Initializing search buffer", .{});
-    // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
-    var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
-        log.err("Unable to allocate search buffer", .{});
-        @panic("lol");
-    };
-    log.debug("Done initializing search buffer", .{});
+    {
+        log.debug("Seeking file {s}", .{filename});
+        const sectors_to_read_at_time = 1;
+        // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
+        var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
+            log.err("Unable to allocate search buffer", .{});
+            @panic("lol");
+        };
 
-    while (true) {
-        log.debug("FS driver asking read", .{});
-        const sectors_read = fs_driver.disk.access(fs_driver.disk, special_context, &search_buffer, Disk.Work{
-            .sector_offset = sector,
-            .sector_count = sectors_to_read_at_time,
-            .operation = .read,
-        });
-        log.debug("FS driver ending read", .{});
-        if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
-        for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
-            if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
+        while (true) {
+            log.debug("FS driver asking read at sector {}", .{sector});
+            const sectors_read = fs_driver.disk.access(fs_driver.disk, special_context, &search_buffer, Disk.Work{
+                .sector_offset = sector,
+                .sector_count = sectors_to_read_at_time,
+                .operation = .read,
+            });
+            if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
+            //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
+            //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
+            //}
+            var node = search_buffer.address.access(*RNUFS.Node);
+            const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
+            const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
+            if (node_name.len == 0) break;
+
+            const sectors_to_add = 1 + common.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
+            log.debug("Found file with name: {s} and size: {}. Need to skip {} sectors", .{ node_name, node.size, sectors_to_add });
+            sector += sectors_to_add;
         }
-        var node = search_buffer.address.access(*RNUFS.Node);
-        const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
-        const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
-        if (node_name.len == 0) break;
-
-        log.debug("Node name: {s}", .{node_name});
-        log.debug("Node size: {}", .{node.size});
-        const sectors_to_add = 1 + common.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
-        log.debug("Sectors to add: {}", .{sectors_to_add});
-        sector += sectors_to_add;
     }
 
     const sector_count = common.bytes_to_sector(file_content.len, fs_driver.disk.sector_size, .can_be_not_exact) + 1;
+    log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
     var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
         log.err("Unable to allocate write buffer", .{});
         @panic("lol");

@@ -98,36 +98,27 @@ const Drive = struct {
         log.debug("NVMe drive: {}", .{drive});
         log.debug("Buffer: (0x{x}, {})", .{ buffer.address.value, buffer.total_size });
         log.debug("Work: {}", .{disk_work});
+
+        // Acquire lock
         // TODO: @Lock
-        const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
-        const submission_queue_full = new_tail == nvme.io_submission_queue_head;
+        var completed_sector_count: u64 = 0;
+        const total_sector_count = disk_work.sector_count * disk.sector_size;
+        // TODO: this assumes it's contiguous
+        const base_physical_address = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
+        while (completed_sector_count < total_sector_count) {
+            const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
+            const submission_queue_full = new_tail == nvme.io_submission_queue_head;
 
-        // TODO: @Lock
-        while (submission_queue_full) : ({
-            // Acquire lock
-        }) {
-            // TODO: @Hack
-            TODO(@src());
-            // Release lock
-        }
-
-        const request_byte_size = disk_work.sector_count * disk.sector_size;
-        const offset = buffer.address.value % kernel.arch.page_size;
-        common.runtime_assert(@src(), offset == 0);
-        log.debug("Offset: 0x{x}", .{offset});
-
-        if (request_byte_size <= 2 * kernel.arch.page_size) {
-            log.debug("Buffer address: 0x{x}", .{buffer.address.value});
-            const prp1 = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
-            const first_prp_length = kernel.arch.page_size - offset;
-            log.debug("TODO: is this correct? PRP1 length: {}", .{first_prp_length});
-            var prp2 = PhysicalAddress.temporary_invalid();
-
-            if (request_byte_size > first_prp_length) {
-                prp2 = virtual_address_space.translate_address(buffer.address.offset(first_prp_length)) orelse TODO(@src());
+            while (submission_queue_full) {
+                // TODO: @Hack
+                TODO(@src());
             }
 
-            const prps = [2]PhysicalAddress{ prp1, prp2 };
+            const request_sector_count = common.min(total_sector_count - completed_sector_count, 2);
+            log.debug("Request sector count: {}", .{request_sector_count});
+            const pointer_offset = completed_sector_count * disk.sector_size;
+            const offset_physical_address = base_physical_address.offset(pointer_offset);
+            const prps = [2]PhysicalAddress{ offset_physical_address, if (request_sector_count > kernel.arch.page_size) offset_physical_address.offset(kernel.arch.page_size) else PhysicalAddress.temporary_invalid() };
 
             var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
             command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
@@ -141,10 +132,10 @@ const Drive = struct {
             command[7] = @truncate(u32, prps[0].value >> 32);
             command[8] = @truncate(u32, prps[1].value);
             command[9] = @truncate(u32, prps[1].value >> 32);
-            command[10] = @truncate(u32, disk_work.sector_offset);
-            command[11] = @truncate(u32, disk_work.sector_offset >> 32);
+            command[10] = @truncate(u32, disk_work.sector_offset + completed_sector_count);
+            command[11] = @truncate(u32, (disk_work.sector_offset + completed_sector_count) >> 32);
             // TODO: what size is really this?
-            command[12] = @intCast(u16, disk_work.sector_count);
+            command[12] = @intCast(u16, request_sector_count);
             command[13] = 0;
             command[14] = 0;
             command[15] = 0;
@@ -155,11 +146,16 @@ const Drive = struct {
             nvme.write_sqtdbl(1, new_tail);
             asm volatile ("hlt");
 
-            return disk_work.sector_count;
-        } else {
-            TODO(@src());
+            completed_sector_count += request_sector_count;
         }
+        // Release lock
+        return disk_work.sector_count;
     }
+
+    const Segment = struct {
+        address: PhysicalAddress,
+        size: u64,
+    };
 
     pub fn get_dma_buffer(disk: *Disk, allocator: common.Allocator, sector_count: u64) common.Allocator.Error!DMA.Buffer {
         const sector_size = disk.sector_size;
