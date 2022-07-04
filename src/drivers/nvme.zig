@@ -102,7 +102,7 @@ const Drive = struct {
         // Acquire lock
         // TODO: @Lock
         var completed_sector_count: u64 = 0;
-        const total_sector_count = disk_work.sector_count * disk.sector_size;
+        const total_sector_count = disk_work.sector_count;
         // TODO: this assumes it's contiguous
         const base_physical_address = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
         while (completed_sector_count < total_sector_count) {
@@ -115,7 +115,7 @@ const Drive = struct {
             }
 
             const request_sector_count = common.min(total_sector_count - completed_sector_count, 2);
-            log.debug("Request sector count: {}", .{request_sector_count});
+            log.debug("Request sector index: {}. Work sector count: {}. Request sector count: {}", .{ completed_sector_count, total_sector_count, request_sector_count });
             const pointer_offset = completed_sector_count * disk.sector_size;
             const offset_physical_address = base_physical_address.offset(pointer_offset);
             const prps = [2]PhysicalAddress{ offset_physical_address, if (request_sector_count > kernel.arch.page_size) offset_physical_address.offset(kernel.arch.page_size) else PhysicalAddress.temporary_invalid() };

@@ -33,11 +33,11 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), kernel.drivers.Filesystem.drivers.items.len > 0);
     x86_64.register_main_storage();
-    var file = kernel.main_storage.read_file_callback(kernel.drivers.Filesystem.drivers.items[0], @ptrToInt(&kernel.virtual_address_space), "font.psf");
+    var file = kernel.main_storage.read_file_callback(kernel.main_storage, @ptrToInt(&kernel.virtual_address_space), "font.psf");
     for (file[0..10]) |byte, i| {
         log.debug("[{}] 0x{x}", .{ i, byte });
     }
-    file = kernel.main_storage.read_file_callback(kernel.drivers.Filesystem.drivers.items[0], @ptrToInt(&kernel.virtual_address_space), "minimal.elf");
+    file = kernel.main_storage.read_file_callback(kernel.main_storage, @ptrToInt(&kernel.virtual_address_space), "minimal.elf");
     for (file[0..10]) |byte, i| {
         log.debug("[{}] 0x{x}", .{ i, byte });
     }
