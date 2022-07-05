@@ -1062,7 +1062,6 @@ pub const LAPIC = struct {
 
     pub inline fn end_of_interrupt(lapic: LAPIC) void {
         lapic.write(.EOI, 0);
-        log.debug("LAPIC error status register: 0x{x}", .{lapic.read(.ERROR_STATUS_REGISTER)});
     }
 };
 

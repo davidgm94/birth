@@ -72,7 +72,6 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     new_thread.local_storage.local_storage = &new_thread.local_storage;
     x86_64.set_local_storage(new_thread.local_storage.local_storage);
     const should_swap_gs = x86_64.cs.read() != 0x28;
-    log.debug("Should swap GS: {}", .{should_swap_gs});
     // TODO: checks
     //const new_thread = current_thread.time_slices == 1;
 

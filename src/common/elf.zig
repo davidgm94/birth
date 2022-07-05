@@ -1,6 +1,7 @@
 const kernel = @import("root");
-const common = @import("common");
+const common = @import("../common.zig");
 
+const TODO = common.TODO;
 const log = common.log.scoped(.ELF);
 
 const FileHeader = extern struct {
@@ -145,9 +146,11 @@ const SectionHeader = extern struct {
         exclude = 0x8000000,
     };
 };
+
 pub fn parse(file: []const u8) void {
     const file_header = @ptrCast(*align(1) const FileHeader, file.ptr);
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
     log.debug("Parsed so far the kernel ELF file\n{}", .{file_header});
+    TODO(@src());
 }

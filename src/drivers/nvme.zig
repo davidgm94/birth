@@ -141,7 +141,6 @@ const Drive = struct {
             command[15] = 0;
 
             nvme.io_submission_queue_tail = new_tail;
-            log.debug("Sending the command", .{});
             @fence(.SeqCst);
             nvme.write_sqtdbl(1, new_tail);
             asm volatile ("hlt");
@@ -223,12 +222,10 @@ pub fn find(pci: *PCI) ?*PCI.Device {
 }
 
 inline fn read(nvme: *NVMe, comptime register: Property) register.type {
-    log.debug("Reading {} bytes from BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), 0, register.offset });
     return nvme.device.read_bar(register.type, 0, register.offset);
 }
 
 inline fn write(nvme: *NVMe, comptime register: Property, value: register.type) void {
-    log.debug("Writing {} bytes (0x{x}) to BAR register #{} at offset 0x{x})", .{ @sizeOf(register.type), value, 0, register.offset });
     nvme.device.write_bar(register.type, 0, register.offset, value);
 }
 
@@ -256,7 +253,6 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
     // TODO: reset event
     @fence(.SeqCst); // best memory barrier?
     common.runtime_assert(@src(), common.arch.are_interrupts_enabled());
-    log.debug("Entering in a wait state", .{});
     nvme.write_sqtdbl(0, nvme.admin_submission_queue_tail);
     asm volatile ("hlt");
     // TODO: wait for event
@@ -273,7 +269,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
         _ = command_retry_delay;
         _ = status_code_type;
         _ = status_code;
-        log.debug("Admin command failed", .{});
+        log.err("Admin command failed", .{});
 
         return false;
     }
@@ -507,7 +503,6 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
         while (i < 1024) : (i += 1) {
             nsid = @ptrCast(*align(1) u32, &identify_data[i]).*;
             if (nsid == 0) break :namespace;
-            log.debug("nsid", .{});
 
             {
                 var command = common.zeroes(Command);
@@ -523,7 +518,6 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
             const formatted_lba_size = identify_data[0x1000 + 26];
             const lba_format = @ptrCast(*u32, @alignCast(@alignOf(u32), &identify_data[@as(u16, 0x1000) + 128 + 4 * @truncate(u4, formatted_lba_size)])).*;
             if (@truncate(u16, lba_format) != 0) continue;
-            log.debug("lba_format", .{});
 
             const sector_bytes_exponent = @truncate(u5, lba_format >> 16);
             if (sector_bytes_exponent < 9 or sector_bytes_exponent > 16) continue;
@@ -569,7 +563,6 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
     }
 
     while (nvme.io_completion_queue != null and ((nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 14] & (1 << 0) != 0) != nvme.io_completion_queue_phase)) {
-        log.debug("NVMe IO queue sucess", .{});
         from_io = true;
 
         const index = @ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 12])).*;

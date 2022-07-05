@@ -1,6 +1,6 @@
 const common = @import("common");
-const log = common.log.scoped(.Entry);
 const kernel = @import("root");
+const log = common.log.scoped(.Entry);
 const x86_64 = common.arch.x86_64;
 const PhysicalAddress = common.PhysicalAddress;
 const Stivale2 = x86_64.Stivale2;
@@ -33,16 +33,9 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), kernel.drivers.Filesystem.drivers.items.len > 0);
     x86_64.register_main_storage();
-    var file = kernel.main_storage.read_file_callback(kernel.main_storage, @ptrToInt(&kernel.virtual_address_space), "font.psf");
-    for (file[0..10]) |byte, i| {
-        log.debug("[{}] 0x{x}", .{ i, byte });
-    }
-    file = kernel.main_storage.read_file_callback(kernel.main_storage, @ptrToInt(&kernel.virtual_address_space), "minimal.elf");
-    for (file[0..10]) |byte, i| {
-        log.debug("[{}] 0x{x}", .{ i, byte });
-    }
+    const exe_file = kernel.main_storage.read_file_callback(kernel.main_storage, @ptrToInt(&kernel.virtual_address_space), "minimal.elf");
+    common.ELF.parse(exe_file);
 
-    log.debug("File font.psf read successfully", .{});
     success_and_end();
 
     //next_timer(1);

@@ -336,7 +336,6 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
 
     log.debug("===================== INT 0x{x} =====================", .{context.interrupt_number});
     const should_swap_gs = x86_64.cs.read() != 0x28;
-    log.debug("Should swap GS: {}", .{should_swap_gs});
     if (should_swap_gs) {
         asm volatile ("swapgs");
     }

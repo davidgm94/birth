@@ -3,7 +3,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const arch = @import("common/arch.zig");
-pub const Heap = @import("common/heap.zig");
 pub const VirtualAddress = @import("common/virtual_address.zig");
 pub const PhysicalAddress = @import("common/physical_address.zig");
 pub const VirtualMemoryRegion = @import("common/virtual_memory_region.zig");
@@ -13,8 +12,10 @@ pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
 pub const Thread = @import("common/thread.zig");
 pub const Scheduler = @import("common/scheduler.zig");
 
+pub const ELF = @import("common/elf.zig");
 pub const RNUFS = @import("common/rnufs.zig");
 pub const PSF1 = @import("common/psf1.zig");
+pub const Heap = @import("common/heap.zig");
 
 // ARCH
 pub const Cpu = std.Target.Cpu;
