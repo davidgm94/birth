@@ -62,8 +62,8 @@ const FileHeader = extern struct {
 };
 
 const ProgramHeader = extern struct {
-    type: u32 = @enumToInt(ProgramHeaderType.load),
-    flags: u32 = @enumToInt(Flags.readable) | @enumToInt(Flags.executable),
+    type: ProgramHeaderType = .load,
+    flags: FlagsPackedStruct, //= @enumToInt(Flags.readable) | @enumToInt(Flags.executable),
     offset: u64,
     virtual_address: u64,
     physical_address: u64,
@@ -84,8 +84,19 @@ const ProgramHeader = extern struct {
         hi_os = 0x6fffffff,
         lo_proc = 0x70000000,
         hi_proc = 0x7fffffff,
+        _,
     };
 
+    const FlagsPackedStruct = packed struct {
+        executable: bool,
+        writable: bool,
+        readable: bool,
+        other: u29,
+
+        comptime {
+            common.comptime_assert(@sizeOf(FlagsPackedStruct) == @sizeOf(u32));
+        }
+    };
     const Flags = enum(u8) {
         executable = 1,
         writable = 2,
@@ -148,9 +159,15 @@ const SectionHeader = extern struct {
 };
 
 pub fn parse(file: []const u8) void {
-    const file_header = @ptrCast(*align(1) const FileHeader, file.ptr);
+    const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
-    log.debug("Parsed so far the kernel ELF file\n{}", .{file_header});
+    // TODO: further checking
+    log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
+    log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
+    const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
+    for (program_headers) |ph| {
+        log.debug("{}", .{ph});
+    }
     TODO(@src());
 }
