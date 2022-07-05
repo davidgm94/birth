@@ -8,14 +8,14 @@ const FileHeader = extern struct {
     // e_ident
     magic: u8 = magic,
     elf_id: [3]u8 = elf_signature.*,
-    bit_count: u8 = @enumToInt(Bits.b64),
-    endianness: u8 = @enumToInt(Endianness.little),
+    bit_count: Bits = .b64,
+    endianness: Endianness = .little,
     header_version: u8 = 1,
-    os_abi: u8 = @enumToInt(ABI.SystemV),
+    os_abi: ABI = .SystemV,
     abi_version: u8 = 0,
     padding: [7]u8 = [_]u8{0} ** 7,
-    object_type: u16 = @enumToInt(ObjectFileType.executable), // e_type
-    machine: u16 = @enumToInt(Machine.AMD64),
+    object_type: ObjectFileType = .executable, // e_type
+    machine: Machine = .AMD64,
     version: u32 = 1,
     entry: u64,
     program_header_offset: u64 = 0x40,
