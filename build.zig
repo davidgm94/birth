@@ -143,6 +143,7 @@ const Kernel = struct {
             const program = kernel.builder.addExecutable(descriptor.out_filename, descriptor.main_source_file);
             program.setTarget(get_target_base(kernel.options.arch));
             program.setOutputDir(cache_dir);
+            program.setBuildMode(.ReleaseSmall);
 
             kernel.builder.default_step.dependOn(&program.step);
 

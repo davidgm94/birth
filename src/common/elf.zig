@@ -162,11 +162,14 @@ pub fn parse(file: []const u8) void {
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
+    common.runtime_assert(@src(), file_header.program_header_size == @sizeOf(ProgramHeader));
+    common.runtime_assert(@src(), file_header.section_header_size == @sizeOf(SectionHeader));
     // TODO: further checking
     log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
     log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
     const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
-    for (program_headers) |ph| {
+    for (program_headers) |*ph| {
+        log.debug("File offset: {}", .{@ptrToInt(ph) - @ptrToInt(file_header)});
         log.debug("{}", .{ph});
     }
     TODO(@src());
