@@ -1,5 +1,6 @@
 const kernel = @import("root");
 const common = @import("../../../common.zig");
+const context = @import("context");
 
 const x86_64 = common.arch.x86_64;
 const log = common.log.scoped(.ACPI);
@@ -19,9 +20,8 @@ const Signature = enum(u32) {
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
 pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
-    const configuration = @import("configuration");
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    const rsdp_physical_page = rsdp_physical_address.aligned_backward(configuration.page_size);
+    const rsdp_physical_page = rsdp_physical_address.aligned_backward(context.page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
     const rsdp1 = rsdp_physical_address.access_kernel(*align(1) RSDP1);
 
@@ -29,7 +29,7 @@ pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, r
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
         const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
-        const rsdt_physical_page = rsdt_physical_address.aligned_backward(configuration.page_size);
+        const rsdt_physical_page = rsdt_physical_address.aligned_backward(context.page_size);
         virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
         const rsdt = rsdt_physical_address.access_kernel(*align(1) Header);
@@ -40,7 +40,7 @@ pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, r
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_physical_address = PhysicalAddress.new(table_address);
-            const table_physical_page = table_physical_address.aligned_backward(configuration.page_size);
+            const table_physical_page = table_physical_address.aligned_backward(context.page_size);
             virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
             const header = table_physical_address.access_kernel(*align(1) Header);
 

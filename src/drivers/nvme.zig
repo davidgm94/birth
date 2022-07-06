@@ -3,7 +3,7 @@ const NVMe = @This();
 
 const kernel = @import("root");
 const common = @import("../common.zig");
-const configuration = @import("configuration");
+const context = @import("context");
 const log = common.log.scoped(.NVMe);
 const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
@@ -92,7 +92,7 @@ const Drive = struct {
     pub fn access(disk: *Disk, special_context: u64, buffer: *DMA.Buffer, disk_work: Disk.Work) u64 {
         const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
         common.runtime_assert(@src(), buffer.completed_size == 0);
-        common.runtime_assert(@src(), common.is_aligned(buffer.address.value, configuration.page_size));
+        common.runtime_assert(@src(), common.is_aligned(buffer.address.value, context.page_size));
         const drive = @fieldParentPtr(Drive, "disk", disk);
         const nvme = driver;
         log.debug("NVMe access", .{});
@@ -119,7 +119,7 @@ const Drive = struct {
             log.debug("Request sector index: {}. Work sector count: {}. Request sector count: {}", .{ completed_sector_count, total_sector_count, request_sector_count });
             const pointer_offset = completed_sector_count * disk.sector_size;
             const offset_physical_address = base_physical_address.offset(pointer_offset);
-            const prps = [2]PhysicalAddress{ offset_physical_address, if (request_sector_count > configuration.page_size) offset_physical_address.offset(configuration.page_size) else PhysicalAddress.temporary_invalid() };
+            const prps = [2]PhysicalAddress{ offset_physical_address, if (request_sector_count > context.page_size) offset_physical_address.offset(context.page_size) else PhysicalAddress.temporary_invalid() };
 
             var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
             command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
@@ -161,7 +161,7 @@ const Drive = struct {
         const sector_size = disk.sector_size;
         const byte_size = sector_count * sector_size;
         log.debug("Initializing search buffer", .{});
-        return DMA.Buffer.new(allocator, .{ .size = common.align_forward(byte_size, configuration.page_size), .alignment = common.align_forward(sector_size, configuration.page_size) }) catch @panic("unable to initialize buffer");
+        return DMA.Buffer.new(allocator, .{ .size = common.align_forward(byte_size, context.page_size), .alignment = common.align_forward(sector_size, context.page_size) }) catch @panic("unable to initialize buffer");
     }
 };
 
@@ -292,8 +292,8 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
     if (nvme.version.major == 1 and nvme.version.minor < 1) @panic("f2");
     if (nvme.capabilities.mqes == 0) @panic("f3");
     if (!nvme.capabilities.css.nvm_command_set) @panic("f4");
-    if (nvme.capabilities.mpsmin < configuration.page_shifter - 12) @panic("f5");
-    if (nvme.capabilities.mpsmax < configuration.page_shifter - 12) @panic("f6");
+    if (nvme.capabilities.mpsmin < context.page_shifter - 12) @panic("f5");
+    if (nvme.capabilities.mpsmax < context.page_shifter - 12) @panic("f6");
 
     nvme.doorbell_stride = @as(u64, 4) << nvme.capabilities.doorbell_stride;
     log.debug("NVMe doorbell stride: 0x{x}", .{nvme.doorbell_stride});
@@ -327,7 +327,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
     nvme.write(cc, blk: {
         var cc_value = nvme.read(cc);
         cc_value.css = .nvm_command_set;
-        cc_value.mps = configuration.page_shifter - 12;
+        cc_value.mps = context.page_shifter - 12;
         cc_value.ams = .round_robin;
         cc_value.shn = .no_notification;
         cc_value.iosqes = 6;
@@ -343,10 +343,10 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
 
     const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
     const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
-    const admin_queue_page_count = common.align_forward(admin_submission_queue_size, configuration.page_size) + common.align_forward(admin_completion_queue_size, configuration.page_size);
+    const admin_queue_page_count = common.align_forward(admin_submission_queue_size, context.page_size) + common.align_forward(admin_completion_queue_size, context.page_size);
     const admin_queue_physical_address = virtual_address_space.physical_address_space.allocate(admin_queue_page_count) orelse @panic("admin queue");
     const admin_submission_queue_physical_address = admin_queue_physical_address;
-    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(common.align_forward(admin_submission_queue_size, configuration.page_size));
+    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(common.align_forward(admin_submission_queue_size, context.page_size));
 
     nvme.write(asq, ASQ{
         .reserved = 0,
@@ -439,7 +439,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
     }
 
     {
-        const size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, configuration.page_size);
+        const size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, context.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
 
@@ -458,7 +458,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
     }
 
     {
-        const size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, configuration.page_size);
+        const size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, context.page_size);
         const page_count = kernel.bytes_to_pages(size, .must_be_exact);
         const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
 

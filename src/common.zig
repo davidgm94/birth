@@ -2,6 +2,13 @@ const root = @import("root");
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const ExecutableIdentity = enum {
+    kernel,
+    kernel_module,
+    user,
+    build,
+};
+
 pub const arch = @import("common/arch.zig");
 pub const VirtualAddress = @import("common/virtual_address.zig");
 pub const PhysicalAddress = @import("common/physical_address.zig");
@@ -78,13 +85,6 @@ pub const kb = 1024;
 pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
-
-fn get_page_size(architecture: Cpu.Arch) comptime_int {
-    return switch (architecture) {
-        .x86_64 => 0x1000,
-        .riscv64 => 0x1000,
-    };
-}
 
 pub inline fn string_eq(a: []const u8, b: []const u8) bool {
     return equal(u8, a, b);
@@ -312,3 +312,11 @@ pub const File = struct {
     address: VirtualAddress,
     size: u64,
 };
+
+pub inline fn get_higher_half_map_address() u64 {
+    if (@hasDecl(root, "higher_half_direct_map")) {
+        return root.higher_half_direct_map;
+    } else {
+        @panic("can't call a non-kernel function");
+    }
+}

@@ -138,7 +138,7 @@ const Kernel = struct {
     fn create_executable(kernel: *Kernel) void {
         kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel.zig");
         var target = get_target_base(kernel.options.arch);
-        const configuration = kernel.builder.addOptions();
+        const kernel_context = kernel.builder.addOptions();
 
         switch (kernel.options.arch) {
             .riscv64 => {
@@ -174,27 +174,32 @@ const Kernel = struct {
                 const page_size = common.arch.x86_64.valid_page_sizes[0];
                 const page_shifter = @ctz(u64, page_size);
 
-                add_constant_option(configuration, u64, "page_size", page_size);
-                add_constant_option(configuration, u64, "page_shifter", page_shifter);
-                add_variable_option(configuration, u6, "max_physical_address_bit", 0);
+                add_constant_option(kernel_context, u64, "page_size", page_size);
+                add_constant_option(kernel_context, u64, "page_shifter", page_shifter);
+                add_variable_option(kernel_context, u6, "max_physical_address_bit", 0);
             },
             else => unreachable,
         }
 
+        kernel_context.addOption(common.PrivilegeLevel, "privilege_level", .kernel);
         kernel.executable.setTarget(target);
-        //kernel.executable.setMainPkgPath("src");
-
-        kernel.executable.addPackage(configuration.getPackage("configuration"));
-        const configuration_package_index = kernel.executable.packages.items.len - 1;
-        const common_package = Package{
+        var context_package = Package{
+            .name = "context",
+            .source = .{ .path = "src/context.zig" },
+            .dependencies = undefined,
+        };
+        var common_package = Package{
             .name = "common",
             .source = .{ .path = "src/common.zig" },
-            .dependencies = kernel.executable.packages.items[configuration_package_index .. configuration_package_index + 1],
+            .dependencies = undefined,
         };
+        context_package.dependencies = &.{common_package};
+        common_package.dependencies = &.{context_package};
+
         kernel.executable.addPackage(common_package);
+        kernel.executable.addPackage(context_package);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
-        configuration.addOption(common.PrivilegeLevel, "privilege_level", .kernel);
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
 

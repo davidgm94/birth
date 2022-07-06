@@ -31,6 +31,7 @@ pub const io_write = arch.io_write;
 
 pub const get_current_cpu = arch.get_current_cpu;
 pub const set_current_cpu = arch.set_current_cpu;
+pub const valid_page_sizes = arch.valid_page_sizes;
 
 pub const next_timer = arch.next_timer;
 pub const read_timestamp = arch.read_timestamp;

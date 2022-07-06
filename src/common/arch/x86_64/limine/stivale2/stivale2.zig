@@ -1,6 +1,7 @@
 const kernel = @import("root");
 const common = @import("../../../../../common.zig");
 const stivale = @import("header.zig");
+const context = @import("context");
 
 const log = common.log.scoped(.stivale);
 const TODO = common.TODO;
@@ -63,7 +64,7 @@ fn get_tag_from_physical(physical_address: PhysicalAddress) ?*align(1) stivale.T
 }
 
 pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
-    const page_size = kernel.configuration.page_size;
+    const page_size = context.page_size;
     const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
     var result = PhysicalAddressSpace{
@@ -87,9 +88,9 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                 const memory_map_allocation_size = memory_map_struct.entry_count * @sizeOf(PhysicalAddressSpace.MapEntry);
                 const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
-                const total_allocation_size = kernel.configuration.page_size * total_allocated_page_count;
+                const total_allocation_size = context.page_size * total_allocated_page_count;
                 common.runtime_assert(@src(), entry.size > total_allocation_size);
-                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + common.align_forward(bitset_size, kernel.configuration.page_size))[0..1];
+                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + common.align_forward(bitset_size, context.page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = PhysicalAddressSpace.MapEntry{
                     .descriptor = PhysicalMemoryRegion{
@@ -100,7 +101,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                     .type = .usable,
                 };
 
-                block.setup_bitset(kernel.configuration.page_size);
+                block.setup_bitset(context.page_size);
 
                 break :blk block;
             }
@@ -128,8 +129,8 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
 
             const bitset = result_entry.get_bitset_extended(page_size);
             const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
-            result_entry.allocated_size = common.align_forward(bitset_size, kernel.configuration.page_size);
-            result_entry.setup_bitset(kernel.configuration.page_size);
+            result_entry.allocated_size = common.align_forward(bitset_size, context.page_size);
+            result_entry.setup_bitset(context.page_size);
         }
     }
 

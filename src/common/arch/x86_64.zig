@@ -1,6 +1,7 @@
 const kernel = @import("root");
 const common = @import("../../common.zig");
 const drivers = @import("../../drivers.zig");
+const context = @import("context");
 const PCI = drivers.PCI;
 const NVMe = drivers.NVMe;
 const Virtio = drivers.Virtio;
@@ -762,7 +763,7 @@ pub const CPUFeatures = struct {
 };
 
 pub fn enable_cpu_features() void {
-    kernel.configuration.max_physical_address_bit = CPUID.get_max_physical_address_bit();
+    context.max_physical_address_bit = CPUID.get_max_physical_address_bit();
 
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -1139,7 +1140,7 @@ pub const Context = struct {
         const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
         const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
         log.debug("User stack: 0x{x}", .{user_stack});
-        const context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
+        const arch_context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
         thread.kernel_stack = VirtualAddress.new(kernel_stack);
         log.debug("ARch Kernel stack: 0x{x}", .{thread.kernel_stack.value});
         thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
@@ -1147,41 +1148,41 @@ pub const Context = struct {
         // TODO: FPU
         switch (thread.privilege_level) {
             .kernel => {
-                context.cs = @offsetOf(GDT.Table, "code_64");
-                context.ss = @offsetOf(GDT.Table, "data_64");
+                arch_context.cs = @offsetOf(GDT.Table, "code_64");
+                arch_context.ss = @offsetOf(GDT.Table, "data_64");
             },
             .user => {
-                context.cs = @offsetOf(GDT.Table, "user_code_64") | 0b11;
-                context.ss = @offsetOf(GDT.Table, "user_data_64") | 0b11;
-                log.debug("CS: 0x{x}. SS: 0x{x}", .{ context.cs, context.ss });
+                arch_context.cs = @offsetOf(GDT.Table, "user_code_64") | 0b11;
+                arch_context.ss = @offsetOf(GDT.Table, "user_data_64") | 0b11;
+                log.debug("CS: 0x{x}. SS: 0x{x}", .{ arch_context.cs, arch_context.ss });
             },
         }
 
-        context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
-        context.rip = entry_point.start_address;
-        context.rsp = user_stack;
+        arch_context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
+        arch_context.rip = entry_point.start_address;
+        arch_context.rsp = user_stack;
         // TODO: remove when doing userspace
-        log.debug("RSP: 0x{x}", .{context.rsp});
-        common.runtime_assert(@src(), context.rsp < thread.kernel_stack_base.value + thread.kernel_stack_size);
-        context.rdi = entry_point.argument;
+        log.debug("RSP: 0x{x}", .{arch_context.rsp});
+        common.runtime_assert(@src(), arch_context.rsp < thread.kernel_stack_base.value + thread.kernel_stack_size);
+        arch_context.rdi = entry_point.argument;
 
-        return context;
+        return arch_context;
     }
 
-    pub fn debug(context: *Context) void {
-        log.debug("Context address: 0x{x}", .{@ptrToInt(context)});
+    pub fn debug(arch_context: *Context) void {
+        log.debug("Context address: 0x{x}", .{@ptrToInt(arch_context)});
         inline for (common.fields(Context)) |field| {
-            log.debug("{s}: 0x{x}", .{ field.name, @field(context, field.name) });
+            log.debug("{s}: 0x{x}", .{ field.name, @field(arch_context, field.name) });
         }
     }
 
-    pub fn check(context: *Context, src: common.SourceLocation) void {
+    pub fn check(arch_context: *Context, src: common.SourceLocation) void {
         var failed = false;
-        failed = failed or context.cs > 0x100;
-        failed = failed or context.ss > 0x100;
+        failed = failed or arch_context.cs > 0x100;
+        failed = failed or arch_context.ss > 0x100;
         // TODO: more checking
         if (failed) {
-            context.debug();
+            arch_context.debug();
             kernel.crash("check failed: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
         }
     }

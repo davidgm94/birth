@@ -2,7 +2,6 @@ const Scheduler = @This();
 
 const kernel = @import("root");
 const common = @import("../common.zig");
-const configuration = @import("configuration");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;

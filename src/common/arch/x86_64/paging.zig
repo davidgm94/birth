@@ -6,7 +6,7 @@
 // • The “enable HLAT” VM-execution control (tertiary processor-based VM-execution control bit 1; see Section 24.6.2, “Processor-Based VM-Execution Controls,” in the Intel® 64 and IA-32 Architectures Software Developer’s Manual, Volume 3C).
 
 const common = @import("../../../common.zig");
-const configuration = @import("configuration");
+const context = @import("context");
 
 const x86_64 = common.arch.x86_64;
 
@@ -150,10 +150,10 @@ pub const VirtualAddressSpace = struct {
         };
     }
 
-    pub inline fn from_context(context: anytype) VirtualAddressSpace {
+    pub inline fn from_context(my_context: anytype) VirtualAddressSpace {
         // This is taking a u64 instead of a physical address to easily put here the value of the CR3 register
-        comptime common.comptime_assert(@TypeOf(context) == u64);
-        const cr3 = context;
+        comptime common.comptime_assert(@TypeOf(my_context) == u64);
+        const cr3 = my_context;
         return VirtualAddressSpace{
             .cr3 = cr3,
         };
@@ -179,8 +179,8 @@ pub const VirtualAddressSpace = struct {
 
     pub fn map(arch_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
         if (should_log) log.debug("Init mapping", .{});
-        common.runtime_assert(@src(), common.is_aligned(virtual_address.value, configuration.page_size));
-        common.runtime_assert(@src(), common.is_aligned(physical_address.value, configuration.page_size));
+        common.runtime_assert(@src(), common.is_aligned(virtual_address.value, context.page_size));
+        common.runtime_assert(@src(), common.is_aligned(physical_address.value, context.page_size));
 
         const indices = compute_indices(virtual_address);
 
@@ -193,7 +193,7 @@ pub const VirtualAddressSpace = struct {
             if (pml4_entry_value.contains(.present)) {
                 pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
             } else {
-                const pdp_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), configuration.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
+                const pdp_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
                 pdp.* = common.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
@@ -214,7 +214,7 @@ pub const VirtualAddressSpace = struct {
             if (pdp_entry_value.contains(.present)) {
                 pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
             } else {
-                const pd_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), configuration.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
+                const pd_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access_kernel(@TypeOf(pd));
                 pd.* = common.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
@@ -233,7 +233,7 @@ pub const VirtualAddressSpace = struct {
             if (pd_entry_value.contains(.present)) {
                 pt = get_address_from_entry_bits(pd_entry_value.bits).access_kernel(@TypeOf(pt));
             } else {
-                const pt_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), configuration.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
+                const pt_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access_kernel(@TypeOf(pt));
                 pt.* = common.zeroes(PTable);
                 pd_entry_value.or_flag(.present);
@@ -259,7 +259,7 @@ pub const VirtualAddressSpace = struct {
 
     pub fn translate_address(address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
         common.runtime_assert(@src(), asked_virtual_address.is_valid());
-        const virtual_address = asked_virtual_address.aligned_backward(configuration.page_size);
+        const virtual_address = asked_virtual_address.aligned_backward(context.page_size);
 
         const indices = compute_indices(virtual_address);
 
@@ -358,8 +358,8 @@ pub const VirtualAddressSpace = struct {
 
 const address_mask: u64 = 0x000000fffffff000;
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
-    common.runtime_assert(@src(), configuration.max_physical_address_bit == 40);
-    common.runtime_assert(@src(), common.is_aligned(new_address.value, configuration.page_size));
+    common.runtime_assert(@src(), context.max_physical_address_bit == 40);
+    common.runtime_assert(@src(), common.is_aligned(new_address.value, context.page_size));
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
     const result = address_masked | old_entry_value_masked;
@@ -367,9 +367,9 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress)
 }
 
 fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
-    common.runtime_assert(@src(), configuration.max_physical_address_bit == 40);
+    common.runtime_assert(@src(), context.max_physical_address_bit == 40);
     const address = entry_bits & address_mask;
-    common.runtime_assert(@src(), common.is_aligned(address, configuration.page_size));
+    common.runtime_assert(@src(), common.is_aligned(address, context.page_size));
 
     return PhysicalAddress.new(address);
 }
