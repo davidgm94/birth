@@ -2,6 +2,7 @@ const Scheduler = @This();
 
 const kernel = @import("root");
 const common = @import("../common.zig");
+const configuration = @import("configuration");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;
@@ -32,7 +33,8 @@ pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
         current_thread.context = context;
         old_address_space = current_thread.address_space;
     } else {
-        old_address_space = &kernel.virtual_address_space;
+        @panic("should have established a thread by now");
+        //old_address_space = &kernel.virtual_address_space;
     }
     const new_thread = scheduler.pick_thread();
     new_thread.time_slices += 1;
@@ -46,7 +48,7 @@ pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
     common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
-pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint, kernel_physical_address_space: *common.PhysicalAddressSpace, kernel_virtual_address_space: *common.VirtualAddressSpace, comptime page_size: u64) *Thread {
+pub fn spawn(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint) *Thread {
     // TODO: lock
     const new_thread_id = scheduler.thread_id;
     const thread_index = new_thread_id % scheduler.thread_pool.len;
@@ -55,10 +57,7 @@ pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point
 
     log.debug("here", .{});
     // TODO: should we always use the same address space for kernel tasks?
-    thread.address_space = switch (privilege_level) {
-        .kernel => kernel_virtual_address_space,
-        .user => VirtualAddressSpace.new_for_user() orelse unreachable,
-    };
+    thread.address_space = virtual_address_space;
 
     var kernel_stack_size: u64 = 0x5000;
     const user_stack_reserve: u64 = switch (privilege_level) {
@@ -72,18 +71,21 @@ pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point
     var user_stack: VirtualAddress = undefined;
     // TODO: implemented idle thread
 
-    const kernel_stack = kernel_virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
+    // TODO: should this be kernel virtual address space?
+    const kernel_stack = virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
     log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
     user_stack = switch (privilege_level) {
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
-            const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
-            const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
-            const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
-            user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
+            //const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
+            //const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
+            //const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
+            //user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
 
-            break :blk user_stack_base_virtual_address;
+            //break :blk user_stack_base_virtual_address;
+            TODO(@src());
+            break :blk undefined;
         },
     };
     thread.privilege_level = privilege_level;
@@ -111,7 +113,9 @@ pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point
                 kernel_entry_point_virtual_address_page.page_align_backward();
                 const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
                 log.debug("Offset: 0x{x}", .{offset});
-                const entry_point_physical_address_page = kernel_virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
+
+                // TODO: should this be kernel virtual address space?
+                const entry_point_physical_address_page = virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
                 const user_entry_point_virtual_address_page = VirtualAddress.new(0x6000_0000_0000);
                 thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, VirtualAddressSpace.Flags.from_flags(&.{ .user, .read_write }));
                 const user_entry_point_virtual_address = VirtualAddress.new(user_entry_point_virtual_address_page.value + offset);
@@ -125,6 +129,9 @@ pub fn spawn(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point
 
     return thread;
 }
+
+//pub fn load_executable(scheduler: *Scheduler, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, executable_content: []const u8) *Thread {
+//}
 
 pub fn terminate(thread: *Thread) void {
     _ = thread;

@@ -7,6 +7,7 @@ const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
+const Allocator = common.Allocator;
 
 const Signature = enum(u32) {
     APIC = @ptrCast(*const u32, "APIC").*,
@@ -17,9 +18,10 @@ const Signature = enum(u32) {
 };
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
+pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
+    const configuration = @import("configuration");
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    const rsdp_physical_page = rsdp_physical_address.aligned_backward(kernel.arch.page_size);
+    const rsdp_physical_page = rsdp_physical_address.aligned_backward(configuration.page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
     const rsdp1 = rsdp_physical_address.access_kernel(*align(1) RSDP1);
 
@@ -27,7 +29,7 @@ pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: 
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
         const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
-        const rsdt_physical_page = rsdt_physical_address.aligned_backward(kernel.arch.page_size);
+        const rsdt_physical_page = rsdt_physical_address.aligned_backward(configuration.page_size);
         virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
         const rsdt = rsdt_physical_address.access_kernel(*align(1) Header);
@@ -38,7 +40,7 @@ pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: 
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_physical_address = PhysicalAddress.new(table_address);
-            const table_physical_page = table_physical_address.aligned_backward(kernel.arch.page_size);
+            const table_physical_page = table_physical_address.aligned_backward(configuration.page_size);
             virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
             const header = table_physical_address.access_kernel(*align(1) Header);
 
@@ -62,7 +64,7 @@ pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: 
                         iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    x86_64.iso = kernel.core_heap.allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
+                    x86_64.iso = allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
 
                     common.runtime_assert(@src(), processor_count == kernel.cpus.len);

@@ -86,8 +86,8 @@ pub fn init_graphics_drivers(allocator: Allocator) !void {
     log.debug("TODO: initialize graphics drivers", .{});
 }
 
-pub fn prepare_drivers(virtual_address_space: *common.VirtualAddressSpace, rsdp: PhysicalAddress) void {
-    ACPI.init(virtual_address_space, rsdp);
+pub fn prepare_drivers(allocator: Allocator, virtual_address_space: *common.VirtualAddressSpace, rsdp: PhysicalAddress) void {
+    ACPI.init(allocator, virtual_address_space, rsdp);
     PCI.init();
 }
 
@@ -761,8 +761,8 @@ pub const CPUFeatures = struct {
     physical_address_max_bit: u6,
 };
 
-pub fn enable_cpu_features(page_size: u64) CPUFeatures {
-    const physical_address_max_bit = CPUID.get_max_physical_address_bit();
+pub fn enable_cpu_features() void {
+    kernel.configuration.max_physical_address_bit = CPUID.get_max_physical_address_bit();
 
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -787,11 +787,6 @@ pub fn enable_cpu_features(page_size: u64) CPUFeatures {
     log.debug("Making sure the cache is initialized properly", .{});
     common.runtime_assert(@src(), !cr0.get_bit(.CD));
     common.runtime_assert(@src(), !cr0.get_bit(.NW));
-
-    return CPUFeatures{
-        .page_size = page_size,
-        .physical_address_max_bit = physical_address_max_bit,
-    };
 }
 
 pub fn SimpleMSR(comptime msr: u32) type {

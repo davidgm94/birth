@@ -62,7 +62,8 @@ fn get_tag_from_physical(physical_address: PhysicalAddress) ?*align(1) stivale.T
     return physical_address.access_kernel(?*align(1) stivale.Tag);
 }
 
-pub fn process_memory_map(stivale2_struct: *Struct, comptime page_size: u64) Error!PhysicalAddressSpace {
+pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
+    const page_size = kernel.configuration.page_size;
     const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
     var result = PhysicalAddressSpace{
@@ -86,9 +87,9 @@ pub fn process_memory_map(stivale2_struct: *Struct, comptime page_size: u64) Err
                 const memory_map_allocation_size = memory_map_struct.entry_count * @sizeOf(PhysicalAddressSpace.MapEntry);
                 const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
-                const total_allocation_size = kernel.arch.page_size * total_allocated_page_count;
+                const total_allocation_size = kernel.configuration.page_size * total_allocated_page_count;
                 common.runtime_assert(@src(), entry.size > total_allocation_size);
-                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + common.align_forward(bitset_size, kernel.arch.page_size))[0..1];
+                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + common.align_forward(bitset_size, kernel.configuration.page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = PhysicalAddressSpace.MapEntry{
                     .descriptor = PhysicalMemoryRegion{
@@ -99,7 +100,7 @@ pub fn process_memory_map(stivale2_struct: *Struct, comptime page_size: u64) Err
                     .type = .usable,
                 };
 
-                block.setup_bitset(kernel.arch.page_size);
+                block.setup_bitset(kernel.configuration.page_size);
 
                 break :blk block;
             }
@@ -127,8 +128,8 @@ pub fn process_memory_map(stivale2_struct: *Struct, comptime page_size: u64) Err
 
             const bitset = result_entry.get_bitset_extended(page_size);
             const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
-            result_entry.allocated_size = common.align_forward(bitset_size, kernel.arch.page_size);
-            result_entry.setup_bitset(kernel.arch.page_size);
+            result_entry.allocated_size = common.align_forward(bitset_size, kernel.configuration.page_size);
+            result_entry.setup_bitset(kernel.configuration.page_size);
         }
     }
 
@@ -207,10 +208,12 @@ pub fn process_memory_map(stivale2_struct: *Struct, comptime page_size: u64) Err
     return result;
 }
 
-pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!VirtualAddress {
+pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!u64 {
     const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse return Error.higher_half_direct_map;
     log.debug("HHDM: 0x{x}", .{hhdm_struct.addr});
-    return VirtualAddress.new(hhdm_struct.addr);
+    // INFO: this is just checking the address is valid
+    const hhdm = VirtualAddress.new(hhdm_struct.addr);
+    return hhdm.value;
 }
 
 pub fn process_pmrs(allocator: Allocator, stivale2_struct: *Struct) Error![]VirtualMemoryRegion {

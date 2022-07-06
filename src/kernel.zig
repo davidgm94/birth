@@ -1,5 +1,6 @@
 const kernel = @This();
 pub const common = @import("common");
+pub const configuration = @import("configuration");
 
 pub const drivers = @import("drivers.zig");
 pub const arch = @import("kernel/arch.zig");
@@ -31,10 +32,9 @@ pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF
 
 pub var scheduler: Scheduler = undefined;
 pub var core_heap: Heap = undefined;
-pub var bootstrapping_memory: [kernel.arch.page_size * 16]u8 = undefined;
+pub var bootstrapping_memory: [configuration.page_size * 16]u8 = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;
-pub var cpu_features: common.arch.CPUFeatures = undefined;
 pub var file: common.File = undefined;
 pub var sections_in_memory: []VirtualMemoryRegion = undefined;
 
@@ -82,5 +82,5 @@ pub fn TODO(src: common.SourceLocation) noreturn {
 }
 
 pub inline fn bytes_to_pages(bytes: u64, comptime must_be_exact: common.MustBeExact) u64 {
-    return common.remainder_division_maybe_exact(bytes, kernel.arch.page_size, must_be_exact);
+    return common.remainder_division_maybe_exact(bytes, configuration.page_size, must_be_exact);
 }

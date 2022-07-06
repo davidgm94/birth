@@ -1,6 +1,7 @@
 const PhysicalAddress = @This();
 
 const common = @import("../common.zig");
+const configuration = @import("configuration");
 const TODO = common.TODO;
 
 const VirtualAddress = common.VirtualAddress;
@@ -31,19 +32,12 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
 }
 
 pub inline fn is_valid(physical_address: PhysicalAddress) bool {
-    const root = @import("root");
-    const is_kernel = @hasDecl(root, "cpu_features");
-    if (is_kernel) {
-        const cpu_features = root.cpu_features;
-        common.runtime_assert(@src(), physical_address.value != 0);
-        common.runtime_assert(@src(), cpu_features.physical_address_max_bit != 0);
-        const max = @as(u64, 1) << cpu_features.physical_address_max_bit;
-        common.runtime_assert(@src(), max > 1000);
-        //log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
-        return physical_address.value <= max;
-    } else {
-        TODO(@src());
-    }
+    common.runtime_assert(@src(), physical_address.value != 0);
+    common.runtime_assert(@src(), configuration.max_physical_address_bit != 0);
+    const max = @as(u64, 1) << configuration.max_physical_address_bit;
+    common.runtime_assert(@src(), max > common.max_int(u32));
+    //log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
+    return physical_address.value <= max;
 }
 
 pub inline fn is_equal(physical_address: PhysicalAddress, other: PhysicalAddress) bool {

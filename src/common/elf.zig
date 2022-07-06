@@ -1,8 +1,9 @@
-const kernel = @import("root");
 const common = @import("../common.zig");
 
 const TODO = common.TODO;
 const log = common.log.scoped(.ELF);
+const VirtualAddress = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const FileHeader = extern struct {
     // e_ident
@@ -62,8 +63,8 @@ const FileHeader = extern struct {
 };
 
 const ProgramHeader = extern struct {
-    type: ProgramHeaderType = .load,
-    flags: FlagsPackedStruct, //= @enumToInt(Flags.readable) | @enumToInt(Flags.executable),
+    type: Type = .load,
+    flags: Flags, //= @enumToInt(Flags.readable) | @enumToInt(Flags.executable),
     offset: u64,
     virtual_address: u64,
     physical_address: u64,
@@ -71,7 +72,7 @@ const ProgramHeader = extern struct {
     size_in_memory: u64,
     alignment: u64 = 0,
 
-    const ProgramHeaderType = enum(u32) {
+    const Type = enum(u32) {
         @"null" = 0,
         load = 1,
         dynamic = 2,
@@ -81,26 +82,23 @@ const ProgramHeader = extern struct {
         program_header = 6,
         tls = 7,
         lo_os = 0x60000000,
+        gnu_eh_frame = 0x6474e550,
+        gnu_stack = 0x6474e551,
         hi_os = 0x6fffffff,
         lo_proc = 0x70000000,
         hi_proc = 0x7fffffff,
         _,
     };
 
-    const FlagsPackedStruct = packed struct {
+    const Flags = packed struct {
         executable: bool,
         writable: bool,
         readable: bool,
-        other: u29,
+        reserved: u29,
 
         comptime {
-            common.comptime_assert(@sizeOf(FlagsPackedStruct) == @sizeOf(u32));
+            common.comptime_assert(@sizeOf(Flags) == @sizeOf(u32));
         }
-    };
-    const Flags = enum(u8) {
-        executable = 1,
-        writable = 2,
-        readable = 4,
     };
 };
 
@@ -158,7 +156,7 @@ const SectionHeader = extern struct {
     };
 };
 
-pub fn parse(file: []const u8) void {
+pub fn parse(virtual_address_space: *VirtualAddressSpace, file: []const u8) void {
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
@@ -168,9 +166,49 @@ pub fn parse(file: []const u8) void {
     log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
     log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
     const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
+
     for (program_headers) |*ph| {
-        log.debug("File offset: {}", .{@ptrToInt(ph) - @ptrToInt(file_header)});
-        log.debug("{}", .{ph});
+        switch (ph.type) {
+            .load => {
+                if (ph.size_in_memory == 0) continue;
+
+                const page_size = virtual_address_space.physical_address_space.page_size;
+                const misalignment = ph.virtual_address & (page_size - 1);
+                const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
+                const segment_size = common.align_forward(ph.size_in_memory + misalignment, page_size);
+                _ = segment_size;
+                _ = base_virtual_address;
+
+                if (!ph.flags.writable) {
+                    if (misalignment != 0) {
+                        @panic("ELF file with misaligned segments");
+                    }
+
+                    if (!common.is_aligned(ph.offset, page_size)) {
+                        @panic("ELF file with misaligned offset");
+                    }
+
+                    common.runtime_assert(@src(), ph.flags.executable);
+                    common.runtime_assert(@src(), ph.flags.readable);
+
+                    common.runtime_assert(@src(), virtual_address_space.translate_address(base_virtual_address) == null);
+                    const page_count = common.bytes_to_pages(segment_size, page_size, .must_be_exact);
+                    const result = virtual_address_space.allocate_at_address(base_virtual_address, page_count, .{
+                        .execute = true,
+                        .user = true,
+                    }) catch @panic("holy shit");
+                    common.runtime_assert(@src(), base_virtual_address.value == result.value);
+                } else {
+                    TODO(@src());
+                }
+            },
+            else => {
+                log.debug("Unhandled PH type: {}", .{ph.type});
+            },
+        }
+        //if (ph.type == .load) {
+        //}
     }
+
     TODO(@src());
 }

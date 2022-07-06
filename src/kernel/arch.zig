@@ -1,8 +1,6 @@
 const kernel = @import("root");
 const common = @import("common");
 
-pub const page_size = arch.page_size;
-pub const page_shifter = @ctz(u64, page_size);
 const arch = switch (common.cpu.arch) {
     .aarch64 => aarch64,
     .riscv64 => riscv64,

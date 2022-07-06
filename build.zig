@@ -15,6 +15,7 @@ const Step = std.build.Step;
 const RunStep = std.build.RunStep;
 const FileSource = std.build.FileSource;
 const Package = std.build.Pkg;
+const OptionsStep = std.build.OptionsStep;
 
 const building_os = builtin.target.os.tag;
 const building_arch = builtin.target.cpu.arch;
@@ -50,6 +51,71 @@ pub fn build(b: *Builder) void {
     kernel.create();
 }
 
+const OptionMutability = enum(u1) {
+    constant = 0,
+    variable = 1,
+};
+
+pub fn add_constant_option(self: *OptionsStep, comptime T: type, name: []const u8, value: T) void {
+    return self.addOption(T, name, value);
+}
+
+fn printLiteral(out: anytype, val: anytype, indent: u8) !void {
+    const T = @TypeOf(val);
+    switch (@typeInfo(T)) {
+        .Array => {
+            try out.print("{s} {{\n", .{@typeName(T)});
+            for (val) |item| {
+                try out.writeByteNTimes(' ', indent + 4);
+                try printLiteral(out, item, indent + 4);
+                try out.writeAll(",\n");
+            }
+            try out.writeByteNTimes(' ', indent);
+            try out.writeAll("}");
+        },
+        .Pointer => |p| {
+            if (p.size != .Slice) {
+                @compileError("Non-slice pointers are not yet supported in build options");
+            }
+            try out.print("&[_]{s} {{\n", .{@typeName(p.child)});
+            for (val) |item| {
+                try out.writeByteNTimes(' ', indent + 4);
+                try printLiteral(out, item, indent + 4);
+                try out.writeAll(",\n");
+            }
+            try out.writeByteNTimes(' ', indent);
+            try out.writeAll("}");
+        },
+        .Optional => {
+            if (val) |inner| {
+                return printLiteral(out, inner, indent);
+            } else {
+                return out.writeAll("null");
+            }
+        },
+        .Void,
+        .Bool,
+        .Int,
+        .Float,
+        .Null,
+        => try out.print("{any}", .{val}),
+        else => @compileError(comptime std.fmt.comptimePrint("`{s}` are not yet supported as build options", .{@tagName(@typeInfo(T))})),
+    }
+}
+
+pub fn add_variable_option(self: *OptionsStep, comptime T: type, name: []const u8, value: T) void {
+    const out = self.contents.writer();
+    switch (@typeInfo(T)) {
+        .Int => {
+            if (value != 0) @panic("value not zero");
+            out.print("pub var {}: {s} = ", .{ std.zig.fmtId(name), std.zig.fmtId(@typeName(T)) }) catch unreachable;
+            printLiteral(out, value, 0) catch unreachable;
+            out.writeAll(";\n") catch unreachable;
+        },
+        else => @compileLog(T),
+    }
+}
+
 const Kernel = struct {
     builder: *Builder,
     executable: *LibExeObjStep = undefined,
@@ -72,6 +138,7 @@ const Kernel = struct {
     fn create_executable(kernel: *Kernel) void {
         kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel.zig");
         var target = get_target_base(kernel.options.arch);
+        const configuration = kernel.builder.addOptions();
 
         switch (kernel.options.arch) {
             .riscv64 => {
@@ -104,15 +171,30 @@ const Kernel = struct {
                 kernel.executable.omit_frame_pointer = false;
                 const linker_script_path = std.mem.concat(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
                 kernel.executable.setLinkerScriptPath(FileSource.relative(linker_script_path));
+                const page_size = common.arch.x86_64.valid_page_sizes[0];
+                const page_shifter = @ctz(u64, page_size);
+
+                add_constant_option(configuration, u64, "page_size", page_size);
+                add_constant_option(configuration, u64, "page_shifter", page_shifter);
+                add_variable_option(configuration, u6, "max_physical_address_bit", 0);
             },
             else => unreachable,
         }
 
         kernel.executable.setTarget(target);
         //kernel.executable.setMainPkgPath("src");
-        kernel.executable.addPackagePath("common", "src/common.zig");
+
+        kernel.executable.addPackage(configuration.getPackage("configuration"));
+        const configuration_package_index = kernel.executable.packages.items.len - 1;
+        const common_package = Package{
+            .name = "common",
+            .source = .{ .path = "src/common.zig" },
+            .dependencies = kernel.executable.packages.items[configuration_package_index .. configuration_package_index + 1],
+        };
+        kernel.executable.addPackage(common_package);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
+        configuration.addOption(common.PrivilegeLevel, "privilege_level", .kernel);
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
 
@@ -144,6 +226,10 @@ const Kernel = struct {
             program.setTarget(get_target_base(kernel.options.arch));
             program.setOutputDir(cache_dir);
             program.setBuildMode(.ReleaseSmall);
+            // TODO: make this architecture independent
+            if (kernel.options.arch != .x86_64) @panic("this should be made architecture independent");
+            program.setLinkerScriptPath(FileSource.relative("./src/common/arch/x86_64/user/linker.ld"));
+            program.entry_symbol_name = "_start";
 
             kernel.builder.default_step.dependOn(&program.step);
 
@@ -573,6 +659,7 @@ fn get_x86_base_features() CPUFeatures {
     };
 
     const Feature = std.Target.x86.Feature;
+    features.disabled.addFeature(@enumToInt(Feature.x87));
     features.disabled.addFeature(@enumToInt(Feature.mmx));
     features.disabled.addFeature(@enumToInt(Feature.sse));
     features.disabled.addFeature(@enumToInt(Feature.sse2));

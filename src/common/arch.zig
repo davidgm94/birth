@@ -59,14 +59,6 @@ pub const LocalStorage = struct {
 
 pub const set_local_storage = arch.set_local_storage;
 
-pub fn check_page_size(asked_page_size: u64) u64 {
-    for (arch.valid_page_sizes) |valid_page_size| {
-        if (asked_page_size == valid_page_size) return asked_page_size;
-    }
-
-    unreachable;
-}
-
 pub const bootstrap_stack_size = 0x10000;
 
 pub extern fn switch_context(context: *Context, new_address_space: *common.VirtualAddressSpace, kernel_stack: u64, new_thread: *common.Thread, old_address_space: *common.VirtualAddressSpace) callconv(.C) noreturn;

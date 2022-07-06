@@ -5,9 +5,11 @@ const PhysicalAddress = @import("physical_address.zig");
 value: u64,
 
 pub inline fn new(value: u64) VirtualAddress {
-    return VirtualAddress{
+    const virtual_address = VirtualAddress{
         .value = value,
     };
+    common.runtime_assert(@src(), virtual_address.is_valid());
+    return virtual_address;
 }
 
 pub inline fn is_valid(virtual_address: VirtualAddress) bool {

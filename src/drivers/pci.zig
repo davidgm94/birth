@@ -556,7 +556,7 @@ pub const Device = struct {
             device.base_physical_addresses[i] = PhysicalAddress.new(address);
             device.base_virtual_addresses[i] = device.base_physical_addresses[i].to_higher_half_virtual_address();
             const physical_region = common.PhysicalMemoryRegion.new(device.base_physical_addresses[i], size);
-            virtual_address_space.map_physical_region(physical_region, device.base_virtual_addresses[i], .{ .write = true, .cache_disable = true }, virtual_address_space.physical_address_space.page_size);
+            virtual_address_space.map_physical_region(physical_region, device.base_virtual_addresses[i], .{ .write = true, .cache_disable = true });
 
             log.debug("Virtual 0x{x}. Physical 0x{x}", .{ device.base_virtual_addresses[i].value, device.base_physical_addresses[i].value });
             device.base_addresses_size[i] = size;

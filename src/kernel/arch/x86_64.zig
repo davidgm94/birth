@@ -19,7 +19,6 @@ const VirtualMemoryRegion = common.VirtualMemoryRegion;
 
 const log = common.log.scoped(.x86_64);
 
-pub const page_size = common.arch.check_page_size(0x1000);
 pub const entry = @import("x86_64/entry.zig");
 
 var bootstrap_cpu: common.arch.CPU = undefined;
