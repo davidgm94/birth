@@ -48,7 +48,7 @@ pub fn bootstrapping() ?VirtualAddressSpace {
     };
 }
 
-pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) ?void {
+pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, kernel_address_space: *VirtualAddressSpace) ?void {
     // TODO: defer memory free when this produces an error
     const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space) orelse return null;
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
@@ -64,7 +64,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .privilege_level = .user,
     };
 
-    virtual_address_space.arch.map_kernel_address_space_higher_half();
+    virtual_address_space.arch.map_kernel_address_space_higher_half(kernel_address_space);
 }
 
 pub fn allocate_at_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, page_count: u64, flags: Flags) Allocator.Error!VirtualAddress {
