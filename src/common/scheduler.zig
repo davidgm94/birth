@@ -2,6 +2,7 @@ const Scheduler = @This();
 
 const kernel = @import("root");
 const common = @import("../common.zig");
+const drivers = @import("../drivers.zig");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;
@@ -10,6 +11,7 @@ const Thread = common.Thread;
 
 const TODO = common.TODO;
 const log = common.log.scoped(.Scheduler);
+const Allocator = common.Allocator;
 
 const PrivilegeLevel = common.PrivilegeLevel;
 
@@ -129,8 +131,16 @@ pub fn spawn(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace,
     return thread;
 }
 
-//pub fn load_executable(scheduler: *Scheduler, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, executable_content: []const u8) *Thread {
-//}
+pub fn load_executable(scheduler: *Scheduler, allocator: Allocator, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
+    common.runtime_assert(@src(), privilege_level == .user);
+    const executable_file = drive.read_file(drive, @ptrToInt(kernel_address_space), executable_filename);
+    const user_virtual_address_space = allocator.create(VirtualAddressSpace) catch @panic("wtf");
+    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, kernel_address_space.physical_address_space) orelse @panic("wtf2");
+    _ = privilege_level;
+    _ = executable_file;
+    _ = scheduler;
+    TODO(@src());
+}
 
 pub fn terminate(thread: *Thread) void {
     _ = thread;

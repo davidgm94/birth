@@ -16,6 +16,7 @@ arch: arch.VirtualAddressSpace,
 physical_address_space: *PhysicalAddressSpace,
 allocator: Allocator,
 initialized: bool,
+privilege_level: common.PrivilegeLevel,
 
 /// This is going to return an identitty-mapped virtual address pointer and it is only intended to use for the
 /// kernel address space
@@ -32,6 +33,7 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
         },
         .physical_address_space = physical_address_space,
         .initialized = false,
+        .privilege_level = .kernel,
     };
 }
 
@@ -42,7 +44,27 @@ pub fn bootstrapping() ?VirtualAddressSpace {
         .allocator = undefined,
         .initialized = false,
         .physical_address_space = undefined,
+        .privilege_level = .kernel,
     };
+}
+
+pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) ?void {
+    // TODO: defer memory free when this produces an error
+    const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space) orelse return null;
+    // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
+    virtual_address_space.* = VirtualAddressSpace{
+        .arch = arch_virtual_space,
+        .allocator = .{
+            // This should be updated
+            .ptr = virtual_address_space,
+            .vtable = &allocator_interface.vtable,
+        },
+        .physical_address_space = physical_address_space,
+        .initialized = false,
+        .privilege_level = .user,
+    };
+
+    virtual_address_space.arch.map_kernel_address_space_higher_half();
 }
 
 pub fn allocate_at_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, page_count: u64, flags: Flags) Allocator.Error!VirtualAddress {
@@ -132,11 +154,17 @@ var allocator_interface = struct {
         _ = return_address;
         _ = len_align;
         _ = ptr_align;
-        const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
-        const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
-        const slice = physical_address.access_kernel([*]u8)[0..size];
-        log.debug("Size asked: {}. Slice len: {}", .{ size, slice.len });
-        return slice;
+
+        switch (virtual_address_space.privilege_level) {
+            .kernel => {
+                const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
+                const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+                const slice = physical_address.access_kernel([*]u8)[0..size];
+                log.debug("Size asked: {}. Slice len: {}", .{ size, slice.len });
+                return slice;
+            },
+            else => TODO(@src()),
+        }
     }
 
     fn resize(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {

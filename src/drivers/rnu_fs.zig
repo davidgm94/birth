@@ -27,7 +27,7 @@ pub const Initialization = struct {
             .fs = Filesystem{
                 .type = .RNU,
                 .disk = initialization_context,
-                .read_file_callback = read_file,
+                .read_file = read_file,
                 .write_new_file = write_new_file,
                 .allocator = allocator,
             },
