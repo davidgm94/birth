@@ -15,8 +15,7 @@ pub export const syscall_handlers = [1]Handler{
 };
 
 pub fn thread_exit(argument0: u64, argument1: u64, argument2: u64, argument3: u64) callconv(.C) u64 {
-    var a: u64 = 0;
-    log.debug("a:{}", .{a});
+    log.debug("We are in kernel back from userspace", .{});
     _ = argument0;
     _ = argument1;
     _ = argument2;
