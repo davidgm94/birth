@@ -75,17 +75,15 @@ pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddres
 
     // TODO: should this be kernel virtual address space?
     // TODO: this may crash
-    const kernel_stack_slice = virtual_address_space.allocator.allocBytes(context.page_size, kernel_stack_size, 0, 0) catch @panic("unable to allocate the kernel stack");
-    const kernel_stack = VirtualAddress.new(@ptrToInt(kernel_stack_slice.ptr));
+    const kernel_stack = virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
     common.runtime_assert(@src(), kernel_stack.is_higher_half());
     user_stack = switch (privilege_level) {
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
             common.runtime_assert(@src(), common.is_aligned(user_stack_reserve, context.page_size));
-            const user_stack_allocation = virtual_address_space.allocator.allocBytes(context.page_size, user_stack_reserve, 0, 0) catch @panic("user stack");
-            const user_stack_base_virtual_address = VirtualAddress.new(@ptrToInt(user_stack_allocation.ptr));
-            break :blk user_stack_base_virtual_address;
+            const user_stack_allocation = virtual_address_space.allocate(user_stack_reserve, null, .{ .write = true, .user = true }) catch @panic("user stack");
+            break :blk user_stack_allocation;
 
             //const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
             //const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
@@ -109,6 +107,8 @@ pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddres
     thread.id = new_thread_id;
     thread.type = .normal;
     common.runtime_assert(@src(), thread.type == .normal);
+    thread.local_storage.local_storage = &thread.local_storage;
+    thread.local_storage.cpu = null;
 
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});

@@ -13,93 +13,100 @@ pub const Region = struct {
     allocated: u64,
 };
 
-allocator: Allocator,
+kernel_allocator: Allocator,
+user_allocator: Allocator,
 // TODO: use another synchronization primitive
 lock: Spinlock,
 regions: [region_count]Region,
 virtual_address_space: ?*VirtualAddressSpace,
-bootstrap_region: Region,
 
 const region_size = 2 * common.mb;
 pub const region_count = 0x1000_0000 / region_size;
 
-pub fn init(heap: *Heap, bootstrapping_memory: []u8) void {
-    heap.allocator.ptr = heap;
-    heap.allocator.vtable = &allocator_interface.vtable;
+pub fn init(heap: *Heap) void {
+    heap.kernel_allocator.ptr = heap;
+    heap.kernel_allocator.vtable = &kernel_allocator_interface.vtable;
+    heap.user_allocator.ptr = heap;
+    heap.user_allocator.vtable = &user_allocator_interface.vtable;
     heap.virtual_address_space = null;
-    heap.bootstrap_region = Region{
-        .virtual = VirtualAddress.new(@ptrToInt(bootstrapping_memory.ptr)),
-        .size = bootstrapping_memory.len,
-        .allocated = 0,
-    };
 }
 
-var allocator_interface = struct {
-    vtable: Allocator.VTable = .{
-        .alloc = @ptrCast(fn alloc(heap: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8, alloc),
-        .resize = @ptrCast(fn resize(heap: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, resize),
-        .free = @ptrCast(fn free(heap: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
-    },
+const user_allocator_interface = AllocatorInterface(.user){};
+const kernel_allocator_interface = AllocatorInterface(.kernel){};
 
-    fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
-        heap.lock.acquire();
-        defer heap.lock.release();
+fn AllocatorInterface(comptime privilege_level: common.PrivilegeLevel) type {
+    return struct {
+        vtable: Allocator.VTable = .{
+            .alloc = @ptrCast(fn alloc(heap: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8, alloc),
+            .resize = @ptrCast(fn resize(heap: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, resize),
+            .free = @ptrCast(fn free(heap: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
+        },
 
-        log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
+        const flags = VirtualAddressSpace.Flags{
+            .write = true,
+            .user = privilege_level == .user,
+        };
 
-        var alignment: u64 = len_align;
-        if (ptr_align > alignment) alignment = ptr_align;
+        fn alloc(heap: *Heap, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
+            heap.lock.acquire();
+            defer heap.lock.release();
 
-        // TODO: check if the region has enough available space
-        const virtual_address_space = heap.virtual_address_space orelse unreachable;
-        if (size < region_size) {
-            const region = blk: {
-                for (heap.regions) |*region| {
-                    if (region.size > 0) {
-                        region.allocated = common.align_forward(region.allocated, alignment);
-                        common.runtime_assert(@src(), (region.size - region.allocated) >= size);
-                        break :blk region;
-                    } else {
-                        // TODO: revisit arguments @MaybeBug
-                        const allocation_slice = try virtual_address_space.allocator.allocBytes(@intCast(u29, virtual_address_space.physical_address_space.page_size), region_size, 0, 0);
+            log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
-                        region.* = Region{
-                            .virtual = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
-                            .size = region_size,
-                            .allocated = 0,
-                        };
+            var alignment: u64 = len_align;
+            if (ptr_align > alignment) alignment = ptr_align;
 
-                        break :blk region;
+            // TODO: check if the region has enough available space
+            const virtual_address_space = heap.virtual_address_space orelse unreachable;
+            if (size < region_size) {
+                const region = blk: {
+                    for (heap.regions) |*region| {
+                        if (region.size > 0) {
+                            region.allocated = common.align_forward(region.allocated, alignment);
+                            common.runtime_assert(@src(), (region.size - region.allocated) >= size);
+                            break :blk region;
+                        } else {
+                            // TODO: revisit arguments @MaybeBug
+
+                            region.* = Region{
+                                .virtual = try virtual_address_space.allocate(region_size, null, flags),
+                                .size = region_size,
+                                .allocated = 0,
+                            };
+
+                            break :blk region;
+                        }
                     }
-                }
 
-                @panic("unreachableeee");
-            };
-            const result_address = region.virtual.value + region.allocated;
-            region.allocated += size;
-            return @intToPtr([*]u8, result_address)[0..size];
-        } else {
-            const big_allocation = try virtual_address_space.allocator.allocBytes(@intCast(u29, virtual_address_space.physical_address_space.page_size), common.align_forward(size, virtual_address_space.physical_address_space.page_size), 0, 0);
-            log.debug("Big allocation happened!", .{});
-            return big_allocation[0..size];
+                    @panic("unreachableeee");
+                };
+                const result_address = region.virtual.value + region.allocated;
+                region.allocated += size;
+                return @intToPtr([*]u8, result_address)[0..size];
+            } else {
+                const allocation_size = common.align_forward(size, virtual_address_space.physical_address_space.page_size);
+                const virtual_address = try virtual_address_space.allocate(allocation_size, null, flags);
+                log.debug("Big allocation happened!", .{});
+                return virtual_address.access([*]u8)[0..size];
+            }
         }
-    }
 
-    fn resize(heap: *Heap, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {
-        _ = heap;
-        _ = old_mem;
-        _ = old_align;
-        _ = new_size;
-        _ = len_align;
-        _ = return_address;
-        TODO(@src());
-    }
+        fn resize(heap: *Heap, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {
+            _ = heap;
+            _ = old_mem;
+            _ = old_align;
+            _ = new_size;
+            _ = len_align;
+            _ = return_address;
+            TODO(@src());
+        }
 
-    fn free(heap: *Heap, old_mem: []u8, old_align: u29, return_address: usize) void {
-        _ = heap;
-        _ = old_mem;
-        _ = old_align;
-        _ = return_address;
-        TODO(@src());
-    }
-}{};
+        fn free(heap: *Heap, old_mem: []u8, old_align: u29, return_address: usize) void {
+            _ = heap;
+            _ = old_mem;
+            _ = old_align;
+            _ = return_address;
+            TODO(@src());
+        }
+    };
+}

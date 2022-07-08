@@ -16,6 +16,7 @@ const RunStep = std.build.RunStep;
 const FileSource = std.build.FileSource;
 const Package = std.build.Pkg;
 const OptionsStep = std.build.OptionsStep;
+const WriteFileStep = std.build.WriteFileStep;
 
 const building_os = builtin.target.os.tag;
 const building_arch = builtin.target.cpu.arch;
@@ -51,71 +52,6 @@ pub fn build(b: *Builder) void {
     kernel.create();
 }
 
-const OptionMutability = enum(u1) {
-    constant = 0,
-    variable = 1,
-};
-
-pub fn add_constant_option(self: *OptionsStep, comptime T: type, name: []const u8, value: T) void {
-    return self.addOption(T, name, value);
-}
-
-fn printLiteral(out: anytype, val: anytype, indent: u8) !void {
-    const T = @TypeOf(val);
-    switch (@typeInfo(T)) {
-        .Array => {
-            try out.print("{s} {{\n", .{@typeName(T)});
-            for (val) |item| {
-                try out.writeByteNTimes(' ', indent + 4);
-                try printLiteral(out, item, indent + 4);
-                try out.writeAll(",\n");
-            }
-            try out.writeByteNTimes(' ', indent);
-            try out.writeAll("}");
-        },
-        .Pointer => |p| {
-            if (p.size != .Slice) {
-                @compileError("Non-slice pointers are not yet supported in build options");
-            }
-            try out.print("&[_]{s} {{\n", .{@typeName(p.child)});
-            for (val) |item| {
-                try out.writeByteNTimes(' ', indent + 4);
-                try printLiteral(out, item, indent + 4);
-                try out.writeAll(",\n");
-            }
-            try out.writeByteNTimes(' ', indent);
-            try out.writeAll("}");
-        },
-        .Optional => {
-            if (val) |inner| {
-                return printLiteral(out, inner, indent);
-            } else {
-                return out.writeAll("null");
-            }
-        },
-        .Void,
-        .Bool,
-        .Int,
-        .Float,
-        .Null,
-        => try out.print("{any}", .{val}),
-        else => @compileError(comptime std.fmt.comptimePrint("`{s}` are not yet supported as build options", .{@tagName(@typeInfo(T))})),
-    }
-}
-
-pub fn add_variable_option(self: *OptionsStep, comptime T: type, name: []const u8, value: T) void {
-    const out = self.contents.writer();
-    switch (@typeInfo(T)) {
-        .Int => {
-            if (value != 0) @panic("value not zero");
-            out.print("pub var {}: {s} = ", .{ std.zig.fmtId(name), std.zig.fmtId(@typeName(T)) }) catch unreachable;
-            printLiteral(out, value, 0) catch unreachable;
-            out.writeAll(";\n") catch unreachable;
-        },
-        else => @compileLog(T),
-    }
-}
-
 const Kernel = struct {
     builder: *Builder,
     executable: *LibExeObjStep = undefined,
@@ -123,8 +59,10 @@ const Kernel = struct {
     options: Options,
     boot_image_step: Step = undefined,
     disk_step: Step = undefined,
+    debug_step: Step = undefined,
     run_argument_list: std.ArrayList([]const u8) = undefined,
     debug_argument_list: std.ArrayList([]const u8) = undefined,
+    gdb_script: *WriteFileStep = undefined,
 
     fn create(kernel: *Kernel) void {
         kernel.create_executable();
@@ -138,7 +76,6 @@ const Kernel = struct {
     fn create_executable(kernel: *Kernel) void {
         kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel.zig");
         var target = get_target_base(kernel.options.arch);
-        const kernel_context = kernel.builder.addOptions();
 
         switch (kernel.options.arch) {
             .riscv64 => {
@@ -171,17 +108,10 @@ const Kernel = struct {
                 kernel.executable.omit_frame_pointer = false;
                 const linker_script_path = std.mem.concat(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
                 kernel.executable.setLinkerScriptPath(FileSource.relative(linker_script_path));
-                const page_size = common.arch.x86_64.valid_page_sizes[0];
-                const page_shifter = @ctz(u64, page_size);
-
-                add_constant_option(kernel_context, u64, "page_size", page_size);
-                add_constant_option(kernel_context, u64, "page_shifter", page_shifter);
-                add_variable_option(kernel_context, u6, "max_physical_address_bit", 0);
             },
             else => unreachable,
         }
 
-        kernel_context.addOption(common.PrivilegeLevel, "privilege_level", .kernel);
         kernel.executable.setTarget(target);
         var context_package = Package{
             .name = "context",
@@ -383,6 +313,9 @@ const Kernel = struct {
                         }
                     }
                 }
+
+                kernel.debug_argument_list.append("-S") catch unreachable;
+                kernel.debug_argument_list.append("-s") catch unreachable;
             },
         }
 
@@ -394,6 +327,23 @@ const Kernel = struct {
             .x86_64 => run_command.step.dependOn(&kernel.boot_image_step),
             else => unreachable,
         }
+
+        kernel.gdb_script = kernel.builder.addWriteFile("gdb_script",
+            \\set disassembly-flavor intel
+            \\symbol-file zig-cache/kernel.elf
+            \\target remote localhost:1234
+            \\b start
+            \\c
+        );
+        kernel.builder.default_step.dependOn(&kernel.gdb_script.step);
+
+        // We need a member variable because we need consistent memory around it to do @fieldParentPtr
+        kernel.debug_step = Step.init(.custom, "_debug_", kernel.builder.allocator, do_debug_step);
+        kernel.debug_step.dependOn(&kernel.boot_image_step);
+        kernel.debug_step.dependOn(&kernel.gdb_script.step);
+
+        const debug_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
+        debug_step.dependOn(&kernel.debug_step);
     }
 
     const BootImage = struct {
@@ -699,71 +649,23 @@ const ZigProgramDescriptor = struct {
     main_source_file: []const u8,
 };
 
-//const Debug = struct {
-//step: Step,
-//b: *Builder,
-//arch: Arch,
+fn do_debug_step(step: *Step) !void {
+    const kernel = @fieldParentPtr(Kernel, "debug_step", step);
+    switch (common.os) {
+        .linux => {
+            const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
+            const first_pid = try std.os.fork();
+            if (first_pid == 0) {
+                var debugger_process = std.ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
+                _ = try debugger_process.spawnAndWait();
+            } else {
+                var qemu_process = std.ChildProcess.init(kernel.debug_argument_list.items, kernel.builder.allocator);
+                try qemu_process.spawn();
 
-//fn create(b: *Builder, arch: Arch) *Debug {
-//const self = kernel.builder.allocator.create(@This()) catch @panic("out of memory\n");
-//self.* = Debug{
-//.step = Step.init(.custom, "_debug_", kernel.builder.allocator, make),
-//.b = b,
-//.arch = arch,
-//};
-
-//const named_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
-//named_step.dependOn(&self.step);
-//return self;
-//}
-
-//fn make(step: *Step) !void {
-//const self = @fieldParentPtr(Debug, "step", step);
-//const b = self.b;
-//const qemu = get_qemu_command(self.arch) ++ [_][]const u8{ "-S", "-s" };
-//if (building_os == .windows) {
-//unreachable;
-//} else {
-//const terminal_thread = try std.Thread.spawn(.{}, terminal_and_gdb_thread, .{b});
-//var process = std.ChildProcess.init(qemu, kernel.builder.allocator);
-//_ = try process.spawnAndWait();
-
-//terminal_thread.join();
-//_ = try process.kill();
-//}
-//}
-
-//fn terminal_and_gdb_thread(b: *Builder) void {
-//_ = b;
-////zig fmt: off
-////var kernel_elf = std.fs.realpathAlloc(kernel.builder.allocator, "zig-cache/kernel.elf") catch unreachable;
-////if (builtin.os.tag == .windows) {
-////const buffer = kernel.builder.allocator.create([512]u8) catch unreachable;
-////var counter: u64 = 0;
-////for (kernel_elf) |ch| {
-////const is_separator = ch == '\\';
-////buffer[counter] = ch;
-////buffer[counter + @boolToInt(is_separator)] = ch;
-////counter += @as(u64, 1) + @boolToInt(is_separator);
-////}
-////kernel_elf = buffer[0..counter];
-////}
-////const symbol_file = kernel.builder.fmt("symbol-file {s}", .{kernel_elf});
-////const process_name = [_][]const u8{
-////"wezterm", "start", "--",
-////get_gdb_name(arch),
-////"-tui",
-////"-ex", symbol_file,
-////"-ex", "target remote :1234",
-////"-ex", "b start",
-////"-ex", "c",
-////};
-
-////for (process_name) |arg, arg_i| {
-////log.debug("Process[{}]: {s}", .{arg_i, arg});
-////}
-////var process = std.ChildProcess.init(&process_name, kernel.builder.allocator);
-//// zig fmt: on
-////_ = process.spawnAndWait() catch unreachable;
-//}
-//};
+                _ = std.os.waitpid(first_pid, 0);
+                _ = try qemu_process.kill();
+            }
+        },
+        else => unreachable,
+    }
+}

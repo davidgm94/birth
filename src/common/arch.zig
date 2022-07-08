@@ -55,7 +55,7 @@ pub var writer = common.Writer(void, Writer.Error, Writer.write){ .context = {} 
 
 pub const LocalStorage = struct {
     local_storage: *LocalStorage,
-    cpu: *arch.CPU,
+    cpu: ?*arch.CPU,
 };
 
 pub const set_local_storage = arch.set_local_storage;

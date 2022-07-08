@@ -191,7 +191,7 @@ pub export fn foo() callconv(.C) void {
 pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace, syscall_entry_point: fn () callconv(.Naked) void) void {
     // This assumes the BSP processor is already properly setup here
     const local_storage = get_local_storage().?;
-    const bsp = local_storage.cpu;
+    const bsp = local_storage.cpu orelse @panic("cpu");
     bsp.gdt.initial_setup();
     // Flush GS as well
     set_local_storage(local_storage);

@@ -78,9 +78,10 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     _ = old_address_space;
     new_thread.last_known_execution_address = context.rip;
 
-    new_thread.local_storage.cpu.lapic.end_of_interrupt();
+    const cpu = new_thread.local_storage.cpu orelse @panic("cpu");
+    cpu.lapic.end_of_interrupt();
     if (x86_64.are_interrupts_enabled()) @panic("interrupts enabled");
-    if (new_thread.local_storage.cpu.spinlock_count > 0) @panic("spinlocks active");
+    if (cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
     if (should_swap_gs) asm volatile ("swapgs");
 }

@@ -27,6 +27,7 @@ pub const Heap = @import("common/heap.zig");
 // ARCH
 pub const Cpu = std.Target.Cpu;
 pub const cpu = builtin.cpu;
+pub const os = builtin.os.tag;
 
 // BUILD
 pub const build_mode = builtin.mode;
