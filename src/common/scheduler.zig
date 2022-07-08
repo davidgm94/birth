@@ -3,10 +3,12 @@ const Scheduler = @This();
 const kernel = @import("root");
 const common = @import("../common.zig");
 const drivers = @import("../drivers.zig");
+const context = @import("context");
 
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualAddress = common.VirtualAddress;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
+const PhysicalAddressSpace = common.PhysicalAddressSpace;
 const Thread = common.Thread;
 
 const TODO = common.TODO;
@@ -21,7 +23,7 @@ lock: common.arch.Spinlock,
 thread_pool: [8192]Thread,
 thread_id: u64,
 
-pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
+pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
     const current_cpu = common.arch.get_current_cpu().?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
@@ -31,7 +33,7 @@ pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled) @panic("ffff");
     if (current_cpu.current_thread) |current_thread| {
-        current_thread.context = context;
+        current_thread.context = arch_context;
         old_address_space = current_thread.address_space;
     } else {
         @panic("should have established a thread by now");
@@ -49,14 +51,13 @@ pub fn yield(scheduler: *Scheduler, context: *Context) noreturn {
     common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
 }
 
-pub fn spawn(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: Thread.EntryPoint) *Thread {
+pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
     // TODO: lock
     const new_thread_id = scheduler.thread_id;
     const thread_index = new_thread_id % scheduler.thread_pool.len;
     var thread = &scheduler.thread_pool[thread_index];
     scheduler.thread_id += 1;
 
-    log.debug("here", .{});
     // TODO: should we always use the same address space for kernel tasks?
     thread.address_space = virtual_address_space;
 
@@ -73,20 +74,25 @@ pub fn spawn(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace,
     // TODO: implemented idle thread
 
     // TODO: should this be kernel virtual address space?
-    const kernel_stack = virtual_address_space.allocate(kernel_stack_size) orelse @panic("unable to allocate the kernel stack");
-    log.debug("Kernel stack: 0x{x}", .{kernel_stack.value});
+    // TODO: this may crash
+    const kernel_stack_slice = virtual_address_space.allocator.allocBytes(context.page_size, kernel_stack_size, 0, 0) catch @panic("unable to allocate the kernel stack");
+    const kernel_stack = VirtualAddress.new(@ptrToInt(kernel_stack_slice.ptr));
+    common.runtime_assert(@src(), kernel_stack.is_higher_half());
     user_stack = switch (privilege_level) {
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
+            common.runtime_assert(@src(), common.is_aligned(user_stack_reserve, context.page_size));
+            const user_stack_allocation = virtual_address_space.allocator.allocBytes(context.page_size, user_stack_reserve, 0, 0) catch @panic("user stack");
+            const user_stack_base_virtual_address = VirtualAddress.new(@ptrToInt(user_stack_allocation.ptr));
+            break :blk user_stack_base_virtual_address;
+
             //const user_stack_physical_address = kernel_physical_address_space.allocate_pages(common.bytes_to_pages(user_stack_reserve, page_size, .must_be_exact)) orelse unreachable;
             //const user_stack_physical_region = PhysicalMemoryRegion.new(user_stack_physical_address, user_stack_reserve);
             //const user_stack_base_virtual_address = VirtualAddress.new(0x5000_0000_0000);
             //user_stack_physical_region.map(thread.address_space, user_stack_base_virtual_address, VirtualAddressSpace.Flags.from_flags(&.{ .read_write, .user }));
 
             //break :blk user_stack_base_virtual_address;
-            TODO(@src());
-            break :blk undefined;
         },
     };
     thread.privilege_level = privilege_level;
@@ -109,37 +115,22 @@ pub fn spawn(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace,
         // TODO: hack
         thread.context = switch (privilege_level) {
             .kernel => common.arch.Context.new(thread, entry_point),
-            .user => blk: {
-                var kernel_entry_point_virtual_address_page = VirtualAddress.new(entry_point.start_address);
-                kernel_entry_point_virtual_address_page.page_align_backward();
-                const offset = entry_point.start_address - kernel_entry_point_virtual_address_page.value;
-                log.debug("Offset: 0x{x}", .{offset});
-
-                // TODO: should this be kernel virtual address space?
-                const entry_point_physical_address_page = virtual_address_space.translate_address(kernel_entry_point_virtual_address_page) orelse @panic("unable to retrieve pa");
-                const user_entry_point_virtual_address_page = VirtualAddress.new(0x6000_0000_0000);
-                thread.address_space.map(entry_point_physical_address_page, user_entry_point_virtual_address_page, VirtualAddressSpace.Flags.from_flags(&.{ .user, .read_write }));
-                const user_entry_point_virtual_address = VirtualAddress.new(user_entry_point_virtual_address_page.value + offset);
-                break :blk common.arch.Context.new(thread, Thread.EntryPoint{
-                    .start_address = user_entry_point_virtual_address.value,
-                    .argument = entry_point.argument,
-                });
-            },
+            .user => common.arch.Context.new(thread, entry_point),
         };
     }
 
     return thread;
 }
 
-pub fn load_executable(scheduler: *Scheduler, allocator: Allocator, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
+pub fn load_executable(scheduler: *Scheduler, allocator: Allocator, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
     common.runtime_assert(@src(), privilege_level == .user);
     const executable_file = drive.read_file(drive, @ptrToInt(kernel_address_space), executable_filename);
     const user_virtual_address_space = allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, kernel_address_space.physical_address_space, kernel_address_space) orelse @panic("wtf2");
-    _ = privilege_level;
-    _ = executable_file;
-    _ = scheduler;
-    TODO(@src());
+    const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
+    const thread = scheduler.spawn_thread(user_virtual_address_space, privilege_level, elf_result.entry_point);
+
+    return thread;
 }
 
 pub fn terminate(thread: *Thread) void {
@@ -156,67 +147,6 @@ fn pick_thread(scheduler: *Scheduler) *Thread {
     const new_thread = &scheduler.thread_pool[next_thread_index];
     return new_thread;
 }
-
-//pub fn syscall5(number: SYS, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) usize {
-//return asm volatile ("syscall"
-//: [ret] "={rax}" (-> usize),
-//: [number] "{rax}" (@enumToInt(number)),
-//[arg1] "{rdi}" (arg1),
-//[arg2] "{rsi}" (arg2),
-//[arg3] "{rdx}" (arg3),
-//[arg4] "{r10}" (arg4),
-//[arg5] "{r8}" (arg5),
-//: "rcx", "r11", "memory"
-//);
-//}
-
-//fn user_space() callconv(.Naked) noreturn {
-//_ = asm volatile (
-//\\mov %%rsp, %%rbp
-//);
-//var a = [_]u8{ 'u', 's', 'e', 'r', '\n' };
-//_ = x86_64.writer_function(&a);
-//_ = asm volatile (
-//\\call user_space_foo
-//\\syscall
-//: [ret] "={rax}" (-> usize),
-//: [number] "{rax}" (@as(u64, 0)),
-////[arg1] "{rdi}" (arg1),
-////[arg2] "{rsi}" (arg2),
-////[arg3] "{rdx}" (arg3),
-////[arg4] "{r10}" (arg4),
-////[arg5] "{r8}" (arg5),
-////: "rcx", "r11", "memory"
-//);
-//unreachable;
-//}
-
-const x86_64 = common.arch.x86_64;
-
-export fn user_space_foo() callconv(.C) void {}
-
-fn test_thread(arg: u64) void {
-    while (true) {
-        log.debug("THREAD {}", .{arg});
-    }
-}
-
-pub fn test_threads(thread_count: u64) void {
-    var thread_i: u64 = 0;
-    while (thread_i < thread_count) : (thread_i += 1) {
-        _ = Thread.spawn(.kernel, Thread.EntryPoint{
-            .start_address = @ptrToInt(test_thread),
-            .argument = thread_i,
-        });
-    }
-}
-
-//pub fn test_userspace() void {
-//_ = Thread.spawn(.user, Thread.EntryPoint{
-//.start_address = @ptrToInt(user_space),
-//.argument = 2,
-//});
-//}
 
 pub fn init(scheduler: *Scheduler) void {
     _ = scheduler;

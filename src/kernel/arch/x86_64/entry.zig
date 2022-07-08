@@ -33,7 +33,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), kernel.drivers.Filesystem.drivers.items.len > 0);
     x86_64.register_main_storage();
-    const result = kernel.scheduler.load_executable(kernel.core_heap.allocator, .user, &kernel.virtual_address_space, kernel.main_storage, "minimal.elf");
+    const result = kernel.scheduler.load_executable(kernel.core_heap.allocator, .user, &kernel.virtual_address_space, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
     log.debug("Got: {}", .{result});
 
     //scheduler: *Scheduler, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8

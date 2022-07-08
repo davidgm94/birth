@@ -43,3 +43,7 @@ pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) vo
 pub inline fn align_backward(virtual_address: *VirtualAddress, alignment: u64) void {
     virtual_address.* = virtual_address.aligned_backward(alignment);
 }
+
+pub inline fn is_higher_half(virtual_address: VirtualAddress) bool {
+    return virtual_address.value >= 0xffff_8000_0000_000;
+}

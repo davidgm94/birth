@@ -1,9 +1,12 @@
 const common = @import("../common.zig");
+const context = @import("context");
 
 const TODO = common.TODO;
 const log = common.log.scoped(.ELF);
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
+const PhysicalAddressSpace = common.PhysicalAddressSpace;
+const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 
 const FileHeader = extern struct {
     // e_ident
@@ -156,7 +159,17 @@ const SectionHeader = extern struct {
     };
 };
 
-pub fn parse(virtual_address_space: *VirtualAddressSpace, file: []const u8) void {
+pub const ELFResult = struct {
+    entry_point: u64,
+};
+
+pub const ElfAddressSpaces = struct {
+    kernel: *VirtualAddressSpace,
+    user: *VirtualAddressSpace,
+    physical: *PhysicalAddressSpace,
+};
+
+pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
@@ -172,7 +185,7 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, file: []const u8) void
             .load => {
                 if (ph.size_in_memory == 0) continue;
 
-                const page_size = virtual_address_space.physical_address_space.page_size;
+                const page_size = context.page_size;
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
                 const segment_size = common.align_forward(ph.size_in_memory + misalignment, page_size);
@@ -191,13 +204,19 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, file: []const u8) void
                     common.runtime_assert(@src(), ph.flags.executable);
                     common.runtime_assert(@src(), ph.flags.readable);
 
-                    common.runtime_assert(@src(), virtual_address_space.translate_address(base_virtual_address) == null);
+                    common.runtime_assert(@src(), address_spaces.kernel.translate_address(base_virtual_address) == null);
+                    common.runtime_assert(@src(), address_spaces.user.translate_address(base_virtual_address) == null);
                     const page_count = common.bytes_to_pages(segment_size, page_size, .must_be_exact);
-                    const result = virtual_address_space.allocate_at_address(base_virtual_address, page_count, .{
-                        .execute = true,
-                        .user = true,
-                    }) catch @panic("holy shit");
-                    common.runtime_assert(@src(), base_virtual_address.value == result.value);
+                    const physical = address_spaces.physical.allocate(page_count) orelse @panic("physical");
+                    const physical_region = PhysicalMemoryRegion.new(physical, segment_size);
+                    const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
+                    // Giving executable permissions here to perform the copy
+                    address_spaces.kernel.map_physical_region(physical_region, kernel_segment_virtual_address, .{ .write = true });
+                    const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
+                    const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
+                    common.copy(u8, dst_slice, src_slice);
+                    // TODO: unmap
+                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = true, .user = true });
                 } else {
                     TODO(@src());
                 }
@@ -210,5 +229,7 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, file: []const u8) void
         //}
     }
 
-    TODO(@src());
+    return ELFResult{
+        .entry_point = file_header.entry,
+    };
 }

@@ -155,15 +155,27 @@ var allocator_interface = struct {
         _ = len_align;
         _ = ptr_align;
 
+        const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
+        const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+
         switch (virtual_address_space.privilege_level) {
             .kernel => {
-                const page_count = common.bytes_to_pages(size, virtual_address_space.physical_address_space.page_size, .must_be_exact);
-                const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+                // TODO: this is tripping some nasty bugs, maybe?
+                // common.runtime_assert(@src(), virtual_address_space.translate_address(physical_address.to_higher_half_virtual_address()) == null);
                 const slice = physical_address.access_kernel([*]u8)[0..size];
                 log.debug("Size asked: {}. Slice len: {}", .{ size, slice.len });
                 return slice;
             },
-            else => TODO(@src()),
+            .user => {
+                common.runtime_assert(@src(), physical_address.value < 0xffff_8000_0000_0000);
+                const virtual_address = VirtualAddress.new(physical_address.value);
+                common.runtime_assert(@src(), virtual_address_space.translate_address(virtual_address) == null);
+                // TODO: this is doing damage: user flag should be set according to a parameter and not always
+                virtual_address_space.map_virtual_region(VirtualMemoryRegion.new(virtual_address, size), physical_address, .{ .write = true, .user = true });
+
+                const slice = virtual_address.access([*]u8)[0..size];
+                return slice;
+            },
         }
     }
 

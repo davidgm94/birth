@@ -1134,7 +1134,7 @@ pub const Context = struct {
     rsp: u64,
     ss: u64,
 
-    pub fn new(thread: *common.Thread, entry_point: common.Thread.EntryPoint) *Context {
+    pub fn new(thread: *common.Thread, entry_point: u64) *Context {
         const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
         log.debug("thread user stack base: 0x{x}", .{thread.user_stack_base.value});
         const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
@@ -1159,12 +1159,10 @@ pub const Context = struct {
         }
 
         arch_context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
-        arch_context.rip = entry_point.start_address;
+        arch_context.rip = entry_point;
         arch_context.rsp = user_stack;
-        // TODO: remove when doing userspace
-        log.debug("RSP: 0x{x}", .{arch_context.rsp});
-        common.runtime_assert(@src(), arch_context.rsp < thread.kernel_stack_base.value + thread.kernel_stack_size);
-        arch_context.rdi = entry_point.argument;
+        // TODO: arguments
+        arch_context.rdi = 0;
 
         return arch_context;
     }
