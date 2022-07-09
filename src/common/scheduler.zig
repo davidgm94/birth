@@ -24,7 +24,7 @@ thread_pool: [8192]Thread,
 thread_id: u64,
 
 pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
-    const current_cpu = common.arch.get_current_cpu().?;
+    const current_cpu = common.arch.get_current_thread().cpu.?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
     }
@@ -32,14 +32,11 @@ pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
     scheduler.lock.acquire();
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled) @panic("ffff");
-    if (current_cpu.current_thread) |current_thread| {
-        current_thread.context = arch_context;
-        old_address_space = current_thread.address_space;
-    } else {
-        @panic("should have established a thread by now");
-        //old_address_space = &kernel.virtual_address_space;
-    }
+    const current_thread = common.arch.get_current_thread();
+    current_thread.context = arch_context;
+    old_address_space = current_thread.address_space;
     const new_thread = scheduler.pick_thread();
+    new_thread.cpu = current_thread.cpu;
     new_thread.time_slices += 1;
     // TODO: idle
 
@@ -101,14 +98,14 @@ pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddres
         .kernel => VirtualAddress.new(0),
         .user => user_stack,
     };
-    log.debug("USB: 0x{x}", .{thread.user_stack_base.value});
+    log.debug("User stack address: 0x{x}", .{thread.user_stack_base.value});
     thread.user_stack_reserve = user_stack_reserve;
     thread.user_stack_commit = user_stack_commit;
     thread.id = new_thread_id;
     thread.type = .normal;
     common.runtime_assert(@src(), thread.type == .normal);
-    thread.local_storage.local_storage = &thread.local_storage;
-    thread.local_storage.cpu = null;
+    thread.current_thread = thread;
+    thread.cpu = null;
 
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});
@@ -139,8 +136,8 @@ pub fn terminate(thread: *Thread) void {
 }
 
 fn pick_thread(scheduler: *Scheduler) *Thread {
-    const current_cpu = common.arch.get_current_cpu().?;
-    const current_thread_id = if (current_cpu.current_thread) |current_thread| current_thread.id else 0;
+    const current_thread = common.arch.get_current_thread();
+    const current_thread_id = current_thread.id;
     common.runtime_assert(@src(), current_thread_id < scheduler.thread_id);
     //const next_thread_index = kernel.arch.read_timestamp() % thread_id;
     const next_thread_index = 0;

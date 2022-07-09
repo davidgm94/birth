@@ -343,7 +343,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         if (should_swap_gs) asm volatile ("swapgs");
     }
 
-    if (x86_64.get_current_cpu()) |current_cpu| {
+    if (x86_64.get_current_thread().cpu) |current_cpu| {
         if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
             @panic("spinlock count bug");
         }
@@ -388,7 +388,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             const handler = irq_handlers[0];
             const result = handler.callback(handler.context, line);
             common.runtime_assert(@src(), result);
-            x86_64.get_current_cpu().?.lapic.end_of_interrupt();
+            x86_64.get_current_thread().cpu.?.lapic.end_of_interrupt();
         },
         0x80 => {
             log.debug("We are getting a syscall", .{});

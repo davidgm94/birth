@@ -29,12 +29,13 @@ pub const pci_write_config = arch.pci_write_config;
 pub const io_read = arch.io_read;
 pub const io_write = arch.io_write;
 
-pub const get_current_cpu = arch.get_current_cpu;
-pub const set_current_cpu = arch.set_current_cpu;
 pub const valid_page_sizes = arch.valid_page_sizes;
 
 pub const next_timer = arch.next_timer;
 pub const read_timestamp = arch.read_timestamp;
+
+pub const set_current_thread = arch.set_current_thread;
+pub const get_current_thread = arch.get_current_thread;
 
 pub const get_memory_map = arch.get_memory_map;
 
@@ -52,13 +53,6 @@ pub const Writer = struct {
 };
 
 pub var writer = common.Writer(void, Writer.Error, Writer.write){ .context = {} };
-
-pub const LocalStorage = struct {
-    local_storage: *LocalStorage,
-    cpu: ?*arch.CPU,
-};
-
-pub const set_local_storage = arch.set_local_storage;
 
 pub const bootstrap_stack_size = 0x10000;
 

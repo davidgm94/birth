@@ -28,9 +28,9 @@ const x86_64 = common.arch.x86_64;
 pub fn preinit_bsp() void {
     // @ZigBug: @ptrCast here crashes the compiler
     kernel.cpus = @intToPtr([*]common.arch.CPU, @ptrToInt(&bootstrap_cpu))[0..1];
-    bootstrap_thread.local_storage.cpu = &bootstrap_cpu;
-    bootstrap_thread.local_storage.local_storage = &bootstrap_thread.local_storage;
-    x86_64.set_local_storage(&bootstrap_thread.local_storage);
+    bootstrap_thread.current_thread = &bootstrap_thread;
+    bootstrap_thread.cpu = &bootstrap_cpu;
+    x86_64.set_current_thread(&bootstrap_thread);
     x86_64.IA32_KERNEL_GS_BASE.write(0);
 }
 //
@@ -68,8 +68,8 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     //common.runtime_assert(@src(), context == new_thread.context);
     //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
     context.check(@src());
-    new_thread.local_storage.local_storage = &new_thread.local_storage;
-    x86_64.set_local_storage(new_thread.local_storage.local_storage);
+    common.runtime_assert(@src(), new_thread.current_thread == new_thread);
+    x86_64.set_current_thread(new_thread);
     const should_swap_gs = x86_64.cs.read() != 0x28;
     // TODO: checks
     //const new_thread = current_thread.time_slices == 1;
@@ -78,7 +78,7 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     _ = old_address_space;
     new_thread.last_known_execution_address = context.rip;
 
-    const cpu = new_thread.local_storage.cpu orelse @panic("cpu");
+    const cpu = new_thread.cpu orelse @panic("cpu");
     cpu.lapic.end_of_interrupt();
     if (x86_64.are_interrupts_enabled()) @panic("interrupts enabled");
     if (cpu.spinlock_count > 0) @panic("spinlocks active");
@@ -88,20 +88,18 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
 
 pub export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
-        common.comptime_assert(@offsetOf(common.arch.CPU, "current_thread") == 0x08);
-        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 0);
+        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
     }
     asm volatile (
         \\mov %%gs:[0], %%r15
         \\add %[offset], %%r15
-        \\mov (%%r15), %%r15
         \\mov (%%r15), %%r15
         \\mov %%r15, %%rbp
         \\push %%rbp
         \\mov %%rbp, %%rsp
         \\sub $0x10, %%rsp
         :
-        : [offset] "i" (@intCast(u8, @offsetOf(common.arch.CPU, "current_thread"))),
+        : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
     );
 
     const syscall_number = x86_64.rax.read();

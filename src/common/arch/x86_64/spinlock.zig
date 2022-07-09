@@ -19,7 +19,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
     common.arch.disable_interrupts();
     const expected = false;
     //spinlock.assert_lock_status(expected);
-    if (common.arch.get_current_cpu()) |current_cpu| {
+    if (common.arch.get_current_thread().cpu) |current_cpu| {
         current_cpu.spinlock_count += 1;
     }
     while (@cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Acquire, .Monotonic) != null) {}
@@ -30,7 +30,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
 
 pub fn release(spinlock: *volatile Spinlock) void {
     const expected = true;
-    if (common.arch.get_current_cpu()) |current_cpu| {
+    if (common.arch.get_current_thread().cpu) |current_cpu| {
         current_cpu.spinlock_count -= 1;
     }
     spinlock.assert_lock_status(expected);

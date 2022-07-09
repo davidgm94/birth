@@ -137,22 +137,15 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub inline fn set_local_storage(local_storage: *common.arch.LocalStorage) void {
-    //log.debug("Setting current CPU: 0x{x}", .{@ptrToInt(cpu)});
-    IA32_GS_BASE.write(@ptrToInt(local_storage));
+pub inline fn set_current_thread(current_thread: *Thread) void {
+    IA32_GS_BASE.write(@ptrToInt(current_thread));
 }
 
-pub inline fn get_local_storage() ?*common.arch.LocalStorage {
-    //return @intToPtr(?*kernel.arch.CPU, IA32_GS_BASE.read());
+pub inline fn get_current_thread() *Thread {
     return asm volatile (
         \\mov %%gs:[0], %[result]
-        : [result] "=r" (-> ?*common.arch.LocalStorage),
+        : [result] "=r" (-> *Thread),
     );
-}
-
-pub inline fn get_current_cpu() ?*CPU {
-    const local_storage = get_local_storage() orelse return null;
-    return local_storage.cpu;
 }
 
 //pub inline fn read_gs() ?*kernel.arch.CPU {
@@ -169,7 +162,7 @@ pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     const spurious_value = @as(u32, 0x100) | spurious_vector;
-    const cpu = get_current_cpu() orelse @panic("cannot get cpu");
+    const cpu = get_current_thread().cpu orelse @panic("cannot get cpu");
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
@@ -190,11 +183,11 @@ pub export fn foo() callconv(.C) void {
 
 pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace, syscall_entry_point: fn () callconv(.Naked) void) void {
     // This assumes the BSP processor is already properly setup here
-    const local_storage = get_local_storage().?;
-    const bsp = local_storage.cpu orelse @panic("cpu");
+    const current_thread = get_current_thread();
+    const bsp = current_thread.cpu orelse @panic("cpu");
     bsp.gdt.initial_setup();
     // Flush GS as well
-    set_local_storage(local_storage);
+    set_current_thread(current_thread);
     interrupts.init();
     enable_apic(virtual_address_space);
     Syscall.enable(syscall_entry_point);
@@ -1062,15 +1055,13 @@ pub const LAPIC = struct {
 };
 
 pub inline fn next_timer(ms: u32) void {
-    const current_cpu = get_current_cpu().?;
+    const current_cpu = get_current_thread().cpu orelse @panic("current cpu not set");
     current_cpu.lapic.next_timer(ms);
 }
 
 const stack_size = 0x10000;
 const guard_stack_size = 0x1000;
 pub const CPU = struct {
-    base: *CPU,
-    current_thread: ?*common.Thread,
     gdt: GDT.Table,
     shared_tss: TSS.Struct,
     int_stack: u64,
@@ -1144,7 +1135,6 @@ pub const Context = struct {
         thread.kernel_stack = VirtualAddress.new(kernel_stack);
         log.debug("ARch Kernel stack: 0x{x}", .{thread.kernel_stack.value});
         thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
-        log.debug("Privilege level", .{});
         // TODO: FPU
         switch (thread.privilege_level) {
             .kernel => {

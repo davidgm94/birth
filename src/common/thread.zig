@@ -5,6 +5,7 @@ const VirtualAddress = common.VirtualAddress;
 const PrivilegeLevel = common.PrivilegeLevel;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 
+current_thread: *Thread,
 kernel_stack: VirtualAddress,
 privilege_level: PrivilegeLevel,
 type: Type,
@@ -18,7 +19,7 @@ context: *common.arch.Context,
 time_slices: u64,
 last_known_execution_address: u64,
 address_space: *VirtualAddressSpace,
-local_storage: common.arch.LocalStorage,
+cpu: ?*common.arch.CPU,
 
 // TODO: idle thread
 const Type = enum(u1) {
