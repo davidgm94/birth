@@ -33,8 +33,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);
     common.runtime_assert(@src(), kernel.drivers.Filesystem.drivers.items.len > 0);
     x86_64.register_main_storage();
-    const result = kernel.scheduler.load_executable(kernel.core_heap.kernel_allocator, .user, &kernel.virtual_address_space, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
-    log.debug("Got: {}", .{result});
+    _ = kernel.scheduler.load_executable(kernel.core_heap.kernel_allocator, .user, &kernel.virtual_address_space, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
     asm volatile ("int $0x40");
 
     success_and_end();
