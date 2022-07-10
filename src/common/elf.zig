@@ -211,71 +211,76 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
                     // Giving executable permissions here to perform the copy
                     address_spaces.kernel.map_physical_region(physical_region, kernel_segment_virtual_address, .{ .write = true });
+                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = ph.flags.writable, .user = true });
                     common.runtime_assert(@src(), ph.size_in_file == ph.size_in_memory);
+                    common.runtime_assert(@src(), misalignment == 0);
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
+                    common.runtime_assert(@src(), dst_slice.len == src_slice.len);
 
                     if (i == 1) {
-                        const entry_offset = entry_point - 0x200000;
-                        common.runtime_assert(@src(), entry_offset == 0x110);
-
-                        const check_slice = [_]u8{
-                            0x55,
-                            0x48,
-                            0x89,
-                            0xe5,
-                            0x48,
-                            0x83,
-                            0xec,
-                            10,
-                            0x31,
-                            0xc0,
-                            0x89,
-                            0xc7,
-                            0xbe,
-                            0x01,
-                            0x00,
-                            0x00,
-                            0x00,
-                            0xba,
-                            0x02,
-                            0x00,
-                            0x00,
-                            0x00,
-                            0xb9,
-                            0x03,
-                            0x00,
-                            0x00,
-                            0x00,
-                            0x41,
-                            0xb8,
-                            0x04,
-                            0x00,
-                            0x00,
-                            00,
-                            0x41,
-                            0xb9,
-                            0x05,
-                            0x00,
-                            0x00,
-                            00,
-                            0xe8,
-                            0xc4,
-                            0xfe,
-                            0xff,
-                            0xff,
-                        };
-                        const slice_to_check = src_slice[entry_offset .. entry_offset + check_slice.len];
-                        for (slice_to_check) |original, byte_i| {
-                            const should_be = check_slice[byte_i];
-                            if (original != should_be) {
-                                log.err("Wrong. At index {}. Original: 0x{x}. Should be: 0x{x}", .{ byte_i, original, should_be });
-                            }
+                        for (src_slice) |byte, byte_i| {
+                            log.debug("[{}] = 0x{x}", .{ byte_i + ph.offset, byte });
                         }
+                        //const entry_offset = entry_point - 0x200000;
+                        //common.runtime_assert(@src(), entry_offset == 0x110);
+
+                        //const check_slice = [_]u8{
+                        //0x55,
+                        //0x48,
+                        //0x89,
+                        //0xe5,
+                        //0x48,
+                        //0x83,
+                        //0xec,
+                        //10,
+                        //0x31,
+                        //0xc0,
+                        //0x89,
+                        //0xc7,
+                        //0xbe,
+                        //0x01,
+                        //0x00,
+                        //0x00,
+                        //0x00,
+                        //0xba,
+                        //0x02,
+                        //0x00,
+                        //0x00,
+                        //0x00,
+                        //0xb9,
+                        //0x03,
+                        //0x00,
+                        //0x00,
+                        //0x00,
+                        //0x41,
+                        //0xb8,
+                        //0x04,
+                        //0x00,
+                        //0x00,
+                        //00,
+                        //0x41,
+                        //0xb9,
+                        //0x05,
+                        //0x00,
+                        //0x00,
+                        //00,
+                        //0xe8,
+                        //0xc4,
+                        //0xfe,
+                        //0xff,
+                        //0xff,
+                        //};
+                        //const slice_to_check = src_slice[entry_offset .. entry_offset + check_slice.len];
+                        //for (slice_to_check) |original, byte_i| {
+                        //const should_be = check_slice[byte_i];
+                        //if (original != should_be) {
+                        //log.err("Wrong. At index {}. Original: 0x{x}. Should be: 0x{x}", .{ byte_i, original, should_be });
+                        //}
+                        //}
                     }
                     common.copy(u8, dst_slice, src_slice);
                     // TODO: unmap
-                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = ph.flags.writable, .user = true });
                 } else {
                     TODO(@src());
                 }
