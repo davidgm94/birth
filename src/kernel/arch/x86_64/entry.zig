@@ -50,5 +50,6 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
 
 fn success_and_end() noreturn {
     log.debug("Everything OK", .{});
+    common.emulator.exit(.success);
     common.arch.x86_64.spinloop_without_wasting_cpu();
 }

@@ -25,6 +25,11 @@ pub const Emulator = enum {
     bochs,
 };
 
+pub const ExitStatus = enum(u32) {
+    success = 0,
+    failure = 1,
+};
+
 pub const emulator_program = Emulator.qemu;
 pub const emulator = switch (emulator_program) {
     .qemu => QEMU,
@@ -82,6 +87,7 @@ pub const log = std.log;
 
 // STDIO
 pub const Writer = std.io.Writer;
+pub const allocPrint = std.fmt.allocPrint;
 
 // MEMORY MANIPULATION
 pub const equal = std.mem.eql;

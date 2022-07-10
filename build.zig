@@ -306,6 +306,12 @@ const Kernel = struct {
                     }
                 }
 
+                switch (kernel.options.run.emulator) {
+                    .qemu => {
+                        common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
+                    },
+                }
+
                 kernel.debug_argument_list.append("-S") catch unreachable;
                 kernel.debug_argument_list.append("-s") catch unreachable;
             },

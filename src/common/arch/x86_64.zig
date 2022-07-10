@@ -319,14 +319,6 @@ pub inline fn io_write(comptime T: type, port: u16, value: T) void {
     }
 }
 
-pub inline fn out16(comptime port: u16, value: u16) void {
-    asm volatile ("outw %[value], %[port]"
-        :
-        : [value] "{al}" (value),
-          [port] "N{dx}" (port),
-    );
-}
-
 pub inline fn writer_function(str: []const u8) usize {
     for (str) |c| {
         io_write(u8, IOPort.E9_hack, c);
