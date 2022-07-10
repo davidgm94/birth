@@ -437,7 +437,12 @@ const Kernel = struct {
                 build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
             }
 
-            log.debug("Disk size: {}", .{build_disk.buffer.items.len});
+            // TODO: fix this @Hack
+            build_disk.buffer.items.len += build_disk.disk.sector_size;
+
+            const disk_size = build_disk.buffer.items.len;
+            const disk_sector_count = common.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
+            log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
             try std.fs.cwd().writeFile(Disk.path, build_disk.buffer.items);
         }

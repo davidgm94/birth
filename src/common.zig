@@ -152,7 +152,7 @@ pub inline fn comptime_assert(condition: bool) void {
 pub inline fn runtime_assert(source_location: SourceLocation, condition: bool) void {
     if (is_comptime()) unreachable;
     if (!condition) {
-        panic(source_location, "Assert failed", .{});
+        panic(source_location, "Assert failed at {s}:{}:{} {s}()", .{ source_location.file, source_location.line, source_location.column, source_location.fn_name });
     }
 }
 

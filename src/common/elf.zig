@@ -201,7 +201,6 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                         @panic("ELF file with misaligned offset");
                     }
 
-                    common.runtime_assert(@src(), ph.flags.executable);
                     common.runtime_assert(@src(), ph.flags.readable);
 
                     common.runtime_assert(@src(), address_spaces.kernel.translate_address(base_virtual_address) == null);
@@ -216,7 +215,7 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
                     common.copy(u8, dst_slice, src_slice);
                     // TODO: unmap
-                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = true, .user = true });
+                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = ph.flags.writable, .user = true });
                 } else {
                     TODO(@src());
                 }

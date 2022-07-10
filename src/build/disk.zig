@@ -27,7 +27,7 @@ fn access(disk: *Disk, special_context: u64, buffer: *drivers.DMA.Buffer, disk_w
             log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
             common.runtime_assert(@src(), disk_slice_start == build_disk.buffer.items.len);
             build_disk.buffer.appendSliceAssumeCapacity(write_source_buffer);
-            build_disk.buffer.items.len = common.align_forward(build_disk.buffer.items.len, sector_size);
+            common.runtime_assert(@src(), common.is_aligned(build_disk.buffer.items.len, sector_size));
 
             return byte_count;
         },

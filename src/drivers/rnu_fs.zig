@@ -92,15 +92,16 @@ pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
-        const bytes_to_read = common.align_forward(node_size, sector_size);
-        const sector_count = common.bytes_to_sector(bytes_to_read, sector_size, .can_be_not_exact);
+        const sector_count = common.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
         // TODO: @Bug @maybebug maybe allocate in the heap?
         var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };
+        const sector_offset = seek_result.sector + 1;
+        log.debug("Sector offset: {}. Sector count: {}", .{ sector_offset, sector_count });
         // Add one to skip the metadata
         const sectors_read = fs_driver.disk.access(fs_driver.disk, @ptrToInt(virtual_address_space), &buffer, Disk.Work{
-            .sector_offset = seek_result.sector + 1,
+            .sector_offset = sector_offset,
             .sector_count = sector_count,
             .operation = .read,
         });

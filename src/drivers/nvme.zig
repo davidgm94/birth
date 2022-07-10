@@ -575,6 +575,7 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
                 const status_code_type = @truncate(u3, status >> 9);
                 const status_code = @truncate(u8, status >> 1);
 
+                // TODO: fix this @Hack (look at build.zig)
                 common.panic(@src(), "NVMe driver internal error: {s}", .{get_error_message(status_code_type, status_code)});
             }
             // TODO: abstraction stuff
