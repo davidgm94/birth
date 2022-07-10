@@ -118,8 +118,7 @@ const Drive = struct {
 
             common.runtime_assert(@src(), context.page_size % disk.sector_size == 0);
             // TODO: fix this
-            //const request_sector_count = common.min(total_sector_count - completed_sector_count, (2 * context.page_size) / disk.sector_size);
-            const request_sector_count = common.min(total_sector_count - completed_sector_count, 2);
+            const request_sector_count = common.min(total_sector_count - completed_sector_count, (2 * context.page_size) / disk.sector_size);
             log.debug("Request sector index: {}. Work sector count: {}. Request sector count: {}", .{ completed_sector_count, total_sector_count, request_sector_count });
             const pointer_offset = completed_sector_count * disk.sector_size;
             const offset_physical_address = base_physical_address.offset(pointer_offset);
