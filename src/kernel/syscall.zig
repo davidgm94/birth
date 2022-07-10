@@ -9,16 +9,24 @@ pub const ID = enum(u64) {
     thread_exit = 0,
 };
 
-const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64) callconv(.C) u64;
-pub export const syscall_handlers = [1]Handler{
+const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64;
+pub const syscall_handlers = [1]Handler{
     thread_exit,
 };
 
-pub fn thread_exit(argument0: u64, argument1: u64, argument2: u64, argument3: u64) callconv(.C) u64 {
-    log.debug("We are in kernel back from userspace", .{});
-    _ = argument0;
-    _ = argument1;
-    _ = argument2;
-    _ = argument3;
-    TODO(@src());
+pub export fn syscall_handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64 {
+    const id = @intToEnum(ID, argument0);
+    log.debug("Syscall #{}: {s}", .{ argument0, @tagName(id) });
+    return syscall_handlers[argument0](argument0, argument1, argument2, argument3, argument4, argument5);
+}
+
+pub fn thread_exit(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64 {
+    log.debug("Argument: {}", .{argument0});
+    log.debug("Argument: {}", .{argument1});
+    log.debug("Argument: {}", .{argument2});
+    log.debug("Argument: {}", .{argument3});
+    log.debug("Argument: {}", .{argument4});
+    log.debug("Argument: {}", .{argument5});
+    log.debug("Argument: {}", .{argument0});
+    return 123;
 }

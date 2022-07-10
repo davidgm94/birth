@@ -292,19 +292,17 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
 const is_root_package_build = @hasDecl(root, "Builder");
 
 pub fn TODO(src: SourceLocation) noreturn {
-    _ = src;
-    //const decls = @typeInfo(root).Struct.decls;
-    //for (decls) |decl| {
-    //@compileLog(decl.name);
-    //}
-    log.err("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
-    unreachable;
-    // TODO
-    //if (is_root_package_build) {
-    //unreachable; //std.debug.panic("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
-    //} else {
-    //unreachable; //root.crash("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
-    //}
+    if (@hasDecl(root, "identity")) {
+        root.crash("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+    } else {
+        // TODO:
+        //if (is_root_package_build) {
+        log.err("PANIC at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+        unreachable;
+        //} else {
+        //unreachable;
+        //}
+    }
 }
 pub inline fn panic(src: SourceLocation, comptime message: []const u8, args: anytype) noreturn {
     if (@hasDecl(root, "identity")) {

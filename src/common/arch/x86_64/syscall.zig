@@ -20,9 +20,29 @@ pub fn enable(syscall_entry_point: fn () callconv(.Naked) void) void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub export fn syscall() callconv(.C) u64 {
-    asm volatile ("syscall");
-    return 0;
+pub extern fn syscall(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) u64;
+
+comptime {
+    asm (
+        \\.global syscall
+        \\syscall:
+        \\push %rsp
+        \\push %rbx
+        \\push %rbp
+        \\push %r12
+        \\push %r13
+        \\push %r14
+        \\push %r15
+        \\syscall
+        \\pop %r15
+        \\pop %r14
+        \\pop %r13
+        \\pop %r12
+        \\pop %rbp
+        \\pop %rbx
+        \\pop %rsp
+        \\ret
+    );
 }
 
 //export fn get_kernel_stack() callconv(.C) u64 {

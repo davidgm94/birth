@@ -103,7 +103,14 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
         : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
     );
 
-    const syscall_number = x86_64.rax.read();
-    _ = kernel.syscall.syscall_handlers[syscall_number](0, 0, 0, 0);
+    asm volatile (
+        \\.extern syscall_handler
+        \\call syscall_handler
+        :
+        : [handler] "i" (kernel.syscall.syscall_handlers),
+    );
+
+    //_ = kernel.syscall.syscall_handlers[syscall_number](0, 0, 0, 0);
     asm volatile ("sysret");
+    unreachable;
 }
