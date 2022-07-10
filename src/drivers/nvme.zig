@@ -104,6 +104,7 @@ const Drive = struct {
         // TODO: @Lock
         var completed_sector_count: u64 = 0;
         const total_sector_count = disk_work.sector_count;
+        log.debug("NVMe byte size {s} request: {}", .{ @tagName(disk_work.operation), total_sector_count * disk.sector_size });
         // TODO: this assumes it's contiguous
         const base_physical_address = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
         while (completed_sector_count < total_sector_count) {
@@ -571,7 +572,10 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
 
         if (index < io_queue_entry_count) {
             if (status != 0) {
-                @panic("failed");
+                const status_code_type = @truncate(u3, status >> 9);
+                const status_code = @truncate(u8, status >> 1);
+
+                common.panic(@src(), "NVMe driver internal error: {s}", .{get_error_message(status_code_type, status_code)});
             }
             // TODO: abstraction stuff
         } else @panic("wtf");
@@ -591,6 +595,156 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
     }
 
     return from_admin or from_io;
+}
+
+const generic_command_status_values = [_][]const u8{
+    "Successful completion",
+    "Invalid command opcode",
+    "Invalid field in command",
+    "Command ID conflict",
+    "Data transfer error",
+    "Commands aborted due to powerloss notification",
+    "Internal error",
+    "Command abort requested",
+    "Command aborted due to SQ deletion",
+    "Command aborted due to failed fused command",
+    "Command aborted due to missing fused command",
+    "Invalid namespace or format",
+    "Command sequence error",
+    "Invalid SGL segment descriptor",
+    "Invalid number of SGL descriptors",
+    "Data SGL length invalid",
+    "Metadata SGL length invalid",
+    "SGL descriptor type invalid",
+    "Invalid use of controller memory buffer",
+    "PRP offset invalid",
+    "Atomic write unit exceeded",
+    "Operation denied",
+    "SGL offset invalid",
+    "Reserved",
+    "Host identifier inconsistent format",
+    "Keep alive timer expired",
+    "Keep alive timeout invalid",
+    "Command aborted due to preempt and abort",
+    "Sanitize failed",
+    "Sanitize in progress",
+    "SGL data block granularity invalid",
+    "Command not supported for queue in CMB",
+    "Namespace is write protected",
+    "Command interrupted",
+    "Transient transport error",
+};
+
+const generic_command_status_values_nvm = [_][]const u8{
+    "LBA out of range",
+    "Capacity exceeded",
+    "Namespace not ready",
+    "Reservation conflict",
+    "Format in progress",
+};
+
+const command_specific_status_values = [_][]const u8{
+    "Completion queue invalid",
+    "Invalid queue identifier",
+    "Invalid queue size",
+    "Abort command limit exceeded",
+    "Reserved",
+    "Asynchronous event request limit exceeded",
+    "Invalid firmware slot",
+    "Invalid firmware image",
+    "Invalid interrupt vector",
+    "Invalid log page",
+    "Invalid format",
+    "Firmware activation requirse conventional reset",
+    "Invalid queue deletion",
+    "Feature identifier not saveable",
+    "Feature not changeable",
+    "Feature not namespace specific",
+    "Firmware activation requires NVM subsystem reset",
+    "Firmware activation requires controller level reset",
+    "Firmware activation requires maximum time violation",
+    "Firmware activation prohibited",
+    "Overlapping range",
+    "Namespace insufficient capacity",
+    "Namespace identifier unavailable",
+    "Reserved",
+    "Namespace already attached",
+    "Namespace is private",
+    "Namespace not attached",
+    "Thin provisioning not supported",
+    "Controller list invalid",
+    "Device self-test in progress",
+    "Boot partition write prohibited",
+    "Invalid controller identifier",
+    "Invalid secondary controller state",
+    "Invalid number of controller resources",
+    "Invalid resource identifier",
+    "Sanitize prohibited while persistent memory region is enabled",
+    "ANA group identifier invalid",
+    "ANA attach failed",
+};
+
+const command_specific_status_values_nvm = [_][]const u8{
+    "Confliciting attributes",
+    "Invalid protection information",
+    "Attempted write to read only range",
+};
+
+const media_and_data_integrity_error_values_nvm = [_][]const u8{
+    "Write fault",
+    "Unrecovered read error",
+    "End-to-end guard check error",
+    "End-to-end application tag check error",
+    "End-to-end reference tag check error",
+    "Compare failure",
+    "Access denied",
+    "Dealocated or unwritten logical block",
+};
+
+const path_related_status_values = [_][]const u8{
+    "Internal path error",
+    "Asymmetric access persistent loss",
+    "Asymmetric access inaccessible",
+    "Asymmetric access transition",
+};
+
+fn get_error_message(status_code_type: u3, status_code: u8) []const u8 {
+    log.debug("Status code type: 0x{x}. Status code: 0x{x}", .{ status_code_type, status_code });
+    return switch (status_code_type) {
+        0 => blk: {
+            if (status_code < generic_command_status_values.len) {
+                break :blk generic_command_status_values[status_code];
+            } else if (status_code >= 0x80 and (status_code - 0x80) < generic_command_status_values_nvm.len) {
+                break :blk generic_command_status_values_nvm[status_code - 0x80];
+            } else {
+                @panic("wtf");
+            }
+        },
+        1 => blk: {
+            if (status_code < command_specific_status_values.len) {
+                break :blk command_specific_status_values[status_code];
+            } else if (status_code >= 0x80 and (status_code - 0x80) < generic_command_status_values_nvm.len) {
+                break :blk generic_command_status_values_nvm[status_code - 0x80];
+            } else {
+                @panic("wtf");
+            }
+        },
+        2 => blk: {
+            if (status_code >= 0x80 and (status_code - 0x80) < media_and_data_integrity_error_values_nvm.len) {
+                break :blk media_and_data_integrity_error_values_nvm[status_code - 0x80];
+            } else {
+                @panic("wtf");
+            }
+        },
+        3 => blk: {
+            if (status_code >= 0x80 and (status_code - 0x80) < path_related_status_values.len) {
+                break :blk path_related_status_values[status_code - 0x80];
+            } else {
+                @panic("wtf");
+            }
+        },
+        else => "Unknown error",
+    };
 }
 
 const DataTransfer = enum(u2) {

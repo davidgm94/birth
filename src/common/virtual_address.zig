@@ -16,7 +16,7 @@ pub inline fn is_valid(virtual_address: VirtualAddress) bool {
     return virtual_address.value != 0;
 }
 
-pub inline fn access(virtual_address: VirtualAddress, comptime Ptr: type) Ptr {
+pub fn access(virtual_address: VirtualAddress, comptime Ptr: type) Ptr {
     return @intToPtr(Ptr, virtual_address.value);
 }
 

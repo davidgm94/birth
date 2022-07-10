@@ -1,10 +1,13 @@
-const kernel = @import("root");
 const common = @import("../../../common.zig");
-const x86_64 = @import("../x86_64.zig");
+const context = @import("context");
+const x86_64 = common.arch.x86_64;
 
 const log = common.log.scoped(.Syscall_x86_64);
 
 pub fn enable(syscall_entry_point: fn () callconv(.Naked) void) void {
+    comptime {
+        common.comptime_assert(context.identity == .kernel);
+    }
     x86_64.IA32_LSTAR.write(@ptrToInt(syscall_entry_point));
     // TODO: figure out what this does
     x86_64.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
@@ -15,6 +18,11 @@ pub fn enable(syscall_entry_point: fn () callconv(.Naked) void) void {
     efer.or_flag(.SCE);
     x86_64.IA32_EFER.write(efer);
     log.debug("Enabled syscalls", .{});
+}
+
+pub export fn syscall() callconv(.C) u64 {
+    asm volatile ("syscall");
+    return 0;
 }
 
 //export fn get_kernel_stack() callconv(.C) u64 {

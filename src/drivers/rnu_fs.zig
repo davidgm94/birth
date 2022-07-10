@@ -62,6 +62,7 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
         //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
         //}
         var node = search_buffer.address.access(*RNUFS.Node);
+        if (node.type == .empty) break;
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
         const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
         if (node_name.len == 0) break;
@@ -86,10 +87,11 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
 
 pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8) []const u8 {
     const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
-    log.debug("About to read a file...", .{});
+    log.debug("About to read file {s}...", .{name});
     if (seek_file(fs_driver, special_context, name)) |seek_result| {
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
+        log.debug("File size: {}", .{node_size});
         const bytes_to_read = common.align_forward(node_size, sector_size);
         const sector_count = common.bytes_to_sector(bytes_to_read, sector_size, .can_be_not_exact);
         // TODO: @Bug @maybebug maybe allocate in the heap?
@@ -112,7 +114,7 @@ pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
 }
 
 pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []const u8, file_content: []const u8) void {
-    log.debug("Writing new file: {s}", .{filename});
+    log.debug("Writing new file: {s}. Size: {}", .{ filename, file_content.len });
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
     {
@@ -123,6 +125,7 @@ pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []
             log.err("Unable to allocate search buffer", .{});
             @panic("lol");
         };
+        log.debug("Search buffer address: 0x{x}", .{search_buffer.address.value});
 
         while (true) {
             log.debug("FS driver asking read at sector {}", .{sector});
@@ -135,7 +138,11 @@ pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []
             //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
             //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
             //}
+            log.debug("Search buffer address: 0x{x}", .{search_buffer.address.value});
+            log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)});
             var node = search_buffer.address.access(*RNUFS.Node);
+            log.debug("Node type: {}", .{node.type});
+            if (node.type == .empty) break;
             const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
             const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
             if (node_name.len == 0) break;

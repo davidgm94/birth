@@ -78,7 +78,7 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     _ = old_address_space;
     new_thread.last_known_execution_address = context.rip;
 
-    const cpu = new_thread.cpu orelse @panic("cpu");
+    const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
     cpu.lapic.end_of_interrupt();
     if (x86_64.are_interrupts_enabled()) @panic("interrupts enabled");
     if (cpu.spinlock_count > 0) @panic("spinlocks active");
@@ -90,6 +90,7 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
         common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
     }
+    // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (
         \\mov %%gs:[0], %%r15
         \\add %[offset], %%r15

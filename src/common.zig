@@ -50,6 +50,8 @@ pub const Allocator = std.mem.Allocator;
 // DATA STRUCTURES
 pub const ArrayList = std.ArrayListUnmanaged;
 pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
+pub const ArrayListManaged = std.ArrayList;
+pub const ArrayListAlignedManaged = std.ArrayListAligned;
 pub const MultiArrayList = std.MultiArrayList;
 
 // DEBUG
@@ -284,18 +286,18 @@ pub fn TODO(src: SourceLocation) noreturn {
     //unreachable; //root.crash("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
     //}
 }
-pub fn panic(src: SourceLocation, comptime message: []const u8, args: anytype) noreturn {
-    _ = src;
-    _ = message;
-    _ = args;
-    // TODO:
-    //if (is_root_package_build) {
-    log.err("PANIC at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
-    unreachable;
-    //} else {
-    ////root.crash(message, args);
-    //unreachable;
-    //}
+pub inline fn panic(src: SourceLocation, comptime message: []const u8, args: anytype) noreturn {
+    if (@hasDecl(root, "identity")) {
+        root.crash(message, args);
+    } else {
+        // TODO:
+        //if (is_root_package_build) {
+        log.err("PANIC at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
+        unreachable;
+        //} else {
+        //unreachable;
+        //}
+    }
 }
 
 /// @Hack This currently works to determine if the code is being executed at compile time or at run time.

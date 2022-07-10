@@ -8,8 +8,9 @@ pub const Node = struct {
 };
 
 pub const NodeType = enum(u64) {
-    file,
-    directory,
+    empty = 0,
+    file = 1,
+    directory = 2,
 };
 
 pub const sector_size = 0x200;

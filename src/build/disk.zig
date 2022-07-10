@@ -11,9 +11,10 @@ const VirtualAddress = common.VirtualAddress;
 const log = common.log.scoped(.BuildDisk);
 
 disk: Disk,
-memory: []u8,
+buffer: common.ArrayListAligned(u8, 0x1000),
 
 fn access(disk: *Disk, special_context: u64, buffer: *drivers.DMA.Buffer, disk_work: Disk.Work) u64 {
+    const build_disk = @fieldParentPtr(BuildDisk, "disk", disk);
     _ = special_context;
     const sector_size = disk.sector_size;
     log.debug("Disk work: {}", .{disk_work});
@@ -23,17 +24,21 @@ fn access(disk: *Disk, special_context: u64, buffer: *drivers.DMA.Buffer, disk_w
             const byte_count = work_byte_size;
             const write_source_buffer = buffer.address.access([*]const u8)[0..byte_count];
             const disk_slice_start = disk_work.sector_offset * sector_size;
-            const disk_slice_end = disk_slice_start + byte_count;
-            log.debug("Disk buffer start: {}. Disk buffer end: {}", .{ disk_slice_start, disk_slice_end });
-            const write_destination_buffer = @fieldParentPtr(BuildDisk, "disk", disk).memory[disk_slice_start..disk_slice_end];
-            common.copy(u8, write_destination_buffer, write_source_buffer);
+            log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
+            common.runtime_assert(@src(), disk_slice_start == build_disk.buffer.items.len);
+            build_disk.buffer.appendSliceAssumeCapacity(write_source_buffer);
+            build_disk.buffer.items.len = common.align_forward(build_disk.buffer.items.len, sector_size);
 
             return byte_count;
         },
         .read => {
-            const memory_disk = @fieldParentPtr(BuildDisk, "disk", disk);
-            buffer.address = VirtualAddress.new(@ptrToInt(memory_disk.memory[disk_work.sector_offset * sector_size ..].ptr));
-            buffer.total_size = disk_work.sector_count * sector_size;
+            const offset = disk_work.sector_offset * sector_size;
+            const bytes = disk_work.sector_count * sector_size;
+            const previous_len = build_disk.buffer.items.len;
+
+            if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
+            common.copy(u8, buffer.address.access([*]u8)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
+            if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
 
             return disk_work.sector_count;
         },
@@ -42,7 +47,11 @@ fn access(disk: *Disk, special_context: u64, buffer: *drivers.DMA.Buffer, disk_w
 
 fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!drivers.DMA.Buffer {
     const allocation_size = disk.sector_size * sector_count;
-    const allocation_slice = try allocator.allocBytes(@intCast(u29, disk.sector_size), allocation_size, 0, 0);
+    const alignment = 0x1000;
+    log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });
+    const allocation_slice = try allocator.allocBytes(@intCast(u29, alignment), allocation_size, 0, 0);
+    common.zero(allocation_slice);
+    log.debug("Allocation address: 0x{x}", .{@ptrToInt(allocation_slice.ptr)});
     return drivers.DMA.Buffer{
         .address = VirtualAddress.new(@ptrToInt(allocation_slice.ptr)),
         .total_size = allocation_slice.len,
@@ -50,7 +59,7 @@ fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocato
     };
 }
 
-pub fn new(memory: []u8) BuildDisk {
+pub fn new(buffer: common.ArrayListAligned(u8, 0x1000)) BuildDisk {
     return BuildDisk{
         .disk = Disk{
             .sector_size = 0x200,
@@ -58,7 +67,7 @@ pub fn new(memory: []u8) BuildDisk {
             .get_dma_buffer = get_dma_buffer,
             .type = .memory,
         },
-        .memory = memory,
+        .buffer = buffer,
     };
 }
 

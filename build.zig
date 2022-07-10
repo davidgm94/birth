@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const log = std.log;
 const print = std.debug.print;
 const assert = std.debug.assert;
+const unix = @cImport(@cInclude("unistd.h"));
 
 const common = @import("src/common.zig");
 const drivers = @import("src/drivers.zig");
@@ -112,24 +113,12 @@ const Kernel = struct {
             else => unreachable,
         }
 
-        kernel.executable.setTarget(target);
-        var context_package = Package{
-            .name = "context",
-            .source = .{ .path = "src/context.zig" },
-            .dependencies = undefined,
-        };
-        var common_package = Package{
-            .name = "common",
-            .source = .{ .path = "src/common.zig" },
-            .dependencies = undefined,
-        };
-        context_package.dependencies = &.{common_package};
-        common_package.dependencies = &.{context_package};
+        add_common_packages(kernel.executable);
 
-        kernel.executable.addPackage(common_package);
-        kernel.executable.addPackage(context_package);
+        kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
+
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
 
@@ -160,11 +149,14 @@ const Kernel = struct {
             const program = kernel.builder.addExecutable(descriptor.out_filename, descriptor.main_source_file);
             program.setTarget(get_target_base(kernel.options.arch));
             program.setOutputDir(cache_dir);
-            program.setBuildMode(.ReleaseSmall);
+            program.setBuildMode(kernel.builder.standardReleaseOptions());
+            //program.setBuildMode(.ReleaseSafe);
             // TODO: make this architecture independent
             if (kernel.options.arch != .x86_64) @panic("this should be made architecture independent");
             program.setLinkerScriptPath(FileSource.relative("./src/common/arch/x86_64/user/linker.ld"));
             program.entry_symbol_name = "_start";
+
+            add_common_packages(program);
 
             kernel.builder.default_step.dependOn(&program.step);
 
@@ -400,9 +392,6 @@ const Kernel = struct {
     };
 
     const Disk = struct {
-        const block_size = 0x200;
-        const block_count = 64;
-        var buffer: [block_size * block_count]u8 align(0x1000) = undefined;
         const path = "zig-cache/disk.bin";
 
         fn create(kernel: *Kernel) void {
@@ -420,7 +409,24 @@ const Kernel = struct {
             const kernel = @fieldParentPtr(Kernel, "disk_step", step);
             const font_file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
             std.debug.print("Font file size: {} bytes\n", .{font_file.len});
-            var build_disk = BuildDisk.new(buffer[0..]);
+
+            const disk_memory = std.os.mmap(
+                null,
+                1 * common.gb,
+                std.os.PROT.READ | std.os.PROT.WRITE,
+                std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS,
+                -1,
+                0,
+            ) catch unreachable;
+            log.debug("Resultant big blob: (0x{x}, {})", .{ @ptrToInt(disk_memory.ptr), disk_memory.len });
+            var build_disk_buffer = common.ArrayListAligned(u8, 0x1000){
+                .items = disk_memory,
+                .capacity = disk_memory.len,
+            };
+            build_disk_buffer.items.len = 0;
+            log.debug("Build disk buffer: 0x{x}", .{@ptrToInt(build_disk_buffer.items.ptr)});
+
+            var build_disk = BuildDisk.new(build_disk_buffer);
             var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
             build_fs.fs.write_new_file(&build_fs.fs, 0, "font.psf", font_file);
 
@@ -431,13 +437,9 @@ const Kernel = struct {
                 build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
             }
 
-            var debug_file = std.ArrayList(u8).init(kernel.builder.allocator);
-            for (build_disk.memory) |byte, i| {
-                try debug_file.appendSlice(kernel.builder.fmt("[{}] = 0x{x}]\n", .{ i, byte }));
-            }
+            log.debug("Disk size: {}", .{build_disk.buffer.items.len});
 
-            try std.fs.cwd().writeFile("debug_disk", debug_file.items);
-            try std.fs.cwd().writeFile(Disk.path, build_disk.memory);
+            try std.fs.cwd().writeFile(Disk.path, build_disk.buffer.items);
         }
     };
 
@@ -668,4 +670,22 @@ fn do_debug_step(step: *Step) !void {
         },
         else => unreachable,
     }
+}
+
+fn add_common_packages(executable: *LibExeObjStep) void {
+    var context_package = Package{
+        .name = "context",
+        .source = .{ .path = "src/context.zig" },
+        .dependencies = undefined,
+    };
+    var common_package = Package{
+        .name = "common",
+        .source = .{ .path = "src/common.zig" },
+        .dependencies = undefined,
+    };
+    context_package.dependencies = &.{common_package};
+    common_package.dependencies = &.{context_package};
+
+    executable.addPackage(common_package);
+    executable.addPackage(context_package);
 }
