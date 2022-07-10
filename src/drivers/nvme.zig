@@ -116,11 +116,14 @@ const Drive = struct {
                 TODO(@src());
             }
 
+            common.runtime_assert(@src(), context.page_size % disk.sector_size == 0);
+            // TODO: fix this
+            //const request_sector_count = common.min(total_sector_count - completed_sector_count, (2 * context.page_size) / disk.sector_size);
             const request_sector_count = common.min(total_sector_count - completed_sector_count, 2);
             log.debug("Request sector index: {}. Work sector count: {}. Request sector count: {}", .{ completed_sector_count, total_sector_count, request_sector_count });
             const pointer_offset = completed_sector_count * disk.sector_size;
             const offset_physical_address = base_physical_address.offset(pointer_offset);
-            const prps = [2]PhysicalAddress{ offset_physical_address, if (request_sector_count > context.page_size) offset_physical_address.offset(context.page_size) else PhysicalAddress.temporary_invalid() };
+            const prps = [2]PhysicalAddress{ offset_physical_address, if ((request_sector_count * disk.sector_size) > context.page_size) offset_physical_address.offset(context.page_size) else PhysicalAddress.temporary_invalid() };
 
             var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_submission_queue.?[nvme.io_submission_queue_tail * submission_queue_entry_bytes]));
             command[0] = (nvme.io_submission_queue_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
@@ -136,8 +139,7 @@ const Drive = struct {
             command[9] = @truncate(u32, prps[1].value >> 32);
             command[10] = @truncate(u32, disk_work.sector_offset + completed_sector_count);
             command[11] = @truncate(u32, (disk_work.sector_offset + completed_sector_count) >> 32);
-            // TODO: what size is really this?
-            command[12] = @intCast(u16, request_sector_count);
+            command[12] = @intCast(u16, request_sector_count - 1); // This is a 0's based value according to the spec, so it has to be decremented by one.
             command[13] = 0;
             command[14] = 0;
             command[15] = 0;
