@@ -9,16 +9,11 @@ pub const ID = enum(u64) {
     thread_exit = 0,
 };
 
+const syscall_count = common.enum_values(ID).len;
 const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64;
-pub const syscall_handlers = [1]Handler{
+pub const syscall_handlers = [syscall_count]Handler{
     thread_exit,
 };
-
-pub export fn syscall_handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64 {
-    const id = @intToEnum(ID, argument0);
-    log.debug("Syscall #{}: {s}", .{ argument0, @tagName(id) });
-    return syscall_handlers[argument0](argument0, argument1, argument2, argument3, argument4, argument5);
-}
 
 pub fn thread_exit(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64 {
     log.debug("Argument: {}", .{argument0});
@@ -27,6 +22,5 @@ pub fn thread_exit(argument0: u64, argument1: u64, argument2: u64, argument3: u6
     log.debug("Argument: {}", .{argument3});
     log.debug("Argument: {}", .{argument4});
     log.debug("Argument: {}", .{argument5});
-    log.debug("Argument: {}", .{argument0});
     return 123;
 }

@@ -33,6 +33,7 @@ comptime {
         \\push %r13
         \\push %r14
         \\push %r15
+        \\mov %rcx, %rax
         \\syscall
         \\pop %r15
         \\pop %r14

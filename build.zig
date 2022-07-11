@@ -318,6 +318,8 @@ const Kernel = struct {
         }
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
+        run_command.step.dependOn(kernel.builder.default_step);
+        run_command.step.dependOn(&kernel.disk_step);
         const run_step = kernel.builder.step("run", "run step");
         run_step.dependOn(&run_command.step);
 
@@ -326,6 +328,7 @@ const Kernel = struct {
             else => unreachable,
         }
 
+        // TODO: architecture independent script
         kernel.gdb_script = kernel.builder.addWriteFile("gdb_script",
             \\set disassembly-flavor intel
             \\symbol-file zig-cache/kernel.elf
@@ -339,6 +342,7 @@ const Kernel = struct {
         kernel.debug_step = Step.init(.custom, "_debug_", kernel.builder.allocator, do_debug_step);
         kernel.debug_step.dependOn(&kernel.boot_image_step);
         kernel.debug_step.dependOn(&kernel.gdb_script.step);
+        kernel.debug_step.dependOn(&kernel.disk_step);
 
         const debug_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
         debug_step.dependOn(&kernel.debug_step);

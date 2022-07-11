@@ -170,6 +170,9 @@ pub const ElfAddressSpaces = struct {
 };
 
 pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
+    //for (file) |byte, byte_i| {
+    //log.debug("[{}] = 0x{x}", .{ byte_i, byte });
+    //}
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
     if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
@@ -219,9 +222,8 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     common.runtime_assert(@src(), dst_slice.len == src_slice.len);
 
                     if (i == 1) {
-                        for (src_slice) |byte, byte_i| {
-                            log.debug("[{}] = 0x{x}", .{ byte_i + ph.offset, byte });
-                        }
+                        common.runtime_assert(@src(), ph.virtual_address == 0x200000);
+                        common.runtime_assert(@src(), ph.virtual_address == base_virtual_address.value);
                         //const entry_offset = entry_point - 0x200000;
                         //common.runtime_assert(@src(), entry_offset == 0x110);
 

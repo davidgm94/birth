@@ -86,16 +86,26 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     if (should_swap_gs) asm volatile ("swapgs");
 }
 
+extern fn syscall_handler(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) u64;
+
 pub export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
         common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
     }
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (
+    // Save RFLAGS (R11), next instruction address after sysret (RCX) and user stack (RSP)
+        \\mov %%r11, %%r12
+        \\mov %%rcx, %%r13
+        \\mov %%rsp, %%r14
+        // Pass original RCX (4th argument)
+        \\mov %%rax, %%rcx
+        // Get kernel stack
         \\mov %%gs:[0], %%r15
         \\add %[offset], %%r15
         \\mov (%%r15), %%r15
         \\mov %%r15, %%rbp
+        // Use kernel stack
         \\push %%rbp
         \\mov %%rbp, %%rsp
         \\sub $0x10, %%rsp
@@ -103,14 +113,29 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
         : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
     );
 
+    // TODO: try call *(%rax) to avoid having another layer
+
     asm volatile (
-        \\.extern syscall_handler
-        \\call syscall_handler
+        \\mov %%rdi, %%rax
+        \\cmp %[syscall_count], %%rax
+        \\jge 0f
+        \\shl $0x03, %%rax
+        \\add %[handler_base_array], %%rax
+        \\call *(%%rax)
+        \\add $0x10, %%rsp
+        \\pop %%rbp
+        \\mov %%r14, %%rsp
+        \\mov %%r12, %%r11
+        \\mov %%r13, %%rcx
+        \\sysret
+        // TODO: we should crash if the index of a syscall is wrong
+        \\0:
+        \\cli
+        \\hlt
         :
-        : [handler] "i" (kernel.syscall.syscall_handlers),
+        : [syscall_count] "i" (kernel.syscall.syscall_handlers.len),
+          [handler_base_array] "i" (@ptrToInt(&kernel.syscall.syscall_handlers)),
     );
 
-    //_ = kernel.syscall.syscall_handlers[syscall_number](0, 0, 0, 0);
-    asm volatile ("sysret");
     unreachable;
 }
