@@ -125,7 +125,7 @@ pub fn load_executable(scheduler: *Scheduler, allocator: Allocator, privilege_le
     const user_virtual_address_space = allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, kernel_address_space.physical_address_space, kernel_address_space) orelse @panic("wtf2");
     const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
-    common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
+    //common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
     const thread = scheduler.spawn_thread(user_virtual_address_space, privilege_level, elf_result.entry_point);
 
     return thread;

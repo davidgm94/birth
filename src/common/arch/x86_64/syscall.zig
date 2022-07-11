@@ -24,24 +24,28 @@ pub extern fn syscall(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg
 
 comptime {
     asm (
+    //\\.global syscall
+    //\\syscall:
+    //\\push %r15
+    //\\push %r14
+    //\\push %r13
+    //\\push %r12
+    //\\push %rbx
+    //\\push %rbp
+    //\\mov %rcx, %rax
+    //\\syscall
+    //\\pop %rbp
+    //\\pop %rbx
+    //\\pop %r12
+    //\\pop %r13
+    //\\pop %r14
+    //\\pop %r15
+    //\\ret
+
         \\.global syscall
         \\syscall:
-        \\push %rsp
-        \\push %rbx
-        \\push %rbp
-        \\push %r12
-        \\push %r13
-        \\push %r14
-        \\push %r15
         \\mov %rcx, %rax
         \\syscall
-        \\pop %r15
-        \\pop %r14
-        \\pop %r13
-        \\pop %r12
-        \\pop %rbp
-        \\pop %rbx
-        \\pop %rsp
         \\ret
     );
 }

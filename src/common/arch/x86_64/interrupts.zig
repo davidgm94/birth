@@ -480,7 +480,6 @@ pub inline fn epilogue() void {
         \\mov %%rax, %%ds
         \\mov %%rax, %%es
         \\mov %%rax, %%fs
-        //\\mov %%rax, %%gs
         \\pop %%r15
         \\pop %%r14
         \\pop %%r13

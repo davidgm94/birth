@@ -70,7 +70,10 @@ export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: 
     context.check(@src());
     common.runtime_assert(@src(), new_thread.current_thread == new_thread);
     x86_64.set_current_thread(new_thread);
-    const should_swap_gs = x86_64.cs.read() != 0x28;
+    const new_cs_user_bits = @truncate(u2, context.cs);
+    const old_cs_user_bits = @truncate(u2, x86_64.cs.read());
+    const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
+
     // TODO: checks
     //const new_thread = current_thread.time_slices == 1;
 
@@ -94,7 +97,8 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
     }
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (
-    // Save RFLAGS (R11), next instruction address after sysret (RCX) and user stack (RSP)
+        \\swapgs
+        // Save RFLAGS (R11), next instruction address after sysret (RCX) and user stack (RSP)
         \\mov %%r11, %%r12
         \\mov %%rcx, %%r13
         \\mov %%rsp, %%r14
@@ -127,6 +131,7 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
         \\mov %%r14, %%rsp
         \\mov %%r12, %%r11
         \\mov %%r13, %%rcx
+        \\swapgs
         \\sysret
         // TODO: we should crash if the index of a syscall is wrong
         \\0:
