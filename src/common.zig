@@ -165,7 +165,7 @@ pub inline fn zeroes(comptime T: type) T {
 }
 
 pub inline fn comptime_assert(condition: bool) void {
-    if (!is_comptime()) unreachable;
+    if (!is_comptime()) @panic("comptime_assert called at runtime");
     if (!condition) unreachable;
 }
 

@@ -1135,7 +1135,7 @@ pub const Context = struct {
             },
             .user => {
                 arch_context.cs = @offsetOf(GDT.Table, "user_code_64") | 0b11;
-                arch_context.ss = @offsetOf(GDT.Table, "user_data_64") | 0b11;
+                arch_context.ss = @offsetOf(GDT.Table, "user_data") | 0b11;
                 log.debug("CS: 0x{x}. SS: 0x{x}", .{ arch_context.cs, arch_context.ss });
             },
         }

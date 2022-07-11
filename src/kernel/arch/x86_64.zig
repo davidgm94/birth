@@ -95,6 +95,7 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
     comptime {
         common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
     }
+    // This function only modifies RSP. The other registers are preserved in user space
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (
         \\swapgs
@@ -110,35 +111,33 @@ pub export fn syscall_entry_point() callconv(.Naked) void {
         \\mov (%%r15), %%r15
         \\mov %%r15, %%rbp
         // Use kernel stack
-        \\push %%rbp
         \\mov %%rbp, %%rsp
-        \\sub $0x10, %%rsp
-        :
-        : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
-    );
-
-    // TODO: try call *(%rax) to avoid having another layer
-
-    asm volatile (
+        // Check if syscall is in range of kernel syscalls
         \\mov %%rdi, %%rax
         \\cmp %[syscall_count], %%rax
         \\jge 0f
+        // Multiply the offset by 8 bytes that occupy functions in 64-bit mode
         \\shl $0x03, %%rax
+        // Add the base address
         \\add %[handler_base_array], %%rax
+        // Call the syscall handler
         \\call *(%%rax)
-        \\add $0x10, %%rsp
-        \\pop %%rbp
+        // Restore RSP, R11 (RFLAGS) and RCX (RIP after sysret)
         \\mov %%r14, %%rsp
         \\mov %%r12, %%r11
         \\mov %%r13, %%rcx
+        // Restore user GS
         \\swapgs
-        \\sysret
+        // Go back to user mode
+        \\sysretq
+        // Crash if syscall array bounds check failed
         // TODO: we should crash if the index of a syscall is wrong
         \\0:
         \\cli
         \\hlt
         :
-        : [syscall_count] "i" (kernel.syscall.syscall_handlers.len),
+        : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
+          [syscall_count] "i" (kernel.syscall.syscall_handlers.len),
           [handler_base_array] "i" (@ptrToInt(&kernel.syscall.syscall_handlers)),
     );
 
