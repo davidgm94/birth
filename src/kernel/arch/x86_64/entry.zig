@@ -26,7 +26,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     kernel.cpus = bootloader_information.cpus;
     const bsp = &kernel.cpus[0];
     x86_64.get_current_thread().cpu = bsp;
-    x86_64.preinit_scheduler(&kernel.virtual_address_space, kernel.arch.x86_64.syscall_entry_point);
+    x86_64.preinit_scheduler(&kernel.virtual_address_space);
     x86_64.init_scheduler();
     x86_64.prepare_drivers(kernel.core_heap.kernel_allocator, &kernel.virtual_address_space, rsdp);
     x86_64.drivers_init(&kernel.virtual_address_space, kernel.core_heap.kernel_allocator) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});

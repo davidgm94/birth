@@ -18,6 +18,7 @@ pub const PhysicalAddressSpace = @import("common/physical_address_space.zig");
 pub const VirtualAddressSpace = @import("common/virtual_address_space.zig");
 pub const Thread = @import("common/thread.zig");
 pub const Scheduler = @import("common/scheduler.zig");
+pub const Syscall = @import("common/syscall.zig");
 pub const Emulator = enum {
     qemu,
     virtualbox,

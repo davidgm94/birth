@@ -181,7 +181,7 @@ pub export fn foo() callconv(.C) void {
     //log.debug("RSP: 0x{x}", .{myrsp});
 }
 
-pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace, syscall_entry_point: fn () callconv(.Naked) void) void {
+pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace) void {
     // This assumes the BSP processor is already properly setup here
     const current_thread = get_current_thread();
     const bsp = current_thread.cpu orelse @panic("cpu");
@@ -190,7 +190,7 @@ pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace, sys
     set_current_thread(current_thread);
     interrupts.init();
     enable_apic(virtual_address_space);
-    Syscall.enable(syscall_entry_point);
+    Syscall.enable();
 
     bsp.shared_tss = TSS.Struct{};
     bsp.shared_tss.set_interrupt_stack(bsp.int_stack);

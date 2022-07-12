@@ -1,7 +1,6 @@
 const common = @import("common");
-const syscall = common.arch.x86_64.Syscall.syscall;
+const thread_exit = common.Syscall.thread_exit;
 export fn _start() callconv(.C) void {
-    const value = syscall(0, 1, 2, 3, 4, 5);
-    _ = value;
+    thread_exit(0, 0, 0, 0, 0);
     while (true) {}
 }
