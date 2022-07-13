@@ -13,7 +13,7 @@ pub fn enable() void {
     efer.or_flag(.SCE);
     x86_64.IA32_EFER.write(efer);
 
-    x86_64.IA32_LSTAR.write(@ptrToInt(syscall_entry_point));
+    x86_64.IA32_LSTAR.write(@ptrToInt(kernel_syscall_entry_point));
     // TODO: figure out what this does
     x86_64.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
     // Selectors (kernel64 and user32. Syscall MSRs pick from there the correct register
@@ -29,13 +29,13 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub extern fn user_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) u64;
+pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) u64;
 
 // INFO: only RSP is handled in the kernel
 comptime {
     asm (
-        \\.global user_entry_point
-        \\user_entry_point:
+        \\.global user_syscall_entry_point
+        \\user_syscall_entry_point:
         \\push %r15
         \\push %r14
         \\push %r13
@@ -54,7 +54,7 @@ comptime {
     );
 }
 
-pub fn syscall_entry_point() callconv(.Naked) noreturn {
+pub fn kernel_syscall_entry_point() callconv(.Naked) noreturn {
     comptime {
         common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
     }

@@ -5,6 +5,9 @@ pub const log = common.User.log;
 const thread_exit = common.Syscall.thread_exit;
 
 export fn _start() callconv(.C) void {
-    thread_exit(0, 0, 0, 0, 0);
+    thread_exit(.{
+        .exit_code = 0,
+        .message = "Hello kernel from userspace",
+    });
     while (true) {}
 }

@@ -9,5 +9,5 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
 
 pub fn panic(message: []const u8, _: ?*common.StackTrace) noreturn {
     _ = message;
-    unreachable;
+    while (true) {}
 }
