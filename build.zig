@@ -41,7 +41,7 @@ pub fn build(b: *Builder) void {
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
-                        .smp = null,
+                        .smp = 8,
                         .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
                         .run_for_debug = true,
                     },

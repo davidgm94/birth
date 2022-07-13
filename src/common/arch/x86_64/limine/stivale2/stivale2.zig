@@ -269,6 +269,8 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
     return rsdp_address;
 }
 
+const stack_size = 0x10000;
+var cpus_left: u64 = 0;
 pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error![]common.arch.CPU {
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
@@ -279,10 +281,29 @@ pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu
     cpus[0] = bootstrap_cpu;
     cpus[0].is_bootstrap = true;
 
+    cpus_left = cpus.len - 1;
+
     for (smps) |smp, cpu_index| {
         const cpu = &cpus[cpu_index];
         cpu.lapic_id = smp.lapic_id;
     }
 
+    for (smps[1..]) |*smp| {
+        const stack = allocator.allocBytes(context.page_size, stack_size, 0, 0) catch @panic("stack");
+        smp.extra_argument = 0;
+        smp.target_stack = @ptrToInt(stack.ptr + stack.len - 16);
+        smp.goto_address = @ptrToInt(smp_entry);
+    }
+
+    while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
+    log.debug("Initialized all cores", .{});
+
     return cpus;
+}
+
+fn smp_entry(argument: u64) callconv(.C) noreturn {
+    _ = argument;
+    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
+    log.debug("Initialized core", .{});
+    while (true) {}
 }

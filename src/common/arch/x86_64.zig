@@ -200,20 +200,6 @@ pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace) voi
     log.debug("Scheduler pre-initialization finished!", .{});
 }
 
-//pub fn init_all_cores() void {
-//// TODO: initialize each CPU but the BSP
-////for (
-
-//const all_stacks_size = kernel.arch.bootstrap_stack_size * kernel.cpus.len;
-//const stack_allocation = kernel.Physical.Memory.allocate_pages(kernel.bytes_to_pages(all_stacks_size)) orelse @panic("unable to allocate stacks");
-//const stack_allocation_virtual_address_value = stack_allocation.identity_virtual_address().value;
-
-//for (kernel.cpus) |*cpu, i| {
-//const stack = stack_allocation_virtual_address_value + (kernel.arch.bootstrap_stack_size * i);
-//const stack_top = stack + kernel.arch.bootstrap_stack_size - 0x10;
-//}
-//}
-
 //pub var rsdp: PhysicalAddress = undefined;
 
 pub const IOPort = struct {
