@@ -288,6 +288,10 @@ pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu
         cpu.lapic_id = smp.lapic_id;
     }
 
+    //const current_thread = common.arch.get_current_thread();
+    //log.debug("Current thread: {}", .{current_thread});
+    //if (true) @panic("lol");
+
     for (smps[1..]) |*smp| {
         const stack = allocator.allocBytes(context.page_size, stack_size, 0, 0) catch @panic("stack");
         smp.extra_argument = 0;

@@ -32,7 +32,7 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
     };
 }
 
-pub fn bootstrapping() ?VirtualAddressSpace {
+pub fn bootstrapping() VirtualAddressSpace {
     const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping();
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,

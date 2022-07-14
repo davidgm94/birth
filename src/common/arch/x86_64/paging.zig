@@ -25,19 +25,19 @@ const PTable = [512]PTE;
 
 pub var should_log = false;
 
-pub fn init(virtual_address_space: *common.VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR, cached_higher_half_direct_map: u64) void {
+pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, stivale_pmrs: []x86_64.Stivale2.Struct.PMRs.PMR, cached_higher_half_direct_map: u64) void {
     log.debug("About to dereference memory regions", .{});
-    common.VirtualAddressSpace.initialize_kernel_address_space(virtual_address_space, physical_address_space) orelse @panic("unable to initialize kernel address space");
+    var new_virtual_address_space: common.VirtualAddressSpace = undefined;
+    common.VirtualAddressSpace.initialize_kernel_address_space(&new_virtual_address_space, physical_address_space) orelse @panic("unable to initialize kernel address space");
 
     // Map the kernel and do some tests
     {
-        var bootloader_address_space = common.VirtualAddressSpace.bootstrapping() orelse @panic("Unable to get bootstrapping address space");
         // TODO: better flags
         for (stivale_pmrs) |pmr| {
             const section_virtual_address = VirtualAddress.new(pmr.address);
             const kernel_section_virtual_region = VirtualMemoryRegion.new(section_virtual_address, pmr.size);
-            const section_physical_address = bootloader_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
-            virtual_address_space.map_virtual_region(kernel_section_virtual_region, section_physical_address, .{
+            const section_physical_address = kernel_virtual_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
+            new_virtual_address_space.map_virtual_region(kernel_section_virtual_region, section_physical_address, .{
                 .execute = pmr.permissions & x86_64.Stivale2.Struct.PMRs.PMR.executable != 0,
                 .write = true, //const writable = permissions & x86_64.Stivale2.Struct.PMRs.PMR.writable != 0;
             });
@@ -48,7 +48,7 @@ pub fn init(virtual_address_space: *common.VirtualAddressSpace, physical_address
     for (physical_address_space.usable) |region| {
         // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
         // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-        virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+        new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
             .write = true,
             .user = true,
         });
@@ -59,7 +59,7 @@ pub fn init(virtual_address_space: *common.VirtualAddressSpace, physical_address
     for (physical_address_space.reclaimable) |region| {
         // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
         // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-        virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+        new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
             .write = true,
             .user = true,
         });
@@ -70,14 +70,15 @@ pub fn init(virtual_address_space: *common.VirtualAddressSpace, physical_address
     for (physical_address_space.framebuffer) |region| {
         // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
         // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-        virtual_address_space.map_physical_region(region, region.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+        new_virtual_address_space.map_physical_region(region, region.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
             .write = true,
             .user = true,
         });
     }
     log.debug("Mapped framebuffer", .{});
 
-    virtual_address_space.make_current();
+    new_virtual_address_space.make_current();
+    kernel_virtual_address_space.* = new_virtual_address_space;
     @import("root").higher_half_direct_map = VirtualAddress.new(cached_higher_half_direct_map);
     // Update identity-mapped pointers to higher-half ones
     physical_address_space.usable.ptr = @intToPtr(@TypeOf(physical_address_space.usable.ptr), @ptrToInt(physical_address_space.usable.ptr) + cached_higher_half_direct_map);

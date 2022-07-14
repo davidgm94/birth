@@ -23,6 +23,9 @@ pub const entry = @import("x86_64/entry.zig");
 
 var bootstrap_cpu: common.arch.CPU = undefined;
 var bootstrap_thread: common.Thread = undefined;
+var bootstrap_context: common.arch.Context = undefined;
+var bootstrap_virtual_address_space: common.VirtualAddressSpace = undefined;
+var bootstrap_physical_address_space: common.PhysicalAddressSpace = undefined;
 
 const x86_64 = common.arch.x86_64;
 pub fn preinit_bsp() void {
@@ -30,6 +33,8 @@ pub fn preinit_bsp() void {
     kernel.cpus = @intToPtr([*]common.arch.CPU, @ptrToInt(&bootstrap_cpu))[0..1];
     bootstrap_thread.current_thread = &bootstrap_thread;
     bootstrap_thread.cpu = &bootstrap_cpu;
+    bootstrap_thread.context = &bootstrap_context;
+    bootstrap_thread.address_space = &kernel.virtual_address_space;
     x86_64.set_current_thread(&bootstrap_thread);
     x86_64.IA32_KERNEL_GS_BASE.write(0);
 }
