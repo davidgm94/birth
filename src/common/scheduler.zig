@@ -23,6 +23,13 @@ lock: common.arch.Spinlock,
 thread_pool: [8192]Thread,
 thread_id: u64,
 
+pub fn init(scheduler: *Scheduler) void {
+    _ = scheduler;
+    log.debug("TODO: initialize scheduler", .{});
+    //test_threads(1);
+    //test_userspace();
+}
+
 pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
     const current_cpu = common.arch.get_current_thread().cpu.?;
     if (current_cpu.spinlock_count > 0) {
@@ -119,10 +126,11 @@ pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddres
     return thread;
 }
 
-pub fn load_executable(scheduler: *Scheduler, allocator: Allocator, privilege_level: PrivilegeLevel, kernel_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
+pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
+    common.runtime_assert(@src(), kernel_address_space.privilege_level == .kernel);
     common.runtime_assert(@src(), privilege_level == .user);
     const executable_file = drive.read_file(drive, @ptrToInt(kernel_address_space), executable_filename);
-    const user_virtual_address_space = allocator.create(VirtualAddressSpace) catch @panic("wtf");
+    const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, kernel_address_space.physical_address_space, kernel_address_space) orelse @panic("wtf2");
     const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     //common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
@@ -144,11 +152,4 @@ fn pick_thread(scheduler: *Scheduler) *Thread {
     const next_thread_index = 0;
     const new_thread = &scheduler.thread_pool[next_thread_index];
     return new_thread;
-}
-
-pub fn init(scheduler: *Scheduler) void {
-    _ = scheduler;
-    log.debug("TODO: initialize scheduler", .{});
-    //test_threads(1);
-    //test_userspace();
 }

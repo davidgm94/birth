@@ -32,7 +32,6 @@ pub var memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF9000000
 pub const core_memory_region = VirtualMemoryRegion.new(VirtualAddress.new(0xFFFF800100000000), 0xFFFF800200000000 - 0xFFFF800100000000);
 
 pub var scheduler: Scheduler = undefined;
-pub var core_heap: Heap = undefined;
 pub var bootstrapping_memory: [context.page_size * 16]u8 = undefined;
 pub var font: common.PSF1.Font = undefined;
 pub var higher_half_direct_map: VirtualAddress = undefined;

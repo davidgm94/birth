@@ -12,11 +12,15 @@ const VirtualMemoryRegion = common.VirtualMemoryRegion;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
+const Heap = common.Heap;
+const Spinlock = common.arch.Spinlock;
 
 arch: arch.VirtualAddressSpace,
 physical_address_space: *PhysicalAddressSpace,
-initialized: bool,
 privilege_level: common.PrivilegeLevel,
+heap: Heap,
+lock: Spinlock,
+initialized: bool,
 
 /// This is going to return an identitty-mapped virtual address pointer and it is only intended to use for the
 /// kernel address space
@@ -27,8 +31,10 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
         .physical_address_space = physical_address_space,
-        .initialized = false,
         .privilege_level = .kernel,
+        .heap = Heap.new(virtual_address_space),
+        .lock = Spinlock.new(),
+        .initialized = false,
     };
 }
 
@@ -36,9 +42,11 @@ pub fn bootstrapping() VirtualAddressSpace {
     const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping();
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,
-        .initialized = false,
         .physical_address_space = undefined,
         .privilege_level = .kernel,
+        .heap = undefined,
+        .lock = Spinlock.new(),
+        .initialized = false,
     };
 }
 
@@ -49,8 +57,10 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
         .physical_address_space = physical_address_space,
-        .initialized = false,
         .privilege_level = .user,
+        .heap = Heap.new(virtual_address_space),
+        .lock = Spinlock.new(),
+        .initialized = false,
     };
 
     virtual_address_space.arch.map_kernel_address_space_higher_half(kernel_address_space);

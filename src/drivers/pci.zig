@@ -14,8 +14,8 @@ bus_scan_states: [256]BusScanState,
 
 pub var controller: Controller = undefined;
 
-pub fn init() void {
-    controller.enumerate();
+pub fn init(virtual_address_space: *VirtualAddressSpace) void {
+    controller.enumerate(virtual_address_space);
 }
 
 const BusScanState = enum(u8) {
@@ -168,7 +168,7 @@ const HeaderType = enum(u8) {
     x2 = 2,
 };
 
-fn enumerate(pci: *Controller) void {
+fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void {
     var base_function = Function.new(0);
     const base_header_type = CommonHeader.read_from_function("header_type", base_function);
     log.debug("Base header type: 0x{x}", .{base_header_type});
@@ -237,7 +237,7 @@ fn enumerate(pci: *Controller) void {
         log.debug("Device count: {}", .{device_count});
 
         buses_to_scan = original_bus_to_scan_count;
-        pci.devices = kernel.core_heap.kernel_allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
+        pci.devices = virtual_address_space.heap.allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
 
         var registered_device_count: u64 = 0;
 

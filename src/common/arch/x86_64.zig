@@ -65,21 +65,21 @@ pub fn register_main_storage() void {
     kernel.main_storage = Filesystem.drivers.items[0];
 }
 
-pub fn drivers_init(virtual_address_space: *common.VirtualAddressSpace, allocator: Allocator) !void {
-    try init_block_drivers(virtual_address_space, allocator);
+pub fn drivers_init(virtual_address_space: *common.VirtualAddressSpace) !void {
+    try init_block_drivers(virtual_address_space);
     log.debug("Initialized block drivers", .{});
 
-    try init_graphics_drivers(allocator);
+    try init_graphics_drivers(virtual_address_space.heap.allocator);
     log.debug("Initialized graphics drivers", .{});
 }
 
-pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace, allocator: Allocator) !void {
+pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace) !void {
     // TODO: make ACPI and PCI controller standard
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
-    NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, allocator, &PCI.controller);
+    NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, &PCI.controller);
     common.runtime_assert(@src(), Disk.drivers.items.len > 0);
-    try drivers.Driver(Filesystem, RNUFS).init(allocator, Disk.drivers.items[0]);
+    try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
 }
 
 pub fn init_graphics_drivers(allocator: Allocator) !void {
@@ -87,9 +87,9 @@ pub fn init_graphics_drivers(allocator: Allocator) !void {
     log.debug("TODO: initialize graphics drivers", .{});
 }
 
-pub fn prepare_drivers(allocator: Allocator, virtual_address_space: *common.VirtualAddressSpace, rsdp: PhysicalAddress) void {
-    ACPI.init(allocator, virtual_address_space, rsdp);
-    PCI.init();
+pub fn prepare_drivers(virtual_address_space: *common.VirtualAddressSpace, rsdp: PhysicalAddress) void {
+    ACPI.init(virtual_address_space, rsdp);
+    PCI.init(virtual_address_space);
 }
 
 pub fn init_scheduler() void {

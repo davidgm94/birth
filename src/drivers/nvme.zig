@@ -174,15 +174,15 @@ pub const Initialization = struct {
         not_found,
     };
 
-    pub fn callback(virtual_address_space: *VirtualAddressSpace, allocator: Allocator, pci: *PCI) Error!*Driver {
+    pub fn callback(virtual_address_space: *VirtualAddressSpace, pci: *PCI) Error!*Driver {
         const nvme_device = find(pci) orelse return Error.not_found;
         log.debug("Found controller", .{});
-        driver = allocator.create(Driver) catch return Error.allocation_failure;
+        driver = virtual_address_space.heap.allocator.create(Driver) catch return Error.allocation_failure;
         driver.* = NVMe.new(nvme_device);
         const result = driver.device.enable_features(PCI.Device.Features.from_flags(&.{ .interrupts, .busmastering_dma, .memory_space_access, .bar0 }), virtual_address_space);
         common.runtime_assert(@src(), result);
         log.debug("Device features enabled", .{});
-        driver.init(virtual_address_space, allocator);
+        driver.init(virtual_address_space);
 
         log.debug("Driver initialized", .{});
 
@@ -283,7 +283,7 @@ pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
 
 const PRPs = [2]PhysicalAddress;
 
-pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator: Allocator) void {
+pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     nvme.capabilities = nvme.read(cap);
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
@@ -533,10 +533,10 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace, allocator:
         }
     }
 
-    nvme.drives = allocator.alloc(Drive, drive_count) catch kernel.crash("unable to allocate for NVMe drives", .{});
+    nvme.drives = virtual_address_space.heap.allocator.alloc(Drive, drive_count) catch kernel.crash("unable to allocate for NVMe drives", .{});
     common.copy(Drive, nvme.drives, drives[0..drive_count]);
     for (nvme.drives) |*drive| {
-        kernel.drivers.Driver(Disk, Drive).init(allocator, drive) catch kernel.crash("Failed to initialized device", .{});
+        kernel.drivers.Driver(Disk, Drive).init(virtual_address_space.heap.allocator, drive) catch kernel.crash("Failed to initialized device", .{});
     }
 
     common.runtime_assert(@src(), drive_count == 1);

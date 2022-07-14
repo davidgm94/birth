@@ -7,7 +7,7 @@ const log = common.log.scoped(.stivale);
 const TODO = common.TODO;
 const Allocator = common.Allocator;
 const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddress;
+const VirtualAddressSpace = common.VirtualAddressSpace;
 const VirtualMemoryRegion = common.VirtualMemoryRegion;
 const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
@@ -30,13 +30,13 @@ const BootloaderInformation = struct {
     cpus: []common.arch.CPU,
 };
 
-pub fn process_bootloader_information(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error!BootloaderInformation {
-    const kernel_sections_in_memory = try process_pmrs(allocator, stivale2_struct);
-    log.debug("Process sections in memory", .{});
-    const kernel_file = try process_kernel_file(allocator, stivale2_struct);
-    log.debug("Process kernel file in memory", .{});
-    const cpus = try process_smp(allocator, stivale2_struct, bootstrap_cpu);
-    log.debug("Process SMP info", .{});
+pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error!BootloaderInformation {
+    const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
+    log.debug("Processed sections in memory", .{});
+    const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
+    log.debug("Processed kernel file in memory", .{});
+    const cpus = try process_smp(virtual_address_space, stivale2_struct, bootstrap_cpu);
+    log.debug("Processed SMP info", .{});
 
     return BootloaderInformation{
         .kernel_sections_in_memory = kernel_sections_in_memory,
@@ -217,13 +217,13 @@ pub fn process_higher_half_direct_map(stivale2_struct: *Struct) Error!u64 {
     return hhdm.value;
 }
 
-pub fn process_pmrs(allocator: Allocator, stivale2_struct: *Struct) Error![]VirtualMemoryRegion {
+pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error![]VirtualMemoryRegion {
     const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
     log.debug("PMRS struct: 0x{x}", .{@ptrToInt(pmrs_struct)});
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
 
-    const kernel_sections = allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
+    const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
         const kernel_section = &kernel_sections[i];
@@ -244,13 +244,13 @@ pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
 }
 
 /// This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
-pub fn process_kernel_file(allocator: Allocator, stivale2_struct: *Struct) Error!common.File {
+pub fn process_kernel_file(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!common.File {
     const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
     const file_address = PhysicalAddress.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
     // TODO: consider alignment?
     log.debug("allocation about to happen", .{});
-    const dst = allocator.alloc(u8, file_size) catch return Error.kernel_file;
+    const dst = virtual_address_space.heap.allocator.alloc(u8, file_size) catch return Error.kernel_file;
     log.debug("allocation did happen", .{});
     const src = file_address.access_kernel([*]u8)[0..file_size];
     log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
@@ -271,11 +271,11 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
 
 const stack_size = 0x10000;
 var cpus_left: u64 = 0;
-pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error![]common.arch.CPU {
+pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error![]common.arch.CPU {
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
-    const cpus = allocator.alloc(common.arch.CPU, smp_struct.cpu_count) catch return Error.smp;
+    const cpus = virtual_address_space.heap.allocator.alloc(common.arch.CPU, smp_struct.cpu_count) catch return Error.smp;
     const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];
     common.runtime_assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
     cpus[0] = bootstrap_cpu;
@@ -293,7 +293,8 @@ pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu
     //if (true) @panic("lol");
 
     for (smps[1..]) |*smp| {
-        const stack = allocator.allocBytes(context.page_size, stack_size, 0, 0) catch @panic("stack");
+        log.debug("Allocating stacks...", .{});
+        const stack = virtual_address_space.heap.allocator.allocBytes(context.page_size, stack_size, 0, 0) catch @panic("stack");
         smp.extra_argument = 0;
         smp.target_stack = @ptrToInt(stack.ptr + stack.len - 16);
         smp.goto_address = @ptrToInt(smp_entry);
@@ -305,9 +306,19 @@ pub fn process_smp(allocator: Allocator, stivale2_struct: *Struct, bootstrap_cpu
     return cpus;
 }
 
-fn smp_entry(argument: u64) callconv(.C) noreturn {
-    _ = argument;
+var go: bool = false;
+
+const SMPArgument = packed struct {
+    core_id: u64,
+};
+
+fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
-    log.debug("Initialized core", .{});
-    while (true) {}
+    log.debug("Core #{} received signal", .{smp_info.processor_id});
+    while (!@atomicLoad(bool, &go, .Acquire)) {
+        asm volatile ("pause" ::: "memory");
+    }
+    while (true) {
+        asm volatile ("pause" ::: "memory");
+    }
 }

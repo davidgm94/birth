@@ -19,7 +19,7 @@ const Signature = enum(u32) {
 };
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
+pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     const rsdp_physical_page = rsdp_physical_address.aligned_backward(context.page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
@@ -64,7 +64,7 @@ pub fn init(allocator: Allocator, virtual_address_space: *VirtualAddressSpace, r
                         iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    x86_64.iso = allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
+                    x86_64.iso = virtual_address_space.heap.allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
 
                     common.runtime_assert(@src(), processor_count == kernel.cpus.len);

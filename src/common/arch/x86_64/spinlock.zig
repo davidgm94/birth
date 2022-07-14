@@ -22,7 +22,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
     if (common.arch.get_current_thread().cpu) |current_cpu| {
         current_cpu.spinlock_count += 1;
     }
-    while (@cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Acquire, .Monotonic) != null) {}
+    while (@cmpxchgWeak(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Acquire, .Monotonic) != null) {}
     @fence(.Acquire);
 
     spinlock.were_interrupts_enabled = are_interrupts_enabled;
@@ -36,8 +36,8 @@ pub fn release(spinlock: *volatile Spinlock) void {
     spinlock.assert_lock_status(expected);
     const were_interrupts_enabled = spinlock.were_interrupts_enabled;
     @fence(.Release);
-    //const result = @cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Release, .Monotonic);
-    spinlock.status = false;
+    const result = @cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Release, .Monotonic);
+    common.runtime_assert(@src(), result == null);
     //common.runtime_assert(@src(), result == null);
     if (were_interrupts_enabled) {
         common.arch.enable_interrupts();
