@@ -79,7 +79,7 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
     log.debug("Mapped framebuffer", .{});
 
     new_virtual_address_space.make_current();
-    kernel_virtual_address_space.* = new_virtual_address_space;
+    new_virtual_address_space.copy(kernel_virtual_address_space);
     @import("root").higher_half_direct_map = VirtualAddress.new(cached_higher_half_direct_map);
     // Update identity-mapped pointers to higher-half ones
     physical_address_space.usable.ptr = @intToPtr(@TypeOf(physical_address_space.usable.ptr), @ptrToInt(physical_address_space.usable.ptr) + cached_higher_half_direct_map);
@@ -133,6 +133,7 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
         .value = cr3,
     };
     common.runtime_assert(@src(), cr3_physical.is_valid());
+    log.debug("heap lock status after VAS creation: 0x{x}", .{kernel_virtual_address_space.heap.lock.status});
 }
 
 pub const VirtualAddressSpace = struct {

@@ -50,16 +50,11 @@ pub const log_level: common.log.Level = switch (common.build_mode) {
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-
-    //var time: [20]u8 = undefined; // 20 should be enough for 64 bit system
-    //const buffer = time[0..];
-    //const time_str = kernel.fmt.bufPrint(buffer, "{d:>6}", .{@intToFloat(f64, kernel.arch.Clock.TICK) / @intToFloat(f64, kernel.arch.HZ)}) catch @panic("Unexpected format error in root.log");
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-
-    //kernel.arch.writer.writeAll("[") catch unreachable;
-    //kernel.arch.writer.writeAll(time_str) catch unreachable;
-    //kernel.arch.writer.writeAll("] ") catch unreachable;
+    const before_status_acquire = common.arch.Writer.lock.status;
     common.arch.Writer.lock.acquire();
+    const after_status_acquire = common.arch.Writer.lock.status;
+    kernel.arch.writer.print("Spinlock debug. (BEFORE): 0x{x} (AFTER): 0x{x}\n", .{ before_status_acquire, after_status_acquire }) catch unreachable;
     kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
     common.arch.Writer.lock.release();
 }

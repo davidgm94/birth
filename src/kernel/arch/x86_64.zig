@@ -66,7 +66,7 @@ export fn switch_context() callconv(.Naked) void {
 
 export fn post_context_switch(context: *common.arch.x86_64.Context, new_thread: *common.Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});
-    if (kernel.scheduler.lock.were_interrupts_enabled) {
+    if (kernel.scheduler.lock.were_interrupts_enabled != 0) {
         @panic("interrupts were enabled");
     }
     kernel.scheduler.lock.release();

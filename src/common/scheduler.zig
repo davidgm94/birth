@@ -38,7 +38,7 @@ pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
     common.arch.disable_interrupts();
     scheduler.lock.acquire();
     var old_address_space: *VirtualAddressSpace = undefined;
-    if (scheduler.lock.were_interrupts_enabled) @panic("ffff");
+    if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
     const current_thread = common.arch.get_current_thread();
     current_thread.context = arch_context;
     old_address_space = current_thread.address_space;

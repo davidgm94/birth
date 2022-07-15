@@ -31,6 +31,8 @@ const BootloaderInformation = struct {
 };
 
 pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error!BootloaderInformation {
+    log.debug("heap lock status stivale: 0x{x}", .{virtual_address_space.heap.lock.status});
+    log.debug("Physical address CR3: 0x{x}", .{virtual_address_space.arch.cr3});
     const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
@@ -222,7 +224,9 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
 
-    const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
+    log.debug("Physical address CR3: 0x{x}", .{virtual_address_space.arch.cr3});
+    log.debug("heap lock status stivale: 0x{x}", .{virtual_address_space.heap.lock.status});
+    const kernel_sections = virtual_address_space.heap_allocate(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
         const kernel_section = &kernel_sections[i];

@@ -32,9 +32,21 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
     };
 }
 
+fn acquire_lock(heap: *Heap) void {
+    log.debug("State before acquiring heap lock: 0x{x}. Spinlock address: 0x{x}. Spinlock size: {}. Spinlock status address: 0x{x}", .{ heap.lock.status, @ptrToInt(&heap.lock), @sizeOf(Spinlock), @ptrToInt(&heap.lock.status) });
+    heap.lock.acquire();
+    log.debug("State after acquiring heap lock: {}", .{heap.lock.status});
+}
+
+fn release_lock(heap: *Heap) void {
+    log.debug("State before releasing heap lock: {}", .{heap.lock.status});
+    heap.lock.release();
+    log.debug("State after releasing heap lock: {}", .{heap.lock.status});
+}
+
 fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
-    virtual_address_space.heap.lock.acquire();
-    defer virtual_address_space.heap.lock.release();
+    virtual_address_space.heap.acquire_lock();
+    defer virtual_address_space.heap.release_lock();
 
     log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
@@ -51,8 +63,10 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         const region = blk: {
             for (virtual_address_space.heap.regions) |*region| {
                 if (region.size > 0) {
-                    region.allocated = common.align_forward(region.allocated, alignment);
-                    common.runtime_assert(@src(), (region.size - region.allocated) >= size);
+                    const aligned_allocated = region.virtual.offset(region.allocated).aligned_forward(alignment).value - region.virtual.value;
+                    if (region.size < aligned_allocated + size) continue;
+                    //common.runtime_assert(@src(), (region.size - region.allocated) >= size);
+                    region.allocated = aligned_allocated;
                     break :blk region;
                 } else {
                     // TODO: revisit arguments @MaybeBug

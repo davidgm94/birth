@@ -35,6 +35,8 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
         .lock = Spinlock.new(),
         .initialized = false,
     };
+
+    log.debug("heap lock status after VAS creation: 0x{x}", .{virtual_address_space.heap.lock.status});
 }
 
 pub fn bootstrapping() VirtualAddressSpace {
@@ -63,9 +65,26 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     virtual_address_space.arch.map_kernel_address_space_higher_half(kernel_address_space);
 }
 
-pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
+pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
+    new.* = old.*;
+    new.heap.allocator.ptr = new;
+}
+
+fn acquire_lock(virtual_address_space: *VirtualAddressSpace) void {
+    log.debug("State before acquiring VAS lock: {}", .{virtual_address_space.lock.status});
     virtual_address_space.lock.acquire();
-    defer virtual_address_space.lock.release();
+    log.debug("State after acquiring VAS lock: {}", .{virtual_address_space.lock.status});
+}
+
+fn release_lock(virtual_address_space: *VirtualAddressSpace) void {
+    log.debug("State before releasing VAS lock: {}", .{virtual_address_space.lock.status});
+    virtual_address_space.lock.release();
+    log.debug("State after releasing VAS lock: {}", .{virtual_address_space.lock.status});
+}
+
+pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
+    virtual_address_space.acquire_lock();
+    defer virtual_address_space.release_lock();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
     log.debug("asking ph", .{});
     const physical_address = root.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
@@ -92,6 +111,21 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
     virtual_address_space.map_physical_region(physical_region, virtual_address, flags);
     log.debug("After map", .{});
     return virtual_address;
+}
+
+pub fn heap_create(virtual_address_space: *VirtualAddressSpace, comptime T: type) !*T {
+    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
+    return try virtual_address_space.heap.allocator.create(T);
+}
+
+pub fn heap_allocate(virtual_address_space: *VirtualAddressSpace, comptime T: type, count: u64) ![]T {
+    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
+    return try virtual_address_space.heap.allocator.alloc(T, count);
+}
+
+pub fn heap_allocate_bytes(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u29) ![]u8 {
+    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
+    return try virtual_address_space.heap.allocator.allocBytes(alignment, size, 0, 0);
 }
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags) void {
