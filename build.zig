@@ -42,7 +42,7 @@ pub fn build(b: *Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = 8,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
+                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = false, },
                         .run_for_debug = true,
                     },
                 },
@@ -309,12 +309,21 @@ const Kernel = struct {
                 switch (kernel.options.run.emulator) {
                     .qemu => {
                         common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
+                        // TODO: better organization
+                        kernel.run_argument_list.append("-trace") catch unreachable;
+                        kernel.run_argument_list.append("-nvme*") catch unreachable;
+                        kernel.debug_argument_list.append("-trace") catch unreachable;
+                        kernel.debug_argument_list.append("-nvme*") catch unreachable;
                     },
                 }
 
                 kernel.debug_argument_list.append("-S") catch unreachable;
                 kernel.debug_argument_list.append("-s") catch unreachable;
             },
+        }
+        log.debug("QEMU command:", .{});
+        for (kernel.run_argument_list.items) |arg| {
+            log.debug("{s}", .{arg});
         }
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
@@ -334,7 +343,6 @@ const Kernel = struct {
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
             \\b start
-            \\b .common.common.arch.x86_64.limine.stivale2.stivale2.process_bootloader_information
             \\c
         );
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);

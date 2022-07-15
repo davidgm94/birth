@@ -34,16 +34,16 @@ rtd3_entry_latency_us: u32,
 maximum_data_outstanding_commands: u16,
 model: [40]u8,
 
-admin_submission_queue: [*]u8,
-admin_completion_queue: [*]u8,
+admin_submission_queue: [*]volatile u8,
+admin_completion_queue: [*]volatile u8,
 admin_completion_queue_head: u32,
 admin_submission_queue_tail: u32,
 admin_completion_queue_phase: bool,
 admin_completion_queue_last_result: u32,
 admin_completion_queue_last_status: u16,
 
-io_submission_queue: ?[*]u8,
-io_completion_queue: ?[*]u8,
+io_submission_queue: ?[*]volatile u8,
+io_completion_queue: ?[*]volatile u8,
 io_completion_queue_head: u32,
 io_submission_queue_tail: u32,
 io_submission_queue_head: u32,
@@ -109,7 +109,7 @@ const Drive = struct {
         const base_physical_address = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
         while (completed_sector_count < total_sector_count) {
             const new_tail = (nvme.io_submission_queue_tail + 1) % io_queue_entry_count;
-            const submission_queue_full = new_tail == nvme.io_submission_queue_head;
+            const submission_queue_full = new_tail == @ptrCast(*volatile u32, &nvme.io_submission_queue_head).*;
 
             while (submission_queue_full) {
                 // TODO: @Hack
@@ -301,33 +301,39 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     log.debug("NVMe doorbell stride: 0x{x}", .{nvme.doorbell_stride});
 
     nvme.ready_transition_timeout = nvme.capabilities.timeout * @as(u64, 500);
-    log.debug("NVMe ready transition timeout: 0x{x}", .{nvme.ready_transition_timeout});
+    log.debug("NVMe ready transition timeout: {} ms", .{nvme.ready_transition_timeout});
 
     const previous_configuration = nvme.read(cc);
     log.debug("Previous configuration: 0x{x}", .{previous_configuration});
 
-    log.debug("we are here", .{});
     if (previous_configuration.enable) {
-        log.debug("the controller was enabled", .{});
-        log.debug("branch", .{});
+        log.warn("The controller was enabled", .{});
         // TODO. HACK we should use a timeout here
         // TODO: PRobably buggy
+        var ready = false;
         while (!nvme.read(csts).ready) {
-            log.debug("busy waiting", .{});
+            ready = true;
         }
+        log.debug("Controller readiness: {}", .{ready});
+        log.debug("Disabling controller", .{});
         var config = nvme.read(cc);
         config.enable = false;
         nvme.write(cc, config);
+        log.debug("Controller disabled", .{});
+        log.debug("New cc: {}", .{nvme.read(cc)});
     }
 
     {
         // TODO. HACK we should use a timeout here
-        while (nvme.read(csts).ready) {}
+        while (nvme.read(csts).ready) {
+            log.debug("CSTS was ready", .{});
+        }
         log.debug("past the timeout", .{});
     }
 
     nvme.write(cc, blk: {
         var cc_value = nvme.read(cc);
+        log.debug("CC enable: {}", .{cc_value.enable});
         cc_value.css = .nvm_command_set;
         cc_value.mps = context.page_shifter - 12;
         cc_value.ams = .round_robin;
@@ -336,39 +342,38 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
         cc_value.iocqes = 4;
         break :blk cc_value;
     });
-    nvme.write(aqa, blk: {
-        var aqa_value = nvme.read(aqa);
-        aqa_value.asqs = admin_queue_entry_count - 1;
-        aqa_value.acqs = admin_queue_entry_count - 1;
-        break :blk aqa_value;
-    });
 
-    const admin_submission_queue_size = common.align_forward(admin_queue_entry_count * submission_queue_entry_bytes, context.page_size);
-    const admin_completion_queue_size = common.align_forward(admin_queue_entry_count * completion_queue_entry_bytes, context.page_size);
-    const admin_queue_data_structures_size = admin_submission_queue_size + admin_completion_queue_size;
-    const admin_queue_allocation_slice = virtual_address_space.heap.allocator.allocBytes(@intCast(u29, context.page_size), admin_queue_data_structures_size, 0, 0) catch @panic("admin queue");
-    const admin_queue_virtual_address = VirtualAddress.new(@ptrToInt(admin_queue_allocation_slice.ptr));
-    const admin_queue_physical_address = virtual_address_space.translate_address(admin_queue_virtual_address) orelse @panic("admin queue data structure physical address");
+    {
+        nvme.write(aqa, blk: {
+            var aqa_value = nvme.read(aqa);
+            aqa_value.asqs = admin_queue_entry_count - 1;
+            aqa_value.acqs = admin_queue_entry_count - 1;
+            break :blk aqa_value;
+        });
 
-    const admin_submission_queue_physical_address = admin_queue_physical_address;
-    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(admin_submission_queue_size);
+        const admin_submission_queue_size = common.align_forward(admin_queue_entry_count * submission_queue_entry_bytes, context.page_size);
+        const admin_completion_queue_size = common.align_forward(admin_queue_entry_count * completion_queue_entry_bytes, context.page_size);
+        const admin_queue_data_structures_size = admin_submission_queue_size + admin_completion_queue_size;
+        const admin_queue_allocation_slice = virtual_address_space.heap.allocator.allocBytes(@intCast(u29, context.page_size), admin_queue_data_structures_size, 0, 0) catch @panic("admin queue");
+        const admin_queue_virtual_address = VirtualAddress.new(@ptrToInt(admin_queue_allocation_slice.ptr));
+        const admin_queue_physical_address = virtual_address_space.translate_address(admin_queue_virtual_address) orelse @panic("admin queue data structure physical address");
 
-    nvme.write(asq, ASQ{
-        .reserved = 0,
-        .asqb = @truncate(u52, admin_submission_queue_physical_address.value >> 12),
-    });
-    nvme.write(acq, ACQ{
-        .reserved = 0,
-        .acqb = @truncate(u52, admin_completion_queue_physical_address.value >> 12),
-    });
+        const admin_submission_queue_physical_address = admin_queue_physical_address;
+        const admin_submission_queue_virtual_address = admin_queue_virtual_address;
+        const admin_completion_queue_physical_address = admin_queue_physical_address.offset(admin_submission_queue_size);
+        const admin_completion_queue_virtual_address = admin_queue_virtual_address.offset(admin_submission_queue_size);
+        nvme.admin_submission_queue = admin_submission_queue_virtual_address.access([*]volatile u8);
+        nvme.admin_completion_queue = admin_completion_queue_virtual_address.access([*]volatile u8);
 
-    const admin_submission_queue_virtual_address = admin_submission_queue_physical_address.to_higher_half_virtual_address();
-    const admin_completion_queue_virtual_address = admin_completion_queue_physical_address.to_higher_half_virtual_address();
-    virtual_address_space.map(admin_submission_queue_physical_address, admin_submission_queue_virtual_address, .{ .write = true });
-    virtual_address_space.map(admin_completion_queue_physical_address, admin_completion_queue_virtual_address, .{ .write = true });
-
-    nvme.admin_submission_queue = admin_submission_queue_virtual_address.access([*]u8);
-    nvme.admin_completion_queue = admin_completion_queue_virtual_address.access([*]u8);
+        nvme.write(asq, ASQ{
+            .reserved = 0,
+            .asqb = @truncate(u52, admin_submission_queue_physical_address.value >> 12),
+        });
+        nvme.write(acq, ACQ{
+            .reserved = 0,
+            .acqb = @truncate(u52, admin_completion_queue_physical_address.value >> 12),
+        });
+    }
 
     nvme.write(cc, blk: {
         var new_cc = nvme.read(cc);
@@ -380,6 +385,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
         // TODO: HACK use a timeout
         while (true) {
             const status = nvme.read(csts);
+            log.debug("Status: {}", .{status});
             if (status.cfs) {
                 @panic("Fatal error when enabling the controller");
             } else if (status.ready) {
@@ -480,11 +486,11 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     }
 
     {
-        for (nvme.prp_list_pages) |*prp_list_page| {
-            const prp_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, context.page_size, 0, 0) catch @panic("prp list page");
-            const prp_virtual_address = VirtualAddress.new(@ptrToInt(prp_allocation.ptr));
-            const prp_physical_address = virtual_address_space.translate_address(prp_virtual_address) orelse @panic("prp");
-            prp_list_page.* = prp_physical_address;
+        const prp_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, nvme.prp_list_pages.len * context.page_size, 0, 0) catch @panic("prp list page");
+        const prp_virtual_address = VirtualAddress.new(@ptrToInt(prp_allocation.ptr));
+        const prp_base_physical_address = virtual_address_space.translate_address(prp_virtual_address) orelse @panic("prp");
+        for (nvme.prp_list_pages) |*prp_list_page, page_i| {
+            prp_list_page.* = prp_base_physical_address.offset(page_i * context.page_size);
         }
 
         virtual_address_space.map(nvme.prp_list_pages[0], nvme.prp_list_pages[0].to_higher_half_virtual_address(), .{ .write = true });
@@ -588,7 +594,7 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
 
         @fence(.SeqCst);
 
-        nvme.io_submission_queue_head = @ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 8])).*;
+        @ptrCast(*volatile u32, &nvme.io_submission_queue_head).* = @ptrCast(*u16, @alignCast(@alignOf(u16), &nvme.io_completion_queue.?[nvme.io_completion_queue_head * completion_queue_entry_bytes + 8])).*;
         // TODO: event set
         nvme.io_completion_queue_head += 1;
 

@@ -466,8 +466,10 @@ pub const Device = struct {
 
     pub inline fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
         const base_address = device.base_addresses[index];
+        const do_mmio = base_address & 1 == 0;
+        log.debug("Do MMIO: {}", .{do_mmio});
         if (T != u64) {
-            if (base_address & 1 != 0) {
+            if (!do_mmio) {
                 const port = @intCast(u16, (base_address & ~@as(@TypeOf(base_address), 3)) + offset);
                 common.arch.io_write(T, port, value);
             } else {
@@ -475,7 +477,7 @@ pub const Device = struct {
                 virtual_address.access(*volatile T).* = value;
             }
         } else {
-            if (base_address & 1 != 0) {
+            if (!do_mmio) {
                 log.debug("here?", .{});
                 device.write_bar(u32, index, offset, @truncate(u32, value));
                 device.write_bar(u32, index, offset + @sizeOf(u32), @truncate(u32, value >> 32));
@@ -547,7 +549,6 @@ pub const Device = struct {
             }
 
             if (size == 0 or address == 0) return false;
-            log.debug("Address: 0x{x}. Size: {}", .{ address, size });
             size &= ~@as(u64, 0xf);
             size = ~size + 1;
             address &= ~@as(u64, 0xf);

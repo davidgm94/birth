@@ -35,8 +35,6 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
         .lock = Spinlock.new(),
         .initialized = false,
     };
-
-    log.debug("heap lock status after VAS creation: 0x{x}", .{virtual_address_space.heap.lock.status});
 }
 
 pub fn bootstrapping() VirtualAddressSpace {
@@ -70,25 +68,11 @@ pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
     new.heap.allocator.ptr = new;
 }
 
-fn acquire_lock(virtual_address_space: *VirtualAddressSpace) void {
-    log.debug("State before acquiring VAS lock: {}", .{virtual_address_space.lock.status});
-    virtual_address_space.lock.acquire();
-    log.debug("State after acquiring VAS lock: {}", .{virtual_address_space.lock.status});
-}
-
-fn release_lock(virtual_address_space: *VirtualAddressSpace) void {
-    log.debug("State before releasing VAS lock: {}", .{virtual_address_space.lock.status});
-    virtual_address_space.lock.release();
-    log.debug("State after releasing VAS lock: {}", .{virtual_address_space.lock.status});
-}
-
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
-    virtual_address_space.acquire_lock();
-    defer virtual_address_space.release_lock();
+    virtual_address_space.lock.acquire();
+    defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
-    log.debug("asking ph", .{});
     const physical_address = root.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
-    log.debug("have ph", .{});
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
@@ -105,11 +89,8 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
 
     if (flags.user) common.runtime_assert(@src(), virtual_address_space.translate_address(virtual_address) == null);
 
-    log.debug("Physical region: 0x{x}", .{physical_address.value});
     const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
-    log.debug("After pr", .{});
     virtual_address_space.map_physical_region(physical_region, virtual_address, flags);
-    log.debug("After map", .{});
     return virtual_address;
 }
 

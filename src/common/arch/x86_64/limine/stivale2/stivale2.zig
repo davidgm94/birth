@@ -31,8 +31,6 @@ const BootloaderInformation = struct {
 };
 
 pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error!BootloaderInformation {
-    log.debug("heap lock status stivale: 0x{x}", .{virtual_address_space.heap.lock.status});
-    log.debug("Physical address CR3: 0x{x}", .{virtual_address_space.arch.cr3});
     const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
@@ -69,13 +67,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
     const page_size = context.page_size;
     const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
-    var result = PhysicalAddressSpace{
-        .usable = &[_]PhysicalAddressSpace.MapEntry{},
-        .reclaimable = &[_]PhysicalAddressSpace.MapEntry{},
-        .framebuffer = &[_]PhysicalMemoryRegion{},
-        .kernel_and_modules = &[_]PhysicalMemoryRegion{},
-        .reserved = &[_]PhysicalMemoryRegion{},
-    };
+    var result = PhysicalAddressSpace.new();
 
     // First, it is required to find a spot in memory big enough to host all the memory map entries in a architecture-independent and bootloader-independent way. This is the host entry
     const host_entry = blk: {
@@ -224,8 +216,6 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
 
-    log.debug("Physical address CR3: 0x{x}", .{virtual_address_space.arch.cr3});
-    log.debug("heap lock status stivale: 0x{x}", .{virtual_address_space.heap.lock.status});
     const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
@@ -304,7 +294,8 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         smp.goto_address = @ptrToInt(smp_entry);
     }
 
-    while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
+    while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}
+    //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
     log.debug("Initialized all cores", .{});
 
     return cpus;

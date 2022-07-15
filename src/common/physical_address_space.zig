@@ -7,21 +7,23 @@ const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
+const Spinlock = common.arch.Spinlock;
 
 usable: []MapEntry,
 reclaimable: []MapEntry,
 framebuffer: []PhysicalMemoryRegion,
 kernel_and_modules: []PhysicalMemoryRegion,
 reserved: []PhysicalMemoryRegion,
+lock: Spinlock,
 
-pub fn new(comptime page_size: u64) PhysicalAddressSpace {
+pub fn new() PhysicalAddressSpace {
     return PhysicalAddressSpace{
         .usable = &.{},
         .reclaimable = &.{},
         .framebuffer = &.{},
         .kernel_and_modules = &.{},
         .reserved = &.{},
-        .page_size = page_size,
+        .lock = Spinlock.new(),
     };
     //TODO(@src());
 }
@@ -33,6 +35,8 @@ pub fn find_address(physical_address_space: *PhysicalAddressSpace, address: Phys
 }
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) ?PhysicalAddress {
+    physical_address_space.lock.acquire();
+    defer physical_address_space.lock.release();
     const take_hint = true;
     const page_size = context.page_size;
     const size = page_count * page_size;

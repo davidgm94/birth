@@ -98,7 +98,7 @@ pub fn init_scheduler() void {
     kernel.scheduler.init();
 }
 
-var timestamp_ticks_per_ms: u64 = 0;
+pub var timestamp_ticks_per_ms: u64 = 0;
 
 fn init_timer() void {
     disable_interrupts();

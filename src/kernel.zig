@@ -45,7 +45,7 @@ pub var local_storages: []common.arch.LocalStorage = undefined;
 pub const log_level: common.log.Level = switch (common.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
-    .ReleaseFast, .ReleaseSmall => .info,
+    .ReleaseFast, .ReleaseSmall => .debug,
 };
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
@@ -69,7 +69,13 @@ pub fn crash(comptime format: []const u8, args: anytype) noreturn {
     @setCold(true);
     common.arch.disable_interrupts();
     crash_log.err(format, args);
-    while (true) {}
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+            \\pause
+            ::: "memory");
+    }
 }
 
 pub fn TODO(src: common.SourceLocation) noreturn {

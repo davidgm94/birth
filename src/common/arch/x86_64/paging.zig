@@ -128,12 +128,6 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
     //log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
     //}
     log.debug("Paging initialized", .{});
-    const cr3 = kernel_virtual_address_space.arch.cr3;
-    const cr3_physical = PhysicalAddress{
-        .value = cr3,
-    };
-    common.runtime_assert(@src(), cr3_physical.is_valid());
-    log.debug("heap lock status after VAS creation: 0x{x}", .{kernel_virtual_address_space.heap.lock.status});
 }
 
 pub const VirtualAddressSpace = struct {
@@ -144,7 +138,6 @@ pub const VirtualAddressSpace = struct {
     pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VirtualAddressSpace {
         const page_count = common.bytes_to_pages(@sizeOf(PML4Table), context.page_size, .must_be_exact);
         const cr3_physical_address = physical_address_space.allocate(page_count) orelse return null;
-        log.debug("CR3 physical address: 0x{x}", .{cr3_physical_address.value});
         const virtual_address_space = VirtualAddressSpace{
             .cr3 = cr3_physical_address.value,
         };
