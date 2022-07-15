@@ -131,7 +131,7 @@ pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddr
     common.runtime_assert(@src(), privilege_level == .user);
     const executable_file = drive.read_file(drive, @ptrToInt(kernel_address_space), executable_filename);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
-    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, kernel_address_space.physical_address_space, kernel_address_space) orelse @panic("wtf2");
+    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space) orelse @panic("wtf2");
     const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     //common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
     const thread = scheduler.spawn_thread(user_virtual_address_space, privilege_level, elf_result.entry_point);

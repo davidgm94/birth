@@ -1,5 +1,6 @@
 const VirtualAddressSpace = @This();
 
+const root = @import("root");
 const common = @import("../common.zig");
 const context = @import("context");
 const Allocator = common.Allocator;
@@ -16,7 +17,6 @@ const Heap = common.Heap;
 const Spinlock = common.arch.Spinlock;
 
 arch: arch.VirtualAddressSpace,
-physical_address_space: *PhysicalAddressSpace,
 privilege_level: common.PrivilegeLevel,
 heap: Heap,
 lock: Spinlock,
@@ -30,7 +30,6 @@ pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpa
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
-        .physical_address_space = physical_address_space,
         .privilege_level = .kernel,
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock.new(),
@@ -42,7 +41,6 @@ pub fn bootstrapping() VirtualAddressSpace {
     const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping();
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,
-        .physical_address_space = undefined,
         .privilege_level = .kernel,
         .heap = undefined,
         .lock = Spinlock.new(),
@@ -56,7 +54,6 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
-        .physical_address_space = physical_address_space,
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock.new(),
@@ -67,8 +64,13 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
+    virtual_address_space.lock.acquire();
+    defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
-    const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+    log.debug("asking ph", .{});
+    const physical_address = root.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+    log.debug("have ph", .{});
+
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
             common.runtime_assert(@src(), !flags.user == specific_address.is_higher_half());
@@ -84,15 +86,11 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
 
     if (flags.user) common.runtime_assert(@src(), virtual_address_space.translate_address(virtual_address) == null);
 
-    const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * virtual_address_space.physical_address_space.page_size);
+    log.debug("Physical region: 0x{x}", .{physical_address.value});
+    const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
+    log.debug("After pr", .{});
     virtual_address_space.map_physical_region(physical_region, virtual_address, flags);
-    return virtual_address;
-}
-
-pub fn allocate_at_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, page_count: u64, flags: Flags) !VirtualAddress {
-    const physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
-    const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * virtual_address_space.physical_address_space.page_size);
-    virtual_address_space.map_physical_region(physical_region, virtual_address, flags);
+    log.debug("After map", .{});
     return virtual_address;
 }
 
@@ -115,7 +113,7 @@ pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
 pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_region: VirtualMemoryRegion, base_physical_address: PhysicalAddress, flags: Flags) void {
     var physical_address = base_physical_address;
     var virtual_address = virtual_region.address;
-    const page_size = virtual_address_space.physical_address_space.page_size;
+    const page_size = context.page_size;
     common.runtime_assert(@src(), common.is_aligned(physical_address.value, page_size));
     common.runtime_assert(@src(), common.is_aligned(virtual_address.value, page_size));
     common.runtime_assert(@src(), common.is_aligned(virtual_region.size, page_size));
@@ -132,18 +130,20 @@ pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_r
 pub fn map_physical_region(virtual_address_space: *VirtualAddressSpace, physical_region: PhysicalMemoryRegion, base_virtual_address: VirtualAddress, flags: Flags) void {
     var physical_address = physical_region.address;
     var virtual_address = base_virtual_address;
-    const page_size = virtual_address_space.physical_address_space.page_size;
+    const page_size = context.page_size;
     common.runtime_assert(@src(), common.is_aligned(physical_address.value, page_size));
     common.runtime_assert(@src(), common.is_aligned(virtual_address.value, page_size));
     common.runtime_assert(@src(), common.is_aligned(physical_region.size, page_size));
 
     var size: u64 = 0;
+    log.debug("Init mapping", .{});
 
     while (size < physical_region.size) : (size += page_size) {
         virtual_address_space.map(physical_address, virtual_address, flags);
         physical_address.value += page_size;
         virtual_address.value += page_size;
     }
+    log.debug("End mapping", .{});
 }
 
 pub const Flags = packed struct {

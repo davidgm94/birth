@@ -1,6 +1,7 @@
 const PhysicalAddressSpace = @This();
 
 const common = @import("../common.zig");
+const context = @import("context");
 const log = common.log.scoped(.PhysicalAddressSpace);
 const TODO = common.TODO;
 const PhysicalAddress = common.PhysicalAddress;
@@ -12,7 +13,6 @@ reclaimable: []MapEntry,
 framebuffer: []PhysicalMemoryRegion,
 kernel_and_modules: []PhysicalMemoryRegion,
 reserved: []PhysicalMemoryRegion,
-page_size: u64,
 
 pub fn new(comptime page_size: u64) PhysicalAddressSpace {
     return PhysicalAddressSpace{
@@ -34,10 +34,16 @@ pub fn find_address(physical_address_space: *PhysicalAddressSpace, address: Phys
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) ?PhysicalAddress {
     const take_hint = true;
-    const page_size = physical_address_space.page_size;
+    const page_size = context.page_size;
     const size = page_count * page_size;
     // TODO: don't allocate if they are different regions (this can cause issues?)
+    //log.debug("Debugging", .{});
+    //const slice = @ptrCast([*]u64, physical_address_space)[0 .. @sizeOf(PhysicalAddressSpace) / @sizeOf(u64)];
+    //for (slice) |int, int_i| {
+    //log.debug("[{}] = 0x{x}", .{ int_i, int });
+    //}
     for (physical_address_space.usable) |*region| {
+        //log.debug("Region descriptor: 0x{x}", .{region.descriptor.address.value});
         if (region.descriptor.size - region.allocated_size >= size) {
             const region_page_count = region.descriptor.size / page_size;
             const supposed_bitset_size = region_page_count / @bitSizeOf(MapEntry.BitsetBaseType);

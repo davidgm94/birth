@@ -343,12 +343,15 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
         break :blk aqa_value;
     });
 
-    const admin_submission_queue_size = admin_queue_entry_count * submission_queue_entry_bytes;
-    const admin_completion_queue_size = admin_queue_entry_count * completion_queue_entry_bytes;
-    const admin_queue_page_count = common.align_forward(admin_submission_queue_size, context.page_size) + common.align_forward(admin_completion_queue_size, context.page_size);
-    const admin_queue_physical_address = virtual_address_space.physical_address_space.allocate(admin_queue_page_count) orelse @panic("admin queue");
+    const admin_submission_queue_size = common.align_forward(admin_queue_entry_count * submission_queue_entry_bytes, context.page_size);
+    const admin_completion_queue_size = common.align_forward(admin_queue_entry_count * completion_queue_entry_bytes, context.page_size);
+    const admin_queue_data_structures_size = admin_submission_queue_size + admin_completion_queue_size;
+    const admin_queue_allocation_slice = virtual_address_space.heap.allocator.allocBytes(@intCast(u29, context.page_size), admin_queue_data_structures_size, 0, 0) catch @panic("admin queue");
+    const admin_queue_virtual_address = VirtualAddress.new(@ptrToInt(admin_queue_allocation_slice.ptr));
+    const admin_queue_physical_address = virtual_address_space.translate_address(admin_queue_virtual_address) orelse @panic("admin queue data structure physical address");
+
     const admin_submission_queue_physical_address = admin_queue_physical_address;
-    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(common.align_forward(admin_submission_queue_size, context.page_size));
+    const admin_completion_queue_physical_address = admin_queue_physical_address.offset(admin_submission_queue_size);
 
     nvme.write(asq, ASQ{
         .reserved = 0,
@@ -392,9 +395,9 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     nvme.write(intmc, 1 << 0);
 
     // TODO: @Hack remove that 3 for a proper value
-    const identify_data_physical_address = virtual_address_space.physical_address_space.allocate(3) orelse @panic("identify");
-    const identify_data_virtual_address = identify_data_physical_address.to_higher_half_virtual_address();
-    virtual_address_space.map(identify_data_physical_address, identify_data_virtual_address, .{ .write = true });
+    const identify_data_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, 3 * context.page_size, 0, 0) catch @panic("identity data");
+    const identify_data_virtual_address = VirtualAddress.new(@ptrToInt(identify_data_allocation.ptr));
+    const identify_data_physical_address = virtual_address_space.translate_address(identify_data_virtual_address) orelse @panic("identify data physical");
     const identify_data = identify_data_virtual_address.access([*]u8);
 
     {
@@ -441,13 +444,12 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     }
 
     {
-        const size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, context.page_size);
-        const page_count = kernel.bytes_to_pages(size, .must_be_exact);
-        const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
+        const queue_size = common.align_forward(io_queue_entry_count * completion_queue_entry_bytes, context.page_size);
+        const queue_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, queue_size, 0, 0) catch @panic("completion queue allocation");
+        const queue_virtual_address = VirtualAddress.new(@ptrToInt(queue_allocation.ptr));
+        const queue_physical_address = virtual_address_space.translate_address(queue_virtual_address) orelse @panic("completion queue physical");
 
-        const physical_region = PhysicalMemoryRegion.new(queue_physical_address, size);
-        virtual_address_space.map_physical_region(physical_region, queue_physical_address.to_higher_half_virtual_address(), .{ .write = true });
-        nvme.io_completion_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
+        nvme.io_completion_queue = queue_virtual_address.access([*]u8);
 
         var command = common.zeroes(Command);
         command[0] = 0x05;
@@ -460,13 +462,12 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     }
 
     {
-        const size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, context.page_size);
-        const page_count = kernel.bytes_to_pages(size, .must_be_exact);
-        const queue_physical_address = virtual_address_space.physical_address_space.allocate(page_count) orelse @panic("ph comp");
+        const queue_size = common.align_forward(io_queue_entry_count * submission_queue_entry_bytes, context.page_size);
+        const queue_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, queue_size, 0, 0) catch @panic("completion queue allocation");
+        const queue_virtual_address = VirtualAddress.new(@ptrToInt(queue_allocation.ptr));
+        const queue_physical_address = virtual_address_space.translate_address(queue_virtual_address) orelse @panic("submission queue physical");
 
-        const physical_region = PhysicalMemoryRegion.new(queue_physical_address, size);
-        virtual_address_space.map_physical_region(physical_region, queue_physical_address.to_higher_half_virtual_address(), .{ .write = true });
-        nvme.io_submission_queue = queue_physical_address.to_higher_half_virtual_address().access([*]u8);
+        nvme.io_submission_queue = queue_virtual_address.access([*]u8);
 
         var command = common.zeroes(Command);
         command[0] = 0x01;
@@ -480,7 +481,10 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
 
     {
         for (nvme.prp_list_pages) |*prp_list_page| {
-            prp_list_page.* = virtual_address_space.physical_address_space.allocate(1) orelse @panic("prp physical");
+            const prp_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, context.page_size, 0, 0) catch @panic("prp list page");
+            const prp_virtual_address = VirtualAddress.new(@ptrToInt(prp_allocation.ptr));
+            const prp_physical_address = virtual_address_space.translate_address(prp_virtual_address) orelse @panic("prp");
+            prp_list_page.* = prp_physical_address;
         }
 
         virtual_address_space.map(nvme.prp_list_pages[0], nvme.prp_list_pages[0].to_higher_half_virtual_address(), .{ .write = true });

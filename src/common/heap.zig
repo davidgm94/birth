@@ -1,5 +1,6 @@
 const Heap = @This();
 const common = @import("../common.zig");
+const context = @import("context");
 const log = common.log.scoped(.Heap);
 const TODO = common.TODO;
 const Allocator = common.Allocator;
@@ -15,6 +16,7 @@ pub const Region = struct {
 
 allocator: Allocator,
 regions: [region_count]Region,
+lock: Spinlock,
 
 const region_size = 2 * common.mb;
 pub const region_count = 0x1000_0000 / region_size;
@@ -26,18 +28,13 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
             .vtable = &vtable,
         },
         .regions = common.zeroes([region_count]Region),
+        .lock = Spinlock.new(),
     };
 }
 
 fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
-    log.debug("here1", .{});
-    common.runtime_assert(@src(), !virtual_address_space.lock.status);
-    log.debug("here2", .{});
-    virtual_address_space.lock.acquire();
-    log.debug("here3", .{});
-    common.runtime_assert(@src(), virtual_address_space.lock.status);
-    log.debug("here4", .{});
-    defer virtual_address_space.lock.release();
+    virtual_address_space.heap.lock.acquire();
+    defer virtual_address_space.heap.lock.release();
 
     log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
@@ -76,7 +73,7 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         region.allocated += size;
         return @intToPtr([*]u8, result_address)[0..size];
     } else {
-        const allocation_size = common.align_forward(size, virtual_address_space.physical_address_space.page_size);
+        const allocation_size = common.align_forward(size, context.page_size);
         const virtual_address = try virtual_address_space.allocate(allocation_size, null, flags);
         log.debug("Big allocation happened!", .{});
         return virtual_address.access([*]u8)[0..size];

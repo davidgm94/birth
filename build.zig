@@ -334,6 +334,7 @@ const Kernel = struct {
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
             \\b start
+            \\b .common.common.arch.x86_64.limine.stivale2.stivale2.process_bootloader_information
             \\c
         );
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);

@@ -184,7 +184,7 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
     log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
     const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
 
-    for (program_headers) |*ph, i| {
+    for (program_headers) |*ph| {
         switch (ph.type) {
             .load => {
                 if (ph.size_in_memory == 0) continue;
@@ -221,66 +221,6 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
                     common.runtime_assert(@src(), dst_slice.len == src_slice.len);
 
-                    if (i == 1) {
-                        common.runtime_assert(@src(), ph.virtual_address == 0x200000);
-                        common.runtime_assert(@src(), ph.virtual_address == base_virtual_address.value);
-                        //const entry_offset = entry_point - 0x200000;
-                        //common.runtime_assert(@src(), entry_offset == 0x110);
-
-                        //const check_slice = [_]u8{
-                        //0x55,
-                        //0x48,
-                        //0x89,
-                        //0xe5,
-                        //0x48,
-                        //0x83,
-                        //0xec,
-                        //10,
-                        //0x31,
-                        //0xc0,
-                        //0x89,
-                        //0xc7,
-                        //0xbe,
-                        //0x01,
-                        //0x00,
-                        //0x00,
-                        //0x00,
-                        //0xba,
-                        //0x02,
-                        //0x00,
-                        //0x00,
-                        //0x00,
-                        //0xb9,
-                        //0x03,
-                        //0x00,
-                        //0x00,
-                        //0x00,
-                        //0x41,
-                        //0xb8,
-                        //0x04,
-                        //0x00,
-                        //0x00,
-                        //00,
-                        //0x41,
-                        //0xb9,
-                        //0x05,
-                        //0x00,
-                        //0x00,
-                        //00,
-                        //0xe8,
-                        //0xc4,
-                        //0xfe,
-                        //0xff,
-                        //0xff,
-                        //};
-                        //const slice_to_check = src_slice[entry_offset .. entry_offset + check_slice.len];
-                        //for (slice_to_check) |original, byte_i| {
-                        //const should_be = check_slice[byte_i];
-                        //if (original != should_be) {
-                        //log.err("Wrong. At index {}. Original: 0x{x}. Should be: 0x{x}", .{ byte_i, original, should_be });
-                        //}
-                        //}
-                    }
                     common.copy(u8, dst_slice, src_slice);
                     // TODO: unmap
                 } else {

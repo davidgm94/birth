@@ -7,6 +7,7 @@
 
 const common = @import("../../../common.zig");
 const context = @import("context");
+const root = @import("root");
 
 const x86_64 = common.arch.x86_64;
 
@@ -89,10 +90,10 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
     log.debug("Memory mapping initialized!", .{});
 
     for (physical_address_space.reclaimable) |*region| {
-        const bitset = region.get_bitset_extended(physical_address_space.page_size);
+        const bitset = region.get_bitset_extended(context.page_size);
         const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
-        region.allocated_size = common.align_forward(bitset_size, physical_address_space.page_size);
-        region.setup_bitset(physical_address_space.page_size);
+        region.allocated_size = common.align_forward(bitset_size, context.page_size);
+        region.setup_bitset(context.page_size);
     }
 
     const old_reclaimable = physical_address_space.reclaimable.len;
@@ -127,6 +128,11 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
     //log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
     //}
     log.debug("Paging initialized", .{});
+    const cr3 = kernel_virtual_address_space.arch.cr3;
+    const cr3_physical = PhysicalAddress{
+        .value = cr3,
+    };
+    common.runtime_assert(@src(), cr3_physical.is_valid());
 }
 
 pub const VirtualAddressSpace = struct {
@@ -135,8 +141,9 @@ pub const VirtualAddressSpace = struct {
     const Indices = [common.enum_values(PageIndex).len]u16;
 
     pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VirtualAddressSpace {
-        const page_count = common.bytes_to_pages(@sizeOf(PML4Table), physical_address_space.page_size, .must_be_exact);
+        const page_count = common.bytes_to_pages(@sizeOf(PML4Table), context.page_size, .must_be_exact);
         const cr3_physical_address = physical_address_space.allocate(page_count) orelse return null;
+        log.debug("CR3 physical address: 0x{x}", .{cr3_physical_address.value});
         const virtual_address_space = VirtualAddressSpace{
             .cr3 = cr3_physical_address.value,
         };
@@ -148,15 +155,6 @@ pub const VirtualAddressSpace = struct {
     pub inline fn bootstrapping() VirtualAddressSpace {
         return VirtualAddressSpace{
             .cr3 = x86_64.cr3.read_raw(),
-        };
-    }
-
-    pub inline fn from_context(my_context: anytype) VirtualAddressSpace {
-        // This is taking a u64 instead of a physical address to easily put here the value of the CR3 register
-        comptime common.comptime_assert(@TypeOf(my_context) == u64);
-        const cr3 = my_context;
-        return VirtualAddressSpace{
-            .cr3 = cr3,
         };
     }
 
@@ -176,6 +174,7 @@ pub const VirtualAddressSpace = struct {
     }
 
     pub fn map(arch_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
+        common.runtime_assert(@src(), (PhysicalAddress{ .value = arch_address_space.cr3 }).is_valid());
         if (should_log) log.debug("Init mapping", .{});
         common.runtime_assert(@src(), common.is_aligned(virtual_address.value, context.page_size));
         common.runtime_assert(@src(), common.is_aligned(physical_address.value, context.page_size));
@@ -191,7 +190,7 @@ pub const VirtualAddressSpace = struct {
             if (pml4_entry_value.contains(.present)) {
                 pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
             } else {
-                const pdp_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
+                const pdp_allocation = root.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDPTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
                 pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
                 pdp.* = common.zeroes(PDPTable);
                 pml4_entry_value.or_flag(.present);
@@ -212,7 +211,7 @@ pub const VirtualAddressSpace = struct {
             if (pdp_entry_value.contains(.present)) {
                 pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
             } else {
-                const pd_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
+                const pd_allocation = root.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PDTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
                 pd = pd_allocation.access_kernel(@TypeOf(pd));
                 pd.* = common.zeroes(PDTable);
                 pdp_entry_value.or_flag(.present);
@@ -231,7 +230,7 @@ pub const VirtualAddressSpace = struct {
             if (pd_entry_value.contains(.present)) {
                 pt = get_address_from_entry_bits(pd_entry_value.bits).access_kernel(@TypeOf(pt));
             } else {
-                const pt_allocation = @ptrCast(*common.VirtualAddressSpace, arch_address_space).physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
+                const pt_allocation = root.physical_address_space.allocate(common.bytes_to_pages(@sizeOf(PTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
                 pt = pt_allocation.access_kernel(@TypeOf(pt));
                 pt.* = common.zeroes(PTable);
                 pd_entry_value.or_flag(.present);

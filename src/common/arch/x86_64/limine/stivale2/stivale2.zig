@@ -73,7 +73,6 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
         .framebuffer = &[_]PhysicalMemoryRegion{},
         .kernel_and_modules = &[_]PhysicalMemoryRegion{},
         .reserved = &[_]PhysicalMemoryRegion{},
-        .page_size = page_size,
     };
 
     // First, it is required to find a spot in memory big enough to host all the memory map entries in a architecture-independent and bootloader-independent way. This is the host entry
@@ -237,6 +236,7 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
 
     return kernel_sections;
 }
+
 pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
     const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse unreachable;
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
