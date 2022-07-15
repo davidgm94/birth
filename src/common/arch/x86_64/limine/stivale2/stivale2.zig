@@ -226,7 +226,7 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
 
     log.debug("Physical address CR3: 0x{x}", .{virtual_address_space.arch.cr3});
     log.debug("heap lock status stivale: 0x{x}", .{virtual_address_space.heap.lock.status});
-    const kernel_sections = virtual_address_space.heap_allocate(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
+    const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
         const kernel_section = &kernel_sections[i];

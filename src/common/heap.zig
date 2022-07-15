@@ -32,21 +32,9 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
     };
 }
 
-fn acquire_lock(heap: *Heap) void {
-    log.debug("State before acquiring heap lock: 0x{x}. Spinlock address: 0x{x}. Spinlock size: {}. Spinlock status address: 0x{x}", .{ heap.lock.status, @ptrToInt(&heap.lock), @sizeOf(Spinlock), @ptrToInt(&heap.lock.status) });
-    heap.lock.acquire();
-    log.debug("State after acquiring heap lock: {}", .{heap.lock.status});
-}
-
-fn release_lock(heap: *Heap) void {
-    log.debug("State before releasing heap lock: {}", .{heap.lock.status});
-    heap.lock.release();
-    log.debug("State after releasing heap lock: {}", .{heap.lock.status});
-}
-
 fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
-    virtual_address_space.heap.acquire_lock();
-    defer virtual_address_space.heap.release_lock();
+    virtual_address_space.heap.lock.acquire();
+    defer virtual_address_space.heap.lock.release();
 
     log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
@@ -77,11 +65,14 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
                         .allocated = 0,
                     };
 
+                    // Avoid footguns
+                    common.runtime_assert(@src(), common.is_aligned(region.virtual.value, alignment));
+
                     break :blk region;
                 }
             }
 
-            @panic("unreachableeee");
+            @panic("heap out of memory");
         };
         const result_address = region.virtual.value + region.allocated;
         region.allocated += size;

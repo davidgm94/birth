@@ -113,21 +113,6 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
     return virtual_address;
 }
 
-pub fn heap_create(virtual_address_space: *VirtualAddressSpace, comptime T: type) !*T {
-    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
-    return try virtual_address_space.heap.allocator.create(T);
-}
-
-pub fn heap_allocate(virtual_address_space: *VirtualAddressSpace, comptime T: type, count: u64) ![]T {
-    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
-    return try virtual_address_space.heap.allocator.alloc(T, count);
-}
-
-pub fn heap_allocate_bytes(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u29) ![]u8 {
-    common.runtime_assert(@src(), @ptrToInt(virtual_address_space.heap.allocator.ptr) == @ptrToInt(virtual_address_space));
-    return try virtual_address_space.heap.allocator.allocBytes(alignment, size, 0, 0);
-}
-
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags) void {
     virtual_address_space.arch.map(physical_address, virtual_address, flags.to_arch_specific());
     const new_physical_address = virtual_address_space.translate_address(virtual_address) orelse @panic("address not present");

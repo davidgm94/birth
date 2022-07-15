@@ -22,17 +22,9 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
     if (common.arch.get_current_thread().cpu) |current_cpu| {
         current_cpu.spinlock_count += 1;
     }
-    //const status = spinlock.status;
-    //const first_bit = @truncate(u1, status);
-    //const bit_count = 8;
-    //comptime var bit_i: u8 = 1;
-    //while (bit_i < bit_count) : (bit_i += 1) {
-    //const bit_value = @truncate(u1, status >> bit_i);
-    //if (bit_value != first_bit) @panic("wtfffffffffff");
-    //}
 
     while (@cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*@TypeOf(spinlock.status), &spinlock.status), expected, ~expected, .Acquire, .Monotonic) != null) {
-        if (spinlock.status != 0 and spinlock.status != 0xff) @panic("wtf");
+        asm volatile ("pause" ::: "memory");
     }
     @fence(.Acquire);
 

@@ -584,7 +584,7 @@ pub fn handle_irq(nvme: *NVMe, line: u64) bool {
                 common.panic(@src(), "NVMe driver internal error: {s}", .{get_error_message(status_code_type, status_code)});
             }
             // TODO: abstraction stuff
-        } else @panic("wtf");
+        } else @panic("NVMe wtf");
 
         @fence(.SeqCst);
 
@@ -723,7 +723,7 @@ fn get_error_message(status_code_type: u3, status_code: u8) []const u8 {
             } else if (status_code >= 0x80 and (status_code - 0x80) < generic_command_status_values_nvm.len) {
                 break :blk generic_command_status_values_nvm[status_code - 0x80];
             } else {
-                @panic("wtf");
+                @panic("NVMe wtf 1");
             }
         },
         1 => blk: {
@@ -732,21 +732,21 @@ fn get_error_message(status_code_type: u3, status_code: u8) []const u8 {
             } else if (status_code >= 0x80 and (status_code - 0x80) < generic_command_status_values_nvm.len) {
                 break :blk generic_command_status_values_nvm[status_code - 0x80];
             } else {
-                @panic("wtf");
+                @panic("NVMe wtf 2");
             }
         },
         2 => blk: {
             if (status_code >= 0x80 and (status_code - 0x80) < media_and_data_integrity_error_values_nvm.len) {
                 break :blk media_and_data_integrity_error_values_nvm[status_code - 0x80];
             } else {
-                @panic("wtf");
+                @panic("NVMe wtf 3");
             }
         },
         3 => blk: {
             if (status_code >= 0x80 and (status_code - 0x80) < path_related_status_values.len) {
                 break :blk path_related_status_values[status_code - 0x80];
             } else {
-                @panic("wtf");
+                @panic("NVMe wtf 4");
             }
         },
         else => "Unknown error",
