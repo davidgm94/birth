@@ -118,6 +118,7 @@ const Kernel = struct {
         kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
+        kernel.executable.emit_llvm_ir = .{ .emit_to = "zig-cache/kernel_llvm.ir" };
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }

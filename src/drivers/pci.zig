@@ -447,43 +447,55 @@ pub const Device = struct {
     }
 
     pub inline fn read_bar(device: *Device, comptime T: type, index: u64, offset: u64) T {
+        const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+        comptime {
+            common.comptime_assert(@sizeOf(T) >= @sizeOf(u32));
+            common.comptime_assert(@sizeOf(T) <= @sizeOf(u64));
+        }
+
         const base_address = device.base_addresses[index];
-        if (T != u64) {
-            if (base_address & 1 != 0) {
+        const mmio_base_address = device.base_virtual_addresses[index];
+        const mmio_address = mmio_base_address.offset(offset);
+        log.debug("MMIO base address: 0x{x}. MMIO address: 0x{x}. Index: {}. Offset: {}. Type: {}", .{ mmio_base_address.value, mmio_address.value, index, offset, T });
+        const do_mmio = base_address & 1 == 0;
+        if (do_mmio) {
+            // Info: @ZigBug. After a read, the value must be bitcasted and assigned of a new variable of the same type in order to work.
+            // If you don't do this, the Zig compiler splits the reads, emitting two or more operations and stopping us to get a good PCI interaction
+            const mmio_ptr = mmio_address.access(*volatile IntType);
+            const mmio_read_value = mmio_ptr.*;
+            const mmio_result: T = @bitCast(T, mmio_read_value);
+            return mmio_result;
+        } else {
+            if (T != u64) {
                 const port = @intCast(u16, (base_address & ~@as(u32, 3)) + offset);
                 return common.arch.io_read(T, port);
             } else {
-                return device.base_virtual_addresses[index].offset(offset).access(*volatile T).*;
-            }
-        } else {
-            if (base_address & 1 != 0) {
                 return device.read_bar(u32, index, offset) | (@intCast(u64, device.read_bar(u64, index, offset + @sizeOf(u32))) << 32);
-            } else {
-                return device.base_virtual_addresses[index].offset(offset).access(*volatile T).*;
             }
         }
     }
 
-    pub inline fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
+    pub fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
+        const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+        comptime {
+            common.comptime_assert(@sizeOf(T) >= @sizeOf(u32));
+            common.comptime_assert(@sizeOf(T) <= @sizeOf(u64));
+        }
         const base_address = device.base_addresses[index];
         const do_mmio = base_address & 1 == 0;
-        log.debug("Do MMIO: {}", .{do_mmio});
-        if (T != u64) {
-            if (!do_mmio) {
+        const mmio_address = device.base_virtual_addresses[index].offset(offset);
+        if (do_mmio) {
+            // Info: @ZigBug. The value must be bitcasted and assigned of a new variable of the same type and the write it to the MMIO register
+            // in order to work. If you don't do this, the Zig compiler splits the writes, emitting two or more operations and stopping us to get a good PCI interaction
+            const int_value: IntType = @bitCast(IntType, value);
+            mmio_address.access(*align(@alignOf(IntType)) volatile IntType).* = int_value;
+        } else {
+            if (T != u64) {
                 const port = @intCast(u16, (base_address & ~@as(@TypeOf(base_address), 3)) + offset);
                 common.arch.io_write(T, port, value);
             } else {
-                const virtual_address = device.base_virtual_addresses[index].offset(offset);
-                virtual_address.access(*volatile T).* = value;
-            }
-        } else {
-            if (!do_mmio) {
-                log.debug("here?", .{});
                 device.write_bar(u32, index, offset, @truncate(u32, value));
                 device.write_bar(u32, index, offset + @sizeOf(u32), @truncate(u32, value >> 32));
-            } else {
-                log.debug("here?", .{});
-                device.base_virtual_addresses[index].offset(offset).access(*volatile T).* = value;
             }
         }
     }
@@ -526,7 +538,6 @@ pub const Device = struct {
             }
 
             const is_size_64 = base_address & 0b100 != 0;
-            log.debug("is size 64: {}", .{is_size_64});
 
             var address: u64 = 0;
             var size: u64 = 0;
