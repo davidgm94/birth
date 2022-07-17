@@ -21,6 +21,7 @@ pub const Syscall = arch.Syscall;
 
 pub const enable_interrupts = arch.enable_interrupts;
 pub const disable_interrupts = arch.disable_interrupts;
+pub const disable_all_interrupts = arch.disable_all_interrupts;
 pub const are_interrupts_enabled = arch.are_interrupts_enabled;
 
 pub const pci_read_config = arch.pci_read_config;
@@ -64,3 +65,5 @@ pub const set_new_stack = arch.set_new_stack;
 pub const post_context_switch = arch.post_context_switch;
 pub const interrupts_epilogue = arch.interrupts_epilogue;
 pub const set_argument = arch.set_argument;
+pub const signal_end_of_interrupt = arch.signal_end_of_interrupt;
+pub const legacy_actions_before_context_switch = arch.legacy_actions_before_context_switch;

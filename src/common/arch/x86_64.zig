@@ -971,6 +971,10 @@ pub inline fn disable_interrupts() void {
     //log.debug("IF=0", .{});
 }
 
+pub inline fn disable_all_interrupts() void {
+    asm volatile ("cli");
+}
+
 pub inline fn are_interrupts_enabled() bool {
     if (use_cr8) {
         const if_set = RFLAGS.read().contains(.IF);
@@ -1225,14 +1229,6 @@ pub inline fn set_new_stack(new_stack: u64) void {
     );
 }
 
-comptime {
-    if (@hasDecl(kernel, "identity")) {
-        if (kernel.identity == .kernel) {
-            @export(post_context_switch, .{ .name = "post_context_switch", .linkage = .Strong });
-        }
-    }
-}
-
 pub fn post_context_switch(arch_context: *Context, new_thread: *common.Thread, old_address_space: *common.VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});
     if (@import("root").scheduler.lock.were_interrupts_enabled != 0) {
@@ -1253,7 +1249,7 @@ pub fn post_context_switch(arch_context: *Context, new_thread: *common.Thread, o
 
     // TODO: close reference or dettach address space
     _ = old_address_space;
-    new_thread.last_known_execution_address = arch_context.rip;
+    //new_thread.last_known_execution_address = arch_context.rip;
 
     const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
     cpu.lapic.end_of_interrupt();
@@ -1275,4 +1271,15 @@ pub inline fn set_argument(comptime argument_i: comptime_int, argument_value: u6
     };
     const register = SimpleR64(register_name);
     register.write(argument_value);
+}
+
+pub inline fn signal_end_of_interrupt(cpu: *CPU) void {
+    cpu.lapic.end_of_interrupt();
+}
+
+pub inline fn legacy_actions_before_context_switch(new_thread: *Thread) void {
+    const new_cs_user_bits = @truncate(u2, new_thread.context.cs);
+    const old_cs_user_bits = @truncate(u2, cs.read());
+    const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
+    if (should_swap_gs) asm volatile ("swapgs");
 }

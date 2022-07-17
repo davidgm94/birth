@@ -17,7 +17,6 @@ user_stack_commit: u64,
 id: u64,
 context: *common.arch.Context,
 time_slices: u64,
-last_known_execution_address: u64,
 address_space: *VirtualAddressSpace,
 cpu: ?*common.arch.CPU,
 
