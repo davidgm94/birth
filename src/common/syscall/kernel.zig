@@ -1,5 +1,6 @@
 const common = @import("../../common.zig");
 const log = common.log.scoped(.Syscall);
+const TODO = common.TODO;
 
 pub const Syscall = common.Syscall;
 
@@ -19,5 +20,6 @@ pub fn thread_exit(syscall_id: Syscall.ID, exit_code: u64, maybe_message_ptr: ?[
             log.err("Message pointer is valid but user didn't specify valid length", .{});
         }
     }
-    unreachable;
+
+    TODO(@src());
 }
