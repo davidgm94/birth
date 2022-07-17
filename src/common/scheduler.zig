@@ -84,8 +84,7 @@ pub fn yield(scheduler: *Scheduler, arch_context: *Context) void {
         if (cpu.spinlock_count > 0) @panic("spinlocks active");
         // TODO: profiling
         common.arch.legacy_actions_before_context_switch(new_thread);
-        log.debug("Here?", .{});
-        common.arch.set_new_stack(new_thread.kernel_stack.value);
+        common.arch.set_new_stack(@ptrToInt(new_thread.context));
         common.arch.interrupts_epilogue();
 
         @panic("wtfffF");
