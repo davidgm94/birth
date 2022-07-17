@@ -334,7 +334,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         @panic("interrupts are enabled");
     }
 
-    log.debug("===================== INT 0x{x} =====================", .{context.interrupt_number});
+    log.debug("===================== START INT 0x{x} =====================", .{context.interrupt_number});
     const should_swap_gs = @truncate(u2, context.cs) == ~@truncate(u2, x86_64.cs.read());
     if (should_swap_gs) {
         asm volatile ("swapgs");
@@ -403,6 +403,8 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     if (x86_64.are_interrupts_enabled()) {
         @panic("interrupts should not be enabled");
     }
+
+    log.debug("===================== END INT 0x{x} =====================", .{context.interrupt_number});
 }
 
 const std = @import("std");

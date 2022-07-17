@@ -249,18 +249,19 @@ inline fn write_cqhdbl(nvme: *NVMe, index: u32, value: u32) void {
 }
 
 pub fn issue_admin_command(nvme: *NVMe, command: *Command, result: ?*u32) bool {
-    _ = result;
     @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.admin_submission_queue[nvme.admin_submission_queue_tail * @sizeOf(Command)])).* = command.*;
     nvme.admin_submission_queue_tail = (nvme.admin_submission_queue_tail + 1) % admin_queue_entry_count;
 
     // TODO: reset event
-    @fence(.SeqCst); // best memory barrier?
+    @fence(.Release); // best memory barrier?
     common.runtime_assert(@src(), common.arch.are_interrupts_enabled());
     nvme.write_sqtdbl(0, nvme.admin_submission_queue_tail);
     asm volatile ("hlt");
     // TODO: wait for event
     //
 
+    // This log makes a NVMe initialization bug disappear. We must evaluate it
+    log.debug("NVMe admin completion queue last status: 0x{x}", .{nvme.admin_completion_queue_last_status});
     if (nvme.admin_completion_queue_last_status != 0) {
         const do_not_retry = nvme.admin_completion_queue_last_status & 0x8000 != 0;
         const more = nvme.admin_completion_queue_last_status & 0x4000 != 0;

@@ -315,6 +315,10 @@ const Kernel = struct {
                         kernel.run_argument_list.append("-nvme*") catch unreachable;
                         kernel.debug_argument_list.append("-trace") catch unreachable;
                         kernel.debug_argument_list.append("-nvme*") catch unreachable;
+                        kernel.run_argument_list.append("-trace") catch unreachable;
+                        kernel.run_argument_list.append("-pci*") catch unreachable;
+                        kernel.debug_argument_list.append("-trace") catch unreachable;
+                        kernel.debug_argument_list.append("-pci*") catch unreachable;
                     },
                 }
 
