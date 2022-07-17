@@ -30,7 +30,7 @@ pub fn init(scheduler: *Scheduler) void {
     //test_userspace();
 }
 
-pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
+pub fn yield(scheduler: *Scheduler, arch_context: *Context) void {
     const current_cpu = common.arch.get_current_thread().cpu.?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
@@ -52,7 +52,30 @@ pub fn yield(scheduler: *Scheduler, arch_context: *Context) noreturn {
     //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
     //common.arch.next_timer(1);
-    common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
+    //log.debug("New thread address: 0x{x}", .{@ptrToInt(&new_thread)});
+    //log.debug("New address space offset: 0x{x}", .{@ptrToInt(&new_thread) + @offsetOf(Thread, "address_space")});
+    //log.debug("New thread address: 0x{x}", .{@intToPtr(*u64, @ptrToInt(&new_thread) + @offsetOf(Thread, "address_space")).*});
+    if (false) {
+        common.arch.switch_context(new_thread.context, new_thread.address_space, new_thread.kernel_stack.value, new_thread, old_address_space);
+    } else {
+        new_thread.context.check(@src());
+        log.debug("About to do the crime", .{});
+        common.arch.switch_context_preamble();
+        new_thread.context.check(@src());
+        common.arch.switch_address_spaces_if_necessary(new_thread.address_space);
+        new_thread.context.check(@src());
+
+        common.arch.set_argument(0, @ptrToInt(new_thread.context));
+        common.arch.set_argument(1, @ptrToInt(new_thread));
+        common.arch.set_argument(2, @ptrToInt(old_address_space));
+        common.arch.set_new_stack(new_thread.kernel_stack.value);
+        asm volatile (
+            \\call post_context_switch
+        );
+        common.arch.interrupts_epilogue();
+
+        @panic("wtfffF");
+    }
 }
 
 pub fn spawn_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {

@@ -42,7 +42,7 @@ pub fn build(b: *Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = 8,
-                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = false, },
+                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },

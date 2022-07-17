@@ -31,6 +31,7 @@ pub const ACPI = @import("x86_64/acpi.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 /// This is just the arch-specific part of the address space
 pub const VirtualAddressSpace = paging.VirtualAddressSpace;
+pub const interrupts_epilogue = interrupts.epilogue;
 const Thread = common.Thread;
 
 pub const IOAPIC = struct {
@@ -1203,4 +1204,75 @@ pub inline fn spinloop_without_wasting_cpu() noreturn {
         );
         asm volatile ("pause" ::: "memory");
     }
+}
+
+pub inline fn switch_context_preamble() void {
+    asm volatile ("cli");
+}
+
+pub inline fn switch_address_spaces_if_necessary(new_address_space: *common.VirtualAddressSpace) void {
+    const current_cr3 = cr3.read_raw();
+    if (current_cr3 != new_address_space.arch.cr3) {
+        cr3.write_raw(new_address_space.arch.cr3);
+    }
+}
+
+pub inline fn set_new_stack(new_stack: u64) void {
+    asm volatile ("mov %[in], %%rsp"
+        :
+        : [in] "r" (new_stack),
+        : "nostack"
+    );
+}
+
+comptime {
+    if (@hasDecl(kernel, "identity")) {
+        if (kernel.identity == .kernel) {
+            @export(post_context_switch, .{ .name = "post_context_switch", .linkage = .Strong });
+        }
+    }
+}
+
+pub fn post_context_switch(arch_context: *Context, new_thread: *common.Thread, old_address_space: *common.VirtualAddressSpace) callconv(.C) void {
+    log.debug("Context switching", .{});
+    if (@import("root").scheduler.lock.were_interrupts_enabled != 0) {
+        @panic("interrupts were enabled");
+    }
+    kernel.scheduler.lock.release();
+    //common.runtime_assert(@src(), context == new_thread.context);
+    //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    arch_context.check(@src());
+    common.runtime_assert(@src(), new_thread.current_thread == new_thread);
+    set_current_thread(new_thread);
+    const new_cs_user_bits = @truncate(u2, arch_context.cs);
+    const old_cs_user_bits = @truncate(u2, cs.read());
+    const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
+
+    // TODO: checks
+    //const new_thread = current_thread.time_slices == 1;
+
+    // TODO: close reference or dettach address space
+    _ = old_address_space;
+    new_thread.last_known_execution_address = arch_context.rip;
+
+    const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
+    cpu.lapic.end_of_interrupt();
+    if (are_interrupts_enabled()) @panic("interrupts enabled");
+    if (cpu.spinlock_count > 0) @panic("spinlocks active");
+    // TODO: profiling
+    if (should_swap_gs) asm volatile ("swapgs");
+}
+
+pub inline fn set_argument(comptime argument_i: comptime_int, argument_value: u64) void {
+    const register_name = switch (argument_i) {
+        0 => "rdi",
+        1 => "rsi",
+        2 => "rdx",
+        3 => "rcx",
+        4 => "r8",
+        5 => "r9",
+        else => unreachable,
+    };
+    const register = SimpleR64(register_name);
+    register.write(argument_value);
 }
