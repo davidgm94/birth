@@ -285,6 +285,8 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     //const current_thread = common.arch.get_current_thread();
     //log.debug("Current thread: {}", .{current_thread});
     //if (true) @panic("lol");
+    //
+    var ap_threads = virtual_address_space.
 
     for (smps[1..]) |*smp| {
         log.debug("Allocating stacks...", .{});
@@ -309,6 +311,7 @@ const SMPArgument = packed struct {
 
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
+    const current_cpu = &kernel.cpus[smp_info.processor_id];
     log.debug("Core #{} received signal", .{smp_info.processor_id});
     while (!@atomicLoad(bool, &go, .Acquire)) {
         asm volatile ("pause" ::: "memory");
