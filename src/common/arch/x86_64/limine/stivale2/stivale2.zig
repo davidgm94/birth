@@ -280,13 +280,13 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     scheduler.cpus[0].is_bootstrap = true;
     const bsp_thread = scheduler.all_threads.addOne(virtual_address_space.heap.allocator) catch @panic("wth");
     bsp_thread.context = &bootstrap_context.context;
-    scheduler.active_threads.setCapacity(virtual_address_space.heap.allocator, thread_count) catch @panic("wtf");
+    scheduler.active_threads.setCapacity(virtual_address_space.heap.allocator, thread_count * 2) catch @panic("wtf");
     scheduler.active_threads.append(virtual_address_space.heap.allocator, bsp_thread) catch @panic("wtf");
     common.arch.set_current_thread(bsp_thread);
 
     const entry_point = @ptrToInt(smp_entry);
     const ap_cpu_count = scheduler.cpus.len - 1;
-    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
+    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, .active, ap_cpu_count, entry_point);
     common.runtime_assert(@src(), scheduler.all_threads.count() == ap_threads.len + 1);
     const all_threads = scheduler.all_threads.prealloc_segment[0..thread_count];
     common.runtime_assert(@src(), &all_threads[0] == bsp_thread);
@@ -306,7 +306,6 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         smp.extra_argument = 0;
         smp.target_stack = stack_pointer;
         smp.goto_address = entry_point;
-        scheduler.active_threads.append(virtual_address_space.heap.allocator, ap_thread) catch @panic("wtf");
     }
 
     while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}

@@ -7,7 +7,9 @@ const VirtualAddressSpace = common.VirtualAddressSpace;
 
 kernel_stack: VirtualAddress,
 privilege_level: PrivilegeLevel,
+
 type: Type,
+state: State,
 kernel_stack_base: VirtualAddress,
 kernel_stack_size: u64,
 user_stack_base: VirtualAddress,
@@ -28,6 +30,11 @@ const Type = enum(u1) {
 pub const EntryPoint = struct {
     start_address: u64,
     argument: u64,
+};
+
+pub const State = enum {
+    paused,
+    active,
 };
 
 pub const AllList = common.SegmentedList(Thread, 256);
