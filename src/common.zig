@@ -33,6 +33,12 @@ pub const ExitStatus = enum(u32) {
     failure = 1,
 };
 
+pub const BootstrapContext = struct {
+    cpu: arch.CPU,
+    thread: Thread,
+    context: arch.Context,
+};
+
 pub const emulator_program = Emulator.qemu;
 pub const emulator = switch (emulator_program) {
     .qemu => QEMU,
@@ -75,6 +81,8 @@ pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
 pub const ArrayListManaged = std.ArrayList;
 pub const ArrayListAlignedManaged = std.ArrayListAligned;
 pub const MultiArrayList = std.MultiArrayList;
+pub const SegmentedList = std.SegmentedList;
+pub const SinglyLinkedList = std.SinglyLinkedList;
 
 // DEBUG
 pub const StackTrace = std.builtin.StackTrace;

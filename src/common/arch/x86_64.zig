@@ -16,6 +16,7 @@ const PhysicalAddressSpace = common.PhysicalAddressSpace;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const VirtualAddress = common.VirtualAddress;
 const VirtualMemoryRegion = common.VirtualMemoryRegion;
+const Scheduler = common.Scheduler;
 
 const log = common.log.scoped(.x86_64);
 
@@ -94,18 +95,20 @@ pub fn prepare_drivers(virtual_address_space: *common.VirtualAddressSpace, rsdp:
 }
 
 pub fn init_scheduler() void {
-    defer init_timer();
-
-    kernel.scheduler.init();
+    // TODO: do more?
+    init_timer();
 }
 
 pub var timestamp_ticks_per_ms: u64 = 0;
 
 fn init_timer() void {
     disable_interrupts();
-    const bsp = &kernel.cpus[0];
+    const bsp = &kernel.scheduler.cpus[0];
+    common.runtime_assert(@src(), bsp.is_bootstrap);
     const timer_calibration_start = read_timestamp();
+    log.debug("About to use LAPIC", .{});
     bsp.lapic.write(.TIMER_INITCNT, common.max_int(u32));
+    log.debug("After to use LAPIC", .{});
     var times_i: u64 = 0;
     const times = 8;
 
@@ -123,6 +126,8 @@ fn init_timer() void {
     const timer_calibration_end = read_timestamp();
     timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
     enable_interrupts();
+
+    log.debug("Timer initialized!", .{});
 }
 
 pub inline fn read_timestamp() u64 {
@@ -138,8 +143,14 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
+var my_current_thread: *Thread = undefined;
+
+pub inline fn preset_thread_pointer() void {
+    IA32_GS_BASE.write(@ptrToInt(&my_current_thread));
+}
+
 pub inline fn set_current_thread(current_thread: *Thread) void {
-    IA32_GS_BASE.write(@ptrToInt(current_thread));
+    my_current_thread = current_thread;
 }
 
 pub inline fn get_current_thread() *Thread {
@@ -169,26 +180,25 @@ pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
     log.debug("APIC physical address: 0{x}", .{apic_physical_address});
-    cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address));
+    common.runtime_assert(@src(), apic_physical_address != 0);
+    const old_lapic_id = cpu.lapic.id;
+    cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
-    common.runtime_assert(@src(), lapic_id == cpu.lapic_id);
+    common.runtime_assert(@src(), lapic_id == cpu.lapic.id);
     log.debug("APIC enabled", .{});
-}
-
-pub export fn foo() callconv(.C) void {
-    log.debug("cpu: 0x{x}", .{rsp.read()});
-    //log.debug("CPU: 0x{x}. INTSTACK: 0x{x}. SCHDSTACK: 0x{x}", .{ @ptrToInt(cpu), cpu.int_stack, cpu.scheduler_stack });
-    //log.debug("RSP: 0x{x}", .{myrsp});
 }
 
 pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace) void {
     // This assumes the BSP processor is already properly setup here
     const current_thread = get_current_thread();
     const bsp = current_thread.cpu orelse @panic("cpu");
+    log.debug("BSP id: {}", .{bsp.id});
+    common.runtime_assert(@src(), bsp.is_bootstrap);
+    common.runtime_assert(@src(), bsp == &kernel.scheduler.cpus[0]);
     bsp.gdt.initial_setup();
-    // Flush GS as well
-    set_current_thread(current_thread);
+    // Flush GS as well. This requires updating the thread pointer holder
+    preset_thread_pointer();
     interrupts.init();
     enable_apic(virtual_address_space);
     Syscall.enable();
@@ -987,8 +997,9 @@ pub inline fn are_interrupts_enabled() bool {
 }
 
 pub const LAPIC = struct {
-    ticks_per_ms: u32 = 0,
     address: VirtualAddress,
+    ticks_per_ms: u32 = 0,
+    id: u32,
 
     const Register = enum(u32) {
         LAPIC_ID = 0x20,
@@ -1003,13 +1014,14 @@ pub const LAPIC = struct {
         TIMER_CURRENT_COUNT = 0x390,
     };
 
-    pub inline fn new(virtual_address_space: *common.VirtualAddressSpace, lapic_physical_address: PhysicalAddress) LAPIC {
+    pub inline fn new(virtual_address_space: *common.VirtualAddressSpace, lapic_physical_address: PhysicalAddress, lapic_id: u32) LAPIC {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
         virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
         const lapic = LAPIC{
             .address = lapic_virtual_address,
+            .id = lapic_id,
         };
         log.debug("LAPIC initialized: 0x{x}", .{lapic_virtual_address.value});
         return lapic;
@@ -1050,9 +1062,9 @@ pub const CPU = struct {
     int_stack: u64,
     scheduler_stack: u64,
     lapic: LAPIC,
-    lapic_id: u32,
     spinlock_count: u64,
     is_bootstrap: bool,
+    id: u32,
 
     pub fn bootstrap_stacks(cpu: *CPU) void {
         cpu.int_stack = bootstrap_stack(stack_size);
@@ -1109,12 +1121,9 @@ pub const Context = struct {
     ss: u64,
 
     pub fn new(thread: *common.Thread, entry_point: u64) *Context {
-        const kernel_stack = thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
-        log.debug("thread user stack base: 0x{x}", .{thread.user_stack_base.value});
-        const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
-        const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
-        log.debug("User stack: 0x{x}", .{user_stack});
-        const arch_context = @intToPtr(*Context, kernel_stack - @sizeOf(Context));
+        const kernel_stack = get_kernel_stack(thread);
+        const user_stack = get_user_stack(thread);
+        const arch_context = from_kernel_stack(kernel_stack);
         thread.kernel_stack = VirtualAddress.new(kernel_stack);
         log.debug("ARch Kernel stack: 0x{x}", .{thread.kernel_stack.value});
         thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
@@ -1138,6 +1147,28 @@ pub const Context = struct {
         arch_context.rdi = 0;
 
         return arch_context;
+    }
+
+    pub fn get_stack_pointer(arch_context: *Context) u64 {
+        return arch_context.rsp;
+    }
+
+    fn get_kernel_stack(thread: *Thread) u64 {
+        return thread.kernel_stack_base.value + thread.kernel_stack_size - 8;
+    }
+
+    fn get_user_stack(thread: *Thread) u64 {
+        const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
+        const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
+        return user_stack;
+    }
+
+    fn from_kernel_stack(kernel_stack: u64) *Context {
+        return @intToPtr(*Context, kernel_stack - @sizeOf(Context));
+    }
+
+    pub fn from_thread(thread: *Thread) *Context {
+        return from_kernel_stack(get_kernel_stack(thread));
     }
 
     pub fn debug(arch_context: *Context) void {
@@ -1282,4 +1313,17 @@ pub inline fn legacy_actions_before_context_switch(new_thread: *Thread) void {
     const old_cs_user_bits = @truncate(u2, cs.read());
     const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
     if (should_swap_gs) asm volatile ("swapgs");
+}
+
+pub fn preinit_bsp(scheduler: *Scheduler, virtual_address_space: *common.VirtualAddressSpace, bootstrap_context: *common.BootstrapContext) void {
+    // @ZigBug: @ptrCast here crashes the compiler
+
+    bootstrap_context.thread.cpu = &bootstrap_context.cpu;
+    bootstrap_context.thread.context = &bootstrap_context.context;
+    bootstrap_context.thread.address_space = virtual_address_space;
+    preset_thread_pointer();
+    set_current_thread(&bootstrap_context.thread);
+    IA32_KERNEL_GS_BASE.write(0);
+
+    scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
 }

@@ -13,6 +13,9 @@ const PhysicalAddress = common.PhysicalAddress;
 const PhysicalAddressSpace = common.PhysicalAddressSpace;
 const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
 const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegion;
+const Thread = common.Thread;
+const CPU = common.arch.CPU;
+const SegmentedList = common.SegmentedList;
 
 pub const Struct = stivale.Struct;
 
@@ -27,21 +30,19 @@ pub const Error = error{
 const BootloaderInformation = struct {
     kernel_sections_in_memory: []VirtualMemoryRegion,
     kernel_file: common.File,
-    cpus: []common.arch.CPU,
 };
 
-pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error!BootloaderInformation {
+pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!BootloaderInformation {
     const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
     log.debug("Processed kernel file in memory", .{});
-    const cpus = try process_smp(virtual_address_space, stivale2_struct, bootstrap_cpu);
+    try process_smp(virtual_address_space, stivale2_struct, bootstrap_context, scheduler);
     log.debug("Processed SMP info", .{});
 
     return BootloaderInformation{
         .kernel_sections_in_memory = kernel_sections_in_memory,
         .kernel_file = kernel_file,
-        .cpus = cpus,
     };
 }
 
@@ -265,53 +266,61 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
 
 const stack_size = 0x10000;
 var cpus_left: u64 = 0;
-pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_cpu: common.arch.CPU) Error![]common.arch.CPU {
+
+pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!void {
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
-    const cpus = virtual_address_space.heap.allocator.alloc(common.arch.CPU, smp_struct.cpu_count) catch return Error.smp;
-    const smps = smp_struct.smp_info()[0..smp_struct.cpu_count];
+    const cpu_count = smp_struct.cpu_count;
+    const thread_count = cpu_count;
+    scheduler.cpus = virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch return Error.smp;
+    const smps = smp_struct.smp_info()[0..cpu_count];
     common.runtime_assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
-    cpus[0] = bootstrap_cpu;
-    cpus[0].is_bootstrap = true;
+    scheduler.cpus[0] = bootstrap_context.cpu;
+    scheduler.cpus[0].is_bootstrap = true;
+    const bsp_thread = scheduler.all_threads.addOne(virtual_address_space.heap.allocator) catch @panic("wth");
+    bsp_thread.context = &bootstrap_context.context;
+    scheduler.active_threads.setCapacity(virtual_address_space.heap.allocator, thread_count) catch @panic("wtf");
+    scheduler.active_threads.append(virtual_address_space.heap.allocator, bsp_thread) catch @panic("wtf");
+    common.arch.set_current_thread(bsp_thread);
 
-    cpus_left = cpus.len - 1;
+    const entry_point = @ptrToInt(smp_entry);
+    const ap_cpu_count = scheduler.cpus.len - 1;
+    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
+    common.runtime_assert(@src(), scheduler.all_threads.count() == ap_threads.len + 1);
+    const all_threads = scheduler.all_threads.prealloc_segment[0..thread_count];
+    common.runtime_assert(@src(), &all_threads[0] == bsp_thread);
 
-    for (smps) |smp, cpu_index| {
-        const cpu = &cpus[cpu_index];
-        cpu.lapic_id = smp.lapic_id;
+    for (smps) |smp, index| {
+        const cpu = &scheduler.cpus[index];
+        const thread = &all_threads[index];
+        cpu.lapic.id = smp.lapic_id;
+        cpu.id = smp.processor_id;
+        thread.cpu = cpu;
     }
 
-    //const current_thread = common.arch.get_current_thread();
-    //log.debug("Current thread: {}", .{current_thread});
-    //if (true) @panic("lol");
-    //
-    var ap_threads = virtual_address_space.
-
-    for (smps[1..]) |*smp| {
-        log.debug("Allocating stacks...", .{});
-        const stack = virtual_address_space.heap.allocator.allocBytes(context.page_size, stack_size, 0, 0) catch @panic("stack");
+    cpus_left = ap_cpu_count;
+    for (smps[1..]) |*smp, index| {
+        const ap_thread = &ap_threads[index];
+        const stack_pointer = ap_thread.context.get_stack_pointer();
         smp.extra_argument = 0;
-        smp.target_stack = @ptrToInt(stack.ptr + stack.len - 16);
-        smp.goto_address = @ptrToInt(smp_entry);
+        smp.target_stack = stack_pointer;
+        smp.goto_address = entry_point;
+        scheduler.active_threads.append(virtual_address_space.heap.allocator, ap_thread) catch @panic("wtf");
     }
 
     while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}
     //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
     log.debug("Initialized all cores", .{});
-
-    return cpus;
 }
 
 var go: bool = false;
 
-const SMPArgument = packed struct {
-    core_id: u64,
-};
-
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
-    const current_cpu = &kernel.cpus[smp_info.processor_id];
+    const current_cpu = &kernel.scheduler.cpus[smp_info.processor_id];
+    _ = current_cpu;
+    if (true) TODO(@src());
     log.debug("Core #{} received signal", .{smp_info.processor_id});
     while (!@atomicLoad(bool, &go, .Acquire)) {
         asm volatile ("pause" ::: "memory");

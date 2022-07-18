@@ -67,7 +67,7 @@ pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: 
                     x86_64.iso = virtual_address_space.heap.allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
 
-                    common.runtime_assert(@src(), processor_count == kernel.cpus.len);
+                    common.runtime_assert(@src(), processor_count == kernel.scheduler.cpus.len);
 
                     offset = @ptrToInt(madt) + @sizeOf(MADT);
 

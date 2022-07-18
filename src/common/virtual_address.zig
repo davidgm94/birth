@@ -12,6 +12,12 @@ pub inline fn new(value: u64) VirtualAddress {
     return virtual_address;
 }
 
+pub inline fn invalid() VirtualAddress {
+    return VirtualAddress{
+        .value = 0,
+    };
+}
+
 pub inline fn is_valid(virtual_address: VirtualAddress) bool {
     return virtual_address.value != 0;
 }

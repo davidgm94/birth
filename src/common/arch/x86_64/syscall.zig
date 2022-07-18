@@ -55,9 +55,6 @@ comptime {
 }
 
 pub fn kernel_syscall_entry_point() callconv(.Naked) noreturn {
-    comptime {
-        common.comptime_assert(@offsetOf(common.Thread, "kernel_stack") == 8);
-    }
     // This function only modifies RSP. The other registers are preserved in user space
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (

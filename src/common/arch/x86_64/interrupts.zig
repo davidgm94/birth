@@ -589,7 +589,8 @@ fn setup_interrupt_redirection_entry(asked_line: u64) bool {
         if (level_triggered) redirection_entry |= (1 << 15);
 
         x86_64.ioapic.write(redirection_table_index, 1 << 16);
-        x86_64.ioapic.write(redirection_table_index + 1, kernel.cpus[0].lapic_id << 24);
+        common.runtime_assert(@src(), x86_64.get_current_thread().cpu.? == &kernel.scheduler.cpus[0]);
+        x86_64.ioapic.write(redirection_table_index + 1, kernel.scheduler.cpus[0].lapic.id << 24);
         x86_64.ioapic.write(redirection_table_index, redirection_entry);
 
         already_setup |= @as(u32, 1) << @intCast(u5, asked_line);

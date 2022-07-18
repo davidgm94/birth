@@ -9,7 +9,7 @@ const VirtualAddressSpace = common.VirtualAddressSpace;
 
 pub export fn start(stivale2_struct_address: u64) noreturn {
     kernel.virtual_address_space = common.VirtualAddressSpace.bootstrapping();
-    kernel.arch.x86_64.preinit_bsp();
+    x86_64.preinit_bsp(&kernel.scheduler, &kernel.virtual_address_space, &kernel.bootstrap_context);
     log.debug("Hello kernel!", .{});
     log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
     x86_64.enable_cpu_features();
@@ -18,12 +18,9 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     const rsdp = Stivale2.process_rsdp(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)) catch @panic("Unable to get RSDP");
     kernel.physical_address_space = Stivale2.process_memory_map(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)) catch unreachable;
     paging.init(&kernel.virtual_address_space, &kernel.physical_address_space, Stivale2.get_pmrs(stivale2_struct_physical_address.access_kernel(*Stivale2.Struct)), higher_half_direct_map);
-    const bootloader_information = Stivale2.process_bootloader_information(&kernel.virtual_address_space, stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), kernel.cpus[0]) catch unreachable;
+    const bootloader_information = Stivale2.process_bootloader_information(&kernel.virtual_address_space, stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), &kernel.bootstrap_context, &kernel.scheduler) catch unreachable;
     kernel.sections_in_memory = bootloader_information.kernel_sections_in_memory;
     kernel.file = bootloader_information.kernel_file;
-    kernel.cpus = bootloader_information.cpus;
-    const bsp = &kernel.cpus[0];
-    x86_64.get_current_thread().cpu = bsp;
     x86_64.preinit_scheduler(&kernel.virtual_address_space);
     x86_64.init_scheduler();
     x86_64.prepare_drivers(&kernel.virtual_address_space, rsdp);

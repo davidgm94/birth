@@ -5,7 +5,6 @@ const VirtualAddress = common.VirtualAddress;
 const PrivilegeLevel = common.PrivilegeLevel;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 
-current_thread: *Thread,
 kernel_stack: VirtualAddress,
 privilege_level: PrivilegeLevel,
 type: Type,
@@ -30,3 +29,6 @@ pub const EntryPoint = struct {
     start_address: u64,
     argument: u64,
 };
+
+pub const AllList = common.SegmentedList(Thread, 256);
+pub const List = common.SegmentedList(*Thread, 0);
