@@ -20,6 +20,9 @@ context: *common.arch.Context,
 time_slices: u64,
 address_space: *VirtualAddressSpace,
 cpu: ?*common.arch.CPU,
+all_item: ListItem,
+queue_item: ListItem,
+executing: bool,
 
 // TODO: idle thread
 const Type = enum(u1) {
@@ -37,5 +40,6 @@ pub const State = enum {
     active,
 };
 
-pub const AllList = common.SegmentedList(Thread, 256);
-pub const List = common.SegmentedList(*Thread, 0);
+pub const ListItem = common.List.ListItem(*Thread);
+pub const List = common.List.List(*Thread);
+pub const Buffer = common.List.StableBuffer(Thread, 64);

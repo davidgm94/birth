@@ -21,7 +21,8 @@ const Allocator = common.Allocator;
 pub const Context = common.arch.Context;
 
 lock: Spinlock,
-all_threads: Thread.AllList,
+thread_buffer: Thread.Buffer,
+all_threads: Thread.List,
 active_threads: Thread.List,
 paused_threads: Thread.List,
 cpus: []CPU,
@@ -94,7 +95,7 @@ const ThreadStack = struct {
     user: ?VirtualAddress,
 };
 
-pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, comptime thread_state: Thread.State, thread_count: u64, entry_point: u64) []Thread {
+pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, thread_count: u64, entry_point: u64) []Thread {
     comptime {
         common.comptime_assert(privilege_level == .kernel);
     }
@@ -106,8 +107,11 @@ pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *Vir
     const thread_bulk_stack_allocation_size = thread_count * thread_stack_size;
     const thread_bulk_stack_allocation = virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
 
-    const existing_threads = scheduler.all_threads.count();
-    common.runtime_assert(@src(), existing_threads + thread_count <= scheduler.all_threads.prealloc_segment.len);
+    const existing_threads = scheduler.all_threads.count;
+    common.runtime_assert(@src(), existing_threads + thread_count <= Thread.Buffer.Bucket.bitset_size);
+    common.runtime_assert(@src(), scheduler.thread_buffer.element_count == scheduler.all_threads.count);
+    const bucket_count = scheduler.thread_buffer.bucket_count;
+    common.runtime_assert(@src(), bucket_count == 1);
     var thread_i: u64 = 0;
     while (thread_i < thread_count) : (thread_i += 1) {
         const stack_allocation_offset = thread_i * thread_stack_size;
@@ -115,21 +119,22 @@ pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *Vir
             .kernel = thread_bulk_stack_allocation.offset(stack_allocation_offset),
             .user = null,
         };
-        _ = scheduler.spawn_thread(virtual_address_space, virtual_address_space, privilege_level, entry_point, thread_state, thread_stack, null);
+        _ = scheduler.spawn_thread(virtual_address_space, virtual_address_space, privilege_level, entry_point, thread_stack, null);
     }
 
-    return scheduler.all_threads.prealloc_segment[existing_threads .. existing_threads + thread_count];
+    return scheduler.thread_buffer.first.?.data[existing_threads .. existing_threads + thread_count];
 }
 
-pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, entry_point: u64, comptime thread_state: Thread.State, maybe_thread_stack: ?ThreadStack, cpu: ?*CPU) *Thread {
+pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, entry_point: u64, maybe_thread_stack: ?ThreadStack, cpu: ?*CPU) *Thread {
     if (maybe_thread_stack != null) {
         common.runtime_assert(@src(), privilege_level == .kernel);
     }
 
     // TODO: lock
-    const new_thread_id = scheduler.all_threads.count();
+    const new_thread_id = scheduler.all_threads.count;
     log.debug("About to allocate", .{});
-    const thread = scheduler.all_threads.addOne(kernel_virtual_address_space.heap.allocator) catch @panic("all threads");
+    const thread = scheduler.thread_buffer.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
+    scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
     log.debug("Ended to allocate", .{});
 
     // TODO: should we always use the same address space for kernel tasks?
@@ -190,6 +195,8 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     thread.type = .normal;
     common.runtime_assert(@src(), thread.type == .normal);
     thread.cpu = cpu;
+    thread.state = .active;
+    thread.executing = false;
 
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});
@@ -197,10 +204,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         thread.context = common.arch.Context.new(thread, entry_point);
     }
 
-    switch (thread_state) {
-        .active => scheduler.active_threads.append(kernel_virtual_address_space.heap.allocator, thread) catch @panic("wtf"),
-        .paused => scheduler.paused_threads.append(kernel_virtual_address_space.heap.allocator, thread) catch @panic("wtf"),
-    }
+    scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
 
     return thread;
 }
@@ -213,7 +217,7 @@ pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddr
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space) orelse @panic("wtf2");
     const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     //common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
-    const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point, .paused, null, null);
+    const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point, null, null);
 
     return thread;
 }
@@ -224,15 +228,14 @@ pub fn terminate(thread: *Thread) void {
 }
 
 fn pick_thread(scheduler: *Scheduler) *Thread {
-    log.debug("Scheduler active threads: {}", .{scheduler.active_threads.count()});
-    log.debug("Scheduler paused threads: {}", .{scheduler.paused_threads.count()});
-    //const current_thread = common.arch.get_current_thread();
-    //const current_thread_id = current_thread.id;
-    //common.runtime_assert(@src(), current_thread_id < scheduler.thread_id);
-    ////const next_thread_index = kernel.arch.read_timestamp() % thread_id;
-    //const next_thread_index = 0;
-    //const new_thread = &scheduler.thread_pool[next_thread_index];
-    //return new_thread;
-    _ = scheduler;
-    TODO(@src());
+    log.debug("Scheduler active threads: {}", .{scheduler.active_threads.count});
+    log.debug("Scheduler paused threads: {}", .{scheduler.paused_threads.count});
+    var maybe_active_thread_node = scheduler.active_threads.first;
+    while (maybe_active_thread_node) |active_thread_node| : (active_thread_node = active_thread_node.next) {
+        const active_thread = active_thread_node.data;
+        scheduler.active_threads.remove(active_thread_node);
+        return active_thread;
+    }
+
+    @panic("Nothing to schedule");
 }

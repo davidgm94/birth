@@ -20,6 +20,8 @@ pub const Thread = @import("common/thread.zig");
 pub const Scheduler = @import("common/scheduler.zig");
 pub const Syscall = @import("common/syscall.zig");
 pub const User = @import("common/user.zig");
+pub const List = @import("common/list.zig");
+pub const StableBuffer = @import("common/stable_buffer.zig");
 
 pub const Emulator = enum {
     qemu,
@@ -83,6 +85,7 @@ pub const ArrayListAlignedManaged = std.ArrayListAligned;
 pub const MultiArrayList = std.MultiArrayList;
 pub const SegmentedList = std.SegmentedList;
 pub const SinglyLinkedList = std.SinglyLinkedList;
+pub const TailQueue = std.TailQueue;
 
 // DEBUG
 pub const StackTrace = std.builtin.StackTrace;

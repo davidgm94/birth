@@ -278,17 +278,18 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     common.runtime_assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
     scheduler.cpus[0] = bootstrap_context.cpu;
     scheduler.cpus[0].is_bootstrap = true;
-    const bsp_thread = scheduler.all_threads.addOne(virtual_address_space.heap.allocator) catch @panic("wth");
+    const bsp_thread = scheduler.thread_buffer.add_one(virtual_address_space.heap.allocator) catch @panic("wtf");
+    scheduler.all_threads.append(&bsp_thread.all_item, bsp_thread) catch @panic("wtF");
     bsp_thread.context = &bootstrap_context.context;
-    scheduler.active_threads.setCapacity(virtual_address_space.heap.allocator, thread_count * 2) catch @panic("wtf");
-    scheduler.active_threads.append(virtual_address_space.heap.allocator, bsp_thread) catch @panic("wtf");
+    bsp_thread.state = .active;
     common.arch.set_current_thread(bsp_thread);
 
     const entry_point = @ptrToInt(smp_entry);
     const ap_cpu_count = scheduler.cpus.len - 1;
-    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, .active, ap_cpu_count, entry_point);
-    common.runtime_assert(@src(), scheduler.all_threads.count() == ap_threads.len + 1);
-    const all_threads = scheduler.all_threads.prealloc_segment[0..thread_count];
+    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
+    common.runtime_assert(@src(), scheduler.all_threads.count == ap_threads.len + 1);
+    common.runtime_assert(@src(), scheduler.all_threads.count < Thread.Buffer.Bucket.bitset_size);
+    const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
     common.runtime_assert(@src(), &all_threads[0] == bsp_thread);
 
     for (smps) |smp, index| {
@@ -297,6 +298,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         cpu.lapic.id = smp.lapic_id;
         cpu.id = smp.processor_id;
         thread.cpu = cpu;
+        thread.executing = true;
     }
 
     cpus_left = ap_cpu_count;
@@ -306,7 +308,9 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         smp.extra_argument = 0;
         smp.target_stack = stack_pointer;
         smp.goto_address = entry_point;
+        scheduler.active_threads.remove(&ap_thread.queue_item);
     }
+    common.runtime_assert(@src(), scheduler.active_threads.count == 0);
 
     while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}
     //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
