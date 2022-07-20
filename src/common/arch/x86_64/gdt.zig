@@ -29,7 +29,7 @@ pub const Table = packed struct {
         //common.comptime_assert(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
     }
 
-    pub fn initial_setup(gdt: *Table) void {
+    pub fn initial_setup(gdt: *Table, cpu_id: u64) void {
         log.debug("Loading GDT...", .{});
         gdt.* = Table{
             .tss = bootstrap_tss.get_descriptor(),
@@ -37,6 +37,7 @@ pub const Table = packed struct {
         gdt.load();
         log.debug("GDT loaded", .{});
         x86_64.flush_segments_kernel();
+        x86_64.preset_thread_pointer(cpu_id);
     }
 
     pub inline fn load(gdt: *Table) void {

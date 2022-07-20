@@ -278,9 +278,6 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     common.arch.start_cpu(virtual_address_space);
     log.debug("CPU started", .{});
 
-    // Initialize GDT, IDT, etc.
-    if (true) TODO(@src());
-    log.debug("Processor woke up", .{});
     _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
     while (true) {
         asm volatile ("pause" ::: "memory");

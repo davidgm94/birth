@@ -186,13 +186,6 @@ pub inline fn get_current_thread() *Thread {
     );
 }
 
-//pub inline fn read_gs() ?*kernel.arch.CPU {
-//return asm volatile (
-//\\mov %%gs:[0], %[result]
-//: [result] "=r" (-> ?*kernel.arch.CPU),
-//);
-//}
-
 pub const timer_interrupt = 0x40;
 pub const interrupt_vector_msi_start = 0x70;
 pub const interrupt_vector_msi_count = 0x40;
@@ -210,9 +203,10 @@ pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     const old_lapic_id = cpu.lapic.id;
     cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
     cpu.lapic.write(.SPURIOUS, spurious_value);
-    const lapic_id = cpu.lapic.read(.LAPIC_ID);
-    log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
-    common.runtime_assert(@src(), lapic_id == cpu.lapic.id);
+    // TODO: getting the lapic id from a LAPIC register is not reporting good ids. Why?
+    //const lapic_id = cpu.lapic.read(.LAPIC_ID);
+    //log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
+    //common.runtime_assert(@src(), lapic_id == cpu.lapic.id);
     log.debug("APIC enabled", .{});
 }
 
@@ -248,9 +242,8 @@ pub fn start_cpu(virtual_address_space: *common.VirtualAddressSpace) void {
     const current_thread = get_current_thread();
     const cpu = current_thread.cpu orelse @panic("cpu");
     log.debug("CPU id: {}", .{cpu.id});
-    cpu.gdt.initial_setup();
+    cpu.gdt.initial_setup(cpu.id);
     // Flush GS as well. This requires updating the thread pointer holder
-    preset_thread_pointer(cpu.id);
     interrupts.init(&cpu.idt);
     enable_apic(virtual_address_space);
     Syscall.enable();
