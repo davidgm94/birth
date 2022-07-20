@@ -54,11 +54,14 @@ pub const log_level: common.log.Level = switch (common.build_mode) {
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    //const before_status_acquire = common.arch.Writer.lock.status;
+    const current_thread = common.arch.get_current_thread();
+    const current_cpu = current_thread.cpu orelse while (true) {};
+    const processor_id = current_cpu.id;
     common.arch.Writer.lock.acquire();
-    //const after_status_acquire = common.arch.Writer.lock.status;
-    //kernel.arch.writer.print("Spinlock debug. (BEFORE): 0x{x} (AFTER): 0x{x}\n", .{ before_status_acquire, after_status_acquire }) catch unreachable;
-    kernel.arch.writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+    kernel.arch.writer.print("[Core #{}] ", .{processor_id}) catch unreachable;
+    kernel.arch.writer.writeAll(prefix) catch unreachable;
+    kernel.arch.writer.print(format, args) catch unreachable;
+    kernel.arch.writer.writeByte('\n') catch unreachable;
     common.arch.Writer.lock.release();
 }
 

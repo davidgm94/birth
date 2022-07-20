@@ -145,12 +145,37 @@ pub inline fn read_timestamp() u64 {
 
 var my_current_thread: *Thread = undefined;
 
-pub inline fn preset_thread_pointer() void {
-    IA32_GS_BASE.write(@ptrToInt(&my_current_thread));
+pub inline fn preset_thread_pointer_bsp(current_thread: *Thread) void {
+    my_current_thread = current_thread;
+    // @ZigBug we need to inttoptr here
+    thread_pointers = @intToPtr([*]*Thread, @ptrToInt(&my_current_thread))[0..1];
+    preset_thread_pointer(0);
+}
+
+pub inline fn preset_thread_pointer(index: u64) void {
+    IA32_GS_BASE.write(@ptrToInt(&thread_pointers[index]));
+}
+
+var thread_pointers: []*Thread = undefined;
+
+/// This is supposed to be called only by the BSP thread/CPU
+pub inline fn allocate_and_setup_thread_pointers(virtual_address_space: *common.VirtualAddressSpace, scheduler: *common.Scheduler) void {
+    const cpu_count = scheduler.cpus.len;
+    const bsp_thread = thread_pointers[0];
+    common.runtime_assert(@src(), bsp_thread.cpu.?.is_bootstrap);
+    thread_pointers = virtual_address_space.heap.allocator.alloc(*Thread, cpu_count) catch @panic("wtf");
+    common.runtime_assert(@src(), scheduler.all_threads.count == scheduler.thread_buffer.element_count);
+    common.runtime_assert(@src(), scheduler.all_threads.count < Thread.Buffer.Bucket.size);
+    for (thread_pointers) |*tp, i| {
+        tp.* = &scheduler.thread_buffer.first.?.data[i];
+    }
+    common.runtime_assert(@src(), thread_pointers[0] == bsp_thread);
+    IA32_GS_BASE.write(@ptrToInt(&thread_pointers[0]));
 }
 
 pub inline fn set_current_thread(current_thread: *Thread) void {
-    my_current_thread = current_thread;
+    const current_cpu = current_thread.cpu orelse @panic("Wtf");
+    thread_pointers[current_cpu.id] = current_thread;
 }
 
 pub inline fn get_current_thread() *Thread {
@@ -198,7 +223,8 @@ pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace) voi
     common.runtime_assert(@src(), bsp == &kernel.scheduler.cpus[0]);
     bsp.gdt.initial_setup();
     // Flush GS as well. This requires updating the thread pointer holder
-    preset_thread_pointer();
+    if (true) TODO(@src());
+    //preset_thread_pointer();
     interrupts.init();
     enable_apic(virtual_address_space);
     Syscall.enable();
@@ -1318,10 +1344,11 @@ pub inline fn legacy_actions_before_context_switch(new_thread: *Thread) void {
 pub fn preinit_bsp(scheduler: *Scheduler, virtual_address_space: *common.VirtualAddressSpace, bootstrap_context: *common.BootstrapContext) void {
     // @ZigBug: @ptrCast here crashes the compiler
 
+    bootstrap_context.cpu.id = 0;
     bootstrap_context.thread.cpu = &bootstrap_context.cpu;
     bootstrap_context.thread.context = &bootstrap_context.context;
     bootstrap_context.thread.address_space = virtual_address_space;
-    preset_thread_pointer();
+    preset_thread_pointer_bsp(&bootstrap_context.thread);
     set_current_thread(&bootstrap_context.thread);
     IA32_KERNEL_GS_BASE.write(0);
 

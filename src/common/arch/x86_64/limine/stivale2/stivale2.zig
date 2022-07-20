@@ -77,10 +77,10 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                 const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size, page_size);
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 // INFO: this is separated since the bitset needs to be in a different page than the memory map
-                const bitset_page_count = kernel.bytes_to_pages(bitset_size, .can_be_not_exact);
+                const bitset_page_count = common.bytes_to_pages(bitset_size, context.page_size, .can_be_not_exact);
                 // Allocate a bit more memory than needed just in case
                 const memory_map_allocation_size = memory_map_struct.entry_count * @sizeOf(PhysicalAddressSpace.MapEntry);
-                const memory_map_page_count = kernel.bytes_to_pages(memory_map_allocation_size, .can_be_not_exact);
+                const memory_map_page_count = common.bytes_to_pages(memory_map_allocation_size, context.page_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
                 const total_allocation_size = context.page_size * total_allocated_page_count;
                 common.runtime_assert(@src(), entry.size > total_allocation_size);
@@ -265,14 +265,18 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
 }
 
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
-    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
-    const current_cpu = &kernel.scheduler.cpus[smp_info.processor_id];
-    _ = current_cpu;
+    const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
+    const virtual_address_space = initialization_context.kernel_virtual_address_space;
+    const scheduler = initialization_context.scheduler;
+    _ = scheduler;
+    const cpu_index = smp_info.processor_id;
+    common.arch.preset_thread_pointer(cpu_index);
+    virtual_address_space.make_current();
+
+    // Initialize GDT, IDT, etc.
     if (true) TODO(@src());
-    log.debug("Core #{} received signal", .{smp_info.processor_id});
-    while (!@atomicLoad(bool, &go, .Acquire)) {
-        asm volatile ("pause" ::: "memory");
-    }
+    log.debug("Processor woke up", .{});
+    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
     while (true) {
         asm volatile ("pause" ::: "memory");
     }
@@ -282,7 +286,20 @@ const stack_size = 0x10000;
 var cpus_left: u64 = 0;
 var go: bool = false;
 
+const CPUInitializationContext = struct {
+    kernel_virtual_address_space: *VirtualAddressSpace,
+    scheduler: *common.Scheduler,
+};
+
+var cpu_initialization_context: CPUInitializationContext = undefined;
+
 pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!void {
+    common.runtime_assert(@src(), virtual_address_space.privilege_level == .kernel);
+    cpu_initialization_context = CPUInitializationContext{
+        .kernel_virtual_address_space = virtual_address_space,
+        .scheduler = scheduler,
+    };
+
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
     log.debug("SMP struct: {}", .{smp_struct});
 
@@ -299,7 +316,9 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     scheduler.all_threads.append(&bsp_thread.all_item, bsp_thread) catch @panic("wtF");
     bsp_thread.context = &bootstrap_context.context;
     bsp_thread.state = .active;
+    bsp_thread.cpu = &scheduler.cpus[0];
     common.arch.set_current_thread(bsp_thread);
+    common.arch.allocate_and_setup_thread_pointers(virtual_address_space, scheduler);
 
     const entry_point = @ptrToInt(smp_entry);
     const ap_cpu_count = scheduler.cpus.len - 1;
@@ -318,17 +337,20 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         thread.executing = true;
     }
 
+    scheduler.lock.acquire();
+    defer scheduler.lock.release();
     cpus_left = ap_cpu_count;
     for (smps[1..]) |*smp, index| {
         const ap_thread = &ap_threads[index];
+        scheduler.active_threads.remove(&ap_thread.queue_item);
         const stack_pointer = ap_thread.context.get_stack_pointer();
-        smp.extra_argument = 0;
+        smp.extra_argument = @ptrToInt(&cpu_initialization_context);
         smp.target_stack = stack_pointer;
         smp.goto_address = entry_point;
-        scheduler.active_threads.remove(&ap_thread.queue_item);
     }
     common.runtime_assert(@src(), scheduler.active_threads.count == 0);
 
+    log.debug("Waiting for all cores to be initialized...", .{});
     while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}
     //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
     log.debug("Initialized all cores", .{});

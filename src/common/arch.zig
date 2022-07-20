@@ -35,6 +35,8 @@ pub const valid_page_sizes = arch.valid_page_sizes;
 pub const next_timer = arch.next_timer;
 pub const read_timestamp = arch.read_timestamp;
 
+pub const allocate_and_setup_thread_pointers = arch.allocate_and_setup_thread_pointers;
+pub const preset_thread_pointer = arch.preset_thread_pointer;
 pub const set_current_thread = arch.set_current_thread;
 pub const get_current_thread = arch.get_current_thread;
 
