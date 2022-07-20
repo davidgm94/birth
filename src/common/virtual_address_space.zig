@@ -69,6 +69,7 @@ pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
+    log.debug("About to lock", .{});
     virtual_address_space.lock.acquire();
     defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);

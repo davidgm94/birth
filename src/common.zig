@@ -174,7 +174,7 @@ pub inline fn zero_slice(slice: anytype) void {
 
 pub inline fn zeroes(comptime T: type) T {
     var result: T = undefined;
-    zero(@ptrCast([*]u8, &result)[0..@sizeOf(T)]);
+    zero(as_bytes(&result));
     return result;
 }
 

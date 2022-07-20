@@ -264,8 +264,23 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
     return rsdp_address;
 }
 
+fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
+    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
+    const current_cpu = &kernel.scheduler.cpus[smp_info.processor_id];
+    _ = current_cpu;
+    if (true) TODO(@src());
+    log.debug("Core #{} received signal", .{smp_info.processor_id});
+    while (!@atomicLoad(bool, &go, .Acquire)) {
+        asm volatile ("pause" ::: "memory");
+    }
+    while (true) {
+        asm volatile ("pause" ::: "memory");
+    }
+}
+
 const stack_size = 0x10000;
 var cpus_left: u64 = 0;
+var go: bool = false;
 
 pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!void {
     const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
@@ -279,6 +294,8 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     scheduler.cpus[0] = bootstrap_context.cpu;
     scheduler.cpus[0].is_bootstrap = true;
     const bsp_thread = scheduler.thread_buffer.add_one(virtual_address_space.heap.allocator) catch @panic("wtf");
+    bsp_thread.all_item = Thread.ListItem.new(bsp_thread);
+    bsp_thread.queue_item = Thread.ListItem.new(bsp_thread);
     scheduler.all_threads.append(&bsp_thread.all_item, bsp_thread) catch @panic("wtF");
     bsp_thread.context = &bootstrap_context.context;
     bsp_thread.state = .active;
@@ -288,7 +305,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     const ap_cpu_count = scheduler.cpus.len - 1;
     const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
     common.runtime_assert(@src(), scheduler.all_threads.count == ap_threads.len + 1);
-    common.runtime_assert(@src(), scheduler.all_threads.count < Thread.Buffer.Bucket.bitset_size);
+    common.runtime_assert(@src(), scheduler.all_threads.count < Thread.Buffer.Bucket.size);
     const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
     common.runtime_assert(@src(), &all_threads[0] == bsp_thread);
 
@@ -315,20 +332,4 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     while (@ptrCast(*volatile u64, &cpus_left).* > 0) {}
     //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
     log.debug("Initialized all cores", .{});
-}
-
-var go: bool = false;
-
-fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
-    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
-    const current_cpu = &kernel.scheduler.cpus[smp_info.processor_id];
-    _ = current_cpu;
-    if (true) TODO(@src());
-    log.debug("Core #{} received signal", .{smp_info.processor_id});
-    while (!@atomicLoad(bool, &go, .Acquire)) {
-        asm volatile ("pause" ::: "memory");
-    }
-    while (true) {
-        asm volatile ("pause" ::: "memory");
-    }
 }

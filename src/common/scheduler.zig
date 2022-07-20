@@ -108,7 +108,8 @@ pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *Vir
     const thread_bulk_stack_allocation = virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
 
     const existing_threads = scheduler.all_threads.count;
-    common.runtime_assert(@src(), existing_threads + thread_count <= Thread.Buffer.Bucket.bitset_size);
+    log.debug("Existing threads: {}", .{existing_threads});
+    common.runtime_assert(@src(), existing_threads + thread_count <= Thread.Buffer.Bucket.size);
     common.runtime_assert(@src(), scheduler.thread_buffer.element_count == scheduler.all_threads.count);
     const bucket_count = scheduler.thread_buffer.bucket_count;
     common.runtime_assert(@src(), bucket_count == 1);
@@ -131,8 +132,8 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     }
 
     // TODO: lock
-    const new_thread_id = scheduler.all_threads.count;
-    log.debug("About to allocate", .{});
+    const new_thread_id = scheduler.thread_buffer.element_count;
+    log.debug("About to allocate 1", .{});
     const thread = scheduler.thread_buffer.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
     scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
     log.debug("Ended to allocate", .{});
@@ -149,7 +150,6 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .kernel => 0,
         .user => default_user_stack_commit,
     };
-    var user_stack: VirtualAddress = undefined;
     // TODO: implemented idle thread
 
     // TODO: should this be kernel virtual address space?
@@ -158,14 +158,14 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         if (maybe_thread_stack) |thread_stack|
             break :blk thread_stack.kernel
         else {
-            log.debug("About to allocate", .{});
+            log.debug("About to allocate 2", .{});
             const result = thread_virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
             log.debug("Ended to allocate", .{});
             break :blk result;
         }
     };
     common.runtime_assert(@src(), kernel_stack.is_higher_half());
-    user_stack = switch (privilege_level) {
+    const user_stack = switch (privilege_level) {
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
@@ -173,7 +173,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
             if (maybe_thread_stack) |thread_stack|
                 break :blk thread_stack.user orelse @panic("Wtffffff")
             else {
-                log.debug("About to allocate", .{});
+                log.debug("About to allocate 3", .{});
                 const result = thread_virtual_address_space.allocate(user_stack_reserve, null, .{ .write = true, .user = true }) catch @panic("user stack");
                 log.debug("Ended to allocate", .{});
                 break :blk result;
