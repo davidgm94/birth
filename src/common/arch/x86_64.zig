@@ -101,7 +101,7 @@ pub fn init_scheduler() void {
 
 pub var timestamp_ticks_per_ms: u64 = 0;
 
-fn init_timer() void {
+pub fn init_timer() void {
     disable_interrupts();
     const bsp = &kernel.scheduler.cpus[0];
     common.runtime_assert(@src(), bsp.is_bootstrap);
@@ -154,6 +154,7 @@ pub inline fn preset_thread_pointer_bsp(current_thread: *Thread) void {
 
 pub inline fn preset_thread_pointer(index: u64) void {
     IA32_GS_BASE.write(@ptrToInt(&thread_pointers[index]));
+    IA32_KERNEL_GS_BASE.write(0);
 }
 
 var thread_pointers: []*Thread = undefined;
@@ -204,35 +205,60 @@ pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     // TODO: x2APIC
     const ia32_apic = IA32_APIC_BASE.read();
     const apic_physical_address = get_apic_base(ia32_apic);
-    log.debug("APIC physical address: 0{x}", .{apic_physical_address});
+    log.debug("APIC physical address: 0x{x}", .{apic_physical_address});
     common.runtime_assert(@src(), apic_physical_address != 0);
     const old_lapic_id = cpu.lapic.id;
     cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
     cpu.lapic.write(.SPURIOUS, spurious_value);
     const lapic_id = cpu.lapic.read(.LAPIC_ID);
+    log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
     common.runtime_assert(@src(), lapic_id == cpu.lapic.id);
     log.debug("APIC enabled", .{});
 }
 
-pub fn preinit_scheduler(virtual_address_space: *common.VirtualAddressSpace) void {
-    // This assumes the BSP processor is already properly setup here
+pub fn enable_cpu_features() void {
+    // Initialize FPU
+    var cr0_value = cr0.read();
+    cr0_value.set_bit(.MP);
+    cr0_value.set_bit(.NE);
+    cr0.write(cr0_value);
+    var cr4_value = cr4.read();
+    cr4_value.set_bit(.OSFXSR);
+    cr4_value.set_bit(.OSXMMEXCPT);
+    cr4.write(cr4_value);
+
+    log.debug("@TODO: MXCSR. See Intel manual", .{});
+    // @TODO: is this correct?
+    const cw: u16 = 0x037a;
+    asm volatile (
+        \\fninit
+        \\fldcw (%[cw])
+        :
+        : [cw] "r" (&cw),
+    );
+
+    log.debug("Making sure the cache is initialized properly", .{});
+    common.runtime_assert(@src(), !cr0.get_bit(.CD));
+    common.runtime_assert(@src(), !cr0.get_bit(.NW));
+}
+
+pub fn start_cpu(virtual_address_space: *common.VirtualAddressSpace) void {
+    enable_cpu_features();
+    // This assumes the CPU processor local storage is already properly setup here
     const current_thread = get_current_thread();
-    const bsp = current_thread.cpu orelse @panic("cpu");
-    log.debug("BSP id: {}", .{bsp.id});
-    common.runtime_assert(@src(), bsp.is_bootstrap);
-    common.runtime_assert(@src(), bsp == &kernel.scheduler.cpus[0]);
-    bsp.gdt.initial_setup();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    log.debug("CPU id: {}", .{cpu.id});
+    cpu.gdt.initial_setup();
     // Flush GS as well. This requires updating the thread pointer holder
-    if (true) TODO(@src());
-    //preset_thread_pointer();
-    interrupts.init();
+    preset_thread_pointer(cpu.id);
+    interrupts.init(&cpu.idt);
     enable_apic(virtual_address_space);
     Syscall.enable();
 
-    bsp.shared_tss = TSS.Struct{};
-    bsp.shared_tss.set_interrupt_stack(bsp.int_stack);
-    bsp.shared_tss.set_scheduler_stack(bsp.scheduler_stack);
-    bsp.gdt.update_tss(&bsp.shared_tss);
+    cpu.shared_tss = TSS.Struct{};
+    cpu.shared_tss.set_interrupt_stack(cpu.int_stack);
+    cpu.shared_tss.set_scheduler_stack(cpu.scheduler_stack);
+    cpu.gdt.update_tss(&cpu.shared_tss);
 
     log.debug("Scheduler pre-initialization finished!", .{});
 }
@@ -770,32 +796,8 @@ pub const CPUFeatures = struct {
     physical_address_max_bit: u6,
 };
 
-pub fn enable_cpu_features() void {
+pub fn get_physical_address_memory_configuration() void {
     context.max_physical_address_bit = CPUID.get_max_physical_address_bit();
-
-    // Initialize FPU
-    var cr0_value = cr0.read();
-    cr0_value.set_bit(.MP);
-    cr0_value.set_bit(.NE);
-    cr0.write(cr0_value);
-    var cr4_value = cr4.read();
-    cr4_value.set_bit(.OSFXSR);
-    cr4_value.set_bit(.OSXMMEXCPT);
-    cr4.write(cr4_value);
-
-    log.debug("@TODO: MXCSR. See Intel manual", .{});
-    // @TODO: is this correct?
-    const cw: u16 = 0x037a;
-    asm volatile (
-        \\fninit
-        \\fldcw (%[cw])
-        :
-        : [cw] "r" (&cw),
-    );
-
-    log.debug("Making sure the cache is initialized properly", .{});
-    common.runtime_assert(@src(), !cr0.get_bit(.CD));
-    common.runtime_assert(@src(), !cr0.get_bit(.NW));
 }
 
 pub fn SimpleMSR(comptime msr: u32) type {
@@ -1044,7 +1046,11 @@ pub const LAPIC = struct {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
+        if (virtual_address_space.translate_address(lapic_virtual_address) == null) {
+            virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
+        }
+
+        common.runtime_assert(@src(), (virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
         const lapic = LAPIC{
             .address = lapic_virtual_address,
             .id = lapic_id,
@@ -1083,14 +1089,15 @@ pub inline fn next_timer(ms: u32) void {
 const stack_size = 0x10000;
 const guard_stack_size = 0x1000;
 pub const CPU = struct {
-    gdt: GDT.Table,
-    shared_tss: TSS.Struct,
     int_stack: u64,
     scheduler_stack: u64,
     lapic: LAPIC,
     spinlock_count: u64,
     is_bootstrap: bool,
     id: u32,
+    gdt: GDT.Table,
+    shared_tss: TSS.Struct,
+    idt: IDT,
 
     pub fn bootstrap_stacks(cpu: *CPU) void {
         cpu.int_stack = bootstrap_stack(stack_size);
@@ -1350,7 +1357,6 @@ pub fn preinit_bsp(scheduler: *Scheduler, virtual_address_space: *common.Virtual
     bootstrap_context.thread.address_space = virtual_address_space;
     preset_thread_pointer_bsp(&bootstrap_context.thread);
     set_current_thread(&bootstrap_context.thread);
-    IA32_KERNEL_GS_BASE.write(0);
 
     scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
 }

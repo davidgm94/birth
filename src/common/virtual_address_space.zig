@@ -69,7 +69,6 @@ pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
-    log.debug("About to lock", .{});
     virtual_address_space.lock.acquire();
     defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
@@ -88,22 +87,57 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
         }
     };
 
-    if (flags.user) common.runtime_assert(@src(), virtual_address_space.translate_address(virtual_address) == null);
+    if (flags.user) common.runtime_assert(@src(), virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) == null);
 
     const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
-    virtual_address_space.map_physical_region(physical_region, virtual_address, flags);
+    virtual_address_space.map_physical_region_extended(physical_region, virtual_address, flags, AlreadyLocked.yes);
     return virtual_address;
 }
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags) void {
+    map_extended(virtual_address_space, physical_address, virtual_address, flags, AlreadyLocked.no);
+}
+
+const AlreadyLocked = enum {
+    no,
+    yes,
+};
+
+fn map_extended(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) void {
+    if (already_locked == .yes) {
+        common.runtime_assert(@src(), virtual_address_space.lock.status != 0);
+    } else {
+        virtual_address_space.lock.acquire();
+    }
+    defer {
+        if (already_locked == .no) {
+            virtual_address_space.lock.release();
+        }
+    }
     virtual_address_space.arch.map(physical_address, virtual_address, flags.to_arch_specific());
-    const new_physical_address = virtual_address_space.translate_address(virtual_address) orelse @panic("address not present");
+    const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) orelse @panic("address not present");
     common.runtime_assert(@src(), new_physical_address.is_valid());
     common.runtime_assert(@src(), new_physical_address.is_equal(physical_address));
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
-    return virtual_address_space.arch.translate_address(virtual_address);
+    return translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no);
+}
+
+fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) ?PhysicalAddress {
+    if (already_locked == .yes) {
+        common.runtime_assert(@src(), virtual_address_space.lock.status != 0);
+    } else {
+        virtual_address_space.lock.acquire();
+    }
+    defer {
+        if (already_locked == .no) {
+            virtual_address_space.lock.release();
+        }
+    }
+
+    const result = virtual_address_space.arch.translate_address(virtual_address);
+    return result;
 }
 
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
@@ -112,6 +146,9 @@ pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
 
 // TODO: make this efficient
 pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_region: VirtualMemoryRegion, base_physical_address: PhysicalAddress, flags: Flags) void {
+    virtual_address_space.lock.acquire();
+    defer virtual_address_space.lock.release();
+
     var physical_address = base_physical_address;
     var virtual_address = virtual_region.address;
     const page_size = context.page_size;
@@ -122,13 +159,28 @@ pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_r
     var size: u64 = 0;
 
     while (size < virtual_region.size) : (size += page_size) {
-        virtual_address_space.map(physical_address, virtual_address, flags);
+        virtual_address_space.map_extended(physical_address, virtual_address, flags, AlreadyLocked.yes);
         physical_address.value += page_size;
         virtual_address.value += page_size;
     }
 }
 
 pub fn map_physical_region(virtual_address_space: *VirtualAddressSpace, physical_region: PhysicalMemoryRegion, base_virtual_address: VirtualAddress, flags: Flags) void {
+    return map_physical_region_extended(virtual_address_space, physical_region, base_virtual_address, flags, AlreadyLocked.no);
+}
+
+fn map_physical_region_extended(virtual_address_space: *VirtualAddressSpace, physical_region: PhysicalMemoryRegion, base_virtual_address: VirtualAddress, flags: Flags, already_locked: AlreadyLocked) void {
+    if (already_locked == .yes) {
+        common.runtime_assert(@src(), virtual_address_space.lock.status != 0);
+    } else {
+        virtual_address_space.lock.acquire();
+    }
+    defer {
+        if (already_locked == .no) {
+            virtual_address_space.lock.release();
+        }
+    }
+
     var physical_address = physical_region.address;
     var virtual_address = base_virtual_address;
     const page_size = context.page_size;
@@ -140,7 +192,7 @@ pub fn map_physical_region(virtual_address_space: *VirtualAddressSpace, physical
     log.debug("Init mapping", .{});
 
     while (size < physical_region.size) : (size += page_size) {
-        virtual_address_space.map(physical_address, virtual_address, flags);
+        virtual_address_space.map_extended(physical_address, virtual_address, flags, AlreadyLocked.yes);
         physical_address.value += page_size;
         virtual_address.value += page_size;
     }

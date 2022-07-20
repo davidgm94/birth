@@ -35,6 +35,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
 fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
     virtual_address_space.heap.lock.acquire();
     defer virtual_address_space.heap.lock.release();
+    common.runtime_assert(@src(), virtual_address_space.lock.status == 0);
 
     log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 

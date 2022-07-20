@@ -41,9 +41,3 @@ pub inline fn load(table: *IDT) void {
         : [idt_address] "r" (&idtr),
     );
 }
-
-pub var interrupt_i: u64 = 0;
-pub fn add_interrupt_handler(table: *IDT, handler: Descriptor) void {
-    table.entries[interrupt_i] = handler;
-    interrupt_i += 1;
-}

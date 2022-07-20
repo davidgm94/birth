@@ -44,6 +44,8 @@ pub const get_memory_map = arch.get_memory_map;
 
 pub const CPUFeatures = arch.CPUFeatures;
 
+pub const start_cpu = arch.start_cpu;
+
 pub const init_block_drivers = arch.init_block_drivers;
 pub const init_graphics_drivers = arch.init_graphics_drivers;
 

@@ -33,6 +33,7 @@ const BootloaderInformation = struct {
 };
 
 pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!BootloaderInformation {
+    common.runtime_assert(@src(), virtual_address_space.lock.status == 0);
     const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
@@ -217,6 +218,7 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
 
+    common.runtime_assert(@src(), virtual_address_space.lock.status == 0);
     const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
@@ -270,8 +272,11 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const scheduler = initialization_context.scheduler;
     _ = scheduler;
     const cpu_index = smp_info.processor_id;
+    // Current thread is already set in the process_smp function
     common.arch.preset_thread_pointer(cpu_index);
     virtual_address_space.make_current();
+    common.arch.start_cpu(virtual_address_space);
+    log.debug("CPU started", .{});
 
     // Initialize GDT, IDT, etc.
     if (true) TODO(@src());
