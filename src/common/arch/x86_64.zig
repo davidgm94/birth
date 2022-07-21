@@ -231,7 +231,7 @@ pub fn enable_cpu_features() void {
     cr4_value.set_bit(.OSXMMEXCPT);
     cr4.write(cr4_value);
 
-    // @TODO: is this correct?
+    // @TODO: what is this?
     const cw: u16 = 0x037a;
     asm volatile (
         \\fninit
@@ -1031,6 +1031,7 @@ pub inline fn are_interrupts_enabled() bool {
 }
 
 pub const LAPIC = struct {
+    // TODO: LAPIC address is shared. Ticks per ms too? Refactor this struct
     address: VirtualAddress,
     ticks_per_ms: u32 = 0,
     id: u32,
