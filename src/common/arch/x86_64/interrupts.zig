@@ -365,8 +365,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                             @panic("reserved write");
                         }
 
-                        log.debug("why are we here", .{});
-                        if (true) unreachable;
+                        if (true) @panic("Unresolvable page fault");
 
                         x86_64.disable_interrupts();
                     },

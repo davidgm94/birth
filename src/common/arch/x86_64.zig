@@ -205,6 +205,21 @@ pub fn enable_apic(virtual_address_space: *common.VirtualAddressSpace) void {
     log.debug("APIC enabled", .{});
 }
 
+var times_mapped: u64 = 0;
+pub fn map_lapic(virtual_address_space: *common.VirtualAddressSpace) void {
+    if (times_mapped != 0) @panic("called more than once");
+    defer times_mapped += 1;
+
+    const cpu = get_current_thread().cpu orelse @panic("wtf");
+    common.runtime_assert(@src(), cpu.id == 0);
+    common.runtime_assert(@src(), cpu.is_bootstrap);
+
+    const ia32_apic = IA32_APIC_BASE.read();
+    const lapic_physical_address = PhysicalAddress.new(get_apic_base(ia32_apic));
+    const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
+    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
+}
+
 pub fn enable_cpu_features() void {
     // Initialize FPU
     var cr0_value = cr0.read();
@@ -230,10 +245,10 @@ pub fn enable_cpu_features() void {
 }
 
 pub fn cpu_start(virtual_address_space: *common.VirtualAddressSpace) void {
-    enable_cpu_features();
-    // This assumes the CPU processor local storage is already properly setup here
     const current_thread = get_current_thread();
     const cpu = current_thread.cpu orelse @panic("cpu");
+    enable_cpu_features();
+    // This assumes the CPU processor local storage is already properly setup here
     cpu.gdt.initial_setup(cpu.id);
     interrupts.init(&cpu.idt);
     enable_apic(virtual_address_space);
@@ -1037,9 +1052,8 @@ pub const LAPIC = struct {
         //Paging.should_log = true;
         const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
         log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        if (virtual_address_space.translate_address(lapic_virtual_address) == null) {
-            virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
-        }
+        common.runtime_assert(@src(), virtual_address_space.translate_address(lapic_virtual_address) != null);
+        log.debug("Checking assert", .{});
 
         common.runtime_assert(@src(), (virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
         const lapic = LAPIC{

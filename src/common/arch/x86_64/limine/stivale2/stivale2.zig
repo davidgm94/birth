@@ -344,6 +344,8 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
 
     // TODO: don't hardcode stack size
     common.arch.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
+    common.runtime_assert(@src(), common.cpu.arch == .x86_64);
+    common.arch.x86_64.map_lapic(virtual_address_space);
 
     scheduler.lock.acquire();
     cpus_left = ap_cpu_count;
