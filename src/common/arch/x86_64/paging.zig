@@ -318,9 +318,7 @@ pub const VirtualAddressSpace = struct {
     }
 
     pub fn make_current(address_space: *VirtualAddressSpace) void {
-        log.debug("Applying address space: 0x{x}", .{address_space.cr3});
         x86_64.cr3.write_raw(address_space.cr3);
-        log.debug("Applied address space: 0x{x}", .{address_space.cr3});
     }
 
     pub inline fn new_flags(general_flags: common.VirtualAddressSpace.Flags) Flags {

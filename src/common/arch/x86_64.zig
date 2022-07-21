@@ -221,7 +221,6 @@ pub fn enable_cpu_features() void {
     cr4_value.set_bit(.OSXMMEXCPT);
     cr4.write(cr4_value);
 
-    log.debug("@TODO: MXCSR. See Intel manual", .{});
     // @TODO: is this correct?
     const cw: u16 = 0x037a;
     asm volatile (
@@ -231,19 +230,16 @@ pub fn enable_cpu_features() void {
         : [cw] "r" (&cw),
     );
 
-    log.debug("Making sure the cache is initialized properly", .{});
     common.runtime_assert(@src(), !cr0.get_bit(.CD));
     common.runtime_assert(@src(), !cr0.get_bit(.NW));
 }
 
-pub fn start_cpu(virtual_address_space: *common.VirtualAddressSpace) void {
+pub fn cpu_start(virtual_address_space: *common.VirtualAddressSpace) void {
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here
     const current_thread = get_current_thread();
     const cpu = current_thread.cpu orelse @panic("cpu");
-    log.debug("CPU id: {}", .{cpu.id});
     cpu.gdt.initial_setup(cpu.id);
-    // Flush GS as well. This requires updating the thread pointer holder
     interrupts.init(&cpu.idt);
     enable_apic(virtual_address_space);
     Syscall.enable();
@@ -255,8 +251,6 @@ pub fn start_cpu(virtual_address_space: *common.VirtualAddressSpace) void {
 
     log.debug("Scheduler pre-initialization finished!", .{});
 }
-
-//pub var rsdp: PhysicalAddress = undefined;
 
 pub const IOPort = struct {
     pub const DMA1 = 0x0000;
@@ -388,6 +382,15 @@ pub const r15 = SimpleR64("r15");
 
 pub const gs = SimpleR64("gs");
 pub const cs = SimpleR64("cs");
+
+pub const dr0 = SimpleR64("dr0");
+pub const dr1 = SimpleR64("dr1");
+pub const dr2 = SimpleR64("dr2");
+pub const dr3 = SimpleR64("dr3");
+pub const dr4 = SimpleR64("dr4");
+pub const dr5 = SimpleR64("dr5");
+pub const dr6 = SimpleR64("dr6");
+pub const dr7 = SimpleR64("dr7");
 
 pub fn SimpleR64(comptime name: []const u8) type {
     return struct {
@@ -1079,8 +1082,6 @@ pub inline fn next_timer(ms: u32) void {
     current_cpu.lapic.next_timer(ms);
 }
 
-const stack_size = 0x10000;
-const guard_stack_size = 0x1000;
 pub const CPU = struct {
     int_stack: u64,
     scheduler_stack: u64,
@@ -1091,20 +1092,25 @@ pub const CPU = struct {
     gdt: GDT.Table,
     shared_tss: TSS.Struct,
     idt: IDT,
-
-    pub fn bootstrap_stacks(cpu: *CPU) void {
-        cpu.int_stack = bootstrap_stack(stack_size);
-        cpu.scheduler_stack = bootstrap_stack(stack_size);
-    }
-
-    fn bootstrap_stack(size: u64) u64 {
-        const total_size = size + guard_stack_size;
-        const physical_address = kernel.physical_address_space.allocate_pages(kernel.bytes_to_pages(total_size, true)) orelse @panic("stack allocation");
-        const virtual_address = physical_address.access_higher_half();
-        kernel.virtual_address_space.map(physical_address, virtual_address);
-        return virtual_address.value + total_size;
-    }
 };
+
+pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *common.VirtualAddressSpace, stack_size: u64) void {
+    common.runtime_assert(@src(), common.is_aligned(stack_size, context.page_size));
+    const cpu_count = cpus.len;
+    const guard_stack_size = 0x1000;
+    const total_single_stack_size = stack_size + guard_stack_size;
+    const allocation_size = cpu_count * total_single_stack_size * 2;
+    const stack_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, allocation_size, 0, 0) catch @panic("wtf");
+    const middle = allocation_size / 2;
+    const base = @ptrToInt(stack_allocation.ptr);
+
+    for (cpus) |*cpu, i| {
+        const scheduler_stack_offset = i * total_single_stack_size;
+        const interrupt_stack_offset = scheduler_stack_offset + middle;
+        cpu.int_stack = base + interrupt_stack_offset + total_single_stack_size;
+        cpu.scheduler_stack = base + interrupt_stack_offset + total_single_stack_size;
+    }
+}
 
 export fn thread_terminate(thread: *Thread) void {
     _ = thread;

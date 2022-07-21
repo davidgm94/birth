@@ -22,7 +22,7 @@ pub export fn start(stivale2_struct_address: u64) noreturn {
     kernel.sections_in_memory = bootloader_information.kernel_sections_in_memory;
     kernel.file = bootloader_information.kernel_file;
     x86_64.prepare_drivers(&kernel.virtual_address_space, rsdp);
-    x86_64.start_cpu(&kernel.virtual_address_space);
+    x86_64.cpu_start(&kernel.virtual_address_space);
     x86_64.init_timer();
     x86_64.drivers_init(&kernel.virtual_address_space) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
     common.runtime_assert(@src(), kernel.drivers.Disk.drivers.items.len > 0);

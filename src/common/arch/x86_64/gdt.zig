@@ -14,19 +14,21 @@ pub const Table = packed struct {
     data_32: Entry = 0x00cf93000000ffff, // 0x20
     code_64: Entry = 0x00af9b000000ffff, // 0x28
     data_64: Entry = 0x00af93000000ffff, // 0x30
-    user_code_32: Entry = 0x00cffa000000ffff,
-    user_data: Entry = 0x00cff2000000ffff,
-    user_code_64: Entry = 0x00affb000000ffff,
+    user_code_32: Entry = 0x00cffa000000ffff, // 0x38
+    user_data: Entry = 0x00cff2000000ffff, // 0x40
+    user_code_64: Entry = 0x00affb000000ffff, // 0x48
     // We don't need a user data 64 selector because 32 bit is enough, most values are not relevant
     tss: TSS.Descriptor,
 
     comptime {
-        //common.comptime_assert(@sizeOf(Table) == 9 * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
-        //common.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
-        //common.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
-        //common.comptime_assert(@offsetOf(Table, "user_code_64") == 0x38);
-        //common.comptime_assert(@offsetOf(Table, "user_data_64") == 0x40);
-        //common.comptime_assert(@offsetOf(Table, "tss") == 9 * @sizeOf(Entry));
+        const entry_count = 10;
+        common.comptime_assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        common.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
+        common.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
+        common.comptime_assert(@offsetOf(Table, "user_code_32") == 0x38);
+        common.comptime_assert(@offsetOf(Table, "user_data") == 0x40);
+        common.comptime_assert(@offsetOf(Table, "user_code_64") == 0x48);
+        common.comptime_assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
     }
 
     pub fn initial_setup(gdt: *Table, cpu_id: u64) void {
@@ -35,9 +37,9 @@ pub const Table = packed struct {
             .tss = bootstrap_tss.get_descriptor(),
         };
         gdt.load();
-        log.debug("GDT loaded", .{});
         x86_64.flush_segments_kernel();
         x86_64.preset_thread_pointer(cpu_id);
+        log.debug("GDT loaded", .{});
     }
 
     pub inline fn load(gdt: *Table) void {

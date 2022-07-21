@@ -108,7 +108,6 @@ pub const equal = std.mem.eql;
 pub const length = std.mem.len;
 pub const starts_with = std.mem.startsWith;
 pub const ends_with = std.mem.endsWith;
-pub const copy = std.mem.copy;
 pub const as_bytes = std.mem.asBytes;
 pub const internal_read_int_big = std.mem.readIntBig;
 pub const read_int_slice_big_endian = std.mem.readIntSliceBig;
@@ -152,6 +151,17 @@ pub inline fn is_aligned(n: u64, alignment: u64) bool {
 pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
     return internal_read_int_big(T, slice[0..@sizeOf(T)]);
 }
+pub fn copy(comptime T: type, dst: []T, src: []const T) void {
+    runtime_assert(@src(), src.len <= dst.len);
+    const dst_ptr = @ptrCast([*]u8, dst.ptr);
+    const src_ptr = @ptrCast([*]const u8, src.ptr);
+    const bytes_to_copy = @sizeOf(T) * src.len;
+    @memcpy(dst_ptr, src_ptr, bytes_to_copy);
+}
+
+pub fn set_byte(slice: []u8, value: u8) void {
+    @memset(slice.ptr, value, slice.len);
+}
 
 pub inline fn zero_typed_address(address: u64, comptime T: type) *T {
     const result = @intToPtr(*T, address);
@@ -164,7 +174,7 @@ pub inline fn zero_range(address: u64, size: u64) void {
 }
 
 pub inline fn zero(bytes: []u8) void {
-    for (bytes) |*byte| byte.* = 0;
+    set_byte(bytes, 0);
 }
 
 pub inline fn zero_slice(slice: anytype) void {
