@@ -94,11 +94,6 @@ pub fn prepare_drivers(virtual_address_space: *common.VirtualAddressSpace, rsdp:
     PCI.init(virtual_address_space);
 }
 
-pub fn init_scheduler() void {
-    // TODO: do more?
-    init_timer();
-}
-
 pub var timestamp_ticks_per_ms: u64 = 0;
 
 pub fn init_timer() void {
