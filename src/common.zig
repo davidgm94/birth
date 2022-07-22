@@ -330,26 +330,16 @@ pub fn TODO(src: SourceLocation) noreturn {
     if (@hasDecl(root, "identity")) {
         root.crash("TODO at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
     } else {
-        // TODO:
-        //if (is_root_package_build) {
         log.err("PANIC at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
         unreachable;
-        //} else {
-        //unreachable;
-        //}
     }
 }
 pub inline fn panic(src: SourceLocation, comptime message: []const u8, args: anytype) noreturn {
     if (@hasDecl(root, "identity")) {
         root.crash(message, args);
     } else {
-        // TODO:
-        //if (is_root_package_build) {
         log.err("PANIC at {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
         unreachable;
-        //} else {
-        //unreachable;
-        //}
     }
 }
 
@@ -357,6 +347,13 @@ pub inline fn panic(src: SourceLocation, comptime message: []const u8, args: any
 pub fn is_comptime() bool {
     var a: bool = false;
     return @TypeOf(@boolToInt(a)) == comptime_int;
+}
+
+pub fn test_comptime_hack() void {
+    comptime {
+        comptime_assert(is_comptime());
+    }
+    runtime_assert(@src(), !is_comptime());
 }
 
 pub const PrivilegeLevel = enum(u1) {

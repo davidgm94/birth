@@ -43,7 +43,6 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
-    // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
     var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
         log.err("Unable to allocate search buffer", .{});
         return null;
@@ -93,7 +92,6 @@ pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
         const sector_count = common.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
-        // TODO: @Bug @maybebug maybe allocate in the heap?
         var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };
@@ -121,7 +119,6 @@ pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []
     {
         log.debug("Seeking file {s}", .{filename});
         const sectors_to_read_at_time = 1;
-        // TODO: this should be a driver call to meet the specific requirements of the device. For the moment, we page-align everything to be over-correct
         var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
             log.err("Unable to allocate search buffer", .{});
             @panic("lol");

@@ -28,6 +28,7 @@ const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
 
 pub fn build(b: *Builder) void {
+    common.test_comptime_hack();
     const kernel = b.allocator.create(Kernel) catch unreachable;
     // zig fmt: off
     kernel.* = Kernel {
@@ -251,7 +252,6 @@ const Kernel = struct {
 
                 for (kernel.options.run.disks) |disk, disk_i| {
                     kernel.run_argument_list.append("-drive") catch unreachable;
-                    // TODO: consider other drive options
                     const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
                     const disk_path = kernel.builder.fmt("zig-cache/{s}.bin", .{disk_id});
                     const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
@@ -322,7 +322,6 @@ const Kernel = struct {
                 switch (kernel.options.run.emulator) {
                     .qemu => {
                         common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
-                        // TODO: better organization
                         kernel.run_argument_list.append("-trace") catch unreachable;
                         kernel.run_argument_list.append("-nvme*") catch unreachable;
                         kernel.debug_argument_list.append("-trace") catch unreachable;
@@ -354,14 +353,19 @@ const Kernel = struct {
             else => unreachable,
         }
 
-        // TODO: architecture independent script
-        kernel.gdb_script = kernel.builder.addWriteFile("gdb_script",
-            \\set disassembly-flavor intel
+        var gdb_script_buffer = std.ArrayList(u8).init(kernel.builder.allocator);
+        switch (kernel.options.arch) {
+            .x86_64 => gdb_script_buffer.appendSlice("set disassembly-flavor intel\n") catch unreachable,
+            else => {},
+        }
+        gdb_script_buffer.appendSlice(
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
             \\b start
             \\c
-        );
+        ) catch unreachable;
+
+        kernel.gdb_script = kernel.builder.addWriteFile("gdb_script", gdb_script_buffer.items);
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);
 
         // We need a member variable because we need consistent memory around it to do @fieldParentPtr

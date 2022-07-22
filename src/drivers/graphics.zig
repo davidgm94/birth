@@ -24,7 +24,6 @@ pub fn draw_char(driver: *Driver, font: Font, color: Color, point: Point, charac
 
         while (x < x_max) : (x += 1) {
             if (font_byte & (@as(u8, 0b1000_0000) >> @intCast(u3, x - point.x)) != 0) {
-                // TODO: correct the color
                 framebuffer[x + (y * driver.framebuffer.width)] = @bitCast(u32, color);
             }
         }
