@@ -4,11 +4,7 @@ const DMA = Drivers.DMA;
 
 const Driver = @This();
 
-pub const Type = enum(u32) {
-    virtio = 0,
-    nvme = 1,
-    memory = 2,
-};
+pub const Type = common.DiskDriverType;
 
 sector_size: u64,
 access: fn (driver: *Driver, special_context: u64, buffer: *DMA.Buffer, disk_work: Work) u64,

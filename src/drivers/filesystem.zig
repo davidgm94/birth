@@ -9,10 +9,7 @@ const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Driver = @This();
 
-const Type = enum(u32) {
-    RNU = 0,
-    ext2 = 1,
-};
+const Type = common.FilesystemDriverType;
 
 type: Type,
 allocator: Allocator,

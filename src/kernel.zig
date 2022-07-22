@@ -71,8 +71,8 @@ pub fn panic(message: []const u8, _: ?*common.StackTrace) noreturn {
 }
 
 pub fn crash(comptime format: []const u8, args: anytype) noreturn {
-    const crash_log = common.log.scoped(.PANIC);
     @setCold(true);
+    const crash_log = common.log.scoped(.PANIC);
     common.arch.disable_interrupts();
     crash_log.err(format, args);
     while (true) {

@@ -35,6 +35,17 @@ pub const ExitStatus = enum(u32) {
     failure = 1,
 };
 
+pub const DiskDriverType = enum(u32) {
+    virtio = 0,
+    nvme = 1,
+    memory = 2,
+};
+
+pub const FilesystemDriverType = enum(u32) {
+    RNU = 0,
+    ext2 = 1,
+};
+
 pub const BootstrapContext = struct {
     cpu: arch.CPU,
     thread: Thread,

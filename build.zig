@@ -35,8 +35,9 @@ pub fn build(b: *Builder) void {
         .options = .{
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
-                .disk_interface = .nvme,
-                .filesystem = .custom,
+                .disks = &.{
+                    .{ .interface = .nvme, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
+                },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
                     .qemu = .{
@@ -59,6 +60,7 @@ const Kernel = struct {
     userspace_programs: []*LibExeObjStep = &.{},
     options: Options,
     boot_image_step: Step = undefined,
+    disk_count: u64 = 0,
     disk_step: Step = undefined,
     debug_step: Step = undefined,
     run_argument_list: std.ArrayList([]const u8) = undefined,
@@ -140,28 +142,39 @@ const Kernel = struct {
     }
 
     fn create_userspace_programs(kernel: *Kernel) void {
-        var userspace_programs = std.ArrayList(*LibExeObjStep).init(kernel.builder.allocator);
-        const userspace_program_descriptors = [_]ZigProgramDescriptor{.{
-            .out_filename = "minimal.elf",
-            .main_source_file = "src/user/minimal/main.zig",
-        }};
+        const linker_script_path = kernel.builder.fmt("src/common/arch/{s}/user/linker.ld", .{@tagName(kernel.options.arch)});
+        common.runtime_assert(@src(), kernel.options.run.disks.len == 1);
 
-        for (userspace_program_descriptors) |descriptor| {
-            const program = kernel.builder.addExecutable(descriptor.out_filename, descriptor.main_source_file);
+        var unique_programs = std.ArrayList([]const u8).init(kernel.builder.allocator);
+        {
+            for (kernel.options.run.disks) |disk| {
+                next_program: for (disk.userspace_programs) |program| {
+                    for (unique_programs.items) |unique_program| {
+                        if (common.string_eq(unique_program, program)) continue :next_program;
+                    }
+
+                    unique_programs.append(program) catch unreachable;
+                }
+            }
+        }
+        var userspace_programs = std.ArrayList(*LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len) catch unreachable;
+
+        for (unique_programs.items) |userspace_program_name| {
+            const out_filename = kernel.builder.fmt("{s}.elf", .{userspace_program_name});
+            const main_source_file = kernel.builder.fmt("src/user/{s}/main.zig", .{userspace_program_name});
+            const program = kernel.builder.addExecutable(out_filename, main_source_file);
             program.setTarget(get_target_base(kernel.options.arch));
             program.setOutputDir(cache_dir);
             program.setBuildMode(kernel.builder.standardReleaseOptions());
             //program.setBuildMode(.ReleaseSafe);
-            // TODO: make this architecture independent
-            if (kernel.options.arch != .x86_64) @panic("this should be made architecture independent");
-            program.setLinkerScriptPath(FileSource.relative("./src/common/arch/x86_64/user/linker.ld"));
+            program.setLinkerScriptPath(FileSource.relative(linker_script_path));
             program.entry_symbol_name = "_start";
 
             add_common_packages(program);
 
             kernel.builder.default_step.dependOn(&program.step);
 
-            userspace_programs.append(program) catch unreachable;
+            userspace_programs.appendAssumeCapacity(program);
         }
 
         kernel.userspace_programs = userspace_programs.items;
@@ -177,9 +190,7 @@ const Kernel = struct {
     }
 
     fn create_disk(kernel: *Kernel) void {
-        if (kernel.options.run.disk_interface) |_| {
-            Disk.create(kernel);
-        }
+        Disk.create(kernel);
     }
 
     fn create_run_and_debug_steps(kernel: *Kernel) void {
@@ -238,14 +249,15 @@ const Kernel = struct {
                 kernel.run_argument_list.append("-global") catch unreachable;
                 kernel.run_argument_list.append("virtio-mmio.force-legacy=false") catch unreachable;
 
-                if (kernel.options.run.disk_interface) |disk_interface| {
+                for (kernel.options.run.disks) |disk, disk_i| {
                     kernel.run_argument_list.append("-drive") catch unreachable;
                     // TODO: consider other drive options
-                    const disk_id = "primary_disk";
-                    const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ Disk.path, disk_id });
+                    const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
+                    const disk_path = kernel.builder.fmt("zig-cache/{s}.bin", .{disk_id});
+                    const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
                     kernel.run_argument_list.append(drive_options) catch unreachable;
 
-                    switch (disk_interface) {
+                    switch (disk.interface) {
                         .nvme => {
                             kernel.run_argument_list.append("-device") catch unreachable;
                             const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
@@ -416,8 +428,6 @@ const Kernel = struct {
     };
 
     const Disk = struct {
-        const path = "zig-cache/disk.bin";
-
         fn create(kernel: *Kernel) void {
             kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, make);
 
@@ -431,41 +441,58 @@ const Kernel = struct {
 
         fn make(step: *Step) !void {
             const kernel = @fieldParentPtr(Kernel, "disk_step", step);
-            const font_file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, "resources/zap-light16.psf", std.math.maxInt(usize));
-            std.debug.print("Font file size: {} bytes\n", .{font_file.len});
+            const max_file_length = std.math.maxInt(usize);
 
-            const disk_memory = std.os.mmap(
-                null,
-                1 * common.gb,
-                std.os.PROT.READ | std.os.PROT.WRITE,
-                std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS,
-                -1,
-                0,
-            ) catch unreachable;
-            log.debug("Resultant big blob: (0x{x}, {})", .{ @ptrToInt(disk_memory.ptr), disk_memory.len });
-            var build_disk_buffer = common.ArrayListAligned(u8, 0x1000){
-                .items = disk_memory,
-                .capacity = disk_memory.len,
-            };
-            build_disk_buffer.items.len = 0;
-            log.debug("Build disk buffer: 0x{x}", .{@ptrToInt(build_disk_buffer.items.ptr)});
+            for (kernel.options.run.disks) |disk, disk_i| {
+                const disk_memory = std.os.mmap(
+                    null,
+                    1 * common.gb,
+                    std.os.PROT.READ | std.os.PROT.WRITE,
+                    std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS,
+                    -1,
+                    0,
+                ) catch unreachable;
+                defer std.os.munmap(disk_memory);
+                var build_disk_buffer = common.ArrayListAligned(u8, 0x1000){
+                    .items = disk_memory,
+                    .capacity = disk_memory.len,
+                };
+                build_disk_buffer.items.len = 0;
+                var build_disk = BuildDisk.new(build_disk_buffer);
+                var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
 
-            var build_disk = BuildDisk.new(build_disk_buffer);
-            var build_fs = drivers.RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
-            build_fs.fs.write_new_file(&build_fs.fs, 0, "font.psf", font_file);
+                for (disk.resource_files) |resource_file| {
+                    const file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
+                    build_fs.fs.write_new_file(&build_fs.fs, 0, resource_file, file);
+                }
 
+                for (disk.userspace_programs) |userspace_program_name| {
+                    const userspace_program = find_userspace_program(kernel, userspace_program_name) orelse @panic("wtf");
+                    const exe_name = userspace_program.out_filename;
+                    const exe_path = userspace_program.output_path_source.getPath();
+                    const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
+                    build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
+                }
+
+                const disk_size = build_disk.buffer.items.len;
+                const disk_sector_count = common.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
+                log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
+
+                try std.fs.cwd().writeFile(kernel.builder.fmt("zig-cache/disk{}.bin", .{disk_i}), build_disk.buffer.items);
+            }
+        }
+
+        fn find_userspace_program(kernel: *Kernel, userspace_program_name: []const u8) ?*LibExeObjStep {
             for (kernel.userspace_programs) |userspace_program| {
-                const exe_name = userspace_program.out_filename;
-                const exe_path = userspace_program.output_path_source.getPath();
-                const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
-                build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
+                const ending = ".elf";
+                common.runtime_assert(@src(), std.ascii.endsWithIgnoreCase(userspace_program.out_filename, ending));
+                const name = userspace_program.out_filename[0 .. userspace_program.out_filename.len - ending.len];
+                if (common.string_eq(name, userspace_program_name)) {
+                    return userspace_program;
+                }
             }
 
-            const disk_size = build_disk.buffer.items.len;
-            const disk_sector_count = common.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
-            log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
-
-            try std.fs.cwd().writeFile(Disk.path, build_disk.buffer.items);
+            return null;
         }
     };
 
@@ -570,8 +597,7 @@ const Kernel = struct {
         };
 
         const RunOptions = struct {
-            disk_interface: ?DiskInterface,
-            filesystem: ?Filesystem,
+            disks: []const DiskOptions,
             memory: Memory,
             emulator: union(enum) {
                 qemu: QEMU,
@@ -600,6 +626,13 @@ const Kernel = struct {
                 };
             };
 
+            const DiskOptions = struct {
+                interface: common.DiskDriverType,
+                filesystem: common.FilesystemDriverType,
+                userspace_programs: []const []const u8,
+                resource_files: []const []const u8,
+            };
+
             const LogOptions = struct {
                 file: ?[]const u8,
                 guest_errors: bool,
@@ -607,14 +640,6 @@ const Kernel = struct {
                 interrupts: bool,
                 assembly: bool,
             };
-
-            const DiskInterface = enum {
-                virtio,
-                ahci,
-                nvme,
-            };
-
-            const Filesystem = enum { custom };
         };
     };
 };
