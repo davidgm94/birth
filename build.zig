@@ -701,11 +701,6 @@ fn get_target_base(arch: Arch) std.zig.CrossTarget {
     return target;
 }
 
-const ZigProgramDescriptor = struct {
-    out_filename: []const u8,
-    main_source_file: []const u8,
-};
-
 fn do_debug_step(step: *Step) !void {
     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
     switch (common.os) {
