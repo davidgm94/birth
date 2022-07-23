@@ -104,29 +104,6 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
 
     // TODO: Handle virtual memory management later on
 
-    //if (true) @panic("this is going to corrupt memory since this is on the stack right now", .{});
-
-    //var insertion_result = false;
-    //insertion_result = virtual_address_space.free_regions_by_address.insert(&kernel.memory_region.item_address, &kernel.memory_region, kernel.memory_region.address.value, .panic);
-    //common.runtime_assert(@src(), insertion_result);
-    //insertion_result = virtual_address_space.free_regions_by_size.insert(&kernel.memory_region.item_size, &kernel.memory_region, kernel.memory_region.size, .allow);
-    //common.runtime_assert(@src(), insertion_result);
-    //log.debug("Set root for Virtual Memory Manager tree", .{});
-    //log.debug("Tree address (free/addr): 0x{x}", .{@ptrToInt(&virtual_address_space.free_regions_by_address)});
-    //log.debug("Tree address (free/size): 0x{x}", .{@ptrToInt(&virtual_address_space.free_regions_by_size)});
-    //log.debug("Tree address (used): 0x{x}", .{@ptrToInt(&virtual_address_space.used_regions)});
-
-    //for (kernel.physical_address_space.usable) |physical_entry| {
-    //virtual_address_space.integrate_mapped_physical_entry(physical_entry, physical_entry.descriptor.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
-    //}
-    //log.debug("Finished the integration of usable regions into the kernel address space successfully!", .{});
-    //for (kernel.physical_address_space.framebuffer) |physical_region| {
-    //virtual_address_space.integrate_mapped_physical_region(physical_region, physical_region.address.to_higher_half_virtual_address()) catch @panic("unable to integrate physical region into vmm");
-    //}
-    //log.debug("Finished the integration of framebuffer regions into the kernel address space successfully!", .{});
-    //for (kernel.physical_address_space.usable) |physical_entry| {
-    //log.debug("(0x{x},\t0x{x}) - 0x{x}", .{ physical_entry.descriptor.address.value, physical_entry.descriptor.address.value + physical_entry.descriptor.size, physical_entry.descriptor.address.value + physical_entry.allocated_size });
-    //}
     log.debug("Paging initialized", .{});
 }
 
@@ -332,7 +309,7 @@ pub const VirtualAddressSpace = struct {
     }
 
     // TODO:
-    pub const Flags = common.Bitflag(true, enum(u64) {
+    pub const Flags = common.Bitflag(true, u64, enum(u6) {
         read_write = 1,
         user = 2,
         write_through = 3,
@@ -373,7 +350,7 @@ const PageIndex = enum(u3) {
 const PML4E = struct {
     value: Flags,
 
-    const Flags = common.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -388,7 +365,7 @@ const PML4E = struct {
 const PDPTE = struct {
     value: Flags,
 
-    const Flags = common.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -404,7 +381,7 @@ const PDPTE = struct {
 const PDE = struct {
     value: Flags,
 
-    const Flags = common.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -420,7 +397,7 @@ const PDE = struct {
 const PTE = struct {
     value: Flags,
 
-    const Flags = common.Bitflag(true, enum(u64) {
+    const Flags = common.Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,

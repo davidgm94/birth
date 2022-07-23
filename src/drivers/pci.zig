@@ -500,7 +500,7 @@ pub const Device = struct {
         }
     }
 
-    pub const Features = common.Bitflag(false, enum(u64) {
+    pub const Features = common.Bitflag(false, u64, enum(u6) {
         bar0 = 0,
         bar1 = 1,
         bar2 = 2,

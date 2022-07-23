@@ -244,19 +244,23 @@ pub fn cstr_len(cstr: [*:0]const u8) u64 {
     return len;
 }
 
-pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
+pub fn Bitflag(comptime is_volatile: bool, comptime BackingType: type, comptime EnumT: type) type {
     return struct {
         pub const Enum = EnumT;
-        const BitFlagIntType = IntType(.unsigned, @bitSizeOf(EnumT));
+        pub const Int = BackingType;
+        const EnumBitSize = @popCount(u64, @bitSizeOf(BackingType) - 1);
+        comptime {
+            comptime_assert(EnumBitSize == @bitSizeOf(EnumT));
+        }
         const Ptr = if (is_volatile) *volatile @This() else *@This();
 
-        bits: BitFlagIntType,
+        bits: Int,
 
         pub inline fn from_flags(comptime flags: []const EnumT) @This() {
             const result = comptime blk: {
                 if (flags.len > @bitSizeOf(EnumT)) @compileError("More flags than bits\n");
 
-                comptime var bits: BitFlagIntType = 0;
+                comptime var bits: Int = 0;
 
                 inline for (flags) |field| {
                     bits |= 1 << @enumToInt(field);
@@ -267,7 +271,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
             return @This(){ .bits = result };
         }
 
-        pub fn from_bits(bits: BitFlagIntType) @This() {
+        pub fn from_bits(bits: Int) @This() {
             return @This(){ .bits = bits };
         }
 
@@ -284,7 +288,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
 
         pub inline fn all() @This() {
             var result = comptime blk: {
-                var bits: BitFlagIntType = 0;
+                var bits: Int = 0;
                 inline for (@typeInfo(EnumT).Enum.fields) |field| {
                     bits |= 1 << field.value;
                 }
@@ -316,7 +320,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime EnumT: type) type {
         pub fn format(bitflag: @This(), comptime _: []const u8, _: InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
             try writer.writeAll("{\n");
             for (enum_values(Enum)) |enum_value| {
-                const bit_value = @boolToInt(bitflag.bits & (@as(BitFlagIntType, 1) << @intCast(u6, @enumToInt(enum_value))) != 0);
+                const bit_value = @boolToInt(bitflag.bits & (@as(Int, 1) << @intCast(u6, @enumToInt(enum_value))) != 0);
                 try internal_format(writer, "\t{s}: {}\n", .{ @tagName(enum_value), bit_value });
             }
             try writer.writeAll("}");

@@ -838,7 +838,7 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     return struct {
         pub const BitEnum = _BitEnum;
 
-        pub const Flags = common.Bitflag(false, BitEnum);
+        pub const Flags = common.Bitflag(false, u64, BitEnum);
         pub inline fn read() Flags {
             var low: u32 = undefined;
             var high: u32 = undefined;
@@ -873,7 +873,7 @@ pub const IA32_FMASK = SimpleMSR(0xC0000084);
 pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
 pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
 pub const IA32_KERNEL_GS_BASE = SimpleMSR(0xC0000102);
-pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u64) {
+pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u6) {
     /// Syscall Enable - syscall, sysret
     SCE = 0,
     /// Long Mode Enable
@@ -887,7 +887,7 @@ pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u64) {
     FFXSR = 14,
     TCE = 15,
 });
-pub const IA32_APIC_BASE = ComplexMSR(0x0000001B, enum(u64) {
+pub const IA32_APIC_BASE = ComplexMSR(0x0000001B, enum(u6) {
     bsp = 8,
     global_enable = 11,
 });
@@ -897,7 +897,7 @@ fn get_apic_base(ia32_apic_base: IA32_APIC_BASE.Flags) u32 {
 }
 
 pub const RFLAGS = struct {
-    pub const Flags = common.Bitflag(false, enum(u64) {
+    pub const Flags = common.Bitflag(false, u64, enum(u6) {
         CF = 0,
         PF = 2,
         AF = 4,

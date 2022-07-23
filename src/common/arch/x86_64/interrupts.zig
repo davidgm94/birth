@@ -316,16 +316,21 @@ const Exception = enum(u5) {
     security_exception = 0x1e,
 };
 
-const PageFaultErrorCode = common.Bitflag(false, enum(u64) {
-    present = 0,
-    write = 1,
-    user = 2,
-    reserved_write = 3,
-    instruction_fetch = 4,
-    protection_key = 5,
-    shadow_stack = 6,
-    software_guard_extensions = 15,
-});
+const PageFaultErrorCode = packed struct {
+    present: bool,
+    write: bool,
+    user: bool,
+    reserved_write: bool,
+    instruction_fetch: bool,
+    protection_key: bool,
+    shadow_stack: bool,
+    reserved: u8,
+    software_guard_extensions: bool,
+
+    comptime {
+        common.comptime_assert(@sizeOf(PageFaultErrorCode) == @sizeOf(u16));
+    }
+};
 
 export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     if (x86_64.are_interrupts_enabled()) {
@@ -358,16 +363,15 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                 if (context.cs != @offsetOf(GDT.Table, "code_64")) @panic("invalid cs");
                 switch (exception) {
                     .page_fault => {
-                        const error_code = PageFaultErrorCode.from_bits(@intCast(u16, context.error_code));
+                        const error_code_int = @truncate(u16, context.error_code);
+                        const error_code = @bitCast(PageFaultErrorCode, error_code_int);
                         const page_fault_address = x86_64.cr2.read();
                         log.debug("Page fault address: 0x{x}. Error code: {}", .{ page_fault_address, error_code });
-                        if (error_code.contains(.reserved_write)) {
+                        if (error_code.reserved_write) {
                             @panic("reserved write");
                         }
 
-                        if (true) @panic("Unresolvable page fault");
-
-                        x86_64.disable_interrupts();
+                        @panic("Unresolvable page fault");
                     },
                     else => kernel.crash("{s}", .{@tagName(exception)}),
                 }
