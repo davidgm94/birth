@@ -4,7 +4,7 @@ const TODO = common.TODO;
 
 pub const Syscall = common.Syscall;
 
-pub const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) u64;
+pub const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) SyscallResult;
 pub const handlers = [Syscall.count]Handler{
     @ptrCast(Handler, thread_exit),
 };

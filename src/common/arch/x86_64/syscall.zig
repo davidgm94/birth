@@ -29,7 +29,7 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) u64;
+pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.Result;
 
 // INFO: only RSP is handled in the kernel
 comptime {
@@ -54,7 +54,7 @@ comptime {
     );
 }
 
-pub fn kernel_syscall_entry_point() callconv(.Naked) noreturn {
+pub fn kernel_syscall_entry_point() callconv(.Naked) void {
     // This function only modifies RSP. The other registers are preserved in user space
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (
@@ -101,5 +101,5 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) noreturn {
           [handler_base_array] "i" (@ptrToInt(&common.Syscall.kernel.handlers)),
     );
 
-    unreachable;
+    @panic("reached unreachable: syscall handler");
 }
