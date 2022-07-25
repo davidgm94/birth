@@ -7,10 +7,24 @@ pub const Syscall = common.Syscall;
 pub const RawHandler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.Result;
 pub const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.Result;
 pub const raw_handlers = [Syscall.raw_count]RawHandler{
-    common.safe_function_cast(ask_syscall_manager, .{ .FunctionType = RawHandler }) catch |err| @compileLog(err),
+    ask_syscall_manager, //common.safe_function_cast(ask_syscall_manager, common.SafeFunctionCastParameters{ .FunctionType = RawHandler }) catch |err| @compileLog(err),
 };
 
-pub noinline fn ask_syscall_manager() callconv(.C) void {}
+pub noinline fn ask_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.Result {
+    _ = argument1;
+    _ = argument2;
+    _ = argument3;
+    _ = argument4;
+    _ = argument5;
+    log.debug("Asking syscall manager", .{});
+    const id = @intToEnum(Syscall.HardwareID, argument0);
+    common.runtime_assert(@src(), id == .ask_syscall_manager);
+    const current_thread = common.arch.get_current_thread();
+    return Syscall.Result{
+        .a = @ptrToInt((current_thread.syscall_manager orelse @panic("wtfff")).user),
+        .b = 0,
+    };
+}
 
 //pub fn thread_exit(syscall_id: Syscall.ID, exit_code: u64, maybe_message_ptr: ?[*]const u8, message_len: u64, _: u64, _: u64) callconv(.C) noreturn {
 //common.runtime_assert(@src(), syscall_id == .thread_exit);

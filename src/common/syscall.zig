@@ -15,7 +15,7 @@ pub const Result = extern struct {
 };
 
 pub const HardwareID = enum(u64) {
-    ask_manager = 0,
+    ask_syscall_manager = 0,
 };
 
 pub const ID = enum(u64) {
