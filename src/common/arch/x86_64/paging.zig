@@ -123,6 +123,11 @@ pub const VirtualAddressSpace = struct {
         return virtual_address_space;
     }
 
+    pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
+        const current = x86_64.cr3.read_raw();
+        return current == virtual_address_space.cr3;
+    }
+
     pub inline fn bootstrapping() VirtualAddressSpace {
         return VirtualAddressSpace{
             .cr3 = x86_64.cr3.read_raw(),

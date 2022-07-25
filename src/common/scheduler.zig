@@ -198,6 +198,13 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     thread.state = .active;
     thread.executing = false;
 
+    // TODO: don't hardcode this
+    const async_queue_entry_count = 256;
+    thread.async_manager = switch (privilege_level) {
+        .user => common.Syscall.AsyncManager.for_kernel(thread.address_space, async_queue_entry_count),
+        .kernel => null,
+    };
+
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});
         // TODO: hack

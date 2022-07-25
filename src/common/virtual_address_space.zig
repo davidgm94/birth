@@ -73,6 +73,7 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
     defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
     const physical_address = root.physical_address_space.allocate(page_count) orelse return Allocator.Error.OutOfMemory;
+    log.debug("allocated physical: 0x{x}", .{physical_address.value});
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
@@ -86,8 +87,10 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
             }
         }
     };
+    log.debug("figure out virtual: 0x{x}", .{virtual_address.value});
 
     if (flags.user) common.runtime_assert(@src(), virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) == null);
+    log.debug("Translated", .{});
 
     const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
     virtual_address_space.map_physical_region_extended(physical_region, virtual_address, flags, AlreadyLocked.yes);
@@ -197,6 +200,10 @@ fn map_physical_region_extended(virtual_address_space: *VirtualAddressSpace, phy
         virtual_address.value += page_size;
     }
     log.debug("End mapping", .{});
+}
+
+pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
+    return virtual_address_space.arch.is_current();
 }
 
 pub const Flags = packed struct {

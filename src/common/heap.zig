@@ -47,6 +47,11 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         .user = virtual_address_space.privilege_level == .user,
     };
 
+    if (flags.user and !virtual_address_space.is_current()) {
+        // TODO: currently the Zig allocator somehow dereferences memory so allocating memory for another address space make this not viable
+        @panic("trying to allocate stuff for userspace from another address space");
+    }
+
     // TODO: check if the region has enough available space
     if (size < region_size) {
         const region = blk: {
