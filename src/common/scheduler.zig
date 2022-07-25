@@ -201,7 +201,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     // TODO: don't hardcode this
     const async_queue_entry_count = 256;
     thread.async_manager = switch (privilege_level) {
-        .user => common.Syscall.AsyncManager.for_kernel(thread.address_space, async_queue_entry_count),
+        .user => common.Syscall.Manager.for_kernel(thread.address_space, async_queue_entry_count),
         .kernel => null,
     };
 

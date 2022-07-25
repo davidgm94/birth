@@ -14,11 +14,15 @@ pub const Result = extern struct {
     b: u64,
 };
 
+pub const HardwareID = enum(u64) {
+    ask_manager = 0,
+};
+
 pub const ID = enum(u64) {
     thread_exit = 0,
 };
 
-pub const count = common.enum_values(ID).len;
+pub const raw_count = common.enum_values(ID).len;
 
 const syscall = common.arch.Syscall.user_syscall_entry_point;
 
@@ -56,17 +60,18 @@ pub const QueueDescriptor = struct {
     offset: u32,
 };
 
-pub const KernelAsyncManager = struct {
-    kernel: AsyncManager,
-    user: *AsyncManager,
+pub const KernelManager = struct {
+    kernel: Manager,
+    user: *Manager,
 };
 
-pub const AsyncManager = struct {
+pub const Manager = struct {
     buffer: []u8,
     submission_queue: QueueDescriptor,
     completion_queue: QueueDescriptor,
 
-    pub fn for_kernel(virtual_address_space: *common.VirtualAddressSpace, entry_count: u64) KernelAsyncManager {
+    pub fn for_kernel(virtual_address_space: *common.VirtualAddressSpace, entry_count: u64) KernelManager {
+        common.runtime_assert(@src(), virtual_address_space.privilege_level == .user);
         const submission_queue_buffer_size = common.align_forward(entry_count * @sizeOf(WorkEntry), context.page_size);
         const completion_queue_buffer_size = common.align_forward(entry_count * @sizeOf(ResultEntry), context.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
@@ -84,19 +89,14 @@ pub const AsyncManager = struct {
 
         // TODO: not use a full page
         // TODO: unmap
-        const user_async_manager_user_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(AsyncManager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
+        // TODO: @Hack undo
+        const user_async_manager_user_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
         const translated_physical = virtual_address_space.translate_address(user_async_manager_user_virtual) orelse @panic("wtff");
         const kernel_virtual = translated_physical.to_higher_half_virtual_address();
         const trans_result = virtual_address_space.translate_address(kernel_virtual) orelse @panic("wtf");
         common.runtime_assert(@src(), trans_result.value == translated_physical.value);
-        const user_async_manager = kernel_virtual.access(*AsyncManager);
-        // TODO: @Hack undo
-        //const user_async_manager_physical = PhysicalAddress.new(@ptrToInt(user_async_manager));
-        //const aligned_physical = user_async_manager_physical.aligned_backward(context.page_size);
-        //const aligned_virtual = user_async_manager_physical.to_higher_half_virtual_address();
-        //const translation_result = virtual_address_space.translate_address(aligned_virtual) orelse @panic("wtf");
-        //common.runtime_assert(@src(), translation_result.value == aligned_physical.value);
-        user_async_manager.* = AsyncManager{
+        const user_async_manager = kernel_virtual.access(*Manager);
+        user_async_manager.* = Manager{
             .buffer = user_virtual_buffer.access([*]u8)[0..total_buffer_size],
             .submission_queue = QueueDescriptor{
                 .head = 0,
@@ -110,8 +110,8 @@ pub const AsyncManager = struct {
             },
         };
 
-        return KernelAsyncManager{
-            .kernel = AsyncManager{
+        return KernelManager{
+            .kernel = Manager{
                 .buffer = kernel_virtual_buffer.access([*]u8)[0..total_buffer_size],
                 .submission_queue = QueueDescriptor{
                     .head = 0,
@@ -124,7 +124,7 @@ pub const AsyncManager = struct {
                     .offset = @intCast(u32, submission_queue_buffer_size),
                 },
             },
-            .user = user_async_manager_user_virtual.access(*AsyncManager),
+            .user = user_async_manager_user_virtual.access(*Manager),
         };
     }
 };

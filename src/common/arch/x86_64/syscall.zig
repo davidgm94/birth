@@ -97,8 +97,8 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\hlt
         :
         : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
-          [syscall_count] "i" (common.Syscall.count),
-          [handler_base_array] "i" (@ptrToInt(&common.Syscall.kernel.handlers)),
+          [syscall_count] "i" (common.Syscall.raw_count),
+          [handler_base_array] "i" (@ptrToInt(&common.Syscall.kernel.raw_handlers)),
     );
 
     @panic("reached unreachable: syscall handler");
