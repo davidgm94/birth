@@ -31,7 +31,7 @@ const raw_syscall_entry_point = common.arch.Syscall.user_syscall_entry_point;
 
 pub const ThreadExitParameters = struct {
     message: ?[]const u8 = null,
-    exit_code: u64,
+    exit_code: u64 = 0,
 };
 
 pub fn raw_syscall(hardware_id: HardwareID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) RawResult {
@@ -49,26 +49,54 @@ pub fn flush_syscall_manager() void {
     _ = raw_syscall(.flush_syscall_manager, 0, 0, 0, 0, 0);
 }
 
+pub const LogParameters = struct {
+    message: []const u8,
+};
 /// @Syscall
-pub fn log(message: []const u8) Submission {
+pub fn log(parameters: LogParameters) Submission {
     return Submission{
-        .arguments = [_]u64{ @enumToInt(ID.log), @ptrToInt(message.ptr), message.len, 0, 0, 0 },
+        .arguments = [_]u64{ @enumToInt(ID.log), @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0 },
     };
 }
 
-//pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) noreturn {
-//var message_ptr: ?[*]const u8 = undefined;
-//var message_len: u64 = undefined;
-//if (thread_exit_parameters.message) |message| {
-//message_ptr = message.ptr;
-//message_len = message.len;
-//} else {
-//message_ptr = null;
-//message_len = 0;
-//}
-//_ = raw_syscall(.thread_exit, thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0);
-//@panic("This syscall should not return");
-//}
+/// @Syscall
+pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
+    var message_ptr: ?[*]const u8 = undefined;
+    var message_len: u64 = undefined;
+    if (thread_exit_parameters.message) |message| {
+        message_ptr = message.ptr;
+        message_len = message.len;
+    } else {
+        message_ptr = null;
+        message_len = 0;
+    }
+
+    return Submission{
+        .arguments = [_]u64{ @enumToInt(ID.thread_exit), thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0 },
+    };
+}
+
+pub const ExecutionMode = enum {
+    blocking,
+    non_blocking,
+    const count = common.enum_values(ExecutionMode).len;
+};
+
+const SyscallReturnType = blk: {
+    var ReturnTypes: [ID.count][ExecutionMode.count]type = undefined;
+    ReturnTypes[@enumToInt(ID.thread_exit)][@enumToInt(ExecutionMode.blocking)] = noreturn;
+    ReturnTypes[@enumToInt(ID.thread_exit)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ID.log)][@enumToInt(ExecutionMode.blocking)] = void;
+    ReturnTypes[@enumToInt(ID.log)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    break :blk ReturnTypes;
+};
+
+const SyscallParameters = blk: {
+    var ParameterTypes: [ID.count]type = undefined;
+    ParameterTypes[@enumToInt(ID.thread_exit)] = ThreadExitParameters;
+    ParameterTypes[@enumToInt(ID.log)] = LogParameters;
+    break :blk ParameterTypes;
+};
 
 pub const Submission = struct {
     arguments: [6]u64,
@@ -98,11 +126,11 @@ pub const Manager = struct {
         const completion_queue_buffer_size = common.align_forward(entry_count * @sizeOf(Completion), context.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
 
-        const async_buffer_physical_address = root.physical_address_space.allocate(common.bytes_to_pages(total_buffer_size, context.page_size, .must_be_exact)) orelse @panic("wtF");
+        const syscall_buffer_physical_address = root.physical_address_space.allocate(common.bytes_to_pages(total_buffer_size, context.page_size, .must_be_exact)) orelse @panic("wtF");
+        const kernel_virtual_buffer = syscall_buffer_physical_address.to_higher_half_virtual_address();
         // TODO: stop hardcoding
-        const kernel_virtual_buffer = VirtualAddress.new(0x0000_7f00_0000_0000);
-        const user_virtual_buffer = kernel_virtual_buffer.offset(total_buffer_size);
-        const submission_physical_address = async_buffer_physical_address;
+        const user_virtual_buffer = VirtualAddress.new(0x0000_7f00_0000_0000);
+        const submission_physical_address = syscall_buffer_physical_address;
         const completion_physical_address = submission_physical_address.offset(submission_queue_buffer_size);
         virtual_address_space.map(submission_physical_address, kernel_virtual_buffer, .{ .write = false, .user = false });
         virtual_address_space.map(completion_physical_address, kernel_virtual_buffer.offset(submission_queue_buffer_size), .{ .write = true, .user = false });
@@ -112,13 +140,13 @@ pub const Manager = struct {
         // TODO: not use a full page
         // TODO: unmap
         // TODO: @Hack undo
-        const user_async_manager_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
-        const translated_physical = virtual_address_space.translate_address(user_async_manager_virtual) orelse @panic("wtff");
-        const kernel_async_manager_virtual = translated_physical.to_higher_half_virtual_address();
-        const trans_result = virtual_address_space.translate_address(kernel_async_manager_virtual) orelse @panic("wtf");
+        const user_syscall_manager_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
+        const translated_physical = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtff");
+        const kernel_syscall_manager_virtual = translated_physical.to_higher_half_virtual_address();
+        const trans_result = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");
         common.runtime_assert(@src(), trans_result.value == translated_physical.value);
-        const user_async_manager = kernel_async_manager_virtual.access(*Manager);
-        user_async_manager.* = Manager{
+        const user_syscall_manager = kernel_syscall_manager_virtual.access(*Manager);
+        user_syscall_manager.* = Manager{
             .buffer = user_virtual_buffer.access([*]u8)[0..total_buffer_size],
             .submission_queue = QueueDescriptor{
                 .head = 0,
@@ -132,24 +160,44 @@ pub const Manager = struct {
             },
         };
 
-        const physical_kernel = virtual_address_space.translate_address(kernel_async_manager_virtual) orelse @panic("wtf");
-        const physical_user = virtual_address_space.translate_address(user_async_manager_virtual) orelse @panic("wtf");
+        const physical_kernel = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");
+        const physical_user = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtf");
         common.runtime_assert(@src(), physical_user.value == physical_kernel.value);
 
         return KernelManager{
-            .kernel = kernel_async_manager_virtual.access(*Manager),
-            .user = user_async_manager_virtual.access(*Manager),
+            .kernel = kernel_syscall_manager_virtual.access(*Manager),
+            .user = user_syscall_manager_virtual.access(*Manager),
         };
     }
 
-    pub fn add_submission(manager: *Manager, submission: Submission) void {
+    pub fn syscall(manager: *Manager, comptime id: ID, comptime execution_mode: ExecutionMode, parameters: SyscallParameters[@enumToInt(id)]) SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)] {
+        const ReturnType = SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)];
+        const submission = switch (id) {
+            .thread_exit => thread_exit(parameters),
+            .log => log(parameters),
+        };
+
+        manager.add_submission(submission);
+
+        switch (execution_mode) {
+            .blocking => manager.flush(),
+            .non_blocking => {},
+        }
+
+        if (ReturnType == noreturn) {
+            @panic("should not have returned");
+        }
+    }
+
+    fn add_submission(manager: *Manager, submission: Submission) void {
         const new_submission = @ptrCast(*Submission, @alignCast(@alignOf(Submission), &manager.buffer[manager.submission_queue.offset + manager.submission_queue.head]));
         new_submission.* = submission;
         manager.submission_queue.head += @sizeOf(Submission);
     }
 
     pub fn flush(manager: *Manager) void {
-        _ = manager;
+        const submission_queue_head = manager.submission_queue.head;
         flush_syscall_manager();
+        common.runtime_assert(@src(), manager.completion_queue.head == submission_queue_head);
     }
 };

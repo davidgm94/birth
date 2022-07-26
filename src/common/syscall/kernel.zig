@@ -45,7 +45,11 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
 
     logger.debug("Manager completion queue head: {}. Submission: {}", .{ manager.completion_queue.head, manager.submission_queue.head });
     // TODO: improve and bug-free this
-    while (manager.completion_queue.head != manager.submission_queue.head) : (manager.completion_queue.head += @sizeOf(Syscall.Submission)) {
+    var processed_syscall_count: u64 = 0;
+    while (manager.completion_queue.head != manager.submission_queue.head) : ({
+        manager.completion_queue.head += @sizeOf(Syscall.Submission);
+        processed_syscall_count += 1;
+    }) {
         const index = manager.submission_queue.offset + manager.completion_queue.head;
         logger.debug("Index: {}", .{index});
         const submission = @ptrCast(*Syscall.Submission, @alignCast(@alignOf(Syscall.Submission), &manager.buffer[index]));
@@ -64,6 +68,8 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
             @panic("invalid syscall id");
         }
     }
+
+    logger.debug("Processed syscall count: {}", .{processed_syscall_count});
 
     // TODO: emit proper result
     return common.zeroes(Syscall.RawResult);
