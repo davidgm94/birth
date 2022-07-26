@@ -29,7 +29,7 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.Result;
+pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.RawResult;
 
 // INFO: only RSP is handled in the kernel
 comptime {
@@ -74,7 +74,7 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\mov %%rbp, %%rsp
         // Check if syscall is in range of kernel syscalls
         \\mov %%rdi, %%rax
-        \\cmp %[syscall_count], %%rax
+        \\cmp %[hardware_syscall_count], %%rax
         \\jge 0f
         // Multiply the offset by 8 bytes that occupy functions in 64-bit mode
         \\shl $0x03, %%rax
@@ -97,7 +97,7 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\hlt
         :
         : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
-          [syscall_count] "i" (common.Syscall.raw_count),
+          [hardware_syscall_count] "i" (common.Syscall.HardwareID.count),
           [handler_base_array] "i" (@ptrToInt(&common.Syscall.kernel.raw_handlers)),
     );
 

@@ -202,7 +202,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     const syscall_queue_entry_count = 256;
     thread.syscall_manager = switch (privilege_level) {
         .user => common.Syscall.Manager.for_kernel(thread.address_space, syscall_queue_entry_count),
-        .kernel => null,
+        .kernel => .{ .kernel = null, .user = null },
     };
 
     if (thread.type != .idle) {

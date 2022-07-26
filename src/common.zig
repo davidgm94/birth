@@ -378,24 +378,6 @@ pub inline fn get_higher_half_map_address() u64 {
     }
 }
 
-//pub const Fn = struct {
-//calling_convention: CallingConvention,
-//alignment: comptime_int,
-//is_generic: bool,
-//is_var_args: bool,
-///// TODO change the language spec to make this not optional.
-//return_type: ?type,
-//args: []const Param,
-
-///// This data structure is used by the Zig language code generation and
-///// therefore must be kept in sync with the compiler implementation.
-//pub const Param = struct {
-//is_generic: bool,
-//is_noalias: bool,
-//arg_type: ?type,
-//};
-//};
-
 const SafeFunctionCastError = error{
     destination_function_type_not_a_function,
     source_function_type_not_a_function,
