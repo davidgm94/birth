@@ -112,8 +112,8 @@ pub const Manager = struct {
         // TODO: not use a full page
         // TODO: unmap
         // TODO: @Hack undo
-        const user_async_manager_user_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
-        const translated_physical = virtual_address_space.translate_address(user_async_manager_user_virtual) orelse @panic("wtff");
+        const user_async_manager_virtual = virtual_address_space.allocate(common.align_forward(@sizeOf(Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
+        const translated_physical = virtual_address_space.translate_address(user_async_manager_virtual) orelse @panic("wtff");
         const kernel_async_manager_virtual = translated_physical.to_higher_half_virtual_address();
         const trans_result = virtual_address_space.translate_address(kernel_async_manager_virtual) orelse @panic("wtf");
         common.runtime_assert(@src(), trans_result.value == translated_physical.value);
@@ -132,14 +132,18 @@ pub const Manager = struct {
             },
         };
 
+        const physical_kernel = virtual_address_space.translate_address(kernel_async_manager_virtual) orelse @panic("wtf");
+        const physical_user = virtual_address_space.translate_address(user_async_manager_virtual) orelse @panic("wtf");
+        common.runtime_assert(@src(), physical_user.value == physical_kernel.value);
+
         return KernelManager{
             .kernel = kernel_async_manager_virtual.access(*Manager),
-            .user = user_async_manager_user_virtual.access(*Manager),
+            .user = user_async_manager_virtual.access(*Manager),
         };
     }
 
     pub fn add_submission(manager: *Manager, submission: Submission) void {
-        const new_submission = @intToPtr(*Submission, @ptrToInt(&manager.buffer[manager.submission_queue.head]));
+        const new_submission = @ptrCast(*Submission, @alignCast(@alignOf(Submission), &manager.buffer[manager.submission_queue.offset + manager.submission_queue.head]));
         new_submission.* = submission;
         manager.submission_queue.head += @sizeOf(Submission);
     }

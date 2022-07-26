@@ -47,6 +47,8 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     old_thread.state = .paused;
     new_thread.state = .active;
     // TODO: idle
+    //
+    if (new_thread.context.cs == 0x4b) common.runtime_assert(@src(), new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
     //log.debug("RSP: 0x{x}", .{context.rsp});
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
@@ -204,6 +206,10 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .user => common.Syscall.Manager.for_kernel(thread.address_space, syscall_queue_entry_count),
         .kernel => .{ .kernel = null, .user = null },
     };
+
+    if (thread.privilege_level == .user) {
+        common.runtime_assert(@src(), thread.address_space.translate_address(VirtualAddress.new(0x205000)) != null);
+    }
 
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});

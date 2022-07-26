@@ -214,12 +214,14 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
                     // Giving executable permissions here to perform the copy
                     address_spaces.kernel.map_physical_region(physical_region, kernel_segment_virtual_address, .{ .write = true });
-                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = ph.flags.writable, .user = true });
-                    common.runtime_assert(@src(), ph.size_in_file == ph.size_in_memory);
+                    // TODO: load segments and then take the right settings from the sections
+                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
+                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = !ph.flags.executable, .user = true });
+                    common.runtime_assert(@src(), ph.size_in_file <= ph.size_in_memory);
                     common.runtime_assert(@src(), misalignment == 0);
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
-                    common.runtime_assert(@src(), dst_slice.len == src_slice.len);
+                    common.runtime_assert(@src(), dst_slice.len >= src_slice.len);
 
                     common.copy(u8, dst_slice, src_slice);
                     // TODO: unmap
