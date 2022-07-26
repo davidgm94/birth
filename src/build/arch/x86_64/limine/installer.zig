@@ -32,6 +32,12 @@ const GPT = struct {
         partition_entry_count: u32,
         partition_entry_size: u32,
         partition_entry_array_CRC32: u32,
+
+        comptime {
+            const expected_size = @sizeOf([8]u8) + (4 * @sizeOf(u32)) + (4 * @sizeOf(u64)) + (2 * @sizeOf(u64)) + @sizeOf(u64) + (3 * @sizeOf(u32));
+            std.debug.assert(expected_size == 92);
+            std.debug.assert(@sizeOf(Header) == expected_size);
+        }
     };
 
     const Entry = packed struct {
@@ -41,6 +47,12 @@ const GPT = struct {
         ending_LBA: u64,
         attributes: u64,
         partition_name: [36]u16,
+
+        comptime {
+            const expected_size = @sizeOf([2]u64) + (2 * @sizeOf(u64)) + (3 * @sizeOf(u64)) + (36 * @sizeOf(u16));
+            std.debug.assert(expected_size == 128);
+            std.debug.assert(@sizeOf(Entry) == expected_size);
+        }
     };
 };
 
