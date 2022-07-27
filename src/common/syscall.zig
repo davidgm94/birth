@@ -25,7 +25,13 @@ pub const Input = extern struct {
 
 pub const Options = packed struct {
     execution_mode: ExecutionMode,
-    unused: u31 = 0,
+    type: Type,
+    unused: u30 = 0,
+};
+
+pub const Type = enum(u1) {
+    hardware = 0,
+    software = 1,
 };
 
 pub const HardwareID = enum(u32) {
@@ -57,6 +63,7 @@ pub fn hardware_syscall(comptime hw_syscall_id: HardwareID) RawResult {
         .id = @enumToInt(hw_syscall_id),
         .options = .{
             .execution_mode = .blocking,
+            .type = .hardware,
         },
     };
     const inputed_bicasted = @bitCast(u64, input);
@@ -76,6 +83,7 @@ pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, ar
         .id = @enumToInt(id),
         .options = .{
             .execution_mode = .blocking,
+            .type = .software,
         },
     };
     const argument0 = @bitCast(u64, input);

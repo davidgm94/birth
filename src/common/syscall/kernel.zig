@@ -9,35 +9,54 @@ pub fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, a
     _ = argument4;
     logger.debug("Syscall handler", .{});
     const input = @bitCast(Syscall.Input, argument0);
+
     switch (input.options.execution_mode) {
         .blocking => {
-            if (input.id < Syscall.ID.count) {
-                const id = @intToEnum(Syscall.ID, input.id);
-                switch (id) {
-                    .thread_exit => {
-                        const exit_code = argument1;
-                        var maybe_message: ?[]const u8 = null;
-                        if (@intToPtr(?[*]const u8, argument2)) |message_ptr| {
-                            const message_len = argument3;
-                            if (message_len != 0) {
-                                const user_message = message_ptr[0..message_len];
-                                logger.debug("User message: {s}", .{user_message});
-                            } else {
-                                logger.err("Message pointer is valid but user didn't specify valid length", .{});
-                            }
+            switch (input.options.type) {
+                .software => {
+                    if (input.id < Syscall.ID.count) {
+                        const id = @intToEnum(Syscall.ID, input.id);
+                        switch (id) {
+                            .thread_exit => {
+                                const exit_code = argument1;
+                                var maybe_message: ?[]const u8 = null;
+                                if (@intToPtr(?[*]const u8, argument2)) |message_ptr| {
+                                    const message_len = argument3;
+                                    if (message_len != 0) {
+                                        const user_message = message_ptr[0..message_len];
+                                        logger.debug("User message: {s}", .{user_message});
+                                    } else {
+                                        logger.err("Message pointer is valid but user didn't specify valid length", .{});
+                                    }
+                                }
+                                thread_exit(exit_code, maybe_message);
+                            },
+                            .log => {
+                                const message_ptr = @intToPtr(?[*]const u8, argument1) orelse @panic("null message ptr");
+                                const message_len = argument2;
+                                const message = message_ptr[0..message_len];
+                                log(message);
+                            },
                         }
-                        thread_exit(exit_code, maybe_message);
-                    },
-                    .log => {
-                        const message_ptr = @intToPtr(?[*]const u8, argument1) orelse @panic("null message ptr");
-                        const message_len = argument2;
-                        const message = message_ptr[0..message_len];
-                        log(message);
-                    },
-                }
+                    } else {
+                        @panic("unrecognized software syscall");
+                    }
+                },
+                .hardware => {
+                    if (input.id < Syscall.HardwareID.count) {
+                        const id = @intToEnum(Syscall.HardwareID, input.id);
+                        switch (id) {
+                            else => common.panic(@src(), "NI: {s}", .{@tagName(id)}),
+                        }
+                    } else {
+                        @panic("unrecognized hardware syscall");
+                    }
+                },
             }
         },
-        .non_blocking => {},
+        .non_blocking => {
+            @panic("non blocking ni");
+        },
     }
 
     return common.zeroes(Syscall.RawResult);
