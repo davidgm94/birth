@@ -12,5 +12,3 @@ comptime {
 
 pub const aarch64 = @import("arch/aarch64.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
-
-pub var writer = common.Writer(void, common.arch.Writer.Error, common.arch.Writer.write){ .context = {} };

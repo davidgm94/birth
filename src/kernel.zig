@@ -58,10 +58,10 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;
     common.arch.Writer.lock.acquire();
-    kernel.arch.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    kernel.arch.writer.writeAll(prefix) catch unreachable;
-    kernel.arch.writer.print(format, args) catch unreachable;
-    kernel.arch.writer.writeByte('\n') catch unreachable;
+    common.arch.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    common.arch.writer.writeAll(prefix) catch unreachable;
+    common.arch.writer.print(format, args) catch unreachable;
+    common.arch.writer.writeByte('\n') catch unreachable;
     common.arch.Writer.lock.release();
 }
 
