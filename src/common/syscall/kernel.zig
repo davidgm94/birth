@@ -91,6 +91,12 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
 //}
 
 pub fn log(message: []const u8) void {
-    const user_log = common.log.scoped(.USER);
-    user_log.debug("{s}", .{message});
+    const current_thread = common.arch.get_current_thread();
+    const current_cpu = current_thread.cpu orelse while (true) {};
+    const processor_id = current_cpu.id;
+    common.arch.Writer.lock.acquire();
+    common.arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    common.arch.writer.writeAll(message) catch unreachable;
+    common.arch.writer.writeByte('\n') catch unreachable;
+    common.arch.Writer.lock.release();
 }

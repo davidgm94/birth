@@ -17,7 +17,7 @@ var writer: common.Writer(void, Writer.Error, Writer.write) = undefined;
 // TODO: handle locks in userspace
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     // TODO: handle errors
-    writer.print("[" ++ @tagName(level) ++ "] [" ++ @tagName(scope) ++ "] " ++ format, args) catch unreachable;
+    writer.print("[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
 }
 
 // TODO: improve user panic implementation
