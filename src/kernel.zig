@@ -37,6 +37,7 @@ pub var scheduler = Scheduler{
     .active_threads = common.Thread.List{},
     .paused_threads = common.Thread.List{},
     .cpus = &.{},
+    .initialized_ap_cpu_count = 0,
 };
 pub var bootstrapping_memory: [context.page_size * 16]u8 = undefined;
 pub var font: common.PSF1.Font = undefined;
@@ -75,6 +76,14 @@ pub fn crash(comptime format: []const u8, args: anytype) noreturn {
     const crash_log = common.log.scoped(.PANIC);
     common.arch.disable_interrupts();
     crash_log.err(format, args);
+    var stack_iterator = common.StackIterator.init(@returnAddress(), @frameAddress());
+    crash_log.err("Stack trace:", .{});
+    var stack_trace_i: u64 = 0;
+    while (stack_iterator.next()) |return_address| : (stack_trace_i += 1) {
+        if (return_address != 0) {
+            crash_log.err("{}: 0x{x}", .{ stack_trace_i, return_address });
+        }
+    }
     while (true) {
         asm volatile (
             \\cli

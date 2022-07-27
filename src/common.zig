@@ -101,6 +101,7 @@ pub const TailQueue = std.TailQueue;
 // DEBUG
 pub const StackTrace = std.builtin.StackTrace;
 pub const SourceLocation = std.builtin.SourceLocation;
+pub const StackIterator = std.debug.StackIterator;
 
 // ATOMIC
 pub const AtomicRmwOp = std.builtin.AtomicRmwOp;

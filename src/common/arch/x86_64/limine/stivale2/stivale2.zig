@@ -270,25 +270,18 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
     const virtual_address_space = initialization_context.kernel_virtual_address_space;
     const scheduler = initialization_context.scheduler;
-    _ = scheduler;
     const cpu_index = smp_info.processor_id;
-    common.arch.x86_64.dr0.write(cpu_index);
     // Current thread is already set in the process_smp function
     common.arch.preset_thread_pointer(cpu_index);
     virtual_address_space.make_current();
     common.arch.cpu_start(virtual_address_space);
     log.debug("CPU started", .{});
 
-    //cpu_initialization_debug[cpu_index] = true;
-    _ = @atomicRmw(u64, &cpus_left, .Sub, 1, .AcqRel);
+    _ = @atomicRmw(u64, &scheduler.initialized_ap_cpu_count, .Add, 1, .AcqRel);
     while (true) {
         asm volatile ("pause" ::: "memory");
     }
 }
-
-const stack_size = 0x10000;
-var cpus_left: u64 = 0;
-var go: bool = false;
 
 const CPUInitializationContext = struct {
     kernel_virtual_address_space: *VirtualAddressSpace,
@@ -296,7 +289,6 @@ const CPUInitializationContext = struct {
 };
 
 var cpu_initialization_context: CPUInitializationContext = undefined;
-var cpu_initialization_debug: [256]bool = undefined;
 
 pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!void {
     common.runtime_assert(@src(), virtual_address_space.privilege_level == .kernel);
@@ -348,7 +340,6 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     common.arch.x86_64.map_lapic(virtual_address_space);
 
     scheduler.lock.acquire();
-    cpus_left = ap_cpu_count;
     for (smps[1..]) |*smp, index| {
         const ap_thread = &ap_threads[index];
         scheduler.active_threads.remove(&ap_thread.queue_item);
@@ -360,11 +351,8 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     common.runtime_assert(@src(), scheduler.active_threads.count == 0);
 
     // @ZigBug if this is written with atomic operations, it gets optimized out by the compiler or LLVM
-    var cpus_left_to_be_initialized: u64 = ap_cpu_count;
-    while (cpus_left_to_be_initialized > 0) {
-        cpus_left_to_be_initialized = @ptrCast(*volatile u64, &cpus_left).*;
-    }
-    //while (@atomicLoad(u64, &cpus_left, .Acquire) != 0) {}
+    //while (@atomicLoad(u64, &scheduler.initalizated_ap_cpu_count, .Acquire) < ap_cpu_count) {}
+    while (@as(*volatile u64, &scheduler.initialized_ap_cpu_count).* < ap_cpu_count) {}
     log.debug("Initialized all cores", .{});
     scheduler.lock.release();
 }

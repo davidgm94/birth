@@ -26,6 +26,7 @@ all_threads: Thread.List,
 active_threads: Thread.List,
 paused_threads: Thread.List,
 cpus: []CPU,
+initialized_ap_cpu_count: u64,
 
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     log.debug("Yielding", .{});
