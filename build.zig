@@ -44,7 +44,7 @@ pub fn build(b: *Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = 8,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
+                        .log = .{ .file = "zig-cache/logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },

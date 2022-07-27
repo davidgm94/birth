@@ -3,7 +3,7 @@ const common = @import("../common.zig");
 pub const kernel = @import("syscall/kernel.zig");
 const context = @import("context");
 
-const syscall_log = common.log.scoped(.Syscall);
+const logger = common.log.scoped(.Syscall);
 const TODO = common.TODO;
 const x86_64 = common.arch.x86_64;
 const VirtualAddress = common.VirtualAddress;
@@ -14,39 +14,53 @@ pub const RawResult = extern struct {
     b: u64,
 };
 
-pub const HardwareID = enum(u64) {
+pub const Input = extern struct {
+    id: u32,
+    options: Options,
+
+    comptime {
+        common.comptime_assert(@sizeOf(Input) == @sizeOf(u64));
+    }
+};
+
+pub const Options = packed struct {
+    execution_mode: ExecutionMode,
+    unused: u31 = 0,
+};
+
+pub const HardwareID = enum(u32) {
     ask_syscall_manager = 0,
     flush_syscall_manager = 1,
 
     pub const count = common.enum_values(@This()).len;
 };
 
-pub const ID = enum(u64) {
+pub const ID = enum(u32) {
     thread_exit = 0,
     log = 1,
     pub const count = common.enum_values(@This()).len;
 };
 
-const raw_syscall_entry_point = common.arch.Syscall.user_syscall_entry_point;
+const hardware_syscall_entry_point = common.arch.Syscall.user_syscall_entry_point;
 
 pub const ThreadExitParameters = struct {
     message: ?[]const u8 = null,
     exit_code: u64 = 0,
 };
 
-pub fn raw_syscall(hardware_id: HardwareID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) RawResult {
-    return raw_syscall_entry_point(@enumToInt(hardware_id), argument1, argument2, argument3, argument4, argument5);
+pub fn immediate_syscall(submission: Submission) RawResult {
+    return hardware_syscall_entry_point(submission.arguments[0], submission.arguments[1], submission.arguments[2], submission.arguments[3], submission.arguments[4], submission.arguments[5]);
 }
 
-/// @HardwareSyscall
-pub fn ask_syscall_manager() ?*Manager {
-    const result = raw_syscall(.ask_syscall_manager, 0, 0, 0, 0, 0);
-    return @intToPtr(?*Manager, result.a);
-}
-
-/// @HardwareSyscall
-pub fn flush_syscall_manager() void {
-    _ = raw_syscall(.flush_syscall_manager, 0, 0, 0, 0, 0);
+pub fn hardware_syscall(comptime hw_syscall_id: HardwareID) RawResult {
+    const input = Input{
+        .id = @enumToInt(hw_syscall_id),
+        .options = .{
+            .execution_mode = .blocking,
+        },
+    };
+    const inputed_bicasted = @bitCast(u64, input);
+    return hardware_syscall_entry_point(inputed_bicasted, 0, 0, 0, 0, 0);
 }
 
 pub const LogParameters = struct {
@@ -54,9 +68,25 @@ pub const LogParameters = struct {
 };
 /// @Syscall
 pub fn log(parameters: LogParameters) Submission {
-    return Submission{
-        .arguments = [_]u64{ @enumToInt(ID.log), @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0 },
+    return new_submission(.log, @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0);
+}
+
+pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {
+    const input = Input{
+        .id = @enumToInt(id),
+        .options = .{
+            .execution_mode = .blocking,
+        },
     };
+    const argument0 = @bitCast(u64, input);
+    return Submission{ .arguments = [_]u64{
+        argument0,
+        argument1,
+        argument2,
+        argument3,
+        argument4,
+        argument5,
+    } };
 }
 
 /// @Syscall
@@ -71,12 +101,10 @@ pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
         message_len = 0;
     }
 
-    return Submission{
-        .arguments = [_]u64{ @enumToInt(ID.thread_exit), thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0 },
-    };
+    return new_submission(.thread_exit, thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0);
 }
 
-pub const ExecutionMode = enum {
+pub const ExecutionMode = enum(u1) {
     blocking,
     non_blocking,
     const count = common.enum_values(ExecutionMode).len;
@@ -171,17 +199,24 @@ pub const Manager = struct {
     }
 
     pub fn syscall(manager: *Manager, comptime id: ID, comptime execution_mode: ExecutionMode, parameters: SyscallParameters[@enumToInt(id)]) SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)] {
+        logger.debug("Syscall user entry point: {s}", .{@tagName(id)});
         const ReturnType = SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)];
         const submission = switch (id) {
             .thread_exit => thread_exit(parameters),
             .log => log(parameters),
         };
 
-        manager.add_submission(submission);
-
         switch (execution_mode) {
-            .blocking => manager.flush(),
-            .non_blocking => {},
+            .blocking => {
+                const result = immediate_syscall(submission);
+                switch (ReturnType) {
+                    noreturn, void => {},
+                    else => return result,
+                }
+            },
+            .non_blocking => {
+                manager.add_submission(submission);
+            },
         }
 
         if (ReturnType == noreturn) {
@@ -190,14 +225,19 @@ pub const Manager = struct {
     }
 
     fn add_submission(manager: *Manager, submission: Submission) void {
-        const new_submission = @ptrCast(*Submission, @alignCast(@alignOf(Submission), &manager.buffer[manager.submission_queue.offset + manager.submission_queue.head]));
-        new_submission.* = submission;
+        const new = @ptrCast(*Submission, @alignCast(@alignOf(Submission), &manager.buffer[manager.submission_queue.offset + manager.submission_queue.head]));
+        new.* = submission;
         manager.submission_queue.head += @sizeOf(Submission);
+    }
+
+    pub fn ask() ?*Manager {
+        const result = hardware_syscall(.ask_syscall_manager);
+        return @intToPtr(?*Manager, result.a);
     }
 
     pub fn flush(manager: *Manager) void {
         const submission_queue_head = manager.submission_queue.head;
-        flush_syscall_manager();
+        _ = hardware_syscall(.flush_syscall_manager);
         common.runtime_assert(@src(), manager.completion_queue.head == submission_queue_head);
     }
 };

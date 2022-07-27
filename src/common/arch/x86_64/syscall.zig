@@ -72,15 +72,8 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\mov %%r15, %%rbp
         // Use kernel stack
         \\mov %%rbp, %%rsp
-        // Check if syscall is in range of kernel syscalls
-        \\mov %%rdi, %%rax
-        \\cmp %[hardware_syscall_count], %%rax
-        \\jge 0f
-        // Multiply the offset by 8 bytes that occupy functions in 64-bit mode
-        \\shl $0x03, %%rax
-        // Add the base address
-        \\add %[handler_base_array], %%rax
         // Call the syscall handler
+        \\mov %[handler], %%rax
         \\call *(%%rax)
         // Restore RSP, R11 (RFLAGS) and RCX (RIP after sysret)
         \\mov %%r14, %%rsp
@@ -97,8 +90,7 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\hlt
         :
         : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
-          [hardware_syscall_count] "i" (common.Syscall.HardwareID.count),
-          [handler_base_array] "i" (@ptrToInt(&common.Syscall.kernel.raw_handlers)),
+          [handler] "i" (@ptrToInt(&common.Syscall.kernel.handler)),
     );
 
     @panic("reached unreachable: syscall handler");

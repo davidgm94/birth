@@ -4,22 +4,55 @@ const TODO = common.TODO;
 
 pub const Syscall = common.Syscall;
 
-pub const RawHandler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult;
-pub const Handler = fn (argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.Result;
-pub const raw_handlers = [Syscall.HardwareID.count]RawHandler{
-    ask_syscall_manager, //common.safe_function_cast(ask_syscall_manager, common.SafeFunctionCastParameters{ .FunctionType = RawHandler }) catch |err| @compileLog(err),
-    flush_syscall_manager,
-};
+pub fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
+    _ = argument5;
+    _ = argument4;
+    logger.debug("Syscall handler", .{});
+    const input = @bitCast(Syscall.Input, argument0);
+    switch (input.options.execution_mode) {
+        .blocking => {
+            if (input.id < Syscall.ID.count) {
+                const id = @intToEnum(Syscall.ID, input.id);
+                switch (id) {
+                    .thread_exit => {
+                        const exit_code = argument1;
+                        var maybe_message: ?[]const u8 = null;
+                        if (@intToPtr(?[*]const u8, argument2)) |message_ptr| {
+                            const message_len = argument3;
+                            if (message_len != 0) {
+                                const user_message = message_ptr[0..message_len];
+                                logger.debug("User message: {s}", .{user_message});
+                            } else {
+                                logger.err("Message pointer is valid but user didn't specify valid length", .{});
+                            }
+                        }
+                        thread_exit(exit_code, maybe_message);
+                    },
+                    .log => {
+                        const message_ptr = @intToPtr(?[*]const u8, argument1) orelse @panic("null message ptr");
+                        const message_len = argument2;
+                        const message = message_ptr[0..message_len];
+                        log(message);
+                    },
+                }
+            }
+        },
+        .non_blocking => {},
+    }
+
+    return common.zeroes(Syscall.RawResult);
+}
 
 /// @HardwareSyscall
-pub noinline fn ask_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
+pub noinline fn ask_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Syscall.RawResult {
     _ = argument1;
     _ = argument2;
     _ = argument3;
     _ = argument4;
     _ = argument5;
     logger.debug("Asking syscall manager", .{});
-    const id = @intToEnum(Syscall.HardwareID, argument0);
+    const input = @bitCast(Syscall.Input, argument0);
+    const id = @intToEnum(Syscall.HardwareID, input.id);
     common.runtime_assert(@src(), id == .ask_syscall_manager);
     const current_thread = common.arch.get_current_thread();
     const user_syscall_manager = current_thread.syscall_manager.user;
@@ -31,15 +64,16 @@ pub noinline fn ask_syscall_manager(argument0: u64, argument1: u64, argument2: u
 }
 
 /// @HardwareSyscall
-pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
+pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Syscall.RawResult {
     _ = argument1;
     _ = argument2;
     _ = argument3;
     _ = argument4;
     _ = argument5;
     logger.debug("Asking for a flush in syscall manager", .{});
-    const hardware_id = @intToEnum(Syscall.HardwareID, argument0);
-    common.runtime_assert(@src(), hardware_id == .flush_syscall_manager);
+    const input = @bitCast(Syscall.Input, argument0);
+    const hardware_id = @intToEnum(Syscall.HardwareID, input.id);
+    common.runtime_assert(@src(), hardware_id == .ask_syscall_manager);
     const current_thread = common.arch.get_current_thread();
     const manager = current_thread.syscall_manager.kernel orelse @panic("wtf");
 
@@ -75,22 +109,17 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
     return common.zeroes(Syscall.RawResult);
 }
 
-//pub fn thread_exit(syscall_id: Syscall.ID, exit_code: u64, maybe_message_ptr: ?[*]const u8, message_len: u64, _: u64, _: u64) callconv(.C) noreturn {
-//common.runtime_assert(@src(), syscall_id == .thread_exit);
-//logger.debug("We are thread exiting with code: 0x{x}", .{exit_code});
-//if (maybe_message_ptr) |message_ptr| {
-//if (message_len != 0) {
-//const user_message = message_ptr[0..message_len];
-//logger.debug("User message: {s}", .{user_message});
-//} else {
-//logger.err("Message pointer is valid but user didn't specify valid length", .{});
-//}
-//}
+pub fn thread_exit(exit_code: u64, maybe_message: ?[]const u8) noreturn {
+    logger.debug("We are thread exiting with code: 0x{x}", .{exit_code});
+    if (maybe_message) |message| {
+        logger.debug("User message: {s}", .{message});
+    }
 
-//TODO(@src());
-//}
+    TODO(@src());
+}
 
 pub fn log(message: []const u8) void {
+    logger.debug("Log called", .{});
     const current_thread = common.arch.get_current_thread();
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;
