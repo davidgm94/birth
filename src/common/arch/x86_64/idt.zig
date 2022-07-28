@@ -24,6 +24,10 @@ pub const Descriptor = packed struct {
     offset_mid: u16,
     offset_high: u32,
     reserved2: u32 = 0,
+
+    comptime {
+        common.comptime_assert(@sizeOf(Descriptor) == 2 * @sizeOf(u64));
+    }
 };
 
 const GateType = enum(u4) {

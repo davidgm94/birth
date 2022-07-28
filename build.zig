@@ -319,28 +319,26 @@ const Kernel = struct {
                     }
                 }
 
-                switch (kernel.options.run.emulator) {
-                    .qemu => {
-                        common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
-                        kernel.run_argument_list.append("-trace") catch unreachable;
-                        kernel.run_argument_list.append("-nvme*") catch unreachable;
-                        kernel.debug_argument_list.append("-trace") catch unreachable;
-                        kernel.debug_argument_list.append("-nvme*") catch unreachable;
-                        kernel.run_argument_list.append("-trace") catch unreachable;
-                        kernel.run_argument_list.append("-pci*") catch unreachable;
-                        kernel.debug_argument_list.append("-trace") catch unreachable;
-                        kernel.debug_argument_list.append("-pci*") catch unreachable;
-                    },
-                }
+                common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-nvme*") catch unreachable;
+                kernel.debug_argument_list.append("-trace") catch unreachable;
+                kernel.debug_argument_list.append("-nvme*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-pci*") catch unreachable;
+                kernel.debug_argument_list.append("-trace") catch unreachable;
+                kernel.debug_argument_list.append("-pci*") catch unreachable;
 
                 kernel.debug_argument_list.append("-S") catch unreachable;
                 kernel.debug_argument_list.append("-s") catch unreachable;
             },
         }
-        log.debug("QEMU command:", .{});
+
+        print("Emulator command:\n", .{});
         for (kernel.run_argument_list.items) |arg| {
-            log.debug("{s}", .{arg});
+            print("{s} ", .{arg});
         }
+        print("\n\n", .{});
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
         run_command.step.dependOn(kernel.builder.default_step);
