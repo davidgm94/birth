@@ -280,7 +280,7 @@ pub const handlers = [IDT.entry_count]Handler{
 pub fn install_interrupt_handlers(idt: *IDT) void {
     for (idt.entries) |*entry, i| {
         const handler = handlers[i];
-        entry.* = get_descriptor(handler);
+        entry.* = IDT.Descriptor.from_handler(handler);
     }
 }
 
@@ -466,15 +466,6 @@ pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) call
             @panic("Interrupt epilogue didn't iret properly");
         }
     }.handler;
-}
-
-pub fn get_descriptor(handler: Handler) IDT.Descriptor {
-    const handler_address = @ptrToInt(handler);
-    return IDT.Descriptor{
-        .offset_low = @truncate(u16, handler_address),
-        .offset_mid = @truncate(u16, handler_address >> 16),
-        .offset_high = @truncate(u32, handler_address >> 32),
-    };
 }
 
 pub inline fn epilogue() void {

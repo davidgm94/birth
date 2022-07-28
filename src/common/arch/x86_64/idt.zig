@@ -28,6 +28,15 @@ pub const Descriptor = packed struct {
     comptime {
         common.comptime_assert(@sizeOf(Descriptor) == 2 * @sizeOf(u64));
     }
+
+    pub fn from_handler(handler: Interrupt.Handler) Descriptor {
+        const handler_address = @ptrToInt(handler);
+        return IDT.Descriptor{
+            .offset_low = @truncate(u16, handler_address),
+            .offset_mid = @truncate(u16, handler_address >> 16),
+            .offset_high = @truncate(u32, handler_address >> 32),
+        };
+    }
 };
 
 const GateType = enum(u4) {
