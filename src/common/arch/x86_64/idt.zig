@@ -1,23 +1,26 @@
-const kernel = @import("root");
-const common = @import("common");
+const common = @import("../../../common.zig");
 
-const Interrupt = @import("interrupts.zig");
-const DescriptorTable = @import("descriptor_table.zig");
+const x86_64 = common.arch.x86_64;
+const Interrupt = x86_64.interrupts;
+const DescriptorTable = x86_64.DescriptorTable;
+const GDT = x86_64.GDT;
 const IDT = @This();
 
 const log = common.log.scoped(.IDT);
 
-entries: [256]Descriptor,
+entries: [entry_count]Descriptor,
+
+pub const entry_count = 256;
 
 pub const Descriptor = packed struct {
     offset_low: u16,
-    segment_selector: u16,
-    interrupt_stack_table: u3,
+    segment_selector: u16 = @offsetOf(GDT.Table, "code_64"),
+    interrupt_stack_table: u3 = 0,
     reserved: u5 = 0,
-    type: GateType,
+    type: GateType = .interrupt,
     reserved1: u1 = 0,
-    descriptor_privilege_level: u2,
-    present: u1,
+    descriptor_privilege_level: u2 = 0,
+    present: u1 = 1,
     offset_mid: u16,
     offset_high: u32,
     reserved2: u32 = 0,

@@ -207,7 +207,6 @@ pub const Manager = struct {
     }
 
     pub fn syscall(manager: *Manager, comptime id: ID, comptime execution_mode: ExecutionMode, parameters: SyscallParameters[@enumToInt(id)]) SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)] {
-        logger.debug("Syscall user entry point: {s}", .{@tagName(id)});
         const ReturnType = SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)];
         const submission = switch (id) {
             .thread_exit => thread_exit(parameters),

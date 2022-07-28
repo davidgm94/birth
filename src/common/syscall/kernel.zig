@@ -1,14 +1,24 @@
 const common = @import("../../common.zig");
+const context = @import("context");
 const logger = common.log.scoped(.Syscall);
 const TODO = common.TODO;
 
 pub const Syscall = common.Syscall;
+const root = @import("root");
 
-pub fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
+pub noinline fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
     _ = argument5;
     _ = argument4;
     logger.debug("Syscall handler", .{});
     const input = @bitCast(Syscall.Input, argument0);
+
+    {
+        const thread = common.arch.get_current_thread();
+        for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
+            const handler_address = @ptrToInt(interrupt_handler);
+            common.runtime_assert(@src(), thread.address_space.translate_address(common.VirtualAddress.new(handler_address).aligned_forward(context.page_size)) != null);
+        }
+    }
 
     switch (input.options.execution_mode) {
         .blocking => {
@@ -45,9 +55,10 @@ pub fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, a
                 .hardware => {
                     if (input.id < Syscall.HardwareID.count) {
                         const id = @intToEnum(Syscall.HardwareID, input.id);
-                        switch (id) {
+                        return switch (id) {
+                            .ask_syscall_manager => ask_syscall_manager(),
                             else => common.panic(@src(), "NI: {s}", .{@tagName(id)}),
-                        }
+                        };
                     } else {
                         @panic("unrecognized hardware syscall");
                     }
@@ -63,16 +74,8 @@ pub fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, a
 }
 
 /// @HardwareSyscall
-pub noinline fn ask_syscall_manager(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Syscall.RawResult {
-    _ = argument1;
-    _ = argument2;
-    _ = argument3;
-    _ = argument4;
-    _ = argument5;
+pub noinline fn ask_syscall_manager() Syscall.RawResult {
     logger.debug("Asking syscall manager", .{});
-    const input = @bitCast(Syscall.Input, argument0);
-    const id = @intToEnum(Syscall.HardwareID, input.id);
-    common.runtime_assert(@src(), id == .ask_syscall_manager);
     const current_thread = common.arch.get_current_thread();
     const user_syscall_manager = current_thread.syscall_manager.user;
     common.runtime_assert(@src(), user_syscall_manager != null);

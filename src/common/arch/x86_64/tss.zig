@@ -3,7 +3,8 @@ const common = @import("../../../common.zig");
 
 pub const Descriptor = packed struct {
     limit_low: u16,
-    base_low: u24,
+    base_low: u16,
+    base_low_mid: u8,
     type: u4,
     unused0: u1 = 0,
     descriptor_privilege_level: u2,
@@ -43,7 +44,8 @@ pub const Struct = packed struct {
         const address = @ptrToInt(tss);
         return Descriptor{
             .limit_low = @truncate(u16, @sizeOf(Struct) - 1),
-            .base_low = @truncate(u24, address),
+            .base_low = @truncate(u16, address),
+            .base_low_mid = @truncate(u8, address >> 16),
             .type = 0b1001,
             .descriptor_privilege_level = 0,
             .present = 1,
@@ -53,17 +55,5 @@ pub const Struct = packed struct {
             .base_mid = @truncate(u8, address >> 24),
             .base_high = @truncate(u32, address >> 32),
         };
-    }
-
-    pub fn set_interrupt_stack(tss: *Struct, stack: u64) void {
-        tss.IST[0] = stack;
-    }
-
-    pub fn set_scheduler_stack(tss: *Struct, stack: u64) void {
-        tss.IST[1] = stack;
-    }
-
-    pub fn set_syscall_stack(tss: *Struct, stack: u64) void {
-        tss.rsp[0] = stack;
     }
 };

@@ -279,7 +279,7 @@ pub const VirtualAddressSpace = struct {
 
         const base_physical_address = get_address_from_entry_bits(pte.value.bits);
         const offset = asked_virtual_address.value - virtual_address.value;
-        if (offset != 0) @panic("lol");
+        if (offset != 0) @panic("Error translating address: offset not zero");
 
         return PhysicalAddress.new(base_physical_address.value + offset);
     }

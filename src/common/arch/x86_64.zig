@@ -22,6 +22,7 @@ const log = common.log.scoped(.x86_64);
 
 pub const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 pub const Spinlock = @import("x86_64/spinlock.zig");
+pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const IDT = @import("x86_64/idt.zig");
 pub const GDT = @import("x86_64/gdt.zig");
@@ -255,8 +256,6 @@ pub fn cpu_start(virtual_address_space: *common.VirtualAddressSpace) void {
     Syscall.enable();
 
     cpu.shared_tss = TSS.Struct{};
-    cpu.shared_tss.set_interrupt_stack(cpu.int_stack);
-    cpu.shared_tss.set_scheduler_stack(cpu.scheduler_stack);
     cpu.gdt.update_tss(&cpu.shared_tss);
 
     log.debug("Scheduler pre-initialization finished!", .{});
@@ -1093,8 +1092,6 @@ pub inline fn next_timer(ms: u32) void {
 }
 
 pub const CPU = struct {
-    int_stack: u64,
-    scheduler_stack: u64,
     lapic: LAPIC,
     spinlock_count: u64,
     is_bootstrap: bool,
@@ -1107,18 +1104,16 @@ pub const CPU = struct {
 pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *common.VirtualAddressSpace, stack_size: u64) void {
     common.runtime_assert(@src(), common.is_aligned(stack_size, context.page_size));
     const cpu_count = cpus.len;
-    const guard_stack_size = 0x1000;
-    const total_single_stack_size = stack_size + guard_stack_size;
-    const allocation_size = cpu_count * total_single_stack_size * 2;
+    const allocation_size = cpu_count * stack_size * 2;
     const stack_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, allocation_size, 0, 0) catch @panic("wtf");
     const middle = allocation_size / 2;
     const base = @ptrToInt(stack_allocation.ptr);
 
     for (cpus) |*cpu, i| {
-        const scheduler_stack_offset = i * total_single_stack_size;
-        const interrupt_stack_offset = scheduler_stack_offset + middle;
-        cpu.int_stack = base + interrupt_stack_offset + total_single_stack_size;
-        cpu.scheduler_stack = base + interrupt_stack_offset + total_single_stack_size;
+        const rsp_offset = base + (i * stack_size);
+        const ist_offset = rsp_offset + middle;
+        cpu.shared_tss.rsp[0] = rsp_offset + stack_size;
+        cpu.shared_tss.IST[0] = ist_offset + stack_size;
     }
 }
 

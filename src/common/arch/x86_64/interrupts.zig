@@ -16,265 +16,272 @@ const Virtual = kernel.Virtual;
 const log = common.log.scoped(.interrupts);
 const Handler = fn () callconv(.Naked) void;
 
+pub const handlers = [IDT.entry_count]Handler{
+    get_handler(0),
+    get_handler(1),
+    get_handler(2),
+    get_handler(3),
+    get_handler(4),
+    get_handler(5),
+    get_handler(6),
+    get_handler(7),
+    get_handler(8),
+    get_handler(9),
+    get_handler(10),
+    get_handler(11),
+    get_handler(12),
+    get_handler(13),
+    get_handler(14),
+    get_handler(15),
+    get_handler(16),
+    get_handler(17),
+    get_handler(18),
+    get_handler(19),
+    get_handler(20),
+    get_handler(21),
+    get_handler(22),
+    get_handler(23),
+    get_handler(24),
+    get_handler(25),
+    get_handler(26),
+    get_handler(27),
+    get_handler(28),
+    get_handler(29),
+    get_handler(30),
+    get_handler(31),
+    get_handler(32),
+    get_handler(33),
+    get_handler(34),
+    get_handler(35),
+    get_handler(36),
+    get_handler(37),
+    get_handler(38),
+    get_handler(39),
+    get_handler(40),
+    get_handler(41),
+    get_handler(42),
+    get_handler(43),
+    get_handler(44),
+    get_handler(45),
+    get_handler(46),
+    get_handler(47),
+    get_handler(48),
+    get_handler(49),
+    get_handler(50),
+    get_handler(51),
+    get_handler(52),
+    get_handler(53),
+    get_handler(54),
+    get_handler(55),
+    get_handler(56),
+    get_handler(57),
+    get_handler(58),
+    get_handler(59),
+    get_handler(60),
+    get_handler(61),
+    get_handler(62),
+    get_handler(63),
+    get_handler(64),
+    get_handler(65),
+    get_handler(66),
+    get_handler(67),
+    get_handler(68),
+    get_handler(69),
+    get_handler(70),
+    get_handler(71),
+    get_handler(72),
+    get_handler(73),
+    get_handler(74),
+    get_handler(75),
+    get_handler(76),
+    get_handler(77),
+    get_handler(78),
+    get_handler(79),
+    get_handler(80),
+    get_handler(81),
+    get_handler(82),
+    get_handler(83),
+    get_handler(84),
+    get_handler(85),
+    get_handler(86),
+    get_handler(87),
+    get_handler(88),
+    get_handler(89),
+    get_handler(90),
+    get_handler(91),
+    get_handler(92),
+    get_handler(93),
+    get_handler(94),
+    get_handler(95),
+    get_handler(96),
+    get_handler(97),
+    get_handler(98),
+    get_handler(99),
+
+    get_handler(100),
+    get_handler(101),
+    get_handler(102),
+    get_handler(103),
+    get_handler(104),
+    get_handler(105),
+    get_handler(106),
+    get_handler(107),
+    get_handler(108),
+    get_handler(109),
+    get_handler(110),
+    get_handler(111),
+    get_handler(112),
+    get_handler(113),
+    get_handler(114),
+    get_handler(115),
+    get_handler(116),
+    get_handler(117),
+    get_handler(118),
+    get_handler(119),
+    get_handler(120),
+    get_handler(121),
+    get_handler(122),
+    get_handler(123),
+    get_handler(124),
+    get_handler(125),
+    get_handler(126),
+    get_handler(127),
+    get_handler(128),
+    get_handler(129),
+    get_handler(130),
+    get_handler(131),
+    get_handler(132),
+    get_handler(133),
+    get_handler(134),
+    get_handler(135),
+    get_handler(136),
+    get_handler(137),
+    get_handler(138),
+    get_handler(139),
+    get_handler(140),
+    get_handler(141),
+    get_handler(142),
+    get_handler(143),
+    get_handler(144),
+    get_handler(145),
+    get_handler(146),
+    get_handler(147),
+    get_handler(148),
+    get_handler(149),
+    get_handler(150),
+    get_handler(151),
+    get_handler(152),
+    get_handler(153),
+    get_handler(154),
+    get_handler(155),
+    get_handler(156),
+    get_handler(157),
+    get_handler(158),
+    get_handler(159),
+    get_handler(160),
+    get_handler(161),
+    get_handler(162),
+    get_handler(163),
+    get_handler(164),
+    get_handler(165),
+    get_handler(166),
+    get_handler(167),
+    get_handler(168),
+    get_handler(169),
+    get_handler(170),
+    get_handler(171),
+    get_handler(172),
+    get_handler(173),
+    get_handler(174),
+    get_handler(175),
+    get_handler(176),
+    get_handler(177),
+    get_handler(178),
+    get_handler(179),
+    get_handler(180),
+    get_handler(181),
+    get_handler(182),
+    get_handler(183),
+    get_handler(184),
+    get_handler(185),
+    get_handler(186),
+    get_handler(187),
+    get_handler(188),
+    get_handler(189),
+    get_handler(190),
+    get_handler(191),
+    get_handler(192),
+    get_handler(193),
+    get_handler(194),
+    get_handler(195),
+    get_handler(196),
+    get_handler(197),
+    get_handler(198),
+    get_handler(199),
+    get_handler(200),
+
+    get_handler(201),
+    get_handler(202),
+    get_handler(203),
+    get_handler(204),
+    get_handler(205),
+    get_handler(206),
+    get_handler(207),
+    get_handler(208),
+    get_handler(209),
+    get_handler(210),
+    get_handler(211),
+    get_handler(212),
+    get_handler(213),
+    get_handler(214),
+    get_handler(215),
+    get_handler(216),
+    get_handler(217),
+    get_handler(218),
+    get_handler(219),
+    get_handler(220),
+    get_handler(221),
+    get_handler(222),
+    get_handler(223),
+    get_handler(224),
+    get_handler(225),
+    get_handler(226),
+    get_handler(227),
+    get_handler(228),
+    get_handler(229),
+    get_handler(230),
+    get_handler(231),
+    get_handler(232),
+    get_handler(233),
+    get_handler(234),
+    get_handler(235),
+    get_handler(236),
+    get_handler(237),
+    get_handler(238),
+    get_handler(239),
+    get_handler(240),
+    get_handler(241),
+    get_handler(242),
+    get_handler(243),
+    get_handler(244),
+    get_handler(245),
+    get_handler(246),
+    get_handler(247),
+    get_handler(248),
+    get_handler(249),
+    get_handler(250),
+    get_handler(251),
+    get_handler(252),
+    get_handler(253),
+    get_handler(254),
+    get_handler(255),
+};
+
 pub fn install_interrupt_handlers(idt: *IDT) void {
-    idt.entries[0] = get_handler_descriptor(0, false);
-    idt.entries[1] = get_handler_descriptor(1, false);
-    idt.entries[2] = get_handler_descriptor(2, false);
-    idt.entries[3] = get_handler_descriptor(3, false);
-    idt.entries[4] = get_handler_descriptor(4, false);
-    idt.entries[5] = get_handler_descriptor(5, false);
-    idt.entries[6] = get_handler_descriptor(6, false);
-    idt.entries[7] = get_handler_descriptor(7, false);
-    idt.entries[8] = get_handler_descriptor(8, true);
-    idt.entries[9] = get_handler_descriptor(9, false);
-    idt.entries[10] = get_handler_descriptor(10, true);
-    idt.entries[11] = get_handler_descriptor(11, true);
-    idt.entries[12] = get_handler_descriptor(12, true);
-    idt.entries[13] = get_handler_descriptor(13, true);
-    idt.entries[14] = get_handler_descriptor(14, true);
-    idt.entries[15] = get_handler_descriptor(15, false);
-    idt.entries[16] = get_handler_descriptor(16, false);
-    idt.entries[17] = get_handler_descriptor(17, true);
-    idt.entries[18] = get_handler_descriptor(18, false);
-    idt.entries[19] = get_handler_descriptor(19, false);
-    idt.entries[20] = get_handler_descriptor(20, false);
-    idt.entries[21] = get_handler_descriptor(21, false);
-    idt.entries[22] = get_handler_descriptor(22, false);
-    idt.entries[23] = get_handler_descriptor(23, false);
-    idt.entries[24] = get_handler_descriptor(24, false);
-    idt.entries[25] = get_handler_descriptor(25, false);
-    idt.entries[26] = get_handler_descriptor(26, false);
-    idt.entries[27] = get_handler_descriptor(27, false);
-    idt.entries[28] = get_handler_descriptor(28, false);
-    idt.entries[29] = get_handler_descriptor(29, false);
-    idt.entries[30] = get_handler_descriptor(30, false);
-    idt.entries[31] = get_handler_descriptor(31, false);
-    idt.entries[32] = get_handler_descriptor(32, false);
-    idt.entries[33] = get_handler_descriptor(33, false);
-    idt.entries[34] = get_handler_descriptor(34, false);
-    idt.entries[35] = get_handler_descriptor(35, false);
-    idt.entries[36] = get_handler_descriptor(36, false);
-    idt.entries[37] = get_handler_descriptor(37, false);
-    idt.entries[38] = get_handler_descriptor(38, false);
-    idt.entries[39] = get_handler_descriptor(39, false);
-    idt.entries[40] = get_handler_descriptor(40, false);
-    idt.entries[41] = get_handler_descriptor(41, false);
-    idt.entries[42] = get_handler_descriptor(42, false);
-    idt.entries[43] = get_handler_descriptor(43, false);
-    idt.entries[44] = get_handler_descriptor(44, false);
-    idt.entries[45] = get_handler_descriptor(45, false);
-    idt.entries[46] = get_handler_descriptor(46, false);
-    idt.entries[47] = get_handler_descriptor(47, false);
-    idt.entries[48] = get_handler_descriptor(48, false);
-    idt.entries[49] = get_handler_descriptor(49, false);
-    idt.entries[50] = get_handler_descriptor(50, false);
-    idt.entries[51] = get_handler_descriptor(51, false);
-    idt.entries[52] = get_handler_descriptor(52, false);
-    idt.entries[53] = get_handler_descriptor(53, false);
-    idt.entries[54] = get_handler_descriptor(54, false);
-    idt.entries[55] = get_handler_descriptor(55, false);
-    idt.entries[56] = get_handler_descriptor(56, false);
-    idt.entries[57] = get_handler_descriptor(57, false);
-    idt.entries[58] = get_handler_descriptor(58, false);
-    idt.entries[59] = get_handler_descriptor(59, false);
-    idt.entries[60] = get_handler_descriptor(60, false);
-    idt.entries[61] = get_handler_descriptor(61, false);
-    idt.entries[62] = get_handler_descriptor(62, false);
-    idt.entries[63] = get_handler_descriptor(63, false);
-    idt.entries[64] = get_handler_descriptor(64, false);
-    idt.entries[65] = get_handler_descriptor(65, false);
-    idt.entries[66] = get_handler_descriptor(66, false);
-    idt.entries[67] = get_handler_descriptor(67, false);
-    idt.entries[68] = get_handler_descriptor(68, false);
-    idt.entries[69] = get_handler_descriptor(69, false);
-    idt.entries[70] = get_handler_descriptor(70, false);
-    idt.entries[71] = get_handler_descriptor(71, false);
-    idt.entries[72] = get_handler_descriptor(72, false);
-    idt.entries[73] = get_handler_descriptor(73, false);
-    idt.entries[74] = get_handler_descriptor(74, false);
-    idt.entries[75] = get_handler_descriptor(75, false);
-    idt.entries[76] = get_handler_descriptor(76, false);
-    idt.entries[77] = get_handler_descriptor(77, false);
-    idt.entries[78] = get_handler_descriptor(78, false);
-    idt.entries[79] = get_handler_descriptor(79, false);
-    idt.entries[80] = get_handler_descriptor(80, false);
-    idt.entries[81] = get_handler_descriptor(81, false);
-    idt.entries[82] = get_handler_descriptor(82, false);
-    idt.entries[83] = get_handler_descriptor(83, false);
-    idt.entries[84] = get_handler_descriptor(84, false);
-    idt.entries[85] = get_handler_descriptor(85, false);
-    idt.entries[86] = get_handler_descriptor(86, false);
-    idt.entries[87] = get_handler_descriptor(87, false);
-    idt.entries[88] = get_handler_descriptor(88, false);
-    idt.entries[89] = get_handler_descriptor(89, false);
-    idt.entries[90] = get_handler_descriptor(90, false);
-    idt.entries[91] = get_handler_descriptor(91, false);
-    idt.entries[92] = get_handler_descriptor(92, false);
-    idt.entries[93] = get_handler_descriptor(93, false);
-    idt.entries[94] = get_handler_descriptor(94, false);
-    idt.entries[95] = get_handler_descriptor(95, false);
-    idt.entries[96] = get_handler_descriptor(96, false);
-    idt.entries[97] = get_handler_descriptor(97, false);
-    idt.entries[98] = get_handler_descriptor(98, false);
-    idt.entries[99] = get_handler_descriptor(99, false);
-
-    idt.entries[100] = get_handler_descriptor(100, false);
-    idt.entries[101] = get_handler_descriptor(101, false);
-    idt.entries[102] = get_handler_descriptor(102, false);
-    idt.entries[103] = get_handler_descriptor(103, false);
-    idt.entries[104] = get_handler_descriptor(104, false);
-    idt.entries[105] = get_handler_descriptor(105, false);
-    idt.entries[106] = get_handler_descriptor(106, false);
-    idt.entries[107] = get_handler_descriptor(107, false);
-    idt.entries[108] = get_handler_descriptor(108, false);
-    idt.entries[109] = get_handler_descriptor(109, false);
-    idt.entries[110] = get_handler_descriptor(110, false);
-    idt.entries[111] = get_handler_descriptor(111, false);
-    idt.entries[112] = get_handler_descriptor(112, false);
-    idt.entries[113] = get_handler_descriptor(113, false);
-    idt.entries[114] = get_handler_descriptor(114, false);
-    idt.entries[115] = get_handler_descriptor(115, false);
-    idt.entries[116] = get_handler_descriptor(116, false);
-    idt.entries[117] = get_handler_descriptor(117, false);
-    idt.entries[118] = get_handler_descriptor(118, false);
-    idt.entries[119] = get_handler_descriptor(119, false);
-    idt.entries[120] = get_handler_descriptor(120, false);
-    idt.entries[121] = get_handler_descriptor(121, false);
-    idt.entries[122] = get_handler_descriptor(122, false);
-    idt.entries[123] = get_handler_descriptor(123, false);
-    idt.entries[124] = get_handler_descriptor(124, false);
-    idt.entries[125] = get_handler_descriptor(125, false);
-    idt.entries[126] = get_handler_descriptor(126, false);
-    idt.entries[127] = get_handler_descriptor(127, false);
-    idt.entries[128] = get_handler_descriptor(128, false);
-    idt.entries[129] = get_handler_descriptor(129, false);
-    idt.entries[130] = get_handler_descriptor(130, false);
-    idt.entries[131] = get_handler_descriptor(131, false);
-    idt.entries[132] = get_handler_descriptor(132, false);
-    idt.entries[133] = get_handler_descriptor(133, false);
-    idt.entries[134] = get_handler_descriptor(134, false);
-    idt.entries[135] = get_handler_descriptor(135, false);
-    idt.entries[136] = get_handler_descriptor(136, false);
-    idt.entries[137] = get_handler_descriptor(137, false);
-    idt.entries[138] = get_handler_descriptor(138, false);
-    idt.entries[139] = get_handler_descriptor(139, false);
-    idt.entries[140] = get_handler_descriptor(140, false);
-    idt.entries[141] = get_handler_descriptor(141, false);
-    idt.entries[142] = get_handler_descriptor(142, false);
-    idt.entries[143] = get_handler_descriptor(143, false);
-    idt.entries[144] = get_handler_descriptor(144, false);
-    idt.entries[145] = get_handler_descriptor(145, false);
-    idt.entries[146] = get_handler_descriptor(146, false);
-    idt.entries[147] = get_handler_descriptor(147, false);
-    idt.entries[148] = get_handler_descriptor(148, false);
-    idt.entries[149] = get_handler_descriptor(149, false);
-    idt.entries[150] = get_handler_descriptor(150, false);
-    idt.entries[151] = get_handler_descriptor(151, false);
-    idt.entries[152] = get_handler_descriptor(152, false);
-    idt.entries[153] = get_handler_descriptor(153, false);
-    idt.entries[154] = get_handler_descriptor(154, false);
-    idt.entries[155] = get_handler_descriptor(155, false);
-    idt.entries[156] = get_handler_descriptor(156, false);
-    idt.entries[157] = get_handler_descriptor(157, false);
-    idt.entries[158] = get_handler_descriptor(158, false);
-    idt.entries[159] = get_handler_descriptor(159, false);
-    idt.entries[160] = get_handler_descriptor(160, false);
-    idt.entries[161] = get_handler_descriptor(161, false);
-    idt.entries[162] = get_handler_descriptor(162, false);
-    idt.entries[163] = get_handler_descriptor(163, false);
-    idt.entries[164] = get_handler_descriptor(164, false);
-    idt.entries[165] = get_handler_descriptor(165, false);
-    idt.entries[166] = get_handler_descriptor(166, false);
-    idt.entries[167] = get_handler_descriptor(167, false);
-    idt.entries[168] = get_handler_descriptor(168, false);
-    idt.entries[169] = get_handler_descriptor(169, false);
-    idt.entries[170] = get_handler_descriptor(170, false);
-    idt.entries[171] = get_handler_descriptor(171, false);
-    idt.entries[172] = get_handler_descriptor(172, false);
-    idt.entries[173] = get_handler_descriptor(173, false);
-    idt.entries[174] = get_handler_descriptor(174, false);
-    idt.entries[175] = get_handler_descriptor(175, false);
-    idt.entries[176] = get_handler_descriptor(176, false);
-    idt.entries[177] = get_handler_descriptor(177, false);
-    idt.entries[178] = get_handler_descriptor(178, false);
-    idt.entries[179] = get_handler_descriptor(179, false);
-    idt.entries[180] = get_handler_descriptor(180, false);
-    idt.entries[181] = get_handler_descriptor(181, false);
-    idt.entries[182] = get_handler_descriptor(182, false);
-    idt.entries[183] = get_handler_descriptor(183, false);
-    idt.entries[184] = get_handler_descriptor(184, false);
-    idt.entries[185] = get_handler_descriptor(185, false);
-    idt.entries[186] = get_handler_descriptor(186, false);
-    idt.entries[187] = get_handler_descriptor(187, false);
-    idt.entries[188] = get_handler_descriptor(188, false);
-    idt.entries[189] = get_handler_descriptor(189, false);
-    idt.entries[190] = get_handler_descriptor(190, false);
-    idt.entries[191] = get_handler_descriptor(191, false);
-    idt.entries[192] = get_handler_descriptor(192, false);
-    idt.entries[193] = get_handler_descriptor(193, false);
-    idt.entries[194] = get_handler_descriptor(194, false);
-    idt.entries[195] = get_handler_descriptor(195, false);
-    idt.entries[196] = get_handler_descriptor(196, false);
-    idt.entries[197] = get_handler_descriptor(197, false);
-    idt.entries[198] = get_handler_descriptor(198, false);
-    idt.entries[199] = get_handler_descriptor(199, false);
-    idt.entries[200] = get_handler_descriptor(200, false);
-
-    idt.entries[201] = get_handler_descriptor(201, false);
-    idt.entries[202] = get_handler_descriptor(202, false);
-    idt.entries[203] = get_handler_descriptor(203, false);
-    idt.entries[204] = get_handler_descriptor(204, false);
-    idt.entries[205] = get_handler_descriptor(205, false);
-    idt.entries[206] = get_handler_descriptor(206, false);
-    idt.entries[207] = get_handler_descriptor(207, false);
-    idt.entries[208] = get_handler_descriptor(208, false);
-    idt.entries[209] = get_handler_descriptor(209, false);
-    idt.entries[210] = get_handler_descriptor(210, false);
-    idt.entries[211] = get_handler_descriptor(211, false);
-    idt.entries[212] = get_handler_descriptor(212, false);
-    idt.entries[213] = get_handler_descriptor(213, false);
-    idt.entries[214] = get_handler_descriptor(214, false);
-    idt.entries[215] = get_handler_descriptor(215, false);
-    idt.entries[216] = get_handler_descriptor(216, false);
-    idt.entries[217] = get_handler_descriptor(217, false);
-    idt.entries[218] = get_handler_descriptor(218, false);
-    idt.entries[219] = get_handler_descriptor(219, false);
-    idt.entries[220] = get_handler_descriptor(220, false);
-    idt.entries[221] = get_handler_descriptor(221, false);
-    idt.entries[222] = get_handler_descriptor(222, false);
-    idt.entries[223] = get_handler_descriptor(223, false);
-    idt.entries[224] = get_handler_descriptor(224, false);
-    idt.entries[225] = get_handler_descriptor(225, false);
-    idt.entries[226] = get_handler_descriptor(226, false);
-    idt.entries[227] = get_handler_descriptor(227, false);
-    idt.entries[228] = get_handler_descriptor(228, false);
-    idt.entries[229] = get_handler_descriptor(229, false);
-    idt.entries[230] = get_handler_descriptor(230, false);
-    idt.entries[231] = get_handler_descriptor(231, false);
-    idt.entries[232] = get_handler_descriptor(232, false);
-    idt.entries[233] = get_handler_descriptor(233, false);
-    idt.entries[234] = get_handler_descriptor(234, false);
-    idt.entries[235] = get_handler_descriptor(235, false);
-    idt.entries[236] = get_handler_descriptor(236, false);
-    idt.entries[237] = get_handler_descriptor(237, false);
-    idt.entries[238] = get_handler_descriptor(238, false);
-    idt.entries[239] = get_handler_descriptor(239, false);
-    idt.entries[240] = get_handler_descriptor(240, false);
-    idt.entries[241] = get_handler_descriptor(241, false);
-    idt.entries[242] = get_handler_descriptor(242, false);
-    idt.entries[243] = get_handler_descriptor(243, false);
-    idt.entries[244] = get_handler_descriptor(244, false);
-    idt.entries[245] = get_handler_descriptor(245, false);
-    idt.entries[246] = get_handler_descriptor(246, false);
-    idt.entries[247] = get_handler_descriptor(247, false);
-    idt.entries[248] = get_handler_descriptor(248, false);
-    idt.entries[249] = get_handler_descriptor(249, false);
-    idt.entries[250] = get_handler_descriptor(250, false);
-    idt.entries[251] = get_handler_descriptor(251, false);
-    idt.entries[252] = get_handler_descriptor(252, false);
-    idt.entries[253] = get_handler_descriptor(253, false);
-    idt.entries[254] = get_handler_descriptor(254, false);
-    idt.entries[255] = get_handler_descriptor(255, false);
+    for (idt.entries) |*entry, i| {
+        const handler = handlers[i];
+        entry.* = get_descriptor(handler);
+    }
 }
 
 pub fn init(idt: *IDT) void {
@@ -437,7 +444,11 @@ inline fn prologue() void {
     );
 }
 
-pub fn get_handler(comptime interrupt_number: u64, comptime has_error_code: bool) fn handler() align(0x10) callconv(.Naked) void {
+pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) callconv(.Naked) void {
+    const has_error_code = switch (interrupt_number) {
+        8, 10, 11, 12, 13, 14, 17 => true,
+        else => false,
+    };
     return struct {
         pub fn handler() align(0x10) callconv(.Naked) void {
             if (comptime !has_error_code) asm volatile ("push $0");
@@ -457,19 +468,12 @@ pub fn get_handler(comptime interrupt_number: u64, comptime has_error_code: bool
     }.handler;
 }
 
-pub fn get_handler_descriptor(comptime interrupt_number: u64, comptime has_error_code: bool) IDT.Descriptor {
-    const handler_function = get_handler(interrupt_number, has_error_code);
-
-    const handler_address = @ptrToInt(handler_function);
+pub fn get_descriptor(handler: Handler) IDT.Descriptor {
+    const handler_address = @ptrToInt(handler);
     return IDT.Descriptor{
         .offset_low = @truncate(u16, handler_address),
         .offset_mid = @truncate(u16, handler_address >> 16),
         .offset_high = @truncate(u32, handler_address >> 32),
-        .segment_selector = @offsetOf(GDT.Table, "code_64"), // @TODO: this should change as the GDT selector changes
-        .interrupt_stack_table = 0,
-        .type = .interrupt,
-        .descriptor_privilege_level = 0,
-        .present = 1,
     };
 }
 
