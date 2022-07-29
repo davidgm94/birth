@@ -14,7 +14,7 @@ pub const RawResult = extern struct {
     b: u64,
 };
 
-pub const Input = extern struct {
+pub const Input = packed struct {
     id: u32,
     options: Options,
 
@@ -55,7 +55,7 @@ pub const ThreadExitParameters = struct {
 };
 
 pub fn immediate_syscall(submission: Submission) RawResult {
-    return hardware_syscall_entry_point(submission.arguments[0], submission.arguments[1], submission.arguments[2], submission.arguments[3], submission.arguments[4], submission.arguments[5]);
+    return hardware_syscall_entry_point(submission.input, submission.arguments[0], submission.arguments[1], submission.arguments[2], submission.arguments[3], submission.arguments[4]);
 }
 
 pub fn hardware_syscall(comptime hw_syscall_id: HardwareID) RawResult {
@@ -135,7 +135,12 @@ const SyscallParameters = blk: {
 };
 
 pub const Submission = struct {
-    arguments: [6]u64,
+    input: Input,
+    arguments: [5]u64,
+
+    comptime {
+        common.comptime_assert(@sizeOf(Submission) == 6 * @sizeOf(u64));
+    }
 };
 
 pub const Completion = RawResult;

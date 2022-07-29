@@ -146,8 +146,8 @@ pub fn log(message: []const u8) void {
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;
     common.arch.Writer.lock.acquire();
+    defer common.arch.Writer.lock.release();
     common.arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
     common.arch.writer.writeAll(message) catch unreachable;
     common.arch.writer.writeByte('\n') catch unreachable;
-    common.arch.Writer.lock.release();
 }

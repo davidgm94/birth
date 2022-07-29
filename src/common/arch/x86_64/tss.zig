@@ -22,11 +22,6 @@ pub const Descriptor = packed struct {
     }
 };
 
-pub const Entry = struct {
-    low: u32,
-    high: u32,
-};
-
 pub const Struct = packed struct {
     reserved0: u32 = 0,
     rsp: [3]u64 = [3]u64{ 0, 0, 0 },
@@ -56,4 +51,9 @@ pub const Struct = packed struct {
             .base_high = @truncate(u32, address >> 32),
         };
     }
+};
+
+pub const Entry = struct {
+    low: u32,
+    high: u32,
 };

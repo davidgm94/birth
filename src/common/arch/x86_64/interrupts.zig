@@ -14,7 +14,7 @@ const TODO = common.TODO;
 const Thread = common.Thread;
 const Virtual = kernel.Virtual;
 const log = common.log.scoped(.interrupts);
-const Handler = fn () callconv(.Naked) void;
+pub const Handler = fn () callconv(.Naked) void;
 
 pub const handlers = [IDT.entry_count]Handler{
     get_handler(0),

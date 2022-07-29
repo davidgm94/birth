@@ -15,7 +15,7 @@ const InstallerError = error{
 
 const GPT = struct {
     const Header = packed struct {
-        signature: [8]u8,
+        signature: u64,
         revision: u32,
         header_size: u32,
         CRC32: u32,
@@ -41,8 +41,10 @@ const GPT = struct {
     };
 
     const Entry = packed struct {
-        partition_type_guid: [2]u64,
-        unique_partition_guid: [2]u64,
+        partition_type_guid0: u64,
+        partition_type_guid1: u64,
+        unique_partition_guid0: u64,
+        unique_partition_guid1: u64,
         starting_LBA: u64,
         ending_LBA: u64,
         attributes: u64,
@@ -71,16 +73,7 @@ fn print_error_and_exit(e: InstallerError) InstallerError {
     return e;
 }
 
-const gpt_header_signature = [_]u8{
-    'E',
-    'F',
-    'I',
-    ' ',
-    'P',
-    'A',
-    'R',
-    'T',
-};
+const gpt_header_signature = @ptrCast(*const u64, "EFI PART").*;
 
 fn div_roundup(a: u64, b: u64) u64 {
     return (((a) + ((b) - 1)) / (b));
@@ -1550,7 +1543,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
 
     for (lb_guesses) |guess| {
         gpt_header = @ptrCast(*GPT.Header, &device[guess]);
-        if (std.mem.eql(u8, &gpt_header.signature, &gpt_header_signature)) {
+        if (gpt_header.signature == gpt_header_signature) {
             lb_size = guess;
             do_gpt = !force_mbr;
             if (force_mbr) {
@@ -1563,7 +1556,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
     const secondary_GPT_header = @ptrCast(*GPT.Header, &device[lb_size * gpt_header.alternate_LBA]);
     if (do_gpt) {
         //print("Installing to GPT. Logical block size of {}\nSecondary header at LBA 0x{x}\n", .{lb_size, gpt_header.alternate_LBA});
-        if (!std.mem.eql(u8, &secondary_GPT_header.signature, &gpt_header_signature)) {
+        if (secondary_GPT_header.signature != gpt_header_signature) {
             return print_error_and_exit(InstallerError.secondary_GPT_header_invalid);
         }
 
@@ -1664,7 +1657,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
             const partition_entries = @intToPtr([*]GPT.Entry, @ptrToInt(device.ptr) + gpt_header.partition_entry_LBA * lb_size)[0..gpt_header.partition_entry_count];
             if (gpt_header.partition_entry_count == 0) @panic("no partitions");
             for (partition_entries) |entry, i| {
-                if (entry.unique_partition_guid[0] != 0 or entry.unique_partition_guid[1] != 0) {
+                if (entry.unique_partition_guid0 != 0 or entry.unique_partition_guid1 != 0) {
                     if (i > max_partition_entry_used) max_partition_entry_used = i;
                 }
             }
