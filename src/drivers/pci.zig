@@ -95,8 +95,8 @@ fn Header(comptime HeaderT: type) type {
             return read_extended(FieldType, bus, slot, function, offset + @offsetOf(HeaderT, field_name));
         }
 
-        pub fn get_offset(comptime field_name: []const u8) u64 {
-            return @offsetOf(HeaderT, field_name);
+        pub fn get_offset(comptime field_name: []const u8) u8 {
+            return @intCast(u8, @offsetOf(HeaderT, field_name));
         }
     };
 }
@@ -637,6 +637,17 @@ pub const Device = struct {
 
     //}
 };
+
+// TODO: this can return more than one device
+pub fn find(self: *Controller, device_id: u16, vendor_id: u16) ?*Device {
+    for (self.devices) |*device| {
+        if (device.vendor_id == vendor_id and device.device_id == device_id) {
+            return device;
+        }
+    }
+
+    return null;
+}
 
 // TODO: report this to Zig
 //_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });

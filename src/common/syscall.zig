@@ -14,8 +14,8 @@ pub const RawResult = extern struct {
     b: u64,
 };
 
-pub const Input = packed struct {
-    id: u32,
+pub const Input = extern struct {
+    id: u16,
     options: Options,
 
     comptime {
@@ -26,7 +26,7 @@ pub const Input = packed struct {
 pub const Options = packed struct {
     execution_mode: ExecutionMode,
     type: Type,
-    unused: u30 = 0,
+    unused: u46 = 0,
 };
 
 pub const Type = enum(u1) {
@@ -34,16 +34,17 @@ pub const Type = enum(u1) {
     software = 1,
 };
 
-pub const HardwareID = enum(u32) {
+pub const HardwareID = enum(u16) {
     ask_syscall_manager = 0,
     flush_syscall_manager = 1,
 
     pub const count = common.enum_values(@This()).len;
 };
 
-pub const ID = enum(u32) {
+pub const ID = enum(u16) {
     thread_exit = 0,
     log = 1,
+    read_file = 2,
     pub const count = common.enum_values(@This()).len;
 };
 
@@ -66,8 +67,7 @@ pub fn hardware_syscall(comptime hw_syscall_id: HardwareID) RawResult {
             .type = .hardware,
         },
     };
-    const inputed_bicasted = @bitCast(u64, input);
-    return hardware_syscall_entry_point(inputed_bicasted, 0, 0, 0, 0, 0);
+    return hardware_syscall_entry_point(input, 0, 0, 0, 0, 0);
 }
 
 pub const LogParameters = struct {
@@ -78,6 +78,14 @@ pub fn log(parameters: LogParameters) Submission {
     return new_submission(.log, @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0);
 }
 
+pub const ReadFileParameters = struct {
+    name: []const u8,
+};
+
+pub fn read_file(parameters: ReadFileParameters) Submission {
+    return new_submission(.read_file, @ptrToInt(parameters.name.ptr), parameters.name.len, 0, 0, 0);
+}
+
 pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {
     const input = Input{
         .id = @enumToInt(id),
@@ -86,9 +94,7 @@ pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, ar
             .type = .software,
         },
     };
-    const argument0 = @bitCast(u64, input);
-    return Submission{ .arguments = [_]u64{
-        argument0,
+    return Submission{ .input = input, .arguments = [_]u64{
         argument1,
         argument2,
         argument3,
@@ -124,6 +130,8 @@ const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ID.thread_exit)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ID.log)][@enumToInt(ExecutionMode.blocking)] = void;
     ReturnTypes[@enumToInt(ID.log)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ID.read_file)][@enumToInt(ExecutionMode.blocking)] = []const u8;
+    ReturnTypes[@enumToInt(ID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };
 
@@ -131,6 +139,7 @@ const SyscallParameters = blk: {
     var ParameterTypes: [ID.count]type = undefined;
     ParameterTypes[@enumToInt(ID.thread_exit)] = ThreadExitParameters;
     ParameterTypes[@enumToInt(ID.log)] = LogParameters;
+    ParameterTypes[@enumToInt(ID.read_file)] = ReadFileParameters;
     break :blk ParameterTypes;
 };
 
@@ -216,6 +225,7 @@ pub const Manager = struct {
         const submission = switch (id) {
             .thread_exit => thread_exit(parameters),
             .log => log(parameters),
+            .read_file => read_file(parameters),
         };
 
         switch (execution_mode) {
@@ -223,7 +233,17 @@ pub const Manager = struct {
                 const result = immediate_syscall(submission);
                 switch (ReturnType) {
                     noreturn, void => {},
-                    else => return result,
+                    else => switch (id) {
+                        .read_file => {
+                            if (@intToPtr(?[*]const u8, result.a)) |file_ptr| {
+                                const file_len = result.b;
+                                return file_ptr[0..file_len];
+                            } else {
+                                @panic("file could not be read");
+                            }
+                        },
+                        else => common.panic("NI: {}", .{id}),
+                    },
                 }
             },
             .non_blocking => {

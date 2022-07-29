@@ -7,6 +7,7 @@ pub const RNUFS = @import("drivers/rnu_fs.zig");
 pub const graphics = @import("drivers/graphics.zig");
 pub const NVMe = @import("drivers/nvme.zig");
 pub const PCI = @import("drivers/pci.zig");
+pub const Virtio = @import("drivers/virtio.zig");
 
 const Allocator = common.Allocator;
 

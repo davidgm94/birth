@@ -37,7 +37,8 @@ pub fn build(b: *Builder) void {
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
                 .disks = &.{
-                    .{ .interface = .nvme, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
+                    .{ .interface = .nvme, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } },
+                    .{ .interface = .virtio, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
                 },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -144,7 +145,6 @@ const Kernel = struct {
 
     fn create_userspace_programs(kernel: *Kernel) void {
         const linker_script_path = kernel.builder.fmt("src/common/arch/{s}/user/linker.ld", .{@tagName(kernel.options.arch)});
-        common.runtime_assert(@src(), kernel.options.run.disks.len == 1);
 
         var unique_programs = std.ArrayList([]const u8).init(kernel.builder.allocator);
         {

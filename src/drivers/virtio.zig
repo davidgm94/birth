@@ -1,64 +1,26 @@
-const common = @import("common");
+const common = @import("../common.zig");
 
 const log = common.log.scoped(.Virtio);
 const TODO = common.TODO;
 const PCI = @import("pci.zig");
+pub const Block = @import("virtio/block.zig");
 
-fn next(caps: *u8, device: *PCI.Device) ?u8 {
-    const current_caps = caps.*;
-    if (current_caps == 0) return null;
-    caps.* = device.read_config(u8, current_caps + 1);
-    return current_caps;
-}
+pub const PCI_vendor_id = 0x1af4;
 
-const CapabilityOffset = enum(u8) {
-    len = 2,
-    cfg_type = 3,
-    bar = 4,
-    offset = 8,
-    length = 12,
-    notify_cap_mult = 16,
+pub const TransitionalPCIDeviceID = enum(u16) {
+    network_card = 0x1000,
+    block_device = 0x1001,
+    memory_ballooning = 0x1002,
+    console = 0x1003,
+    SCSI_host = 0x1004,
+    entropy_source = 0x1005,
+    transport_9p = 0x1009,
 };
 
-const ConfigurationType = enum(u8) {
-    common = 1,
-    notify = 2,
-    isr = 3,
-    device = 4,
-    pci = 5,
-};
-
-const vendor_specific_capability = 0x09;
-
-fn read_capability_data(comptime T: type, device: *PCI.Device, capability_offset: CapabilityOffset, caps: u8) T {
-    return device.read_config(T, caps + @enumToInt(capability_offset));
-}
-
-pub fn init_from_pci(device: *PCI.Device) void {
-    const driver = PCIDriver.detect_bar(device);
-    _ = driver;
+pub fn detect_bars(device: *PCI.Device) void {
+    const header_type = device.read_config(u8, PCI.CommonHeader.get_offset("header_type"));
+    common.runtime_assert(@src(), header_type == 0);
+    const capabilities_pointer = device.read_config(u8, PCI.HeaderType0x00.get_offset("capabilities_pointer")) & 0xfc;
+    log.debug("CP: {}", .{capabilities_pointer});
     TODO(@src());
 }
-
-const PCIDriver = struct {
-    fn detect_bar(device: *PCI.Device) PCIDriver {
-        var caps = device.read_capabilities_pointer() & 0xfc;
-
-        while (next(&caps, device)) |cap| {
-            const vendor_id = PCI.CommonHeader.read_from_offset("vendor_id", device.bus, device.slot, device.function, cap);
-            log.debug("Vendor id: 0x{x}", .{vendor_id});
-            log.debug("Caps: 0x{x}", .{cap});
-
-            if (vendor_id == vendor_specific_capability) {
-                const configuration_type = @intToEnum(ConfigurationType, read_capability_data(u8, device, .cfg_type, cap));
-                const bar = read_capability_data(u8, device, .bar, cap);
-                const offset = read_capability_data(u32, device, .offset, cap);
-                const length = read_capability_data(u32, device, .length, cap);
-
-                log.debug("Configuration type: {s}. BAR: 0x{x}. Offset: 0x{x}. Length: 0x{x}", .{ @tagName(configuration_type), bar, offset, length });
-            }
-        }
-
-        TODO(@src());
-    }
-};

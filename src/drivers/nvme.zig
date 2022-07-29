@@ -289,48 +289,32 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     nvme.version = nvme.read(vs);
     log.debug("Capabilities = {}. Version = {}", .{ nvme.capabilities, nvme.version });
 
-    common.runtime_assert(@src(), nvme.version.major == 1 and nvme.version.minor == 4);
-    if (nvme.version.major > 1) @panic("version too new");
-    if (nvme.version.major < 1) @panic("f1");
-    if (nvme.version.major == 1 and nvme.version.minor < 1) @panic("f2");
+    if (nvme.version.major != 1 and nvme.version.minor != 4) @panic("Version check failed");
     if (nvme.capabilities.mqes == 0) @panic("f3");
     if (!nvme.capabilities.css.nvm_command_set) @panic("f4");
     if (nvme.capabilities.mpsmin < context.page_shifter - 12) @panic("f5");
     if (nvme.capabilities.mpsmax < context.page_shifter - 12) @panic("f6");
+
+    const previous_configuration = nvme.read(cc);
+    log.debug("Previous configuration: 0x{x}", .{previous_configuration});
+
+    if (previous_configuration.enable) {
+        log.warn("The controller was enabled. Waiting for it to be ready before disabling", .{});
+        while (!nvme.read(csts).ready) {}
+        log.debug("Disabling the controller", .{});
+        var config = nvme.read(cc);
+        config.enable = false;
+        nvme.write(cc, config);
+        log.debug("Waiting for the controller to be ready", .{});
+        while (nvme.read(csts).ready) {}
+        log.debug("Controller disabled", .{});
+    }
 
     nvme.doorbell_stride = @as(u64, 4) << nvme.capabilities.doorbell_stride;
     log.debug("NVMe doorbell stride: 0x{x}", .{nvme.doorbell_stride});
 
     nvme.ready_transition_timeout = nvme.capabilities.timeout * @as(u64, 500);
     log.debug("NVMe ready transition timeout: {} ms", .{nvme.ready_transition_timeout});
-
-    const previous_configuration = nvme.read(cc);
-    log.debug("Previous configuration: 0x{x}", .{previous_configuration});
-
-    if (previous_configuration.enable) {
-        log.warn("The controller was enabled", .{});
-        // TODO. HACK we should use a timeout here
-        // TODO: PRobably buggy
-        var ready = false;
-        while (!nvme.read(csts).ready) {
-            ready = true;
-        }
-        log.debug("Controller readiness: {}", .{ready});
-        log.debug("Disabling controller", .{});
-        var config = nvme.read(cc);
-        config.enable = false;
-        nvme.write(cc, config);
-        log.debug("Controller disabled", .{});
-        log.debug("New cc: {}", .{nvme.read(cc)});
-    }
-
-    {
-        // TODO. HACK we should use a timeout here
-        while (nvme.read(csts).ready) {
-            log.debug("CSTS was ready", .{});
-        }
-        log.debug("past the timeout", .{});
-    }
 
     nvme.write(cc, blk: {
         var cc_value = nvme.read(cc);

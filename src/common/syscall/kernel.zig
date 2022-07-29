@@ -6,12 +6,7 @@ const TODO = common.TODO;
 pub const Syscall = common.Syscall;
 const root = @import("root");
 
-pub noinline fn handler(argument0: u64, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
-    _ = argument5;
-    _ = argument4;
-    logger.debug("Syscall handler", .{});
-    const input = @bitCast(Syscall.Input, argument0);
-
+pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
     {
         const thread = common.arch.get_current_thread();
         for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
@@ -20,12 +15,18 @@ pub noinline fn handler(argument0: u64, argument1: u64, argument2: u64, argument
         }
     }
 
-    switch (input.options.execution_mode) {
+    const submission = Syscall.Submission{
+        .input = input,
+        .arguments = .{ argument1, argument2, argument3, argument4, argument5 },
+    };
+    const current_thread = common.arch.get_current_thread();
+
+    switch (submission.input.options.execution_mode) {
         .blocking => {
-            switch (input.options.type) {
+            switch (submission.input.options.type) {
                 .software => {
-                    if (input.id < Syscall.ID.count) {
-                        const id = @intToEnum(Syscall.ID, input.id);
+                    if (submission.input.id < Syscall.ID.count) {
+                        const id = @intToEnum(Syscall.ID, submission.input.id);
                         switch (id) {
                             .thread_exit => {
                                 const exit_code = argument1;
@@ -46,6 +47,18 @@ pub noinline fn handler(argument0: u64, argument1: u64, argument2: u64, argument
                                 const message_len = argument2;
                                 const message = message_ptr[0..message_len];
                                 log(message);
+                            },
+                            .read_file => {
+                                const filename = blk: {
+                                    const ptr = @intToPtr(?[*]const u8, submission.arguments[0]) orelse @panic("null message ptr");
+                                    const len = submission.arguments[1];
+                                    break :blk ptr[0..len];
+                                };
+
+                                const lol = root.main_storage.read_file(root.main_storage, @ptrToInt(current_thread.address_space), filename);
+                                common.runtime_assert(@src(), lol.len > 0);
+                                logger.debug("Len: {}", .{lol.len});
+                                TODO(@src());
                             },
                         }
                     } else {
@@ -141,7 +154,6 @@ pub fn thread_exit(exit_code: u64, maybe_message: ?[]const u8) noreturn {
 }
 
 pub fn log(message: []const u8) void {
-    logger.debug("Log called", .{});
     const current_thread = common.arch.get_current_thread();
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;

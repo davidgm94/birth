@@ -29,7 +29,7 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub extern fn user_syscall_entry_point(arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.RawResult;
+pub extern fn user_syscall_entry_point(arg0: common.Syscall.Input, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.RawResult;
 
 // INFO: only RSP is handled in the kernel
 comptime {

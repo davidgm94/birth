@@ -81,8 +81,12 @@ pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace) !v
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
     NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, &PCI.controller);
-    common.runtime_assert(@src(), Disk.drivers.items.len > 0);
+    common.runtime_assert(@src(), Disk.drivers.items.len == 1);
     try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
+
+    Virtio.Block.driver = try Virtio.Block.from_pci(&PCI.controller);
+    common.runtime_assert(@src(), Disk.drivers.items.len == 2);
+    try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[1]);
 }
 
 pub fn init_graphics_drivers(allocator: Allocator) !void {
