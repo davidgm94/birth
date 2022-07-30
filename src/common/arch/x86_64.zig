@@ -1259,7 +1259,17 @@ pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function:
     defer pci_lock.release();
 
     notify_config_op(bus, slot, function, offset);
-    return io_read(IntType, IOPort.PCI_data + @intCast(u16, offset % 4));
+    const result_int = io_read(IntType, IOPort.PCI_data + @intCast(u16, offset % 4));
+    switch (@typeInfo(T)) {
+        .Enum => {
+            const result = @intToEnum(T, result_int);
+            return result;
+        },
+        else => {
+            const result = @bitCast(T, result_int);
+            return result;
+        },
+    }
 }
 
 pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
