@@ -77,6 +77,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     // TODO: set up last know instruction address
 
     const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
+    // TODO: this is only supposed to be called from an interrupt
     common.arch.signal_end_of_interrupt(cpu);
     if (common.arch.are_interrupts_enabled()) @panic("interrupts enabled");
     if (cpu.spinlock_count > 0) @panic("spinlocks active");
