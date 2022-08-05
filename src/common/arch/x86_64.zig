@@ -84,9 +84,9 @@ pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace) !v
     common.runtime_assert(@src(), Disk.drivers.items.len == 1);
     try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
 
-    Virtio.Block.driver = try Virtio.Block.from_pci(&PCI.controller);
-    common.runtime_assert(@src(), Disk.drivers.items.len == 2);
-    try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[1]);
+    //Virtio.Block.driver = try Virtio.Block.from_pci(&PCI.controller);
+    //common.runtime_assert(@src(), Disk.drivers.items.len == 2);
+    //try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[1]);
 }
 
 pub fn init_graphics_drivers(allocator: Allocator) !void {

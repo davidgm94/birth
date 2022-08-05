@@ -296,7 +296,7 @@ pub fn init(nvme: *NVMe, virtual_address_space: *VirtualAddressSpace) void {
     if (nvme.capabilities.mpsmax < context.page_shifter - 12) @panic("f6");
 
     const previous_configuration = nvme.read(cc);
-    log.debug("Previous configuration: 0x{x}", .{previous_configuration});
+    log.debug("Previous configuration: {}", .{previous_configuration});
 
     if (previous_configuration.enable) {
         log.warn("The controller was enabled. Waiting for it to be ready before disabling", .{});
