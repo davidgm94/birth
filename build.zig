@@ -37,15 +37,15 @@ pub fn build(b: *Builder) void {
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
                 .disks = &.{
-                    .{ .interface = .nvme, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } },
-                    .{ .interface = .virtio, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
+                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } },
+                    //.{ .interface = .virtio, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
                 },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
                         .smp = 8,
-                        .log = .{ .file = "zig-cache/logfile", .guest_errors = true, .cpu = false, .assembly = true, .interrupts = true, },
+                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                     },
                 },
@@ -201,6 +201,15 @@ const Kernel = struct {
                 const qemu_name = std.mem.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
                 kernel.run_argument_list.append(qemu_name) catch unreachable;
 
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-nvme*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-pci*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-ide*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-ata*") catch unreachable;
+
                 switch (kernel.options.arch) {
                     .x86_64 => {
                         const image_flag = "-cdrom";
@@ -251,17 +260,17 @@ const Kernel = struct {
                 kernel.run_argument_list.append("virtio-mmio.force-legacy=false") catch unreachable;
 
                 for (kernel.options.run.disks) |disk, disk_i| {
-                    kernel.run_argument_list.append("-drive") catch unreachable;
                     const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
                     const disk_path = kernel.builder.fmt("zig-cache/{s}.bin", .{disk_id});
-                    const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
-                    kernel.run_argument_list.append(drive_options) catch unreachable;
 
                     switch (disk.interface) {
                         .nvme => {
                             kernel.run_argument_list.append("-device") catch unreachable;
                             const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
                             kernel.run_argument_list.append(device_options) catch unreachable;
+                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
+                            kernel.run_argument_list.append(drive_options) catch unreachable;
                         },
                         .virtio => {
                             kernel.run_argument_list.append("-device") catch unreachable;
@@ -272,7 +281,32 @@ const Kernel = struct {
                             };
                             const device_options = kernel.builder.fmt("virtio-blk-{s},drive={s}", .{ device_type, disk_id });
                             kernel.run_argument_list.append(device_options) catch unreachable;
+                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
+                            kernel.run_argument_list.append(drive_options) catch unreachable;
                         },
+                        .ide => {
+                            kernel.run_argument_list.append("-device") catch unreachable;
+                            common.runtime_assert(@src(), kernel.options.arch == .x86_64);
+                            kernel.run_argument_list.append("piix3-ide,id=ide") catch unreachable;
+
+                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path })) catch unreachable;
+                            kernel.run_argument_list.append("-device") catch unreachable;
+                            // ide bus port is hardcoded to avoid errors
+                            kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ide.0", .{disk_id})) catch unreachable;
+                        },
+                        .ahci => {
+                            kernel.run_argument_list.append("-device") catch unreachable;
+                            kernel.run_argument_list.append("ahci,id=ahci") catch unreachable;
+
+                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path })) catch unreachable;
+                            kernel.run_argument_list.append("-device") catch unreachable;
+                            // ide bus port is hardcoded to avoid errors
+                            kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ahci.0", .{disk_id})) catch unreachable;
+                        },
+
                         else => unreachable,
                     }
                 }
@@ -320,14 +354,6 @@ const Kernel = struct {
                 }
 
                 common.QEMU.add_isa_debug_exit(kernel.builder.allocator, &kernel.run_argument_list) catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-nvme*") catch unreachable;
-                kernel.debug_argument_list.append("-trace") catch unreachable;
-                kernel.debug_argument_list.append("-nvme*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-pci*") catch unreachable;
-                kernel.debug_argument_list.append("-trace") catch unreachable;
-                kernel.debug_argument_list.append("-pci*") catch unreachable;
 
                 kernel.debug_argument_list.append("-S") catch unreachable;
                 kernel.debug_argument_list.append("-s") catch unreachable;

@@ -1,16 +1,18 @@
+const Controller = @This();
 // TODO: batch PCI register access
+
 const kernel = @import("root");
 const common = @import("../common.zig");
+
 const log = common.log.scoped(.PCI);
 const TODO = common.TODO;
 const VirtualAddress = common.VirtualAddress;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 const PhysicalAddress = common.PhysicalAddress;
-const Controller = @This();
+
 const x86_64 = common.arch.x86_64;
 
 devices: []Device,
-bus_scan_states: [256]BusScanState,
 
 pub var controller: Controller = undefined;
 
@@ -24,84 +26,10 @@ const BusScanState = enum(u8) {
     scanned = 2,
 };
 
-pub const Bus = enum(u8) {
-    _,
-    inline fn new(value: u8) @This() {
-        return @intToEnum(@This(), value);
-    }
-
-    inline fn inc(bus: *Bus) void {
-        const current = @enumToInt(bus.*);
-        if (current == 0xff) @panic("bus");
-        bus.* = @intToEnum(Bus, current + 1);
-    }
-};
-
-pub const Function = enum(u8) {
-    _,
-    inline fn new(value: u8) @This() {
-        return @intToEnum(@This(), value);
-    }
-
-    inline fn inc(function: *Function) void {
-        const current = @enumToInt(function.*);
-        if (current == 0xff) @panic("function");
-        function.* = @intToEnum(Function, current + 1);
-    }
-};
-
-pub const Slot = enum(u8) {
-    _,
-    inline fn new(value: u8) Slot {
-        return @intToEnum(Slot, value);
-    }
-
-    inline fn inc(slot: *Slot) void {
-        const current = @enumToInt(slot.*);
-        if (current == 0xff) @panic("slot");
-        slot.* = @intToEnum(Slot, current + 1);
-    }
-};
-
 const pci_read_config = common.arch.pci_read_config;
 const pci_write_config = common.arch.pci_read_config;
 
-fn Header(comptime HeaderT: type) type {
-    return struct {
-        fn get_type_from_field_name(comptime field_name: []const u8) type {
-            comptime var header: HeaderT = undefined;
-            return @TypeOf(@field(header, field_name));
-        }
-
-        pub fn read(comptime field_name: []const u8, bus: Bus, slot: Slot, function: Function) get_type_from_field_name(field_name) {
-            const FieldType = get_type_from_field_name(field_name);
-            return read_extended(FieldType, bus, slot, function, @offsetOf(HeaderT, field_name));
-        }
-
-        pub fn read_extended(comptime FieldType: type, bus: Bus, slot: Slot, function: Function, offset: u8) FieldType {
-            return pci_read_config(FieldType, bus, slot, function, offset);
-        }
-
-        pub fn read_from_function(comptime field_name: []const u8, function: Function) get_type_from_field_name(field_name) {
-            return read(field_name, Bus.new(0), Slot.new(0), function);
-        }
-
-        pub fn read_base(comptime field_name: []const u8) get_type_from_field_name(field_name) {
-            return read(field_name, Bus.new(0), Slot.new(0), Function.new(0));
-        }
-
-        pub fn read_from_offset(comptime field_name: []const u8, bus: Bus, slot: Slot, function: Function, offset: u8) get_type_from_field_name(field_name) {
-            const FieldType = get_type_from_field_name(field_name);
-            return read_extended(FieldType, bus, slot, function, offset + @offsetOf(HeaderT, field_name));
-        }
-
-        pub fn get_offset(comptime field_name: []const u8) u8 {
-            return @intCast(u8, @offsetOf(HeaderT, field_name));
-        }
-    };
-}
-
-pub const CommonHeader = Header(packed struct {
+pub const CommonHeader = packed struct {
     vendor_id: u16,
     device_id: u16,
     command: u16,
@@ -118,9 +46,9 @@ pub const CommonHeader = Header(packed struct {
     comptime {
         common.comptime_assert(@sizeOf(@This()) == 0x10);
     }
-});
+};
 
-pub const HeaderType0x00 = Header(packed struct {
+pub const HeaderType0x00 = packed struct {
     vendor_id: u16,
     device_id: u16,
     command: u16,
@@ -145,8 +73,9 @@ pub const HeaderType0x00 = Header(packed struct {
     subsystem_id: u16,
     expansion_rom_base_address: u32,
     capabilities_pointer: u8,
-    reserved: u24,
-    reserved2: u32,
+    reserved1: u8,
+    reserved2: u16,
+    reserved3: u32,
     interrupt_line: u8,
     interrupt_pin: u8,
     min_grant: u8,
@@ -155,10 +84,10 @@ pub const HeaderType0x00 = Header(packed struct {
     comptime {
         common.comptime_assert(@sizeOf(@This()) == 0x40);
     }
-});
+};
 
-fn check_vendor(bus: Bus, slot: Slot, function: Function) bool {
-    const vendor_id = CommonHeader.read("vendor_id", bus, slot, function);
+fn check_vendor(bus: u8, slot: u8, function: u8) bool {
+    const vendor_id = read_field_from_header(CommonHeader, "vendor_id", bus, slot, function);
     return vendor_id != common.max_int(u16);
 }
 
@@ -169,15 +98,15 @@ const HeaderType = enum(u8) {
 };
 
 fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void {
-    var base_function = Function.new(0);
-    const base_header_type = CommonHeader.read_from_function("header_type", base_function);
-    log.debug("Base header type: 0x{x}", .{base_header_type});
+    var bus_scan_states = common.zeroes([256]BusScanState);
+    var base_function: u8 = 0;
+    const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
     common.runtime_assert(@src(), base_header_type == 0x0);
     const base_function_count: u8 = if (base_header_type & 0x80 != 0) 8 else 1;
     var buses_to_scan: u8 = 0;
-    while (@enumToInt(base_function) < base_function_count) : (base_function.inc()) {
-        if (!check_vendor(Bus.new(0), Slot.new(0), base_function)) continue;
-        pci.bus_scan_states[@enumToInt(base_function)] = .scan_next;
+    while (base_function < base_function_count) : (base_function += 1) {
+        if (!check_vendor(0, 0, base_function)) continue;
+        bus_scan_states[base_function] = .scan_next;
         buses_to_scan += 1;
     }
 
@@ -185,123 +114,105 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
 
     if (buses_to_scan == 0) kernel.crash("unable to find any PCI bus", .{});
 
-    base_function = Function.new(0);
-    common.runtime_assert(@src(), @enumToInt(base_function) == 0);
+    base_function = 0;
+    common.runtime_assert(@src(), base_function == 0);
     var device_count: u64 = 0;
     // First scan the buses to find out how many PCI devices the computer has
     while (buses_to_scan > 0) {
         var bus_i: u9 = 0;
         while (bus_i < 256) : (bus_i += 1) {
-            const bus = Bus.new(@intCast(u8, bus_i));
-            if (pci.bus_scan_states[@enumToInt(bus)] != .scan_next) continue;
-            log.debug("Scanning bus {}...", .{@enumToInt(bus)});
-            pci.bus_scan_states[@enumToInt(bus)] = .scanned;
+            const bus = @intCast(u8, bus_i);
+            if (bus_scan_states[bus] != .scan_next) continue;
+            bus_scan_states[bus] = .scanned;
             buses_to_scan -= 1;
-            var device = Slot.new(0);
+            var device: u8 = 0;
 
-            while (@enumToInt(device) < 32) : (device.inc()) {
-                if (!check_vendor(bus, device, Function.new(0))) continue;
+            while (device < 32) : (device += 1) {
+                if (!check_vendor(bus, device, 0)) continue;
 
-                const header_type = CommonHeader.read("header_type", bus, device, base_function);
-                const real_header_type = @intToEnum(HeaderType, header_type & 0x3f);
-                log.debug("Header type: 0x{x}", .{@enumToInt(real_header_type)});
+                const header_type = read_field_from_header(CommonHeader, "header_type", bus, device, base_function);
                 const function_count: u8 = if (header_type & 0x80 != 0) 8 else 1;
-                var function = Function.new(0);
-                log.debug("Function count: {}", .{function_count});
+                var function: u8 = 0;
 
-                while (@enumToInt(function) < function_count) : (function.inc()) {
+                while (function < function_count) : (function += 1) {
                     if (!check_vendor(bus, device, function)) continue;
 
                     device_count += 1;
-                    const class_code = CommonHeader.read("class_code", bus, device, function);
-                    const subclass_code = CommonHeader.read("subclass_code", bus, device, function);
+                    const class_code = read_field_from_header(CommonHeader, "class_code", bus, device, function);
+                    const subclass_code = read_field_from_header(CommonHeader, "subclass_code", bus, device, function);
 
                     if (class_code == 0x06 and subclass_code == 0x04) {
-                        const secondary_bus = HeaderType0x00.read("bar1", bus, device, function);
+                        const secondary_bus = read_field_from_header(HeaderType0x00, "bar1", bus, device, function);
                         buses_to_scan += 1;
-                        pci.bus_scan_states[secondary_bus] = .scan_next;
+                        bus_scan_states[secondary_bus] = .scan_next;
                     }
                 }
             }
         }
     }
 
-    base_function = Function.new(0);
-    while (@enumToInt(base_function) < base_function_count) : (base_function.inc()) {
-        if (!check_vendor(Bus.new(0), Slot.new(0), base_function)) continue;
-        pci.bus_scan_states[@enumToInt(base_function)] = .scan_next;
+    base_function = 0;
+    while (base_function < base_function_count) : (base_function += 1) {
+        if (!check_vendor(0, 0, base_function)) continue;
+        bus_scan_states[base_function] = .scan_next;
     }
 
     common.runtime_assert(@src(), device_count > 0);
     if (device_count > 0) {
-        log.debug("Device count: {}", .{device_count});
-
         buses_to_scan = original_bus_to_scan_count;
         pci.devices = virtual_address_space.heap.allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
 
         var registered_device_count: u64 = 0;
 
-        log.debug("Buses to scan: {}", .{buses_to_scan});
-
-        base_function = Function.new(0);
-        common.runtime_assert(@src(), @enumToInt(base_function) == 0);
+        base_function = 0;
+        common.runtime_assert(@src(), base_function == 0);
 
         while (buses_to_scan > 0) {
             var bus_i: u9 = 0;
             while (bus_i < 256) : (bus_i += 1) {
-                const bus = Bus.new(@intCast(u8, bus_i));
-                if (pci.bus_scan_states[@enumToInt(bus)] != .scan_next) continue;
+                const bus = @intCast(u8, bus_i);
+                if (bus_scan_states[bus] != .scan_next) continue;
 
-                log.debug("Scanning bus {}...", .{bus});
-                pci.bus_scan_states[@enumToInt(bus)] = .scanned;
+                bus_scan_states[bus] = .scanned;
                 buses_to_scan -= 1;
 
-                var device = Slot.new(0);
+                var device: u8 = 0;
 
-                while (@enumToInt(device) < 32) : (device.inc()) {
+                while (device < 32) : (device += 1) {
                     if (!check_vendor(bus, device, base_function)) continue;
 
-                    const header_type = CommonHeader.read("header_type", bus, device, base_function);
-                    const real_header_type = @intToEnum(HeaderType, header_type & 0x3f);
-                    log.debug("Header type: 0x{x}", .{@enumToInt(real_header_type)});
+                    const header_type = read_field_from_header(CommonHeader, "header_type", bus, device, base_function);
                     const function_count: u8 = if (header_type & 0x80 != 0) 8 else 1;
-                    var function = Function.new(0);
-                    log.debug("Function count: {}", .{function_count});
+                    var function: u8 = 0;
 
-                    while (@enumToInt(function) < function_count) : (function.inc()) {
+                    while (function < function_count) : (function += 1) {
                         if (!check_vendor(bus, device, function)) continue;
-
-                        //const device_class = pci_read_config(u32, Bus.new(bus), Slot.new(device), Function.new(function), 0x08);
-                        //log.debug("Device class: 0x{x}", .{device_class});
-                        //const interrupt_information = pci_read_config(u32, Bus.new(bus), Slot.new(device), Function.new(function), 0x3c);
-                        //log.debug("Interrupt information: 0x{x}", .{interrupt_information});
 
                         const pci_device = &pci.devices[registered_device_count];
                         registered_device_count += 1;
-
-                        pci_device.class_code = CommonHeader.read("class_code", bus, device, function);
-                        pci_device.subclass_code = CommonHeader.read("subclass_code", bus, device, function);
-                        pci_device.prog_if = CommonHeader.read("prog_if", bus, device, function);
 
                         pci_device.bus = bus;
                         pci_device.slot = device;
                         pci_device.function = function;
 
-                        pci_device.interrupt_pin = HeaderType0x00.read("interrupt_pin", bus, device, function);
-                        pci_device.interrupt_line = HeaderType0x00.read("interrupt_line", bus, device, function);
+                        pci_device.class_code = pci_device.read_field(CommonHeader, "class_code");
+                        pci_device.subclass_code = pci_device.read_field(CommonHeader, "subclass_code");
+                        pci_device.prog_if = pci_device.read_field(CommonHeader, "prog_if");
 
-                        pci_device.device_id = CommonHeader.read("device_id", bus, device, function);
-                        pci_device.vendor_id = CommonHeader.read("vendor_id", bus, device, function);
-                        log.debug("Device ID: 0x{x}. Vendor ID: 0x{x}", .{ pci_device.device_id, pci_device.vendor_id });
-                        pci_device.subsystem_id = HeaderType0x00.read("subsystem_id", bus, device, function);
-                        pci_device.subsystem_vendor_id = HeaderType0x00.read("subsystem_vendor_id", bus, device, function);
+                        pci_device.interrupt_pin = pci_device.read_field(HeaderType0x00, "interrupt_pin");
+                        pci_device.interrupt_line = pci_device.read_field(HeaderType0x00, "interrupt_line");
 
-                        pci_device.base_addresses[0] = HeaderType0x00.read("bar0", bus, device, function);
-                        pci_device.base_addresses[1] = HeaderType0x00.read("bar1", bus, device, function);
-                        pci_device.base_addresses[2] = HeaderType0x00.read("bar2", bus, device, function);
-                        pci_device.base_addresses[3] = HeaderType0x00.read("bar3", bus, device, function);
-                        pci_device.base_addresses[4] = HeaderType0x00.read("bar4", bus, device, function);
-                        pci_device.base_addresses[5] = HeaderType0x00.read("bar5", bus, device, function);
+                        pci_device.device_id = pci_device.read_field(CommonHeader, "device_id");
+                        pci_device.vendor_id = pci_device.read_field(CommonHeader, "vendor_id");
+                        pci_device.subsystem_id = pci_device.read_field(HeaderType0x00, "subsystem_id");
+                        pci_device.subsystem_vendor_id = pci_device.read_field(HeaderType0x00, "subsystem_vendor_id");
+
+                        pci_device.bars[0] = pci_device.read_field(HeaderType0x00, "bar0");
+                        pci_device.bars[1] = pci_device.read_field(HeaderType0x00, "bar1");
+                        pci_device.bars[2] = pci_device.read_field(HeaderType0x00, "bar2");
+                        pci_device.bars[3] = pci_device.read_field(HeaderType0x00, "bar3");
+                        pci_device.bars[4] = pci_device.read_field(HeaderType0x00, "bar4");
+                        pci_device.bars[5] = pci_device.read_field(HeaderType0x00, "bar5");
 
                         const class_code_name = if (pci_device.class_code < class_code_names.len) class_code_names[pci_device.class_code] else "Unknown";
                         const subclass_code_name = switch (pci_device.class_code) {
@@ -309,8 +220,8 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
                             12 => if (pci_device.subclass_code < subclass12_code_names.len) subclass12_code_names[pci_device.subclass_code] else "",
                             else => "",
                         };
-                        const prog_if_name = if (pci_device.class_code == 12 and pci_device.subclass_code == 3 and pci_device.prog_if / 0x10 < prog_if_12_3_names.len) prog_if_12_3_names[pci_device.prog_if / 0x10] else "";
-                        log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: {s}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, prog_if_name });
+
+                        log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: 0x{x}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, pci_device.prog_if });
                     }
                 }
             }
@@ -327,37 +238,6 @@ pub fn find_device(pci: *Controller, class_code: u8, subclass_code: u8) ?*Device
 
     return null;
 }
-
-// TODO: harden the search
-pub fn find_virtio_device(pci: *Controller) ?*Device {
-    for (pci.devices) |*device| {
-        // TODO: better matching
-        if (device.vendor_id == 0x1af4) {
-            return device;
-        }
-    }
-
-    return null;
-}
-
-// TODO: Report this Zig bug
-//pub fn find_device_by_fields(pci: *Controller, comptime field_names: []const []const u8, comptime field_values: anytype) ?*Device {
-//const field_values_unrolled = kernel.fields(@TypeOf(field_values));
-//next_device: for (pci.devices) |*device| {
-//inline for (field_names) |field_name, field_index| {
-//const actual_field_value = @field(device, field_name);
-//const field_value_struct_field = field_values_unrolled[field_index];
-//_ = field_value_struct_field.default_value;
-
-//const asked_field_value = @ptrCast(*align(1) const field_value_struct_field.field_type, field_value_struct_field.default_value.?).*;
-//if (asked_field_value != actual_field_value) {
-//continue :next_device;
-//}
-//}
-//}
-
-//return null;
-//}
 
 const class_code_names = [_][]const u8{
     "Unknown",
@@ -412,6 +292,23 @@ const prog_if_12_3_names = [_][]const u8{
     "XHCI",
 };
 
+pub const FindDeviceResult = struct {
+    devices: [32]*Device,
+    count: u32,
+};
+
+pub fn find_devices(driver: *Controller, class_code: u16, subclass_code: u16) FindDeviceResult {
+    var result = common.zeroes(FindDeviceResult);
+    for (driver.devices) |*device| {
+        if (device.class_code == class_code and device.subclass_code == subclass_code) {
+            result.devices[result.count] = device;
+            result.count += 1;
+        }
+    }
+
+    return result;
+}
+
 pub const Device = struct {
     device_id: u16,
     vendor_id: u16,
@@ -421,22 +318,13 @@ pub const Device = struct {
     class_code: u8,
     subclass_code: u8,
     prog_if: u8,
-    bus: Bus,
-    slot: Slot,
-    function: Function,
+    bus: u8,
+    slot: u8,
+    function: u8,
     interrupt_pin: u8,
     interrupt_line: u8,
-
-    base_virtual_addresses: [6]VirtualAddress,
-    base_physical_addresses: [6]PhysicalAddress,
-    base_addresses_size: [6]u64,
-    base_addresses: [6]u32,
-
-    //uint8_t  *baseAddressesVirtual[6];
-    //uintptr_t baseAddressesPhysical[6];
-    //size_t    baseAddressesSizes[6];
-
-    //uint32_t baseAddresses[6];
+    bars: [6]u32,
+    bar_sizes: [6]u32,
 
     pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
         return common.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
@@ -626,34 +514,19 @@ pub const Device = struct {
         return false;
     }
 
-    pub fn read_capabilities_pointer(device: *Device) u8 {
-        return HeaderType0x00.read("capabilities_pointer", device.bus, device.slot, device.function);
+    pub fn read_field(device: *Device, comptime HT: type, comptime field_name: []const u8) TypeFromFieldName(HT, field_name) {
+        const result = read_field_from_header(HT, field_name, device.bus, device.slot, device.function);
+        return result;
     }
-
-    //pub fn read_bar(device: *Device, bar_index: u8) u32 {
-    //}
-
-    //pub fn bar_info(device: *Device, bar_index: u8) Physical.Memory.Region {
-
-    //}
 };
 
-// TODO: this can return more than one device
-pub fn find(self: *Controller, device_id: u16, vendor_id: u16) ?*Device {
-    for (self.devices) |*device| {
-        if (device.vendor_id == vendor_id and device.device_id == device_id) {
-            return device;
-        }
-    }
-
-    return null;
+// TODO: Maybe it's required to implement an extended function which accepts a non-harcoded offset of the field?
+fn read_field_from_header(comptime HT: type, comptime field_name: []const u8, bus: u8, slot: u8, function: u8) TypeFromFieldName(HT, field_name) {
+    const FieldType = TypeFromFieldName(HT, field_name);
+    return pci_read_config(FieldType, bus, slot, function, @offsetOf(HT, field_name));
 }
 
-// TODO: report this to Zig
-//_ = PCI.controller.find_device_by_fields(&.{ "vendor_id", "device_id" }, .{ 0x123, 0x456 });
-// TODO: harden
-//if (PCI.controller.find_virtio_device()) |virtio_block_pci| {
-//Virtio.init_from_pci(virtio_block_pci);
-//} else {
-//@panic("virtio device not found");
-//}
+fn TypeFromFieldName(comptime HeaderT: type, comptime field_name: []const u8) type {
+    comptime var header: HeaderT = undefined;
+    return @TypeOf(@field(header, field_name));
+}

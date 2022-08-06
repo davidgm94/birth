@@ -1,13 +1,24 @@
 const common = @import("common.zig");
 pub const DMA = @import("drivers/dma.zig");
 
+// Generic drivers
 pub const Disk = @import("drivers/disk.zig");
 pub const Filesystem = @import("drivers/filesystem.zig");
-pub const RNUFS = @import("drivers/rnu_fs.zig");
-pub const graphics = @import("drivers/graphics.zig");
-pub const NVMe = @import("drivers/nvme.zig");
+
+// IO drivers
 pub const PCI = @import("drivers/pci.zig");
 pub const Virtio = @import("drivers/virtio.zig");
+
+// Graphics
+pub const graphics = @import("drivers/graphics.zig");
+
+// Disk drivers
+pub const NVMe = @import("drivers/nvme.zig");
+pub const IDE = @import("drivers/ide.zig");
+pub const AHCI = @import("drivers/ahci.zig");
+
+// Filesystem drivers
+pub const RNUFS = @import("drivers/rnu_fs.zig");
 
 const Allocator = common.Allocator;
 

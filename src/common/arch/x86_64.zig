@@ -3,6 +3,8 @@ const common = @import("../../common.zig");
 const drivers = @import("../../drivers.zig");
 const context = @import("context");
 const PCI = drivers.PCI;
+const AHCI = drivers.AHCI;
+const IDE = drivers.IDE;
 const NVMe = drivers.NVMe;
 const Virtio = drivers.Virtio;
 const Disk = drivers.Disk;
@@ -77,12 +79,13 @@ pub fn drivers_init(virtual_address_space: *common.VirtualAddressSpace) !void {
 }
 
 pub fn init_block_drivers(virtual_address_space: *common.VirtualAddressSpace) !void {
+    try AHCI.Initialization.callback(virtual_address_space, &PCI.controller);
     // TODO: make ACPI and PCI controller standard
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
-    NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, &PCI.controller);
-    common.runtime_assert(@src(), Disk.drivers.items.len == 1);
-    try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
+    //NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, &PCI.controller);
+    //common.runtime_assert(@src(), Disk.drivers.items.len == 1);
+    //try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
 
     //Virtio.Block.driver = try Virtio.Block.from_pci(&PCI.controller);
     //common.runtime_assert(@src(), Disk.drivers.items.len == 2);
@@ -128,6 +131,16 @@ pub fn init_timer() void {
     enable_interrupts();
 
     log.debug("Timer initialized!", .{});
+}
+
+pub fn sleep_on_tsc(ms: u32) void {
+    const sleep_tick_count = ms * timestamp_ticks_per_ms;
+    const start = read_timestamp();
+    while (true) {
+        const now = read_timestamp();
+        const ticks_passed = now - start;
+        if (ticks_passed >> 3 >= sleep_tick_count) break;
+    }
 }
 
 pub inline fn read_timestamp() u64 {
@@ -1086,6 +1099,7 @@ pub const LAPIC = struct {
     }
 
     pub inline fn end_of_interrupt(lapic: LAPIC) void {
+        log.debug("Signaling end of interrupt", .{});
         lapic.write(.EOI, 0);
     }
 };
@@ -1248,11 +1262,11 @@ pub inline fn flush_segments_kernel() void {
 
 var pci_lock: Spinlock = undefined;
 
-inline fn notify_config_op(bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
-    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, @enumToInt(bus)) << 16) | (@as(u32, @enumToInt(slot)) << 11) | (@as(u32, @enumToInt(function)) << 8) | offset);
+inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
+    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
 }
 
-pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) T {
+pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
     const IntType = common.IntType(.unsigned, @bitSizeOf(T));
     comptime common.comptime_assert(IntType == u8 or IntType == u16 or IntType == u32);
     pci_lock.acquire();
@@ -1272,7 +1286,7 @@ pub fn pci_read_config(comptime T: type, bus: PCI.Bus, slot: PCI.Slot, function:
     }
 }
 
-pub fn pci_write_config(comptime T: type, value: T, bus: PCI.Bus, slot: PCI.Slot, function: PCI.Function, offset: u8) void {
+pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
     const IntType = common.IntType(.unsigned, @bitSizeOf(T));
     comptime common.comptime_assert(IntType == u8 or IntType == u16 or IntType == u32);
     pci_lock.acquire();

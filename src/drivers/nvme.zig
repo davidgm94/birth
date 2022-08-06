@@ -102,10 +102,7 @@ const Drive = struct {
         common.runtime_assert(@src(), common.is_aligned(buffer.address.value, context.page_size));
         const drive = @fieldParentPtr(Drive, "disk", disk);
         const nvme = driver;
-        log.debug("NVMe access", .{});
-        log.debug("NVMe drive: {}", .{drive});
-        log.debug("Buffer: (0x{x}, {})", .{ buffer.address.value, buffer.total_size });
-        log.debug("Work: {}", .{disk_work});
+        log.debug("NVMe access: {}", .{disk_work});
 
         // Acquire lock
         // TODO: @Lock
@@ -115,7 +112,8 @@ const Drive = struct {
         // TODO: this assumes it's contiguous
         const base_physical_address = virtual_address_space.translate_address(buffer.address) orelse TODO(@src());
         while (completed_sector_count < total_sector_count) {
-            const new_tail = (nvme.io_queue.submission_tail + 1) % io_queue_entry_count;
+            const current_tail = nvme.io_queue.submission_tail;
+            const new_tail = (current_tail + 1) % io_queue_entry_count;
             const submission_queue_full = new_tail == @ptrCast(*volatile u32, &nvme.io_queue.submission_head).*;
 
             while (submission_queue_full) {
@@ -131,8 +129,8 @@ const Drive = struct {
             const offset_physical_address = base_physical_address.offset(pointer_offset);
             const prps = [2]PhysicalAddress{ offset_physical_address, if ((request_sector_count * disk.sector_size) > context.page_size) offset_physical_address.offset(context.page_size) else PhysicalAddress.temporary_invalid() };
 
-            var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_queue.submission.?[nvme.io_queue.submission_tail * submission_queue_entry_bytes]));
-            command[0] = (nvme.io_queue.submission_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
+            var command = @ptrCast(*Command, @alignCast(@alignOf(Command), &nvme.io_queue.submission.?[current_tail * submission_queue_entry_bytes]));
+            command[0] = (current_tail << 16) | @as(u32, if (disk_work.operation == .write) 0x01 else 0x02);
             // TODO:
             command[1] = drive.nsid;
             command[2] = 0;
@@ -153,7 +151,9 @@ const Drive = struct {
             nvme.io_queue.submission_tail = new_tail;
             @fence(.SeqCst);
             nvme.write_sqtdbl(1, new_tail);
-            asm volatile ("hlt");
+            while (@ptrCast(*volatile u32, &nvme.io_queue.completion_head).* != new_tail) {}
+            //asm volatile ("hlt");
+            log.debug("New request completed", .{});
 
             completed_sector_count += request_sector_count;
         }

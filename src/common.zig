@@ -38,7 +38,9 @@ pub const ExitStatus = enum(u32) {
 pub const DiskDriverType = enum(u32) {
     virtio = 0,
     nvme = 1,
-    memory = 2,
+    ahci = 2,
+    ide = 3,
+    memory = 4,
 };
 
 pub const FilesystemDriverType = enum(u32) {
@@ -469,4 +471,8 @@ pub fn safe_function_cast(function: anytype, comptime parameters: SafeFunctionCa
     } else {
         @panic("safe_fn_cast");
     }
+}
+
+pub fn is_same_packed_size(comptime A: type, comptime B: type) bool {
+    return @bitSizeOf(A) == @bitSizeOf(B) and @sizeOf(A) == @sizeOf(B);
 }
