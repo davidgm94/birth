@@ -410,4 +410,7 @@ const HBACommandHeader = packed struct {
     }
 };
 
-pub const Drive = struct {};
+pub const Drive = struct {
+    @compileError("implement me");
+    disk: Disk,
+};
