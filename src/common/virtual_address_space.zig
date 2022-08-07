@@ -69,6 +69,16 @@ pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
+    const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags);
+    return result.virtual_address;
+}
+
+const Result = struct {
+    physical_address: PhysicalAddress,
+    virtual_address: VirtualAddress,
+};
+
+pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !Result {
     virtual_address_space.lock.acquire();
     defer virtual_address_space.lock.release();
     const page_count = common.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
@@ -94,7 +104,11 @@ pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, ma
 
     const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
     virtual_address_space.map_physical_region_extended(physical_region, virtual_address, flags, AlreadyLocked.yes);
-    return virtual_address;
+
+    return Result{
+        .physical_address = physical_address,
+        .virtual_address = virtual_address,
+    };
 }
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags) void {

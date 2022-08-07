@@ -209,6 +209,10 @@ const Kernel = struct {
                 kernel.run_argument_list.append("-ide*") catch unreachable;
                 kernel.run_argument_list.append("-trace") catch unreachable;
                 kernel.run_argument_list.append("-ata*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-ahci*") catch unreachable;
+                kernel.run_argument_list.append("-trace") catch unreachable;
+                kernel.run_argument_list.append("-sata*") catch unreachable;
 
                 switch (kernel.options.arch) {
                     .x86_64 => {

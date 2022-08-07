@@ -144,7 +144,7 @@ pub const VirtualAddressSpace = struct {
         // TODO: maybe user flag is not necessary?
         kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, .{ .write = true, .user = true });
         const pml4 = cr3_kernel_virtual_address.access(*PML4Table);
-        common.zero_slice(pml4[0..0x100]);
+        common.zero_slice(PML4E, pml4[0..0x100]);
         common.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
         log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
     }

@@ -285,13 +285,6 @@ const subclass12_code_names = [_][]const u8{
     "CANbus",
 };
 
-const prog_if_12_3_names = [_][]const u8{
-    "UHCI",
-    "OHCI",
-    "EHCI",
-    "XHCI",
-};
-
 pub const FindDeviceResult = struct {
     devices: [32]*Device,
     count: u32,
@@ -325,6 +318,7 @@ pub const Device = struct {
     interrupt_line: u8,
     bars: [6]u32,
     bar_sizes: [6]u32,
+    bar_physical_addresses: [6]PhysicalAddress,
 
     pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
         return common.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
@@ -463,6 +457,45 @@ pub const Device = struct {
         }
 
         return true;
+    }
+
+    const BarEnableError = error{
+        bar_is_an_io_port,
+        todo_prefetch,
+    };
+
+    pub fn enable_bar(device: *Device, virtual_address_space: *VirtualAddressSpace, comptime bar_i: comptime_int) BarEnableError!void {
+        const bar = device.bars[bar_i];
+
+        if (@truncate(u1, bar) != 0) {
+            log.err("BAR #{} is an IO port", .{bar});
+            return BarEnableError.bar_is_an_io_port;
+        }
+
+        if (bar & 0b1000 != 0) {
+            log.err("TODO: prefetch", .{});
+            return BarEnableError.todo_prefetch;
+        }
+
+        const is_size_64 = bar & 0b100 != 0;
+        log.debug("Is size 64: {}", .{is_size_64});
+        common.runtime_assert(@src(), !is_size_64);
+        const bar_header_offset = @offsetOf(HeaderType0x00, "bar0") + (@sizeOf(u32) * bar_i);
+        device.write_config(u32, common.max_int(u32), bar_header_offset);
+        const size1 = device.read_config(u32, bar_header_offset);
+        const size2 = size1 | (@as(u64, common.max_int(u32)) << 32);
+        common.runtime_assert(@src(), size2 != 0);
+        device.write_config(u32, bar, bar_header_offset);
+
+        const size3 = size2 & 0xffff_ffff_ffff_fff0;
+        const size = @intCast(u32, ~size3 + 1);
+        const physical_address = PhysicalAddress.new(bar & 0xffff_fff0);
+        log.debug("Enabling BAR #{}. Address: 0x{x}. Size: {}. Proceeding to map it...", .{ bar_i, physical_address.value, size });
+        device.bar_physical_addresses[bar_i] = physical_address;
+        device.bar_sizes[bar_i] = size;
+        const virtual_address = physical_address.to_higher_half_virtual_address();
+        const physical_memory_region = common.PhysicalMemoryRegion.new(physical_address, size);
+        virtual_address_space.map_physical_region(physical_memory_region, virtual_address, .{ .write = true, .cache_disable = true });
     }
 
     pub fn enable_single_interrupt(device: *Device, virtual_address_space: *VirtualAddressSpace, handler: x86_64.interrupts.HandlerInfo) bool {

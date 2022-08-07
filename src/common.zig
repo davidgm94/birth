@@ -173,7 +173,7 @@ pub fn copy(comptime T: type, dst: []T, src: []const T) void {
     @memcpy(dst_ptr, src_ptr, bytes_to_copy);
 }
 
-pub fn set_byte(slice: []u8, value: u8) void {
+pub inline fn set_byte(slice: []u8, value: u8) void {
     @memset(slice.ptr, value, slice.len);
 }
 
@@ -187,13 +187,14 @@ pub inline fn zero_range(address: u64, size: u64) void {
     zero(@intToPtr([*]u8, address)[0..size]);
 }
 
-pub inline fn zero(bytes: []u8) void {
+pub fn zero(bytes: []u8) void {
     set_byte(bytes, 0);
 }
 
-pub inline fn zero_slice(slice: anytype) void {
-    const bytes = as_bytes(slice);
-    zero(bytes);
+pub inline fn zero_slice(comptime T: type, slice: []T) void {
+    for (slice) |*elem| {
+        elem.* = zeroes(T);
+    }
 }
 
 pub inline fn zeroes(comptime T: type) T {
