@@ -495,7 +495,7 @@ const Kernel = struct {
 
                 for (disk.resource_files) |resource_file| {
                     const file = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
-                    build_fs.fs.write_new_file(&build_fs.fs, 0, resource_file, file);
+                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, 0, resource_file, file);
                 }
 
                 for (disk.userspace_programs) |userspace_program_name| {
@@ -503,7 +503,7 @@ const Kernel = struct {
                     const exe_name = userspace_program.out_filename;
                     const exe_path = userspace_program.output_path_source.getPath();
                     const exe_file_content = try std.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.math.maxInt(usize));
-                    build_fs.fs.write_new_file(&build_fs.fs, 0, exe_name, exe_file_content);
+                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, 0, exe_name, exe_file_content);
                 }
 
                 const disk_size = build_disk.buffer.items.len;

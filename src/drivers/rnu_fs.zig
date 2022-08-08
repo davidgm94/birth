@@ -29,7 +29,6 @@ pub const Initialization = struct {
                 .disk = initialization_context,
                 .read_file = read_file,
                 .write_new_file = write_new_file,
-                .allocator = allocator,
             },
         };
 
@@ -37,13 +36,13 @@ pub const Initialization = struct {
     }
 };
 
-pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8) ?SeekResult {
+pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: u64, name: []const u8) ?SeekResult {
     const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
     log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
-    var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
+    var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sectors_to_read_at_time) catch {
         log.err("Unable to allocate search buffer", .{});
         return null;
     };
@@ -84,15 +83,15 @@ pub fn seek_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
     @panic("not found");
 }
 
-pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8) []const u8 {
+pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, special_context: u64, name: []const u8) []const u8 {
     const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
     log.debug("About to read file {s}...", .{name});
-    if (seek_file(fs_driver, special_context, name)) |seek_result| {
+    if (seek_file(fs_driver, allocator, special_context, name)) |seek_result| {
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
         const sector_count = common.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
-        var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
+        var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };
         const sector_offset = seek_result.sector + 1;
@@ -112,14 +111,14 @@ pub fn read_file(fs_driver: *Filesystem, special_context: u64, name: []const u8)
     }
 }
 
-pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []const u8, file_content: []const u8) void {
+pub fn write_new_file(fs_driver: *Filesystem, allocator: Allocator, special_context: u64, filename: []const u8, file_content: []const u8) void {
     log.debug("Writing new file: {s}. Size: {}", .{ filename, file_content.len });
     var sector: u64 = 0;
     const sector_size = fs_driver.disk.sector_size;
     {
         log.debug("Seeking file {s}", .{filename});
         const sectors_to_read_at_time = 1;
-        var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sectors_to_read_at_time) catch {
+        var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sectors_to_read_at_time) catch {
             log.err("Unable to allocate search buffer", .{});
             @panic("lol");
         };
@@ -153,7 +152,7 @@ pub fn write_new_file(fs_driver: *Filesystem, special_context: u64, filename: []
 
     const sector_count = common.bytes_to_sector(file_content.len, fs_driver.disk.sector_size, .can_be_not_exact) + 1;
     log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
-    var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, fs_driver.allocator, sector_count) catch {
+    var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
         log.err("Unable to allocate write buffer", .{});
         @panic("lol");
     };

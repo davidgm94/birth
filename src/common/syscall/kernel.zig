@@ -55,10 +55,14 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
                                     break :blk ptr[0..len];
                                 };
 
-                                const lol = root.main_storage.read_file(root.main_storage, @ptrToInt(current_thread.address_space), filename);
-                                common.runtime_assert(@src(), lol.len > 0);
-                                logger.debug("Len: {}", .{lol.len});
+                                const file = root.main_storage.read_file(root.main_storage, current_thread.address_space.heap.allocator, @ptrToInt(current_thread.address_space), filename);
+                                common.runtime_assert(@src(), file.len > 0);
+                                logger.debug("Len: {}", .{file.len});
+                                logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
                                 TODO(@src());
+                                //return Syscall.RawResult{
+                                //.a =
+                                //};
                             },
                         }
                     } else {

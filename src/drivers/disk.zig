@@ -18,9 +18,16 @@ pub const Work = struct {
     operation: Operation,
 };
 
-pub const Operation = enum {
-    read,
-    write,
+pub const Operation = enum(u1) {
+    read = 0,
+    write = 1,
+
+    // This is used by NVMe and AHCI
+    comptime {
+        common.comptime_assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
+        common.comptime_assert(@enumToInt(Operation.read) == 0);
+        common.comptime_assert(@enumToInt(Operation.write) == 1);
+    }
 };
 
 pub var drivers: common.ArrayList(*Driver) = undefined;

@@ -12,11 +12,10 @@ const Driver = @This();
 const Type = common.FilesystemDriverType;
 
 type: Type,
-allocator: Allocator,
 disk: *Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
-read_file: fn (driver: *Driver, special_context: u64, name: []const u8) []const u8,
-write_new_file: fn (driver: *Driver, special_context: u64, filename: []const u8, file_content: []const u8) void,
+read_file: fn (driver: *Driver, allocator: Allocator, special_context: u64, name: []const u8) []const u8,
+write_new_file: fn (driver: *Driver, allocator: Allocator, special_context: u64, filename: []const u8, file_content: []const u8) void,
 
 pub const InitializationError = error{
     allocation_failure,
