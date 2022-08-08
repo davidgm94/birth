@@ -65,7 +65,9 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
         const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
         if (node_name.len == 0) break;
 
-        log.debug("Node name: {s}, size: {}", .{ node_name, node.size });
+        if (name[0] == 0x00) @panic("Wtf");
+
+        log.debug("Wanted node name: (\"{s}\", {}) (First byte = 0x{x}). This node name: (\"{s}\", {})", .{ name, name.len, name[0], node_name, node_name.len });
 
         if (common.string_eq(node_name, name)) {
             return SeekResult{

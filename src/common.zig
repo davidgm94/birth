@@ -115,6 +115,7 @@ pub const log = std.log;
 
 // STDIO
 pub const Writer = std.io.Writer;
+pub const bufPrint = std.fmt.bufPrint;
 pub const allocPrint = std.fmt.allocPrint;
 
 // MEMORY MANIPULATION

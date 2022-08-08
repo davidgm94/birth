@@ -3,7 +3,6 @@ const common = @import("../common.zig");
 pub const kernel = @import("syscall/kernel.zig");
 const context = @import("context");
 
-const logger = common.log.scoped(.Syscall);
 const TODO = common.TODO;
 const x86_64 = common.arch.x86_64;
 const VirtualAddress = common.VirtualAddress;
@@ -83,7 +82,11 @@ pub const ReadFileParameters = struct {
 };
 
 pub fn read_file(parameters: ReadFileParameters) Submission {
-    return new_submission(.read_file, @ptrToInt(parameters.name.ptr), parameters.name.len, 0, 0, 0);
+    const file_name_address = @ptrToInt(parameters.name.ptr);
+    const file_name_length = parameters.name.len;
+    common.runtime_assert(@src(), file_name_address != 0);
+    common.runtime_assert(@src(), file_name_length != 0);
+    return new_submission(.read_file, file_name_address, file_name_length, 0, 0, 0);
 }
 
 pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {

@@ -7,13 +7,13 @@ pub const Syscall = common.Syscall;
 const root = @import("root");
 
 pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
-    {
-        const thread = common.arch.get_current_thread();
-        for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
-            const handler_address = @ptrToInt(interrupt_handler);
-            common.runtime_assert(@src(), thread.address_space.translate_address(common.VirtualAddress.new(handler_address).aligned_forward(context.page_size)) != null);
-        }
-    }
+    //{
+    //const thread = common.arch.get_current_thread();
+    //for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
+    //const handler_address = @ptrToInt(interrupt_handler);
+    //common.runtime_assert(@src(), thread.address_space.translate_address(common.VirtualAddress.new(handler_address).aligned_forward(context.page_size)) != null);
+    //}
+    //}
 
     const submission = Syscall.Submission{
         .input = input,
@@ -57,12 +57,17 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
 
                                 const file = root.main_storage.read_file(root.main_storage, current_thread.address_space.heap.allocator, @ptrToInt(current_thread.address_space), filename);
                                 common.runtime_assert(@src(), file.len > 0);
-                                logger.debug("Len: {}", .{file.len});
                                 logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
-                                TODO(@src());
-                                //return Syscall.RawResult{
-                                //.a =
-                                //};
+                                logger.debug("Len: {}", .{file.len});
+                                logger.debug("File[0]: 0x{x}", .{file[0]});
+
+                                const result = Syscall.RawResult{
+                                    .a = @ptrToInt(file.ptr),
+                                    .b = file.len,
+                                };
+                                common.runtime_assert(@src(), result.a != 0);
+                                common.runtime_assert(@src(), result.b != 0);
+                                return result;
                             },
                         }
                     } else {
