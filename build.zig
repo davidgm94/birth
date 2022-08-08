@@ -38,7 +38,6 @@ pub fn build(b: *Builder) void {
             .run = .{
                 .disks = &.{
                     .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } },
-                    //.{ .interface = .virtio, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } }
                 },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{

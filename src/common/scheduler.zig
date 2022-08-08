@@ -209,10 +209,6 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .kernel => .{ .kernel = null, .user = null },
     };
 
-    if (thread.privilege_level == .user) {
-        common.runtime_assert(@src(), thread.address_space.translate_address(VirtualAddress.new(0x205000)) != null);
-    }
-
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});
         // TODO: hack
