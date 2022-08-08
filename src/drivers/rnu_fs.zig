@@ -65,7 +65,7 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
         const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
         if (node_name.len == 0) break;
 
-        log.debug("Node name: {s}", .{node_name});
+        log.debug("Node name: {s}, size: {}", .{ node_name, node.size });
 
         if (common.string_eq(node_name, name)) {
             return SeekResult{
@@ -74,7 +74,8 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
             };
         }
 
-        log.debug("Node size: {}", .{node.size});
+        log.debug("Names don't match", .{});
+
         const sectors_to_add = 1 + common.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
         log.debug("Sectors to add: {}", .{sectors_to_add});
         sector += sectors_to_add;
