@@ -44,6 +44,7 @@ pub const ID = enum(u16) {
     thread_exit = 0,
     log = 1,
     read_file = 2,
+    allocate_memory = 3,
     pub const count = common.enum_values(@This()).len;
 };
 
@@ -87,6 +88,15 @@ pub fn read_file(parameters: ReadFileParameters) Submission {
     common.runtime_assert(@src(), file_name_address != 0);
     common.runtime_assert(@src(), file_name_length != 0);
     return new_submission(.read_file, file_name_address, file_name_length, 0, 0, 0);
+}
+
+pub const AllocateMemoryParameters = struct {
+    byte_count: u64,
+    alignment: u64,
+};
+
+pub fn allocate_memory(parameters: AllocateMemoryParameters) Submission {
+    return new_submission(.allocate_memory, parameters.byte_count, parameters.alignment, 0, 0, 0);
 }
 
 pub fn new_submission(id: ID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {
@@ -229,6 +239,7 @@ pub const Manager = struct {
             .thread_exit => thread_exit(parameters),
             .log => log(parameters),
             .read_file => read_file(parameters),
+            .allocate_memory => allocate_memory(parameters),
         };
 
         switch (execution_mode) {

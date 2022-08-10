@@ -69,6 +69,9 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
                                 common.runtime_assert(@src(), result.b != 0);
                                 return result;
                             },
+                            .allocate_memory => {
+                                TODO(@src());
+                            },
                         }
                     } else {
                         @panic("unrecognized software syscall");
