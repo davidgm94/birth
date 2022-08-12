@@ -14,7 +14,8 @@ pub const RawResult = extern struct {
 };
 
 pub const Input = extern struct {
-    id: u16,
+    const IDIntType = u16;
+    id: IDIntType,
     options: Options,
 
     comptime {
@@ -37,7 +38,7 @@ pub const HardwareID = enum(u16) {
     ask_syscall_manager = 0,
     flush_syscall_manager = 1,
 
-    pub const count = common.enum_values(@This()).len;
+    pub const count = common.enum_count(@This());
 };
 
 pub const ID = enum(u16) {
@@ -45,7 +46,7 @@ pub const ID = enum(u16) {
     log = 1,
     read_file = 2,
     allocate_memory = 3,
-    pub const count = common.enum_values(@This()).len;
+    pub const count = common.enum_count(@This());
 };
 
 const hardware_syscall_entry_point = common.arch.Syscall.user_syscall_entry_point;
@@ -134,7 +135,7 @@ pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
 pub const ExecutionMode = enum(u1) {
     blocking,
     non_blocking,
-    const count = common.enum_values(ExecutionMode).len;
+    const count = common.enum_count(@This());
 };
 
 const SyscallReturnType = blk: {
@@ -145,6 +146,8 @@ const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ID.log)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ID.read_file)][@enumToInt(ExecutionMode.blocking)] = []const u8;
     ReturnTypes[@enumToInt(ID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ID.allocate_memory)][@enumToInt(ExecutionMode.blocking)] = []u8;
+    ReturnTypes[@enumToInt(ID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };
 
@@ -153,6 +156,7 @@ const SyscallParameters = blk: {
     ParameterTypes[@enumToInt(ID.thread_exit)] = ThreadExitParameters;
     ParameterTypes[@enumToInt(ID.log)] = LogParameters;
     ParameterTypes[@enumToInt(ID.read_file)] = ReadFileParameters;
+    ParameterTypes[@enumToInt(ID.allocate_memory)] = AllocateMemoryParameters;
     break :blk ParameterTypes;
 };
 
@@ -256,7 +260,7 @@ pub const Manager = struct {
                                 @panic("file could not be read");
                             }
                         },
-                        else => common.panic("NI: {}", .{id}),
+                        else => common.panic(@src(), "NI: {}", .{id}),
                     },
                 }
             },
@@ -287,3 +291,32 @@ pub const Manager = struct {
         common.runtime_assert(@src(), manager.completion_queue.head == submission_queue_head);
     }
 };
+
+const SyscallDescriptor = struct {};
+
+pub const SyscallID = enum(Input.IDIntType) {
+    ask_syscall_manager = 0,
+    flush_syscall_manager = 1,
+
+    pub const count = common.enum_count(@This());
+};
+
+pub const ServiceID = enum(Input.IDIntType) {
+    foo = 1,
+};
+
+pub fn add_syscall_descriptor(comptime id: HardwareID) type {
+    _ = id;
+}
+
+const ServiceDescriptor = struct {
+    id: ID,
+    UserParameters: type,
+    UserResult: type,
+    used: bool = false,
+};
+
+pub fn add_service_descriptor(comptime id: ID, arr: []ServiceDescriptor) void {
+    _ = id;
+    _ = arr;
+}

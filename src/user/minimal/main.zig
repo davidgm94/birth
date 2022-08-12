@@ -14,6 +14,8 @@ export fn _start() callconv(.C) void {
     for (file[0..10]) |byte, byte_i| {
         logger.debug("{}: 0x{x}", .{ byte_i, byte });
     }
+    const memory = syscall_manager.syscall(.allocate_memory, .blocking, .{ .byte_count = 5001, .alignment = 1 });
+    _ = memory;
     syscall_manager.syscall(.thread_exit, .blocking, .{ .message = "Thread terminated successfully" });
     while (true) {}
 }

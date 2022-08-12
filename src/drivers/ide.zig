@@ -341,7 +341,7 @@ pub const Channel = struct {
     bus_master_ide: u16,
     nIEN: u8,
 
-    pub const count = common.enum_values(ChannelType).len;
+    pub const count = common.enum_count(ChannelType);
 };
 
 pub const ATAType = enum(u1) {

@@ -478,3 +478,7 @@ pub fn safe_function_cast(function: anytype, comptime parameters: SafeFunctionCa
 pub fn is_same_packed_size(comptime A: type, comptime B: type) bool {
     return @bitSizeOf(A) == @bitSizeOf(B) and @sizeOf(A) == @sizeOf(B);
 }
+
+pub fn enum_count(comptime E: type) usize {
+    return @typeInfo(E).Enum.fields.len;
+}

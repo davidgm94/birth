@@ -775,7 +775,7 @@ const QueueType = enum(u2) {
     fabrics = 1,
     io = 2,
 
-    const count = common.enum_values(QueueType).len;
+    const count = common.enum_count(@This());
 };
 const AdminOpcode = enum(u8) {
     delete_io_submission_queue = 0x00,

@@ -110,7 +110,7 @@ pub fn init(kernel_virtual_address_space: *common.VirtualAddressSpace, physical_
 pub const VirtualAddressSpace = struct {
     cr3: u64 = 0,
 
-    const Indices = [common.enum_values(PageIndex).len]u16;
+    const Indices = [common.enum_count(PageIndex)]u16;
 
     pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VirtualAddressSpace {
         const page_count = common.bytes_to_pages(@sizeOf(PML4Table), context.page_size, .must_be_exact);
