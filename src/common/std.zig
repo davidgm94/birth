@@ -1,10 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-comptime {
-    if (os != .freestanding) @compileError("This file should not be included in build.zig");
-}
-
 pub const Cpu = std.Target.Cpu;
 pub const cpu = builtin.cpu;
 pub const os = builtin.os.tag;

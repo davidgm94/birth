@@ -1,4 +1,4 @@
-//! This is not an official USTAR implementation, but my own custom version just to get started with
+//! This is a custom variation of the USTAR filesystem just to get started with
 pub const Node = struct {
     name: [100]u8,
     parent: [100]u8,

@@ -1,14 +1,13 @@
-const common = @import("../common.zig");
-
-const log = common.log.scoped(.RNUFS);
+const std = @import("../common/std.zig");
+const log = std.log.scoped(.RNUFS);
+const RNUFS = @import("../common/rnufs.zig");
 const drivers = @import("../drivers.zig");
 const Filesystem = drivers.Filesystem;
-const RNUFS = common.RNUFS;
 const GenericDriver = drivers.Driver;
 const Disk = drivers.Disk;
 const DMA = drivers.DMA;
 
-const Allocator = common.Allocator;
+const Allocator = std.Allocator;
 const VirtualAddressSpace = common.VirtualAddressSpace;
 
 const Driver = @This();

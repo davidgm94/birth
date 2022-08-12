@@ -1,13 +1,14 @@
-const common = @import("../common.zig");
+const std = @import("../common/std.zig");
+const Drivers = @import("./common.zig");
 const DMA = @import("dma.zig");
 
 const Driver = @This();
 
-pub const Type = common.DiskDriverType;
+pub const Type = Drivers.DiskDriverType;
 
 sector_size: u64,
 access: fn (driver: *Driver, special_context: u64, buffer: *DMA.Buffer, disk_work: Work) u64,
-get_dma_buffer: fn (driver: *Driver, allocator: common.Allocator, sector_count: u64) common.Allocator.Error!DMA.Buffer,
+get_dma_buffer: fn (driver: *Driver, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer,
 
 type: Type,
 
@@ -23,10 +24,10 @@ pub const Operation = enum(u1) {
 
     // This is used by NVMe and AHCI
     comptime {
-        common.comptime_assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-        common.comptime_assert(@enumToInt(Operation.read) == 0);
-        common.comptime_assert(@enumToInt(Operation.write) == 1);
+        std.comptime_assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
+        std.comptime_assert(@enumToInt(Operation.read) == 0);
+        std.comptime_assert(@enumToInt(Operation.write) == 1);
     }
 };
 
-pub var drivers: common.ArrayList(*Driver) = undefined;
+pub var drivers: std.ArrayList(*Driver) = undefined;
