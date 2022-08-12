@@ -1,8 +1,9 @@
+const std = @import("src/common/std.zig");
 const Build = @import("src/build.zig");
 const drivers = @import("src/drivers/common.zig");
 const DiskDriverType = drivers.DiskDriverType;
 const FilesystemDriverType = drivers.FilesystemDriverType;
-const RNUFS = @import("src/drivers/rnu_fs.zig");
+const RNUFS = @import("src/drivers/rnufs/write_only.zig");
 
 const Arch = Build.Arch;
 
@@ -466,7 +467,7 @@ const Kernel = struct {
                     -1,
                     0,
                 ) catch unreachable;
-                defer Build.os.munmap(disk_memory);
+                defer Build.munmap(disk_memory);
                 var build_disk_buffer = Build.ArrayListAlignedUnmanaged(u8, 0x1000){
                     .items = disk_memory,
                     .capacity = disk_memory.len,
@@ -476,30 +477,30 @@ const Kernel = struct {
                 var build_fs = RNUFS.Initialization.callback(kernel.builder.allocator, &build_disk.disk) catch @panic("wtf");
 
                 for (disk.resource_files) |resource_file| {
-                    const file = try Build.fs.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
-                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, 0, resource_file, file);
+                    const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
+                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, resource_file, file, null);
                 }
 
                 for (disk.userspace_programs) |userspace_program_name| {
                     const userspace_program = find_userspace_program(kernel, userspace_program_name) orelse @panic("wtf");
                     const exe_name = userspace_program.out_filename;
                     const exe_path = userspace_program.output_path_source.getPath();
-                    const exe_file_content = try Build.fs.cwd().readFileAlloc(kernel.builder.allocator, exe_path, Build.maxInt(usize));
-                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, 0, exe_name, exe_file_content);
+                    const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, Build.maxInt(usize));
+                    build_fs.fs.write_new_file(&build_fs.fs, kernel.builder.allocator, exe_name, exe_file_content, null);
                 }
 
                 const disk_size = build_disk.buffer.items.len;
-                const disk_sector_count = Build.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
+                const disk_sector_count = std.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
                 Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
-                try Build.fs.cwd().writeFile(kernel.builder.fmt("zig-cache/disk{}.bin", .{disk_i}), build_disk.buffer.items);
+                try Build.cwd().writeFile(kernel.builder.fmt("zig-cache/disk{}.bin", .{disk_i}), build_disk.buffer.items);
             }
         }
 
         fn find_userspace_program(kernel: *Kernel, userspace_program_name: []const u8) ?*Build.LibExeObjStep {
             for (kernel.userspace_programs) |userspace_program| {
                 const ending = ".elf";
-                Build.runtime_assert(@src(), Build.ascii.endsWithIgnoreCase(userspace_program.out_filename, ending));
+                std.unreachable_assert(std.ends_with(u8, userspace_program.out_filename, ending));
                 const name = userspace_program.out_filename[0 .. userspace_program.out_filename.len - ending.len];
                 if (Build.memory_equal(u8, name, userspace_program_name)) {
                     return userspace_program;

@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+comptime {
+    if (os == .freestanding) @compileError("This is only meant to be imported in build.zig");
+}
+
 pub const Builder = std.build.Builder;
 pub const LibExeObjStep = std.build.LibExeObjStep;
 pub const Step = std.build.Step;
@@ -35,6 +39,7 @@ pub const ChildProcess = std.ChildProcess;
 pub const mmap = std.os.mmap;
 pub const PROT = std.os.PROT;
 pub const MAP = std.os.MAP;
+pub const munmap = std.os.munmap;
 pub const waitpid = std.os.waitpid;
 
 pub const cwd = std.fs.cwd;
@@ -57,16 +62,16 @@ pub const Disk = struct {
     disk: DiskDevice,
     buffer: BufferType,
 
-    fn access(disk: *DiskDevice, special_context: u64, buffer: *DMA.Buffer, disk_work: DiskDevice.Work) u64 {
+    fn access(disk: *DiskDevice, buffer: *DMA.Buffer, disk_work: DiskDevice.Work, extra_context: ?*anyopaque) u64 {
         const build_disk = @fieldParentPtr(Disk, "disk", disk);
-        _ = special_context;
+        _ = extra_context;
         const sector_size = disk.sector_size;
         log.debug("Disk work: {}", .{disk_work});
         switch (disk_work.operation) {
             .write => {
                 const work_byte_size = disk_work.sector_count * sector_size;
                 const byte_count = work_byte_size;
-                const write_source_buffer = buffer.address.access([*]const u8)[0..byte_count];
+                const write_source_buffer = @intToPtr([*]const u8, buffer.address)[0..byte_count];
                 const disk_slice_start = disk_work.sector_offset * sector_size;
                 log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
                 assert(disk_slice_start == build_disk.buffer.items.len);
@@ -80,7 +85,7 @@ pub const Disk = struct {
                 const previous_len = build_disk.buffer.items.len;
 
                 if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
-                memory_copy(u8, buffer.address.access([*]u8)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
+                memory_copy(u8, @intToPtr([*]u8, buffer.address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
                 if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
 
                 return disk_work.sector_count;
@@ -88,7 +93,7 @@ pub const Disk = struct {
         }
     }
 
-    fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *DiskDevice, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
         const allocation_size = disk.sector_size * sector_count;
         const alignment = 0x1000;
         log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });

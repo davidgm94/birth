@@ -7,7 +7,7 @@ const Driver = @This();
 pub const Type = Drivers.DiskDriverType;
 
 sector_size: u64,
-access: fn (driver: *Driver, special_context: u64, buffer: *DMA.Buffer, disk_work: Work) u64,
+access: fn (driver: *Driver, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
 get_dma_buffer: fn (driver: *Driver, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer,
 
 type: Type,
