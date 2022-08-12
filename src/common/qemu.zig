@@ -16,8 +16,3 @@ pub const x86_isa_debug_exit = struct {
     port: u16 = 0xf4,
     type: type = u32,
 }{};
-
-pub fn add_isa_debug_exit(allocator: common.Allocator, list: *common.ArrayListManaged([]const u8)) !void {
-    try list.append("-device");
-    try list.append(try common.allocPrint(allocator, "isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ x86_isa_debug_exit.port, @sizeOf(x86_isa_debug_exit.type) }));
-}

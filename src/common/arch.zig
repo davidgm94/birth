@@ -1,6 +1,6 @@
-const kernel = @import("root");
 const common = @import("../common.zig");
 
+const Thread = @import("thread.zig");
 const arch = switch (common.cpu.arch) {
     .aarch64 => aarch64,
     .x86_64 => x86_64,
@@ -60,9 +60,6 @@ pub var writer = common.Writer(void, Writer.Error, Writer.write){ .context = {} 
 
 pub const bootstrap_stack_size = 0x10000;
 
-pub extern fn switch_context(context: *Context, new_address_space: *common.VirtualAddressSpace, kernel_stack: u64, new_thread: *common.Thread, old_address_space: *common.VirtualAddressSpace) callconv(.C) void;
-
-pub const switch_context_preamble = arch.switch_context_preamble;
 pub const switch_address_spaces_if_necessary = arch.switch_address_spaces_if_necessary;
 pub const set_new_stack = arch.set_new_stack;
 pub const post_context_switch = arch.post_context_switch;
@@ -70,3 +67,9 @@ pub const interrupts_epilogue = arch.interrupts_epilogue;
 pub const set_argument = arch.set_argument;
 pub const signal_end_of_interrupt = arch.signal_end_of_interrupt;
 pub const legacy_actions_before_context_switch = arch.legacy_actions_before_context_switch;
+
+pub const BootstrapContext = struct {
+    cpu: CPU,
+    thread: Thread,
+    context: Context,
+};

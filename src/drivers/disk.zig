@@ -1,6 +1,5 @@
 const common = @import("../common.zig");
-const Drivers = @import("../drivers.zig");
-const DMA = Drivers.DMA;
+const DMA = @import("dma.zig");
 
 const Driver = @This();
 

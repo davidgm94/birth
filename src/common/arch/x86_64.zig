@@ -1308,10 +1308,6 @@ pub inline fn spinloop_without_wasting_cpu() noreturn {
     }
 }
 
-pub inline fn switch_context_preamble() void {
-    asm volatile ("cli");
-}
-
 pub inline fn switch_address_spaces_if_necessary(new_address_space: *common.VirtualAddressSpace) void {
     const current_cr3 = cr3.read_raw();
     if (current_cr3 != new_address_space.arch.cr3) {

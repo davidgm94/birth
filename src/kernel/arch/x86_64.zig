@@ -26,28 +26,3 @@ const Thread = common.arch.Thread;
 const Context = common.arch.Context;
 
 const x86_64 = common.arch.x86_64;
-//
-//pub extern fn switch_context(new_context: *Context, new_address_space: *AddressSpace, kernel_stack: u64, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void;
-//pub export fn switch_context() callconv(.Naked) void {
-//asm volatile (
-//\\cli
-//// Compare address spaces and switch if they are not the same
-//\\mov (%%rsi), %%rsi
-//\\mov %%cr3, %%rax
-//\\cmp %%rsi, %%rax
-//\\je 0f
-//\\mov %%rsi, %%cr3
-//\\0:
-//\\mov %%rdi, %%rsp
-//\\mov %%rcx, %%rsi
-//\\mov %%r8, %%rdx
-//);
-
-//asm volatile (
-//\\call post_context_switch
-//);
-
-//x86_64.interrupts.epilogue();
-
-//unreachable;
-//}

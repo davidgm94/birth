@@ -46,6 +46,7 @@ pub const ID = enum(u16) {
     log = 1,
     read_file = 2,
     allocate_memory = 3,
+
     pub const count = common.enum_count(@This());
 };
 
@@ -301,13 +302,19 @@ pub const SyscallID = enum(Input.IDIntType) {
     pub const count = common.enum_count(@This());
 };
 
-pub const ServiceID = enum(Input.IDIntType) {
-    foo = 1,
-};
-
-pub fn add_syscall_descriptor(comptime id: HardwareID) type {
+pub fn add_syscall_descriptor(comptime id: SyscallID, arr: []SyscallDescriptor) void {
+    _ = arr;
     _ = id;
 }
+
+pub const ServiceID = enum(Input.IDIntType) {
+    thread_exit = 0,
+    log = 1,
+    read_file = 2,
+    allocate_memory = 3,
+
+    pub const count = common.enum_count(@This());
+};
 
 const ServiceDescriptor = struct {
     id: ID,
