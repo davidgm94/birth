@@ -1,9 +1,10 @@
-const common = @import("common");
-pub const panic = common.User.panic;
-pub const log = common.User.log;
-pub const logger = common.log.scoped(.main);
+const std = @import("../../common/std.zig");
+const user = @import("../../common/user.zig");
+pub const panic = user.panic;
+pub const log = user.log;
+pub const logger = std.log.scoped(.main);
 
-const Syscall = common.Syscall;
+const Syscall = Syscall;
 const ask_syscall_manager = Syscall.ask_syscall_manager;
 pub var syscall_manager: *Syscall.Manager = undefined;
 

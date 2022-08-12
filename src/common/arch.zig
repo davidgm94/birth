@@ -56,8 +56,6 @@ pub const Writer = struct {
     }
 };
 
-pub var writer = common.Writer(void, Writer.Error, Writer.write){ .context = {} };
-
 pub const bootstrap_stack_size = 0x10000;
 
 pub const switch_address_spaces_if_necessary = arch.switch_address_spaces_if_necessary;

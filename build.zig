@@ -63,7 +63,7 @@ const Kernel = struct {
     }
 
     fn create_executable(kernel: *Kernel) void {
-        kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel.zig");
+        kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/root.zig");
         var target = get_target_base(kernel.options.arch);
 
         switch (kernel.options.arch) {

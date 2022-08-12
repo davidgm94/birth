@@ -26,3 +26,23 @@ const Thread = common.arch.Thread;
 const Context = common.arch.Context;
 
 const x86_64 = common.arch.x86_64;
+
+pub const DefaultWriterError = SerialWriter.Error;
+pub const DefaultErrorContext = SerialWriter.Context;
+pub const default_writer_function = SerialWriter.function;
+
+pub const SerialWriter = struct {
+    const Error = error{};
+    const Context = void;
+
+    fn function(context: Context, bytes: []const u8) Error!usize {
+        _ = context;
+        for (bytes) |byte| {
+            _ = byte;
+            @panic("wtF");
+            //io_write(u8, IOPort.E9_hack, byte);
+        }
+
+        return bytes.len;
+    }
+};
