@@ -1,6 +1,10 @@
 const kernel = @This();
 pub const identity = common.ExecutableIdentity.kernel;
 
+comptime {
+    if (@import("builtin").os.tag != .freestanding) @compileError("This file is not supposed to be included in the build.zig");
+}
+
 pub const common = @import("common");
 pub const context = @import("context");
 

@@ -1,10 +1,9 @@
-const kernel = @import("root");
-const common = @import("../../../common.zig");
+const std = @import("../../../common/std.zig");
 
-const x86_64 = common.arch.x86_64;
+const x86_64 = @import("../x86_64.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
-const log = common.log.scoped(.GDT);
+const log = std.log.scoped(.GDT);
 
 pub const Table = packed struct {
     null_entry: Entry = 0, // 0x00
@@ -22,13 +21,13 @@ pub const Table = packed struct {
 
     comptime {
         const entry_count = 10;
-        common.comptime_assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
-        common.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
-        common.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
-        common.comptime_assert(@offsetOf(Table, "user_code_32") == 0x38);
-        common.comptime_assert(@offsetOf(Table, "user_data") == 0x40);
-        common.comptime_assert(@offsetOf(Table, "user_code_64") == 0x48);
-        common.comptime_assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
+        std.comptime_assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        std.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
+        std.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
+        std.comptime_assert(@offsetOf(Table, "user_code_32") == 0x38);
+        std.comptime_assert(@offsetOf(Table, "user_data") == 0x40);
+        std.comptime_assert(@offsetOf(Table, "user_code_64") == 0x48);
+        std.comptime_assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
     }
 
     pub fn initial_setup(gdt: *Table, cpu_id: u64) void {

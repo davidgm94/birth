@@ -1,5 +1,5 @@
 const std = @import("../common/std.zig");
-const Drivers = @import("./common.zig");
+const Drivers = @import("common.zig");
 const DMA = @import("dma.zig");
 
 const Driver = @This();
@@ -24,9 +24,9 @@ pub const Operation = enum(u1) {
 
     // This is used by NVMe and AHCI
     comptime {
-        std.comptime_assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-        std.comptime_assert(@enumToInt(Operation.read) == 0);
-        std.comptime_assert(@enumToInt(Operation.write) == 1);
+        std.assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
+        std.assert(@enumToInt(Operation.read) == 0);
+        std.assert(@enumToInt(Operation.write) == 1);
     }
 };
 

@@ -5,10 +5,9 @@ pub const ExecutableIdentity = enum {
     build,
 };
 
-pub const PrivilegeLevel = enum(u1) {
-    kernel = 0,
-    user = 1,
-};
+comptime {
+    if (@import("builtin").os.tag != .freestanding) @compileError("This file is not supposed to be included in the build.zig");
+}
 
 //pub const arch = @import("common/arch.zig");
 //pub const VirtualAddress = @import("common/virtual_address.zig");

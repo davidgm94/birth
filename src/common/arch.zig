@@ -62,12 +62,5 @@ pub const switch_address_spaces_if_necessary = arch.switch_address_spaces_if_nec
 pub const set_new_stack = arch.set_new_stack;
 pub const post_context_switch = arch.post_context_switch;
 pub const interrupts_epilogue = arch.interrupts_epilogue;
-pub const set_argument = arch.set_argument;
 pub const signal_end_of_interrupt = arch.signal_end_of_interrupt;
 pub const legacy_actions_before_context_switch = arch.legacy_actions_before_context_switch;
-
-pub const BootstrapContext = struct {
-    cpu: CPU,
-    thread: Thread,
-    context: Context,
-};

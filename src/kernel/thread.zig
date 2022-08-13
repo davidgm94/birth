@@ -1,9 +1,12 @@
 const Thread = @This();
 
-const common = @import("../common.zig");
-const VirtualAddress = common.VirtualAddress;
-const PrivilegeLevel = common.PrivilegeLevel;
-const VirtualAddressSpace = common.VirtualAddressSpace;
+const arch = @import("arch.zig");
+
+const VirtualAddress = @import("virtual_address.zig");
+const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
+const VirtualAddressSpace = @import("virtual_address_space.zig");
+const Syscall = @import("syscall.zig");
+const ListFile = @import("../common/list.zig");
 
 kernel_stack: VirtualAddress,
 privilege_level: PrivilegeLevel,
@@ -16,11 +19,11 @@ user_stack_base: VirtualAddress,
 user_stack_reserve: u64,
 user_stack_commit: u64,
 id: u64,
-context: *common.arch.Context,
+context: *arch.Context,
 time_slices: u64,
 address_space: *VirtualAddressSpace,
-cpu: ?*common.arch.CPU,
-syscall_manager: common.Syscall.KernelManager,
+cpu: ?*arch.CPU,
+syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,
 executing: bool,
@@ -41,6 +44,6 @@ pub const State = enum {
     active,
 };
 
-pub const ListItem = common.List.ListItem(*Thread);
-pub const List = common.List.List(*Thread);
-pub const Buffer = common.List.StableBuffer(Thread, 64);
+pub const ListItem = ListFile.ListItem(*Thread);
+pub const List = ListFile.List(*Thread);
+pub const Buffer = ListFile.StableBuffer(Thread, 64);

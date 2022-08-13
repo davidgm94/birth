@@ -7,12 +7,12 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     const current_thread = arch.get_current_thread();
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;
-    arch.Writer.lock.acquire();
-    defer arch.Writer.lock.release();
-    arch.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    arch.writer.writeAll(prefix) catch unreachable;
-    arch.writer.print(format, args) catch unreachable;
-    arch.writer.writeByte('\n') catch unreachable;
+    arch.default_io.lock.acquire();
+    defer arch.default_io.lock.release();
+    arch.default_io.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    arch.default_io.writer.writeAll(prefix) catch unreachable;
+    arch.default_io.writer.print(format, args) catch unreachable;
+    arch.default_io.writer.writeByte('\n') catch unreachable;
 }
 
 //var panicking: usize = 0;

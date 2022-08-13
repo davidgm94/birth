@@ -14,6 +14,7 @@ const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
 
 pub fn build(b: *Build.Builder) void {
+    std.test_comptime_hack();
     const kernel = b.allocator.create(Kernel) catch unreachable;
     // zig fmt: off
     kernel.* = Kernel {
@@ -101,6 +102,7 @@ const Kernel = struct {
             else => unreachable,
         }
 
+        kernel.executable.setMainPkgPath("src");
         kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
@@ -347,7 +349,6 @@ const Kernel = struct {
             },
         }
 
-        Build.print("Emulator command:\n", .{});
         for (kernel.run_argument_list.items) |arg| {
             Build.print("{s} ", .{arg});
         }
@@ -500,7 +501,7 @@ const Kernel = struct {
         fn find_userspace_program(kernel: *Kernel, userspace_program_name: []const u8) ?*Build.LibExeObjStep {
             for (kernel.userspace_programs) |userspace_program| {
                 const ending = ".elf";
-                std.unreachable_assert(std.ends_with(u8, userspace_program.out_filename, ending));
+                std.assert(std.ends_with(u8, userspace_program.out_filename, ending));
                 const name = userspace_program.out_filename[0 .. userspace_program.out_filename.len - ending.len];
                 if (Build.memory_equal(u8, name, userspace_program_name)) {
                     return userspace_program;

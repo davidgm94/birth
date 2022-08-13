@@ -1,6 +1,5 @@
-const common = @import("../common.zig");
-const Allocator = common.Allocator;
-const TODO = common.TODO;
+const std = @import("std.zig");
+const Allocator = std.Allocator;
 
 /// This list works when you are having multiple lists of the same type
 pub fn ListItem(comptime T: type) type {
@@ -8,7 +7,7 @@ pub fn ListItem(comptime T: type) type {
         previous: ?*@This() = null,
         next: ?*@This() = null,
         list: ?*List(T) = null,
-        data: T, // = common.zeroes(T), This trips a bug in stage 1
+        data: T, // = std.zeroes(T), This trips a bug in stage 1
 
         pub fn new(data: T) @This() {
             return @This(){
@@ -25,20 +24,20 @@ pub fn List(comptime T: type) type {
         count: u64 = 0,
 
         pub fn append(list: *@This(), list_item: *ListItem(T), item: T) !void {
-            common.runtime_assert(@src(), list_item.previous == null);
-            common.runtime_assert(@src(), list_item.next == null);
-            common.runtime_assert(@src(), list_item.list == null);
+            std.unreachable_assert(@src(), list_item.previous == null);
+            std.unreachable_assert(@src(), list_item.next == null);
+            std.unreachable_assert(@src(), list_item.list == null);
             list_item.data = item;
 
             if (list.last) |last| {
-                common.runtime_assert(@src(), list.first != null);
-                common.runtime_assert(@src(), list.count > 0);
+                std.runtime_assert(@src(), list.first != null);
+                std.runtime_assert(@src(), list.count > 0);
                 last.next = list_item;
                 list_item.previous = last;
                 list.last = list_item;
             } else {
-                common.runtime_assert(@src(), list.first == null);
-                common.runtime_assert(@src(), list.count == 0);
+                std.runtime_assert(@src(), list.first == null);
+                std.runtime_assert(@src(), list.count == 0);
                 list.first = list_item;
                 list.last = list_item;
             }
@@ -48,7 +47,7 @@ pub fn List(comptime T: type) type {
         }
 
         pub fn remove(list: *@This(), list_item: *ListItem(T)) void {
-            common.runtime_assert(@src(), list_item.list == list);
+            std.runtime_assert(@src(), list_item.list == list);
             if (list_item.previous) |previous| {
                 previous.next = list_item.next;
             } else {
@@ -64,13 +63,13 @@ pub fn List(comptime T: type) type {
 
             list.count -= 1;
             list_item.list = null;
-            common.runtime_assert(@src(), list.count == 0 or (list.first != null and list.last != null));
+            std.runtime_assert(@src(), list.count == 0 or (list.first != null and list.last != null));
         }
     };
 }
 
 pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
-    common.comptime_assert(bucket_size % 64 == 0);
+    std.comptime_assert(bucket_size % 64 == 0);
     return struct {
         first: ?*Bucket = null,
         last: ?*Bucket = null,
@@ -92,7 +91,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 bit_index: u32,
             };
             pub fn allocate_index(bucket: *Bucket) u64 {
-                common.runtime_assert(@src(), bucket.count + 1 <= bucket_size);
+                std.runtime_assert(@src(), bucket.count + 1 <= bucket_size);
 
                 for (bucket.bitset) |*bitset_elem, bitset_i| {
                     // @ZigBug using a comptime var here ends with an infinite loop
@@ -110,10 +109,10 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             }
         };
 
-        pub fn add_one(stable_buffer: *@This(), allocator: Allocator) common.Allocator.Error!*T {
+        pub fn add_one(stable_buffer: *@This(), allocator: Allocator) std.Allocator.Error!*T {
             if (stable_buffer.first == null) {
                 const first_bucket = try allocator.create(Bucket);
-                first_bucket.* = Bucket{ .data = common.zeroes([bucket_size]T) };
+                first_bucket.* = Bucket{ .data = std.zeroes([bucket_size]T) };
                 stable_buffer.first = first_bucket;
                 first_bucket.bitset[0] = 1;
                 stable_buffer.bucket_count += 1;

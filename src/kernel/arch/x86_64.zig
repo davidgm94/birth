@@ -1,48 +1,885 @@
-const kernel = @import("root");
-const common = @import("common");
-const drivers = @import("../../drivers.zig");
-const PCI = drivers.PCI;
-const NVMe = drivers.NVMe;
-const Virtio = drivers.Virtio;
-const Disk = drivers.Disk;
-const Filesystem = drivers.Filesystem;
-const RNUFS = drivers.RNUFS;
-
-const TODO = common.TODO;
-const Allocator = common.Allocator;
-const PhysicalAddress = common.PhysicalAddress;
-const PhysicalAddressSpace = common.PhysicalAddressSpace;
-const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
-const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-const VirtualMemoryRegion = common.VirtualMemoryRegion;
-
-const log = common.log.scoped(.x86_64);
-
 pub const entry = @import("x86_64/entry.zig");
 
-const CPU = common.arch.CPU;
-const Thread = common.arch.Thread;
-const Context = common.arch.Context;
+const std = @import("../../common/std.zig");
 
-const x86_64 = common.arch.x86_64;
+const Bitflag = @import("../../common/bitflag.zig").Bitflag;
+const crash = @import("../crash.zig");
+const context = @import("../context.zig");
+const kernel = @import("../kernel.zig");
+const PhysicalAddress = @import("../physical_address.zig");
+const PhysicalAddressSpace = @import("../physical_address_space.zig");
+const Scheduler = @import("../scheduler.zig");
+const Thread = @import("../thread.zig");
+const VirtualAddress = @import("../virtual_address.zig");
+const VirtualAddressSpace = @import("../virtual_address_space.zig");
 
-pub const DefaultWriterError = SerialWriter.Error;
-pub const DefaultErrorContext = SerialWriter.Context;
-pub const default_writer_function = SerialWriter.function;
+const Context = @import("x86_64/context.zig");
+const GDT = @import("x86_64/gdt.zig");
+const IDT = @import("x86_64/idt.zig");
+const interrupts = @import("x86_64/interrupts.zig");
+const registers = @import("x86_64/registers.zig");
+const SerialWriter = @import("x86_64/serial_writer.zig");
+const Syscall = @import("x86_64/syscall.zig");
+const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
+const TSS = @import("x86_64/tss.zig");
 
-pub const SerialWriter = struct {
-    const Error = error{};
-    const Context = void;
+pub const DefaultWriter = SerialWriter;
+pub const Spinlock = @import("x86_64/spinlock.zig");
+pub const TLS = @import("x86_64/tls.zig");
 
-    fn function(context: Context, bytes: []const u8) Error!usize {
-        _ = context;
-        for (bytes) |byte| {
-            _ = byte;
-            @panic("wtF");
-            //io_write(u8, IOPort.E9_hack, byte);
+const log = std.log.scoped(.x86_64);
+const TODO = crash.TODO;
+const panic = crash.panic;
+
+pub const VAS = struct {
+    cr3: u64 = 0,
+
+    const Indices = [std.enum_count(PageIndex)]u16;
+
+    pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VirtualAddressSpace {
+        const page_count = std.bytes_to_pages(@sizeOf(PML4Table), context.page_size, .must_be_exact);
+        const cr3_physical_address = physical_address_space.allocate(page_count) orelse return null;
+        const virtual_address_space = VirtualAddressSpace{
+            .cr3 = cr3_physical_address.value,
+        };
+
+        std.zero(virtual_address_space.get_pml4().access_kernel([*]u8)[0..@sizeOf(PML4Table)]);
+        return virtual_address_space;
+    }
+
+    pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
+        const current = cr3.read_raw();
+        return current == virtual_address_space.cr3;
+    }
+
+    pub inline fn bootstrapping() VirtualAddressSpace {
+        return VirtualAddressSpace{
+            .cr3 = cr3.read_raw(),
+        };
+    }
+
+    pub fn get_pml4(address_space: VirtualAddressSpace) PhysicalAddress {
+        return PhysicalAddress.new(address_space.cr3);
+    }
+
+    pub fn map_kernel_address_space_higher_half(address_space: VirtualAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
+        const cr3_physical_address = PhysicalAddress.new(address_space.cr3);
+        const cr3_kernel_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
+        // TODO: maybe user flag is not necessary?
+        kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, .{ .write = true, .user = true });
+        const pml4 = cr3_kernel_virtual_address.access(*PML4Table);
+        std.zero_slice(PML4E, pml4[0..0x100]);
+        std.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+        log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
+    }
+
+    pub fn map(arch_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
+        std.assert((PhysicalAddress{ .value = arch_address_space.cr3 }).is_valid());
+        std.assert(std.is_aligned(virtual_address.value, context.page_size));
+        std.assert(std.is_aligned(physical_address.value, context.page_size));
+
+        const indices = compute_indices(virtual_address);
+
+        var pdp: *volatile PDPTable = undefined;
+        {
+            var pml4 = arch_address_space.get_pml4().access_kernel(*PML4Table);
+            var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
+            var pml4_entry_value = pml4_entry.value;
+
+            if (pml4_entry_value.contains(.present)) {
+                pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
+            } else {
+                const pdp_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDPTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
+                pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
+                pdp.* = std.zeroes(PDPTable);
+                pml4_entry_value.or_flag(.present);
+                pml4_entry_value.or_flag(.read_write);
+                pml4_entry_value.or_flag(.user);
+                pml4_entry_value.bits = set_entry_in_address_bits(pml4_entry_value.bits, pdp_allocation);
+                pml4_entry.value = pml4_entry_value;
+            }
         }
 
-        return bytes.len;
+        var pd: *volatile PDTable = undefined;
+        {
+            var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
+            var pdp_entry_value = pdp_entry.value;
+
+            if (pdp_entry_value.contains(.present)) {
+                pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
+            } else {
+                const pd_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
+                pd = pd_allocation.access_kernel(@TypeOf(pd));
+                pd.* = std.zeroes(PDTable);
+                pdp_entry_value.or_flag(.present);
+                pdp_entry_value.or_flag(.read_write);
+                pdp_entry_value.or_flag(.user);
+                pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation);
+                pdp_entry.value = pdp_entry_value;
+            }
+        }
+
+        var pt: *volatile PTable = undefined;
+        {
+            var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
+            var pd_entry_value = pd_entry.value;
+
+            if (pd_entry_value.contains(.present)) {
+                pt = get_address_from_entry_bits(pd_entry_value.bits).access_kernel(@TypeOf(pt));
+            } else {
+                const pt_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PTable), context.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
+                pt = pt_allocation.access_kernel(@TypeOf(pt));
+                pt.* = std.zeroes(PTable);
+                pd_entry_value.or_flag(.present);
+                pd_entry_value.or_flag(.read_write);
+                pd_entry_value.or_flag(.user);
+                pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation);
+                pd_entry.value = pd_entry_value;
+            }
+        }
+
+        pt[indices[@enumToInt(PageIndex.PT)]] = blk: {
+            var pte = PTE{
+                .value = PTE.Flags.from_bits(flags.bits),
+            };
+            pte.value.or_flag(.present);
+            pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);
+
+            break :blk pte;
+        };
+    }
+
+    pub fn translate_address(address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
+        std.assert(asked_virtual_address.is_valid());
+        const virtual_address = asked_virtual_address.aligned_backward(context.page_size);
+
+        const indices = compute_indices(virtual_address);
+
+        var pdp: *volatile PDPTable = undefined;
+        {
+            //log.debug("CR3: 0x{x}", .{address_space.cr3});
+            var pml4 = address_space.get_pml4().access_kernel(*PML4Table);
+            const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
+            var pml4_entry_value = pml4_entry.value;
+
+            if (!pml4_entry_value.contains(.present)) return null;
+            //log.debug("PML4 present", .{});
+
+            pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
+        }
+
+        var pd: *volatile PDTable = undefined;
+        {
+            var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
+            var pdp_entry_value = pdp_entry.value;
+
+            if (!pdp_entry_value.contains(.present)) return null;
+            //log.debug("PDP present", .{});
+
+            pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
+        }
+
+        var pt: *volatile PTable = undefined;
+        {
+            var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
+            var pd_entry_value = pd_entry.value;
+
+            if (!pd_entry_value.contains(.present)) return null;
+            //log.debug("PD present", .{});
+
+            pt = get_address_from_entry_bits(pd_entry_value.bits).access_kernel(@TypeOf(pt));
+        }
+
+        const pte = pt[indices[@enumToInt(PageIndex.PT)]];
+        if (!pte.value.contains(.present)) return null;
+
+        const base_physical_address = get_address_from_entry_bits(pte.value.bits);
+        const offset = asked_virtual_address.value - virtual_address.value;
+        if (offset != 0) @panic("Error translating address: offset not zero");
+
+        return PhysicalAddress.new(base_physical_address.value + offset);
+    }
+
+    fn compute_indices(virtual_address: VirtualAddress) Indices {
+        var indices: Indices = undefined;
+        var va = virtual_address.value;
+        va = va >> 12;
+        indices[3] = @truncate(u9, va);
+        va = va >> 9;
+        indices[2] = @truncate(u9, va);
+        va = va >> 9;
+        indices[1] = @truncate(u9, va);
+        va = va >> 9;
+        indices[0] = @truncate(u9, va);
+
+        return indices;
+    }
+
+    pub fn make_current(address_space: *VirtualAddressSpace) void {
+        cr3.write_raw(address_space.cr3);
+    }
+
+    pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) Flags {
+        var flags = Flags.empty();
+        if (general_flags.write) flags.or_flag(.read_write);
+        if (general_flags.user) flags.or_flag(.user);
+        if (general_flags.cache_disable) flags.or_flag(.cache_disable);
+        if (general_flags.accessed) flags.or_flag(.accessed);
+        if (!general_flags.execute) flags.or_flag(.execute_disable);
+        return flags;
+    }
+
+    // TODO:
+    pub const Flags = Bitflag(true, u64, enum(u6) {
+        read_write = 1,
+        user = 2,
+        write_through = 3,
+        cache_disable = 4,
+        accessed = 5,
+        dirty = 6,
+        pat = 7, // must be 0
+        global = 8,
+        execute_disable = 63,
+    });
+};
+
+const address_mask: u64 = 0x000000fffffff000;
+fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
+    std.assert(context.max_physical_address_bit == 40);
+    std.assert(std.is_aligned(new_address.value, context.page_size));
+    const address_masked = new_address.value & address_mask;
+    const old_entry_value_masked = old_entry_value & ~address_masked;
+    const result = address_masked | old_entry_value_masked;
+    return result;
+}
+
+fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
+    std.assert(context.max_physical_address_bit == 40);
+    const address = entry_bits & address_mask;
+    std.assert(std.is_aligned(address, context.page_size));
+
+    return PhysicalAddress.new(address);
+}
+
+const PageIndex = enum(u3) {
+    PML4 = 0,
+    PDP = 1,
+    PD = 2,
+    PT = 3,
+};
+
+const PML4E = struct {
+    value: Flags,
+
+    const Flags = std.Bitflag(true, u64, enum(u6) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PDPTE = struct {
+    value: Flags,
+
+    const Flags = std.Bitflag(true, u64, enum(u6) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        page_size = 7, // must be 0
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PDE = struct {
+    value: Flags,
+
+    const Flags = std.Bitflag(true, u64, enum(u6) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        page_size = 7, // must be 0
+        hlat_restart = 11,
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PTE = struct {
+    value: Flags,
+
+    const Flags = std.Bitflag(true, u64, enum(u6) {
+        present = 0,
+        read_write = 1,
+        user = 2,
+        page_level_write_through = 3,
+        page_level_cache_disable = 4,
+        accessed = 5,
+        dirty = 6,
+        pat = 7, // must be 0
+        global = 8,
+        hlat_restart = 11,
+        // TODO: protection key
+        execute_disable = 63, // IA32_EFER.NXE must be 1
+    });
+};
+
+const PML4Table = [512]PML4E;
+const PDPTable = [512]PDPTE;
+const PDTable = [512]PDE;
+const PTable = [512]PTE;
+
+var _zero: u64 = 0;
+
+pub var timestamp_ticks_per_ms: u64 = 0;
+
+pub fn init_timer() void {
+    interrupts.disable();
+    const bsp = &kernel.scheduler.cpus[0];
+    std.assert(bsp.is_bootstrap);
+    const timer_calibration_start = read_timestamp();
+    log.debug("About to use LAPIC", .{});
+    bsp.lapic.write(.TIMER_INITCNT, std.max_int(u32));
+    log.debug("After to use LAPIC", .{});
+    var times_i: u64 = 0;
+    const times = 8;
+
+    while (times_i < times) : (times_i += 1) {
+        io_write(u8, IOPort.PIT_command, 0x30);
+        io_write(u8, IOPort.PIT_data, 0xa9);
+        io_write(u8, IOPort.PIT_data, 0x04);
+
+        while (true) {
+            io_write(u8, IOPort.PIT_command, 0xe2);
+            if (io_read(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
+        }
+    }
+    bsp.lapic.ticks_per_ms = std.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
+    const timer_calibration_end = read_timestamp();
+    timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
+    interrupts.enable();
+
+    log.debug("Timer initialized!", .{});
+}
+
+pub fn sleep_on_tsc(ms: u32) void {
+    const sleep_tick_count = ms * timestamp_ticks_per_ms;
+    const start = read_timestamp();
+    while (true) {
+        const now = read_timestamp();
+        const ticks_passed = now - start;
+        if (ticks_passed >> 3 >= sleep_tick_count) break;
+    }
+}
+
+pub inline fn read_timestamp() u64 {
+    var my_rdx: u64 = undefined;
+    var my_rax: u64 = undefined;
+
+    asm volatile (
+        \\rdtsc
+        : [rax] "={rax}" (my_rax),
+          [rdx] "={rdx}" (my_rdx),
+    );
+
+    return my_rdx << 32 | my_rax;
+}
+
+pub const timer_interrupt = 0x40;
+pub const spurious_vector: u8 = 0xFF;
+
+pub fn enable_apic(virtual_address_space: *VirtualAddressSpace) void {
+    const spurious_value = @as(u32, 0x100) | spurious_vector;
+    const cpu = TLS.get_current().cpu orelse @panic("cannot get cpu");
+    log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
+    // TODO: x2APIC
+    const ia32_apic = IA32_APIC_BASE.read();
+    const apic_physical_address = get_apic_base(ia32_apic);
+    log.debug("APIC physical address: 0x{x}", .{apic_physical_address});
+    std.assert(apic_physical_address != 0);
+    const old_lapic_id = cpu.lapic.id;
+    cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
+    cpu.lapic.write(.SPURIOUS, spurious_value);
+    // TODO: getting the lapic id from a LAPIC register is not reporting good ids. Why?
+    //const lapic_id = cpu.lapic.read(.LAPIC_ID);
+    //log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
+    //std.assert(lapic_id == cpu.lapic.id);
+    log.debug("APIC enabled", .{});
+}
+
+var times_mapped: u64 = 0;
+pub fn map_lapic(virtual_address_space: *VirtualAddressSpace) void {
+    if (times_mapped != 0) @panic("called more than once");
+    defer times_mapped += 1;
+
+    const cpu = TLS.get_current().cpu orelse @panic("wtf");
+    std.assert(cpu.id == 0);
+    std.assert(cpu.is_bootstrap);
+
+    const ia32_apic = IA32_APIC_BASE.read();
+    const lapic_physical_address = PhysicalAddress.new(get_apic_base(ia32_apic));
+    const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
+    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
+}
+
+pub fn enable_cpu_features() void {
+    // Initialize FPU
+    var cr0_value = cr0.read();
+    cr0_value.set_bit(.MP);
+    cr0_value.set_bit(.NE);
+    cr0.write(cr0_value);
+    var cr4_value = cr4.read();
+    cr4_value.set_bit(.OSFXSR);
+    cr4_value.set_bit(.OSXMMEXCPT);
+    cr4.write(cr4_value);
+
+    // @TODO: what is this?
+    const cw: u16 = 0x037a;
+    asm volatile (
+        \\fninit
+        \\fldcw (%[cw])
+        :
+        : [cw] "r" (&cw),
+    );
+
+    std.assert(!cr0.get_bit(.CD));
+    std.assert(!cr0.get_bit(.NW));
+}
+
+pub fn cpu_start(virtual_address_space: *VirtualAddressSpace) void {
+    const current_thread = TLS.get_current();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    enable_cpu_features();
+    // This assumes the CPU processor local storage is already properly setup here
+    cpu.gdt.initial_setup(cpu.id);
+    interrupts.init(&cpu.idt);
+    enable_apic(virtual_address_space);
+    Syscall.enable();
+
+    cpu.shared_tss = TSS.Struct{};
+    cpu.gdt.update_tss(&cpu.shared_tss);
+
+    log.debug("Scheduler pre-initialization finished!", .{});
+}
+
+pub const IOPort = struct {
+    pub const DMA1 = 0x0000;
+    pub const PIC1 = 0x0020;
+    pub const Cyrix_MSR = 0x0022;
+    pub const PIT_data = 0x0040;
+    pub const PIT_command = 0x0043;
+    pub const PS2 = 0x0060;
+    pub const CMOS_RTC = 0x0070;
+    pub const DMA_page_registers = 0x0080;
+    pub const A20 = 0x0092;
+    pub const PIC2 = 0x00a0;
+    pub const DMA2 = 0x00c0;
+    pub const E9_hack = 0x00e9;
+    pub const ATA2 = 0x0170;
+    pub const ATA1 = 0x01f0;
+    pub const parallel_port = 0x0278;
+    pub const serial2 = 0x02f8;
+    pub const IBM_VGA = 0x03b0;
+    pub const floppy = 0x03f0;
+    pub const serial1 = 0x03f8;
+    pub const PCI_config = 0x0cf8;
+    pub const PCI_data = 0x0cfc;
+};
+
+pub inline fn io_read(comptime T: type, port: u16) T {
+    return switch (T) {
+        u8 => asm volatile ("inb %[port], %[result]"
+            : [result] "={al}" (-> u8),
+            : [port] "N{dx}" (port),
+        ),
+        u16 => asm volatile ("inw %[port], %[result]"
+            : [result] "={ax}" (-> u16),
+            : [port] "N{dx}" (port),
+        ),
+        u32 => asm volatile ("inl %[port], %[result]"
+            : [result] "={eax}" (-> u32),
+            : [port] "N{dx}" (port),
+        ),
+
+        else => unreachable,
+    };
+}
+
+pub inline fn io_write(comptime T: type, port: u16, value: T) void {
+    switch (T) {
+        u8 => asm volatile ("outb %[value], %[port]"
+            :
+            : [value] "{al}" (value),
+              [port] "N{dx}" (port),
+        ),
+        u16 => asm volatile ("outw %[value], %[port]"
+            :
+            : [value] "{ax}" (value),
+              [port] "N{dx}" (port),
+        ),
+        u32 => asm volatile ("outl %[value], %[port]"
+            :
+            : [value] "{eax}" (value),
+              [port] "N{dx}" (port),
+        ),
+        else => unreachable,
+    }
+}
+
+pub fn get_physical_address_memory_configuration() void {
+    context.max_physical_address_bit = CPUID.get_max_physical_address_bit();
+}
+
+fn get_apic_base(ia32_apic_base: IA32_APIC_BASE.Flags) u32 {
+    return @truncate(u32, ia32_apic_base.bits & 0xfffff000);
+}
+
+pub const CPUID = struct {
+    eax: u32,
+    ebx: u32,
+    edx: u32,
+    ecx: u32,
+
+    /// Returns the maximum number bits a physical address is allowed to have in this CPU
+    pub inline fn get_max_physical_address_bit() u6 {
+        return @truncate(u6, cpuid(0x80000008).eax);
     }
 };
+
+pub inline fn cpuid(leaf: u32) CPUID {
+    var eax: u32 = undefined;
+    var ebx: u32 = undefined;
+    var edx: u32 = undefined;
+    var ecx: u32 = undefined;
+
+    asm volatile (
+        \\cpuid
+        : [eax] "={eax}" (eax),
+          [ebx] "={ebx}" (ebx),
+          [edx] "={edx}" (edx),
+          [ecx] "={ecx}" (ecx),
+        : [leaf] "{eax}" (leaf),
+    );
+
+    return CPUID{
+        .eax = eax,
+        .ebx = ebx,
+        .edx = edx,
+        .ecx = ecx,
+    };
+}
+
+pub fn get_memory_map() kernel.Memory.Map {
+    const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap) orelse @panic("Stivale had no RSDP struct");
+    return Stivale2.process_memory_map(memory_map_struct);
+}
+
+pub const valid_page_sizes = [3]u64{ 0x1000, 0x1000 * 512, 0x1000 * 512 * 512 };
+
+fn is_canonical_address(address: u64) bool {
+    const sign_bit = address & (1 << 63) != 0;
+    const significant_bit_count = page_table_level_count_to_bit_map(page_table_level_count);
+    var i: u8 = 63;
+    while (i >= significant_bit_count) : (i -= 1) {
+        const bit = address & (1 << i) != 0;
+        if (bit != sign_bit) return false;
+    }
+
+    return true;
+}
+
+pub const page_table_level_count = 4;
+
+fn page_table_level_count_to_bit_map(level: u8) u8 {
+    return switch (level) {
+        4 => 48,
+        5 => 57,
+        else => @panic("invalid page table level count\n"),
+    };
+}
+
+pub const LAPIC = struct {
+    // TODO: LAPIC address is shared. Ticks per ms too? Refactor this struct
+    address: VirtualAddress,
+    ticks_per_ms: u32 = 0,
+    id: u32,
+
+    const Register = enum(u32) {
+        LAPIC_ID = 0x20,
+        EOI = 0xB0,
+        SPURIOUS = 0xF0,
+        ERROR_STATUS_REGISTER = 0x280,
+        ICR_LOW = 0x300,
+        ICR_HIGH = 0x310,
+        LVT_TIMER = 0x320,
+        TIMER_DIV = 0x3E0,
+        TIMER_INITCNT = 0x380,
+        TIMER_CURRENT_COUNT = 0x390,
+    };
+
+    pub inline fn new(virtual_address_space: *VirtualAddressSpace, lapic_physical_address: PhysicalAddress, lapic_id: u32) LAPIC {
+        const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
+        log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
+        std.assert(virtual_address_space.translate_address(lapic_virtual_address) != null);
+        log.debug("Checking assert", .{});
+
+        std.assert((virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
+        const lapic = LAPIC{
+            .address = lapic_virtual_address,
+            .id = lapic_id,
+        };
+        log.debug("LAPIC initialized: 0x{x}", .{lapic_virtual_address.value});
+        return lapic;
+    }
+
+    pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
+        const register_index = @enumToInt(register) / @sizeOf(u32);
+        const result = lapic.address.access([*]volatile u32)[register_index];
+        return result;
+    }
+
+    pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
+        const register_index = @enumToInt(register) / @sizeOf(u32);
+        lapic.address.access([*]volatile u32)[register_index] = value;
+    }
+
+    pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
+        std.assert(lapic.ticks_per_ms != 0);
+        lapic.write(.LVT_TIMER, timer_interrupt | (1 << 17));
+        lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
+    }
+
+    pub inline fn end_of_interrupt(lapic: LAPIC) void {
+        log.debug("Signaling end of interrupt", .{});
+        lapic.write(.EOI, 0);
+    }
+};
+
+pub inline fn next_timer(ms: u32) void {
+    const current_cpu = TLS.get_current().cpu orelse @panic("current cpu not set");
+    current_cpu.lapic.next_timer(ms);
+}
+
+pub const CPU = struct {
+    lapic: LAPIC,
+    spinlock_count: u64,
+    is_bootstrap: bool,
+    id: u32,
+    gdt: GDT.Table,
+    shared_tss: TSS.Struct,
+    idt: IDT,
+};
+
+pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *VirtualAddressSpace, stack_size: u64) void {
+    std.assert(std.is_aligned(stack_size, context.page_size));
+    const cpu_count = cpus.len;
+    const allocation_size = cpu_count * stack_size * 2;
+    const stack_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, allocation_size, 0, 0) catch @panic("wtf");
+    const middle = allocation_size / 2;
+    const base = @ptrToInt(stack_allocation.ptr);
+
+    for (cpus) |*cpu, i| {
+        const rsp_offset = base + (i * stack_size);
+        const ist_offset = rsp_offset + middle;
+        cpu.shared_tss.rsp[0] = rsp_offset + stack_size;
+        cpu.shared_tss.IST[0] = ist_offset + stack_size;
+    }
+}
+
+export fn thread_terminate(thread: *Thread) void {
+    _ = thread;
+    TODO();
+}
+
+pub inline fn flush_segments_kernel() void {
+    asm volatile (
+        \\xor %%rax, %%rax
+        \\mov %[data_segment_selector], %%rax
+        \\mov %%rax, %%ds
+        \\mov %%rax, %%es
+        \\mov %%rax, %%fs
+        \\mov %%rax, %%gs
+        :
+        : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
+    );
+}
+
+var pci_lock: Spinlock = undefined;
+
+inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
+    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
+}
+
+pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
+    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
+    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
+    pci_lock.acquire();
+    defer pci_lock.release();
+
+    notify_config_op(bus, slot, function, offset);
+    const result_int = io_read(IntType, IOPort.PCI_data + @intCast(u16, offset % 4));
+    switch (@typeInfo(T)) {
+        .Enum => {
+            const result = @intToEnum(T, result_int);
+            return result;
+        },
+        else => {
+            const result = @bitCast(T, result_int);
+            return result;
+        },
+    }
+}
+
+pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
+    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
+    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
+    pci_lock.acquire();
+    defer pci_lock.release();
+
+    std.assert(std.is_aligned(offset, 4));
+    notify_config_op(bus, slot, function, offset);
+
+    io_write(IntType, IOPort.PCI_data + @intCast(u16, offset % 4), value);
+}
+
+pub inline fn spinloop_without_wasting_cpu() noreturn {
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+        );
+        asm volatile ("pause" ::: "memory");
+    }
+}
+
+pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
+    const current_cr3 = cr3.read_raw();
+    if (current_cr3 != new_address_space.arch.cr3) {
+        cr3.write_raw(new_address_space.arch.cr3);
+    }
+}
+
+pub inline fn set_new_stack(new_stack: u64) void {
+    asm volatile ("mov %[in], %%rsp"
+        :
+        : [in] "r" (new_stack),
+        : "nostack"
+    );
+}
+
+pub fn post_context_switch(arch_context: *Context, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
+    log.debug("Context switching", .{});
+    if (@import("root").scheduler.lock.were_interrupts_enabled != 0) {
+        @panic("interrupts were enabled");
+    }
+    kernel.scheduler.lock.release();
+    //std.assert(context == new_thread.context);
+    //std.assert(context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    arch_context.check(@src());
+    std.assert(new_thread.current_thread == new_thread);
+    TLS.set_current(new_thread);
+    const new_cs_user_bits = @truncate(u2, arch_context.cs);
+    const old_cs_user_bits = @truncate(u2, cs.read());
+    const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
+
+    // TODO: checks
+    //const new_thread = current_thread.time_slices == 1;
+
+    // TODO: close reference or dettach address space
+    _ = old_address_space;
+    //new_thread.last_known_execution_address = arch_context.rip;
+
+    const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
+    cpu.lapic.end_of_interrupt();
+    if (interrupts.are_enabled()) @panic("interrupts enabled");
+    if (cpu.spinlock_count > 0) @panic("spinlocks active");
+    // TODO: profiling
+    if (should_swap_gs) asm volatile ("swapgs");
+}
+
+pub inline fn signal_end_of_interrupt(cpu: *CPU) void {
+    cpu.lapic.end_of_interrupt();
+}
+
+pub inline fn legacy_actions_before_context_switch(new_thread: *Thread) void {
+    const new_cs_user_bits = @truncate(u2, new_thread.context.cs);
+    const old_cs_user_bits = @truncate(u2, cs.read());
+    const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
+    if (should_swap_gs) asm volatile ("swapgs");
+}
+
+pub fn preinit_bsp(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, bootstrap_context: *BootstrapContext) void {
+    // @ZigBug: @ptrCast here crashes the compiler
+
+    bootstrap_context.cpu.id = 0;
+    bootstrap_context.thread.cpu = &bootstrap_context.cpu;
+    bootstrap_context.thread.context = &bootstrap_context.context;
+    bootstrap_context.thread.address_space = virtual_address_space;
+    TLS.preset_bsp(&bootstrap_context.thread);
+    TLS.set_current(&bootstrap_context.thread);
+
+    scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
+}
+
+pub const BootstrapContext = struct {
+    cpu: CPU,
+    thread: Thread,
+    context: Context,
+};
+
+pub const rax = registers.rax;
+pub const rbx = registers.rbx;
+pub const rcx = registers.rcx;
+pub const rdx = registers.rdx;
+pub const rbp = registers.rbp;
+pub const rsp = registers.rsp;
+pub const rsi = registers.rsi;
+pub const rdi = registers.rdi;
+pub const r8 = registers.r8;
+pub const r9 = registers.r9;
+pub const r10 = registers.r10;
+pub const r11 = registers.r11;
+pub const r12 = registers.r12;
+pub const r13 = registers.r13;
+pub const r14 = registers.r14;
+pub const r15 = registers.r15;
+
+pub const cs = registers.cs;
+pub const gs = registers.gs;
+
+pub const dr0 = registers.dr0;
+pub const dr1 = registers.dr1;
+pub const dr2 = registers.dr2;
+pub const dr3 = registers.dr3;
+pub const dr4 = registers.dr4;
+pub const dr5 = registers.dr5;
+pub const dr6 = registers.dr6;
+pub const dr7 = registers.dr7;
+
+pub const cr0 = registers.cr0;
+pub const cr2 = registers.cr2;
+pub const cr3 = registers.cr3;
+pub const cr4 = registers.cr4;
+pub const cr8 = registers.cr8;
+
+pub const RFLAGS = registers.RFLAGS;
+
+//pub const PAT = SimpleMSR(0x277);
+pub const IA32_STAR = registers.IA32_STAR;
+pub const IA32_LSTAR = registers.IA32_LSTAR;
+pub const IA32_FMASK = registers.IA32_FMASK;
+pub const IA32_FS_BASE = registers.IA32_FS_BASE;
+pub const IA32_GS_BASE = registers.IA32_GS_BASE;
+pub const IA32_KERNEL_GS_BASE = registers.IA32_KERNEL_GS_BASE;
+pub const IA32_EFER = registers.IA32_EFER;
+pub const IA32_APIC_BASE = registers.IA32_APIC_BASE;

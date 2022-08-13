@@ -1,6 +1,10 @@
 const common = @import("../common.zig");
 const root = @import("root");
 
+comptime {
+    if (@import("builtin").os.tag != .freestading) @compileError("This file is not meant to be imported in build.zig");
+}
+
 const Writer = struct {
     const Error = error{};
     const execution_mode = common.Syscall.ExecutionMode.blocking;

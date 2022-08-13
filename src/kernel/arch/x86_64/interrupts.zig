@@ -1,19 +1,60 @@
-const kernel = @import("root");
-const common = @import("../../../common.zig");
+const interrupts = @This();
 
-const x86_64 = common.arch.x86_64;
-const PIC = x86_64.PIC;
-const IDT = x86_64.IDT;
-const GDT = x86_64.GDT;
+const std = @import("../../../common/std.zig");
+
+const Context = @import("context.zig");
+const crash = @import("../../crash.zig");
+const kernel = @import("../../kernel.zig");
+const registers = @import("registers.zig");
+const GDT = @import("gdt.zig");
+const IDT = @import("idt.zig");
+const PIC = @import("pic.zig");
+const PhysicalAddress = @import("../../physical_address.zig");
+const TLS = @import("tls.zig");
+
 const PCI = @import("../../../drivers/pci.zig");
 
-const interrupts = @This();
-const Context = x86_64.Context;
+const log = std.log.scoped(.interrupts);
+const cr8 = registers.cr8;
+const panic = crash.panic;
+const RFLAGS = registers.RFLAGS;
 
-const TODO = common.TODO;
-const Thread = common.Thread;
-const Virtual = kernel.Virtual;
-const log = common.log.scoped(.interrupts);
+const use_cr8 = true;
+pub inline fn enable() void {
+    if (use_cr8) {
+        cr8.write(0);
+        asm volatile ("sti");
+    } else {
+        asm volatile ("sti");
+    }
+    //log.debug("IF=1", .{});
+}
+
+pub inline fn disable() void {
+    if (use_cr8) {
+        cr8.write(0xe);
+        asm volatile ("sti");
+    } else {
+        asm volatile ("cli");
+    }
+    //log.debug("IF=0", .{});
+}
+
+pub inline fn disable_all() void {
+    asm volatile ("cli");
+}
+
+pub inline fn are_enabled() bool {
+    if (use_cr8) {
+        const if_set = RFLAGS.read().contains(.IF);
+        const cr8_value = cr8.read();
+        return if_set and cr8_value == 0;
+    } else {
+        const if_set = RFLAGS.read().contains(.IF);
+        return if_set;
+    }
+}
+
 pub const Handler = fn () callconv(.Naked) void;
 
 pub const handlers = [IDT.entry_count]Handler{
@@ -292,7 +333,7 @@ pub fn init(idt: *IDT) void {
     log.debug("Installed interrupt handlers", .{});
     idt.load();
     log.debug("Loaded IDT", .{});
-    x86_64.enable_interrupts();
+    interrupts.enable();
     log.debug("Enabled interrupts", .{});
 }
 
@@ -335,17 +376,17 @@ const PageFaultErrorCode = packed struct {
     software_guard_extensions: bool,
 
     comptime {
-        common.comptime_assert(@sizeOf(PageFaultErrorCode) == @sizeOf(u16));
+        std.assert(@sizeOf(PageFaultErrorCode) == @sizeOf(u16));
     }
 };
 
 export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
-    if (x86_64.are_interrupts_enabled()) {
+    if (interrupts.are_enabled()) {
         @panic("interrupts are enabled");
     }
 
     log.debug("===================== START INT 0x{x} =====================", .{context.interrupt_number});
-    const should_swap_gs = @truncate(u2, context.cs) == ~@truncate(u2, x86_64.cs.read());
+    const should_swap_gs = @truncate(u2, context.cs) == ~@truncate(u2, registers.cs.read());
     if (should_swap_gs) {
         asm volatile ("swapgs");
     }
@@ -353,7 +394,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         if (should_swap_gs) asm volatile ("swapgs");
     }
 
-    if (x86_64.get_current_thread().cpu) |current_cpu| {
+    if (TLS.get_current().cpu) |current_cpu| {
         if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
             @panic("spinlock count bug");
         }
@@ -372,7 +413,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                     .page_fault => {
                         const error_code_int = @truncate(u16, context.error_code);
                         const error_code = @bitCast(PageFaultErrorCode, error_code_int);
-                        const page_fault_address = x86_64.cr2.read();
+                        const page_fault_address = registers.cr2.read();
                         log.debug("Page fault address: 0x{x}. Error code: {}", .{ page_fault_address, error_code });
                         if (error_code.reserved_write) {
                             @panic("reserved write");
@@ -380,7 +421,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
 
                         @panic("Unresolvable page fault");
                     },
-                    else => kernel.crash("{s}", .{@tagName(exception)}),
+                    else => panic("{s}", .{@tagName(exception)}),
                 }
                 log.debug("Exception: {s}", .{@tagName(exception)});
             }
@@ -395,8 +436,8 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             // TODO: dont hard code
             const handler = irq_handlers[0];
             const result = handler.callback(handler.context, line);
-            common.runtime_assert(@src(), result);
-            x86_64.get_current_thread().cpu.?.lapic.end_of_interrupt();
+            std.assert(result);
+            TLS.get_current().cpu.?.lapic.end_of_interrupt();
         },
         0x80 => {
             log.debug("We are getting a syscall", .{});
@@ -408,14 +449,12 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
 
     context.check(@src());
 
-    if (x86_64.are_interrupts_enabled()) {
+    if (interrupts.are_enabled()) {
         @panic("interrupts should not be enabled");
     }
 
     log.debug("===================== END INT 0x{x} =====================", .{context.interrupt_number});
 }
-
-const std = @import("std");
 
 inline fn prologue() void {
     asm volatile (
@@ -497,7 +536,10 @@ pub inline fn epilogue() void {
     );
 }
 
-pub var msi_handlers: [x86_64.interrupt_vector_msi_count]HandlerInfo = undefined;
+pub const interrupt_vector_msi_start = 0x70;
+pub const interrupt_vector_msi_count = 0x40;
+
+pub var msi_handlers: [interrupt_vector_msi_count]HandlerInfo = undefined;
 
 pub const HandlerInfo = struct {
     const Callback = fn (u64, u64) bool;
@@ -512,8 +554,8 @@ pub const HandlerInfo = struct {
     }
 
     pub fn register_MSI(handler: HandlerInfo) void {
-        const msi_end = x86_64.interrupt_vector_msi_start + x86_64.interrupt_vector_msi_count;
-        var msi = x86_64.interrupt_vector_msi_start;
+        const msi_end = interrupt_vector_msi_start + interrupt_vector_msi_count;
+        var msi = interrupt_vector_msi_start;
         while (msi < msi_end) : (msi += 1) {
             if (msi_handlers[msi].address != 0) continue;
             msi_handlers[msi] = handler;
@@ -557,6 +599,30 @@ pub const HandlerInfo = struct {
 var already_setup: u32 = 0;
 const irq_base = 0x50;
 
+pub const IOAPIC = struct {
+    address: PhysicalAddress,
+    gsi: u32,
+    id: u8,
+
+    pub inline fn read(apic: IOAPIC, register: u32) u32 {
+        apic.address.access_kernel([*]volatile u32)[0] = register;
+        return apic.address.access_kernel([*]volatile u32)[4];
+    }
+
+    pub inline fn write(apic: IOAPIC, register: u32, value: u32) void {
+        apic.address.access_kernel([*]volatile u32)[0] = register;
+        apic.address.access_kernel([*]volatile u32)[4] = value;
+    }
+};
+pub var ioapic: IOAPIC = undefined;
+pub const ISO = struct {
+    gsi: u32,
+    source_IRQ: u8,
+    active_low: bool,
+    level_triggered: bool,
+};
+pub var iso: []ISO = undefined;
+
 fn setup_interrupt_redirection_entry(asked_line: u64) bool {
     // TODO: @Lock
     if (already_setup & (@as(u32, 1) << @intCast(u5, asked_line)) != 0) return true;
@@ -567,26 +633,26 @@ fn setup_interrupt_redirection_entry(asked_line: u64) bool {
     var level_triggered = false;
     var line = asked_line;
 
-    for (x86_64.iso) |iso| {
-        if (iso.source_IRQ == line) {
-            line = iso.gsi;
-            active_low = iso.active_low;
-            level_triggered = iso.level_triggered;
+    for (iso) |override| {
+        if (override.source_IRQ == line) {
+            line = override.gsi;
+            active_low = override.active_low;
+            level_triggered = override.level_triggered;
             break;
         }
     }
 
-    if (line >= x86_64.ioapic.gsi and line < (x86_64.ioapic.gsi + @truncate(u8, x86_64.ioapic.read(1) >> 16))) {
-        line -= x86_64.ioapic.gsi;
+    if (line >= ioapic.gsi and line < (ioapic.gsi + @truncate(u8, ioapic.read(1) >> 16))) {
+        line -= ioapic.gsi;
         const redirection_table_index: u32 = @intCast(u32, line) * 2 + 0x10;
         var redirection_entry = processor_irq;
         if (active_low) redirection_entry |= (1 << 13);
         if (level_triggered) redirection_entry |= (1 << 15);
 
-        x86_64.ioapic.write(redirection_table_index, 1 << 16);
-        common.runtime_assert(@src(), x86_64.get_current_thread().cpu.? == &kernel.scheduler.cpus[0]);
-        x86_64.ioapic.write(redirection_table_index + 1, kernel.scheduler.cpus[0].lapic.id << 24);
-        x86_64.ioapic.write(redirection_table_index, redirection_entry);
+        ioapic.write(redirection_table_index, 1 << 16);
+        std.assert(TLS.get_current().cpu.? == &kernel.scheduler.cpus[0]);
+        ioapic.write(redirection_table_index + 1, kernel.scheduler.cpus[0].lapic.id << 24);
+        ioapic.write(redirection_table_index, redirection_entry);
 
         already_setup |= @as(u32, 1) << @intCast(u5, asked_line);
         return true;

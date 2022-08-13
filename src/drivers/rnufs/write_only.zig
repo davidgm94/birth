@@ -79,7 +79,7 @@ pub fn write_new_file(fs_driver: *Filesystem, allocator: Allocator, filename: []
     // Copy file metadata
     var node = @intToPtr(*RNUFS.Node, write_buffer.address);
     node.size = file_content.len;
-    std.unreachable_assert(filename.len < node.name.len);
+    std.assert(filename.len < node.name.len);
     std.copy(u8, &node.name, filename);
     node.name[filename.len] = 0;
     node.type = .file;
