@@ -1,7 +1,7 @@
 const Thread = @This();
 
-const arch = @import("arch.zig");
-
+const Context = @import("arch/context.zig");
+const CPU = @import("arch/cpu.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
 const VirtualAddressSpace = @import("virtual_address_space.zig");
@@ -19,10 +19,10 @@ user_stack_base: VirtualAddress,
 user_stack_reserve: u64,
 user_stack_commit: u64,
 id: u64,
-context: *arch.Context,
+context: *Context,
 time_slices: u64,
 address_space: *VirtualAddressSpace,
-cpu: ?*arch.CPU,
+cpu: ?*CPU,
 syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,

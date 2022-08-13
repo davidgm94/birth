@@ -2,14 +2,13 @@ const Heap = @This();
 
 const std = @import("../common/std.zig");
 
-const arch = @import("arch.zig");
 const crash = @import("crash.zig");
 const context = @import("context.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
 
 const log = std.log.scoped(.Heap);
-const Spinlock = arch.Spinlock;
+const Spinlock = @import("spinlock.zig");
 const TODO = crash.TODO;
 
 pub const Region = struct {

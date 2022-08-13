@@ -1,6 +1,5 @@
 const std = @import("../../../common/std.zig");
 
-const x86_64 = @import("../x86_64.zig");
 const DescriptorTable = @import("descriptor_table.zig");
 const TSS = @import("tss.zig");
 const log = std.log.scoped(.GDT);

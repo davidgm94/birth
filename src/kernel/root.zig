@@ -1,18 +1,19 @@
 const std = @import("../common/std.zig");
-const arch = @import("arch.zig");
+const TLS = @import("arch/tls.zig");
+const default_log_writer = @import("arch/default_log_writer.zig");
 
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    const current_thread = arch.get_current_thread();
+    const current_thread = TLS.get_current();
     const current_cpu = current_thread.cpu orelse while (true) {};
     const processor_id = current_cpu.id;
-    arch.default_io.lock.acquire();
-    defer arch.default_io.lock.release();
-    arch.default_io.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    arch.default_io.writer.writeAll(prefix) catch unreachable;
-    arch.default_io.writer.print(format, args) catch unreachable;
-    arch.default_io.writer.writeByte('\n') catch unreachable;
+    default_log_writer.lock.acquire();
+    defer default_log_writer.lock.release();
+    default_log_writer.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    default_log_writer.writer.writeAll(prefix) catch unreachable;
+    default_log_writer.writer.print(format, args) catch unreachable;
+    default_log_writer.writer.writeByte('\n') catch unreachable;
 }
 
 //var panicking: usize = 0;

@@ -2,8 +2,8 @@ const Spinlock = @This();
 
 const std = @import("../../../common/std.zig");
 
-const interrupts = @import("interrupts.zig");
-const TLS = @import("tls.zig");
+const interrupts = @import("arch/interrupts.zig");
+const TLS = @import("arch/tls.zig");
 const log = std.log.scoped(.Spinlock);
 const AtomicRmwOp = std.AtomicRmwOp;
 

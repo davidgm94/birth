@@ -1,4 +1,3 @@
-const x86_64 = @import("../x86_64.zig");
 const IOPort = x86_64.IOPort;
 const io_write = x86_64.io_write;
 

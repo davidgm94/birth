@@ -2,7 +2,6 @@ const VirtualAddressSpace = @This();
 
 const std = @import("../common/std.zig");
 
-const arch = @import("arch.zig");
 const context = @import("context.zig");
 const Heap = @import("heap.zig");
 const kernel = @import("kernel.zig");
@@ -11,11 +10,12 @@ const PhysicalAddress = @import("physical_address.zig");
 const PhysicalAddressSpace = @import("physical_address_space.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
-const Spinlock = arch.Spinlock;
+const Spinlock = @import("spinlock.zig");
+const VAS = @import("arch/vas.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualMemoryRegion = @import("virtual_memory_region.zig");
 
-arch: arch.VAS,
+arch: VAS,
 privilege_level: PrivilegeLevel,
 heap: Heap,
 lock: Spinlock,
@@ -25,19 +25,19 @@ initialized: bool,
 /// kernel address space
 pub fn initialize_kernel_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) ?void {
     // TODO: defer memory free when this produces an error
-    const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space) orelse return null;
+    const arch_virtual_space = VAS.new(physical_address_space) orelse return null;
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
         .privilege_level = .kernel,
         .heap = Heap.new(virtual_address_space),
-        .lock = arch.Spinlock.new(),
+        .lock = Spinlock{},
         .initialized = false,
     };
 }
 
 pub fn bootstrapping() VirtualAddressSpace {
-    const bootstrap_arch_specific_vas = arch.VirtualAddressSpace.bootstrapping();
+    const bootstrap_arch_specific_vas = VAS.bootstrapping();
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,
         .privilege_level = .kernel,
@@ -49,7 +49,7 @@ pub fn bootstrapping() VirtualAddressSpace {
 
 pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, kernel_address_space: *VirtualAddressSpace) ?void {
     // TODO: defer memory free when this produces an error
-    const arch_virtual_space = arch.VirtualAddressSpace.new(physical_address_space) orelse return null;
+    const arch_virtual_space = VAS.new(physical_address_space) orelse return null;
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
         .arch = arch_virtual_space,
@@ -231,7 +231,7 @@ pub const Flags = packed struct {
         return std.zeroes(Flags);
     }
 
-    pub inline fn to_arch_specific(flags: Flags) arch.VirtualAddressSpace.Flags {
-        return arch.VirtualAddressSpace.new_flags(flags);
+    pub inline fn to_arch_specific(flags: Flags) VAS.Flags {
+        return VAS.new_flags(flags);
     }
 };
