@@ -1,7 +1,9 @@
 const Thread = @This();
 
+const std = @import("../common/std.zig");
+
 const Context = @import("arch/context.zig");
-const CPU = @import("arch/cpu.zig");
+const CPU = @import("arch/common.zig").CPU;
 const VirtualAddress = @import("virtual_address.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
 const VirtualAddressSpace = @import("virtual_address_space.zig");

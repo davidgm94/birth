@@ -1,6 +1,9 @@
+const GDT = @This();
+
 const std = @import("../../../common/std.zig");
 
 const DescriptorTable = @import("descriptor_table.zig");
+const TLS = @import("tls.zig");
 const TSS = @import("tss.zig");
 const log = std.log.scoped(.GDT);
 
@@ -20,13 +23,13 @@ pub const Table = packed struct {
 
     comptime {
         const entry_count = 10;
-        std.comptime_assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
-        std.comptime_assert(@offsetOf(Table, "code_64") == 0x28);
-        std.comptime_assert(@offsetOf(Table, "data_64") == 0x30);
-        std.comptime_assert(@offsetOf(Table, "user_code_32") == 0x38);
-        std.comptime_assert(@offsetOf(Table, "user_data") == 0x40);
-        std.comptime_assert(@offsetOf(Table, "user_code_64") == 0x48);
-        std.comptime_assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
+        std.assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        std.assert(@offsetOf(Table, "code_64") == 0x28);
+        std.assert(@offsetOf(Table, "data_64") == 0x30);
+        std.assert(@offsetOf(Table, "user_code_32") == 0x38);
+        std.assert(@offsetOf(Table, "user_data") == 0x40);
+        std.assert(@offsetOf(Table, "user_code_64") == 0x48);
+        std.assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
     }
 
     pub fn initial_setup(gdt: *Table, cpu_id: u64) void {
@@ -35,8 +38,19 @@ pub const Table = packed struct {
             .tss = bootstrap_tss.get_descriptor(),
         };
         gdt.load();
-        x86_64.flush_segments_kernel();
-        x86_64.preset_thread_pointer(cpu_id);
+
+        // Flush segments
+        asm volatile (
+            \\xor %%rax, %%rax
+            \\mov %[data_segment_selector], %%rax
+            \\mov %%rax, %%ds
+            \\mov %%rax, %%es
+            \\mov %%rax, %%fs
+            \\mov %%rax, %%gs
+            :
+            : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
+        );
+        TLS.preset(cpu_id);
         log.debug("GDT loaded", .{});
     }
 

@@ -1,10 +1,10 @@
-const common = @import("../../../common.zig");
+const std = @import("../../../common/std.zig");
 
 pub const Register = packed struct {
     limit: u16,
     address: u64,
 
     comptime {
-        common.comptime_assert(@sizeOf(Register) == 10);
+        std.assert(@sizeOf(Register) == 10);
     }
 };

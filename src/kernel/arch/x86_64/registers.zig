@@ -1,5 +1,7 @@
 const std = @import("../../../common/std.zig");
 
+const Bitflag = @import("../../../common/bitflag.zig").Bitflag;
+
 pub const rax = SimpleR64("rax");
 pub const rbx = SimpleR64("rbx");
 pub const rcx = SimpleR64("rcx");
@@ -49,7 +51,7 @@ pub const cr4 = ComplexR64("cr4", CR4Flags);
 pub const cr8 = SimpleR64("cr8");
 
 pub const RFLAGS = struct {
-    pub const Flags = std.Bitflag(false, u64, enum(u6) {
+    pub const Flags = Bitflag(false, u64, enum(u6) {
         CF = 0,
         PF = 2,
         AF = 4,
@@ -516,7 +518,7 @@ pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
     return struct {
         pub const BitEnum = _BitEnum;
 
-        pub const Flags = std.Bitflag(false, u64, BitEnum);
+        pub const Flags = Bitflag(false, u64, BitEnum);
         pub inline fn read() Flags {
             var low: u32 = undefined;
             var high: u32 = undefined;

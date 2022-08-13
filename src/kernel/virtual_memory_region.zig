@@ -1,7 +1,7 @@
 const VirtualMemoryRegion = @This();
 
-const common = @import("../common.zig");
-const VirtualAddress = common.VirtualAddress;
+const std = @import("../common/std.zig");
+const VirtualAddress = @import("virtual_address.zig");
 
 address: VirtualAddress,
 size: u64,

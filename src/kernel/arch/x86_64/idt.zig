@@ -1,12 +1,12 @@
-const common = @import("../../../common.zig");
-
-const x86_64 = common.arch.x86_64;
-const Interrupt = x86_64.interrupts;
-const DescriptorTable = x86_64.DescriptorTable;
-const GDT = x86_64.GDT;
 const IDT = @This();
 
-const log = common.log.scoped(.IDT);
+const std = @import("../../../common/std.zig");
+
+const interrupts = @import("interrupts.zig");
+const DescriptorTable = @import("descriptor_table.zig");
+const GDT = @import("gdt.zig");
+
+const log = std.log.scoped(.IDT);
 
 entries: [entry_count]Descriptor,
 
@@ -26,10 +26,10 @@ pub const Descriptor = packed struct {
     reserved2: u32 = 0,
 
     comptime {
-        common.comptime_assert(@sizeOf(Descriptor) == 2 * @sizeOf(u64));
+        std.assert(@sizeOf(Descriptor) == 2 * @sizeOf(u64));
     }
 
-    pub fn from_handler(handler: Interrupt.Handler) Descriptor {
+    pub fn from_handler(handler: interrupts.Handler) Descriptor {
         const handler_address = @ptrToInt(handler);
         return IDT.Descriptor{
             .offset_low = @truncate(u16, handler_address),

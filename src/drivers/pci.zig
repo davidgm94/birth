@@ -1,16 +1,20 @@
 const Controller = @This();
 // TODO: batch PCI register access
 
-const kernel = @import("root");
-const common = @import("../common.zig");
+const std = @import("../common/std.zig");
 
-const log = common.log.scoped(.PCI);
-const TODO = common.TODO;
-const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-const PhysicalAddress = common.PhysicalAddress;
+const Bitflag = @import("../common/bitflag.zig").Bitflag;
+const crash = @import("../kernel/crash.zig");
+const PhysicalAddress = @import("../kernel/physical_address.zig");
+const PhysicalMemoryRegion = @import("../kernel/physical_memory_region.zig");
+const VirtualAddress = @import("../kernel/virtual_address.zig");
+const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+const PCI = @import("../kernel/arch/pci.zig");
+const io = @import("../kernel/arch/io.zig");
 
-const x86_64 = common.arch.x86_64;
+const log = std.log.scoped(.PCI);
+const TODO = crash.TODO;
+const panic = crash.panic;
 
 devices: []Device,
 
@@ -25,9 +29,6 @@ const BusScanState = enum(u8) {
     scan_next = 1,
     scanned = 2,
 };
-
-const pci_read_config = common.arch.pci_read_config;
-const pci_write_config = common.arch.pci_read_config;
 
 pub const CommonHeader = packed struct {
     vendor_id: u16,
@@ -44,7 +45,7 @@ pub const CommonHeader = packed struct {
     bist: u8,
 
     comptime {
-        common.comptime_assert(@sizeOf(@This()) == 0x10);
+        std.assert(@sizeOf(@This()) == 0x10);
     }
 };
 
@@ -82,13 +83,13 @@ pub const HeaderType0x00 = packed struct {
     max_latency: u8,
 
     comptime {
-        common.comptime_assert(@sizeOf(@This()) == 0x40);
+        std.assert(@sizeOf(@This()) == 0x40);
     }
 };
 
 fn check_vendor(bus: u8, slot: u8, function: u8) bool {
     const vendor_id = read_field_from_header(CommonHeader, "vendor_id", bus, slot, function);
-    return vendor_id != common.max_int(u16);
+    return vendor_id != std.max_int(u16);
 }
 
 const HeaderType = enum(u8) {
@@ -98,10 +99,10 @@ const HeaderType = enum(u8) {
 };
 
 fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void {
-    var bus_scan_states = common.zeroes([256]BusScanState);
+    var bus_scan_states = std.zeroes([256]BusScanState);
     var base_function: u8 = 0;
     const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
-    common.runtime_assert(@src(), base_header_type == 0x0);
+    std.assert(@src(), base_header_type == 0x0);
     const base_function_count: u8 = if (base_header_type & 0x80 != 0) 8 else 1;
     var buses_to_scan: u8 = 0;
     while (base_function < base_function_count) : (base_function += 1) {
@@ -112,10 +113,10 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
 
     const original_bus_to_scan_count = buses_to_scan;
 
-    if (buses_to_scan == 0) kernel.crash("unable to find any PCI bus", .{});
+    if (buses_to_scan == 0) panic("unable to find any PCI bus", .{});
 
     base_function = 0;
-    common.runtime_assert(@src(), base_function == 0);
+    std.assert(@src(), base_function == 0);
     var device_count: u64 = 0;
     // First scan the buses to find out how many PCI devices the computer has
     while (buses_to_scan > 0) {
@@ -157,7 +158,7 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
         bus_scan_states[base_function] = .scan_next;
     }
 
-    common.runtime_assert(@src(), device_count > 0);
+    std.assert(@src(), device_count > 0);
     if (device_count > 0) {
         buses_to_scan = original_bus_to_scan_count;
         pci.devices = virtual_address_space.heap.allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
@@ -165,7 +166,7 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
         var registered_device_count: u64 = 0;
 
         base_function = 0;
-        common.runtime_assert(@src(), base_function == 0);
+        std.assert(@src(), base_function == 0);
 
         while (buses_to_scan > 0) {
             var bus_i: u9 = 0;
@@ -291,7 +292,7 @@ pub const FindDeviceResult = struct {
 };
 
 pub fn find_devices(driver: *Controller, class_code: u16, subclass_code: u16) FindDeviceResult {
-    var result = common.zeroes(FindDeviceResult);
+    var result = std.zeroes(FindDeviceResult);
     for (driver.devices) |*device| {
         if (device.class_code == class_code and device.subclass_code == subclass_code) {
             result.devices[result.count] = device;
@@ -321,18 +322,18 @@ pub const Device = struct {
     bar_physical_addresses: [6]PhysicalAddress,
 
     pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
-        return common.arch.pci_read_config(T, device.bus, device.slot, device.function, offset);
+        return PCI.read_config(T, device.bus, device.slot, device.function, offset);
     }
 
     pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8) void {
-        return common.arch.pci_write_config(T, value, device.bus, device.slot, device.function, offset);
+        return PCI.write_config(T, value, device.bus, device.slot, device.function, offset);
     }
 
     pub inline fn read_bar(device: *Device, comptime T: type, index: u64, offset: u64) T {
-        const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+        const IntType = std.IntType(.unsigned, @bitSizeOf(T));
         comptime {
-            common.comptime_assert(@sizeOf(T) >= @sizeOf(u32));
-            common.comptime_assert(@sizeOf(T) <= @sizeOf(u64));
+            std.assert(@sizeOf(T) >= @sizeOf(u32));
+            std.assert(@sizeOf(T) <= @sizeOf(u64));
         }
 
         const base_address = device.base_addresses[index];
@@ -350,7 +351,7 @@ pub const Device = struct {
         } else {
             if (T != u64) {
                 const port = @intCast(u16, (base_address & ~@as(u32, 3)) + offset);
-                return common.arch.io_read(T, port);
+                return io.read(T, port);
             } else {
                 return device.read_bar(u32, index, offset) | (@intCast(u64, device.read_bar(u64, index, offset + @sizeOf(u32))) << 32);
             }
@@ -358,10 +359,10 @@ pub const Device = struct {
     }
 
     pub fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
-        const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+        const IntType = std.IntType(.unsigned, @bitSizeOf(T));
         comptime {
-            common.comptime_assert(@sizeOf(T) >= @sizeOf(u32));
-            common.comptime_assert(@sizeOf(T) <= @sizeOf(u64));
+            std.assert(@sizeOf(T) >= @sizeOf(u32));
+            std.assert(@sizeOf(T) <= @sizeOf(u64));
         }
         const base_address = device.base_addresses[index];
         const do_mmio = base_address & 1 == 0;
@@ -374,7 +375,7 @@ pub const Device = struct {
         } else {
             if (T != u64) {
                 const port = @intCast(u16, (base_address & ~@as(@TypeOf(base_address), 3)) + offset);
-                common.arch.io_write(T, port, value);
+                io.write(T, port, value);
             } else {
                 device.write_bar(u32, index, offset, @truncate(u32, value));
                 device.write_bar(u32, index, offset + @sizeOf(u32), @truncate(u32, value >> 32));
@@ -382,7 +383,7 @@ pub const Device = struct {
         }
     }
 
-    pub const Features = common.Bitflag(false, u64, enum(u6) {
+    pub const Features = Bitflag(false, u64, enum(u6) {
         bar0 = 0,
         bar1 = 1,
         bar2 = 2,
@@ -425,8 +426,8 @@ pub const Device = struct {
             var size: u64 = 0;
 
             if (is_size_64) {
-                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i));
-                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
+                device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
                 size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
                 size |= @intCast(u64, device.read_config(u32, 0x10 + 4 * @intCast(u8, i + 1))) << 32;
                 device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
@@ -434,9 +435,9 @@ pub const Device = struct {
                 address = base_address;
                 address |= @intCast(u64, device.base_addresses[i + 1]) << 32;
             } else {
-                device.write_config(u32, common.max_int(u32), 0x10 + 4 * @intCast(u8, i));
+                device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i));
                 size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
-                size |= @as(u64, common.max_int(u32)) << 32;
+                size |= @as(u64, std.max_int(u32)) << 32;
                 device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
                 address = base_address;
             }
@@ -449,7 +450,7 @@ pub const Device = struct {
 
             device.base_physical_addresses[i] = PhysicalAddress.new(address);
             device.base_virtual_addresses[i] = device.base_physical_addresses[i].to_higher_half_virtual_address();
-            const physical_region = common.PhysicalMemoryRegion.new(device.base_physical_addresses[i], size);
+            const physical_region = PhysicalMemoryRegion.new(device.base_physical_addresses[i], size);
             virtual_address_space.map_physical_region(physical_region, device.base_virtual_addresses[i], .{ .write = true, .cache_disable = true });
 
             log.debug("Virtual 0x{x}. Physical 0x{x}", .{ device.base_virtual_addresses[i].value, device.base_physical_addresses[i].value });
@@ -479,12 +480,12 @@ pub const Device = struct {
 
         const is_size_64 = bar & 0b100 != 0;
         log.debug("Is size 64: {}", .{is_size_64});
-        common.runtime_assert(@src(), !is_size_64);
+        std.assert(@src(), !is_size_64);
         const bar_header_offset = @offsetOf(HeaderType0x00, "bar0") + (@sizeOf(u32) * bar_i);
-        device.write_config(u32, common.max_int(u32), bar_header_offset);
+        device.write_config(u32, std.max_int(u32), bar_header_offset);
         const size1 = device.read_config(u32, bar_header_offset);
-        const size2 = size1 | (@as(u64, common.max_int(u32)) << 32);
-        common.runtime_assert(@src(), size2 != 0);
+        const size2 = size1 | (@as(u64, std.max_int(u32)) << 32);
+        std.assert(@src(), size2 != 0);
         device.write_config(u32, bar, bar_header_offset);
 
         const size3 = size2 & 0xffff_ffff_ffff_fff0;
@@ -494,57 +495,8 @@ pub const Device = struct {
         device.bar_physical_addresses[bar_i] = physical_address;
         device.bar_sizes[bar_i] = size;
         const virtual_address = physical_address.to_higher_half_virtual_address();
-        const physical_memory_region = common.PhysicalMemoryRegion.new(physical_address, size);
+        const physical_memory_region = PhysicalMemoryRegion.new(physical_address, size);
         virtual_address_space.map_physical_region(physical_memory_region, virtual_address, .{ .write = true, .cache_disable = true });
-    }
-
-    pub fn enable_single_interrupt(device: *Device, virtual_address_space: *VirtualAddressSpace, handler: x86_64.interrupts.HandlerInfo) bool {
-        if (device.enable_MSI(handler)) return true;
-        if (device.interrupt_pin == 0) return false;
-        if (device.interrupt_pin > 4) return false;
-
-        const result = device.enable_features(Features.from_flag(.interrupts), virtual_address_space);
-        common.runtime_assert(@src(), result);
-
-        // TODO: consider some stuff Essence does?
-        const interrupt_line: ?u64 = null;
-
-        if (handler.register_IRQ(interrupt_line, device)) {
-            return true;
-        }
-
-        TODO(@src());
-    }
-
-    pub fn enable_MSI(device: *Device, handler: x86_64.interrupts.HandlerInfo) bool {
-        _ = handler;
-        const status = device.read_config(u32, 0x04) >> 16;
-
-        if (~status & (1 << 4) != 0) return false;
-
-        var pointer = device.read_config(u8, 0x34);
-        var index: u64 = 0;
-
-        while (true) {
-            if (pointer == 0) break;
-            if (index >= 0xff) break;
-            index += 1;
-
-            const dw = device.read_config(u32, pointer);
-            const next_pointer = @truncate(u8, dw >> 8);
-            const id = @truncate(u8, dw);
-
-            if (id != 5) {
-                pointer = next_pointer;
-                continue;
-            }
-
-            // TODO: maybe this is a bug.NVMe should support MSI
-            TODO(@src());
-            //const msi =
-        }
-
-        return false;
     }
 
     pub fn read_field(device: *Device, comptime HT: type, comptime field_name: []const u8) TypeFromFieldName(HT, field_name) {
@@ -556,7 +508,7 @@ pub const Device = struct {
 // TODO: Maybe it's required to implement an extended function which accepts a non-harcoded offset of the field?
 fn read_field_from_header(comptime HT: type, comptime field_name: []const u8, bus: u8, slot: u8, function: u8) TypeFromFieldName(HT, field_name) {
     const FieldType = TypeFromFieldName(HT, field_name);
-    return pci_read_config(FieldType, bus, slot, function, @offsetOf(HT, field_name));
+    return PCI.read_config(FieldType, bus, slot, function, @offsetOf(HT, field_name));
 }
 
 fn TypeFromFieldName(comptime HeaderT: type, comptime field_name: []const u8) type {

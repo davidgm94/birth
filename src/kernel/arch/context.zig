@@ -5,5 +5,5 @@ pub usingnamespace switch (std.cpu.arch) {
 };
 
 comptime {
-    if (std.os.tag != .freestanding) @compileError("This file is not supposed to be included in build.zig");
+    if (std.os != .freestanding) @compileError("This file is not supposed to be included in build.zig");
 }

@@ -1,6 +1,5 @@
 const Region = @This();
-const common = @import("../common.zig");
-const PhysicalAddress = common.PhysicalAddress;
+const PhysicalAddress = @import("physical_address.zig");
 address: PhysicalAddress,
 size: u64,
 

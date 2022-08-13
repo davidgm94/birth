@@ -1,13 +1,15 @@
 const PhysicalAddressSpace = @This();
 
-const common = @import("../common.zig");
+const std = @import("../common/std.zig");
+
 const context = @import("context");
-const log = common.log.scoped(.PhysicalAddressSpace);
-const TODO = common.TODO;
-const PhysicalAddress = common.PhysicalAddress;
-const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
-const IsHigherHalfMappedAlready = common.IsHigherHalfMappedAlready;
-const Spinlock = common.arch.Spinlock;
+const crash = @import("crash.zig");
+const PhysicalAddress = @import("physical_address.zig");
+const PhysicalMemoryRegion = @import("physical_memory_region.zig");
+const Spinlock = @import("spinlock.zig");
+
+const log = std.log.scoped(.PhysicalAddressSpace);
+const TODO = crash.TODO;
 
 usable: []MapEntry,
 reclaimable: []MapEntry,
@@ -31,7 +33,7 @@ pub fn new() PhysicalAddressSpace {
 pub fn find_address(physical_address_space: *PhysicalAddressSpace, address: PhysicalAddress) void {
     _ = physical_address_space;
     _ = address;
-    TODO(@src());
+    TODO();
 }
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) ?PhysicalAddress {
@@ -52,7 +54,7 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) 
             const region_page_count = region.descriptor.size / page_size;
             const supposed_bitset_size = region_page_count / @bitSizeOf(MapEntry.BitsetBaseType);
             const bitset = region.get_bitset_extended(page_size);
-            common.runtime_assert(@src(), bitset.len >= supposed_bitset_size);
+            std.assert(bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
             const allocated_page_count = region.allocated_size / page_size;
 
@@ -83,18 +85,18 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) 
             if (region_allocated_page_count == page_count) {
                 const result = first_address;
                 region.allocated_size += region_allocated_page_count * page_size;
-                common.runtime_assert(@src(), result != 0);
+                std.assert(result != 0);
                 return PhysicalAddress.new(result);
             }
 
-            common.runtime_assert(@src(), region.allocated_size + size > region.descriptor.size);
-            common.runtime_assert(@src(), first_address != 0);
+            std.assert(region.allocated_size + size > region.descriptor.size);
+            std.assert(first_address != 0);
             const original_allocated_size = region.allocated_size - (region_allocated_page_count * page_size);
             const original_allocated_page_count = original_allocated_size / page_size;
             var byte = original_allocated_page_count / @bitSizeOf(u64);
             var bit = original_allocated_page_count % @bitSizeOf(u64);
 
-            common.runtime_assert(@src(), region_allocated_page_count > 0);
+            std.assert(region_allocated_page_count > 0);
 
             if (bit > 0) {
                 while (bit < @bitSizeOf(u64)) : (bit += 1) {
@@ -133,8 +135,8 @@ pub const MapEntry = struct {
     pub const BitsetBaseType = u64;
 
     pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64, page_size: u64) []BitsetBaseType {
-        const page_count = common.bytes_to_pages(size, page_size, .must_be_exact);
-        const bitset_len = common.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
+        const page_count = std.bytes_to_pages(size, page_size, .must_be_exact);
+        const bitset_len = std.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
         return physical_address.access_kernel([*]BitsetBaseType)[0..bitset_len];
     }
 
@@ -143,17 +145,17 @@ pub const MapEntry = struct {
     }
 
     pub fn setup_bitset(entry: *MapEntry, page_size: u64) void {
-        const page_count = common.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
+        const page_count = std.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
         const remainder_bitsize_max: u64 = bitsize - 1;
         const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
-        const remainder = @intCast(common.IntType(.unsigned, popcount), page_count % bitsize);
+        const remainder = @intCast(std.IntType(.unsigned, popcount), page_count % bitsize);
 
         const bitset = entry.get_bitset_extended(page_size);
 
         for (bitset[0..quotient]) |*bitset_elem| {
-            bitset_elem.* = common.max_int(BitsetBaseType);
+            bitset_elem.* = std.max_int(BitsetBaseType);
         }
 
         var remainder_i: @TypeOf(remainder) = 0;

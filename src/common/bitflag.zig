@@ -6,7 +6,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime BackingType: type, comptime 
         pub const Int = BackingType;
         const EnumBitSize = @popCount(u64, @bitSizeOf(BackingType) - 1);
         comptime {
-            std.comptime_assert(EnumBitSize == @bitSizeOf(EnumT));
+            std.assert(EnumBitSize == @bitSizeOf(EnumT));
         }
         const Ptr = if (is_volatile) *volatile @This() else *@This();
 

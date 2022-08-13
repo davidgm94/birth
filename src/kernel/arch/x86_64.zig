@@ -23,7 +23,7 @@ const Syscall = @import("x86_64/syscall.zig");
 const Stivale2 = @import("x86_64/limine/stivale2/stivale2.zig");
 const TSS = @import("x86_64/tss.zig");
 
-pub const DefaultWriter = SerialWriter;
+pub const DefaultLogWriter = SerialWriter;
 pub const Spinlock = @import("x86_64/spinlock.zig");
 pub const TLS = @import("x86_64/tls.zig");
 
@@ -87,7 +87,6 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub const timer_interrupt = 0x40;
 pub const spurious_vector: u8 = 0xFF;
 
 pub fn enable_apic(virtual_address_space: *VirtualAddressSpace) void {
@@ -164,70 +163,6 @@ pub fn cpu_start(virtual_address_space: *VirtualAddressSpace) void {
     log.debug("Scheduler pre-initialization finished!", .{});
 }
 
-pub const IOPort = struct {
-    pub const DMA1 = 0x0000;
-    pub const PIC1 = 0x0020;
-    pub const Cyrix_MSR = 0x0022;
-    pub const PIT_data = 0x0040;
-    pub const PIT_command = 0x0043;
-    pub const PS2 = 0x0060;
-    pub const CMOS_RTC = 0x0070;
-    pub const DMA_page_registers = 0x0080;
-    pub const A20 = 0x0092;
-    pub const PIC2 = 0x00a0;
-    pub const DMA2 = 0x00c0;
-    pub const E9_hack = 0x00e9;
-    pub const ATA2 = 0x0170;
-    pub const ATA1 = 0x01f0;
-    pub const parallel_port = 0x0278;
-    pub const serial2 = 0x02f8;
-    pub const IBM_VGA = 0x03b0;
-    pub const floppy = 0x03f0;
-    pub const serial1 = 0x03f8;
-    pub const PCI_config = 0x0cf8;
-    pub const PCI_data = 0x0cfc;
-};
-
-pub inline fn io_read(comptime T: type, port: u16) T {
-    return switch (T) {
-        u8 => asm volatile ("inb %[port], %[result]"
-            : [result] "={al}" (-> u8),
-            : [port] "N{dx}" (port),
-        ),
-        u16 => asm volatile ("inw %[port], %[result]"
-            : [result] "={ax}" (-> u16),
-            : [port] "N{dx}" (port),
-        ),
-        u32 => asm volatile ("inl %[port], %[result]"
-            : [result] "={eax}" (-> u32),
-            : [port] "N{dx}" (port),
-        ),
-
-        else => unreachable,
-    };
-}
-
-pub inline fn io_write(comptime T: type, port: u16, value: T) void {
-    switch (T) {
-        u8 => asm volatile ("outb %[value], %[port]"
-            :
-            : [value] "{al}" (value),
-              [port] "N{dx}" (port),
-        ),
-        u16 => asm volatile ("outw %[value], %[port]"
-            :
-            : [value] "{ax}" (value),
-              [port] "N{dx}" (port),
-        ),
-        u32 => asm volatile ("outl %[value], %[port]"
-            :
-            : [value] "{eax}" (value),
-              [port] "N{dx}" (port),
-        ),
-        else => unreachable,
-    }
-}
-
 pub fn get_physical_address_memory_configuration() void {
     context.max_physical_address_bit = CPUID.get_max_physical_address_bit();
 }
@@ -298,68 +233,21 @@ fn page_table_level_count_to_bit_map(level: u8) u8 {
     };
 }
 
-pub const LAPIC = struct {
-    // TODO: LAPIC address is shared. Ticks per ms too? Refactor this struct
-    address: VirtualAddress,
-    ticks_per_ms: u32 = 0,
-    id: u32,
-
-    const Register = enum(u32) {
-        LAPIC_ID = 0x20,
-        EOI = 0xB0,
-        SPURIOUS = 0xF0,
-        ERROR_STATUS_REGISTER = 0x280,
-        ICR_LOW = 0x300,
-        ICR_HIGH = 0x310,
-        LVT_TIMER = 0x320,
-        TIMER_DIV = 0x3E0,
-        TIMER_INITCNT = 0x380,
-        TIMER_CURRENT_COUNT = 0x390,
-    };
-
-    pub inline fn new(virtual_address_space: *VirtualAddressSpace, lapic_physical_address: PhysicalAddress, lapic_id: u32) LAPIC {
-        const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
-        log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-        std.assert(virtual_address_space.translate_address(lapic_virtual_address) != null);
-        log.debug("Checking assert", .{});
-
-        std.assert((virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
-        const lapic = LAPIC{
-            .address = lapic_virtual_address,
-            .id = lapic_id,
-        };
-        log.debug("LAPIC initialized: 0x{x}", .{lapic_virtual_address.value});
-        return lapic;
-    }
-
-    pub inline fn read(lapic: LAPIC, comptime register: LAPIC.Register) u32 {
-        const register_index = @enumToInt(register) / @sizeOf(u32);
-        const result = lapic.address.access([*]volatile u32)[register_index];
-        return result;
-    }
-
-    pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void {
-        const register_index = @enumToInt(register) / @sizeOf(u32);
-        lapic.address.access([*]volatile u32)[register_index] = value;
-    }
-
-    pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
-        std.assert(lapic.ticks_per_ms != 0);
-        lapic.write(.LVT_TIMER, timer_interrupt | (1 << 17));
-        lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
-    }
-
-    pub inline fn end_of_interrupt(lapic: LAPIC) void {
-        log.debug("Signaling end of interrupt", .{});
-        lapic.write(.EOI, 0);
-    }
-};
 
 pub inline fn next_timer(ms: u32) void {
     const current_cpu = TLS.get_current().cpu orelse @panic("current cpu not set");
     current_cpu.lapic.next_timer(ms);
 }
 
+pub inline fn spinloop_without_wasting_cpu() noreturn {
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+        );
+        asm volatile ("pause" ::: "memory");
+    }
+}
 
 pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *VirtualAddressSpace, stack_size: u64) void {
     std.assert(std.is_aligned(stack_size, context.page_size));
@@ -380,67 +268,6 @@ pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *VirtualAddressSpace
 export fn thread_terminate(thread: *Thread) void {
     _ = thread;
     TODO();
-}
-
-pub inline fn flush_segments_kernel() void {
-    asm volatile (
-        \\xor %%rax, %%rax
-        \\mov %[data_segment_selector], %%rax
-        \\mov %%rax, %%ds
-        \\mov %%rax, %%es
-        \\mov %%rax, %%fs
-        \\mov %%rax, %%gs
-        :
-        : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
-    );
-}
-
-var pci_lock: Spinlock = undefined;
-
-inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
-    io_write(u32, IOPort.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
-}
-
-pub fn pci_read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8) T {
-    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
-    pci_lock.acquire();
-    defer pci_lock.release();
-
-    notify_config_op(bus, slot, function, offset);
-    const result_int = io_read(IntType, IOPort.PCI_data + @intCast(u16, offset % 4));
-    switch (@typeInfo(T)) {
-        .Enum => {
-            const result = @intToEnum(T, result_int);
-            return result;
-        },
-        else => {
-            const result = @bitCast(T, result_int);
-            return result;
-        },
-    }
-}
-
-pub fn pci_write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8, offset: u8) void {
-    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
-    pci_lock.acquire();
-    defer pci_lock.release();
-
-    std.assert(std.is_aligned(offset, 4));
-    notify_config_op(bus, slot, function, offset);
-
-    io_write(IntType, IOPort.PCI_data + @intCast(u16, offset % 4), value);
-}
-
-pub inline fn spinloop_without_wasting_cpu() noreturn {
-    while (true) {
-        asm volatile (
-            \\cli
-            \\hlt
-        );
-        asm volatile ("pause" ::: "memory");
-    }
 }
 
 pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
