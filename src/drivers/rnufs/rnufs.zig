@@ -4,11 +4,9 @@ const std = @import("../../common/std.zig");
 
 const RNUFS = @import("../../common/rnufs.zig");
 const crash = @import("../../kernel/crash.zig");
-const drivers = @import("../../kernel/drivers.zig");
-const Filesystem = drivers.Filesystem;
-const GenericDriver = drivers.Driver;
-const Disk = drivers.Disk;
-const DMA = drivers.DMA;
+const Filesystem = @import("../filesystem.zig");
+const Disk = @import("../disk.zig");
+const DMA = @import("../dma.zig");
 const VirtualAddressSpace = @import("../../kernel/virtual_address_space.zig");
 
 const log = std.log.scoped(.RNUFS);

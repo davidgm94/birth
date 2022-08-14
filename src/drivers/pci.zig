@@ -5,6 +5,7 @@ const std = @import("../common/std.zig");
 
 const Bitflag = @import("../common/bitflag.zig").Bitflag;
 const crash = @import("../kernel/crash.zig");
+const DeviceManager = @import("../kernel/device_manager.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const PhysicalMemoryRegion = @import("../kernel/physical_memory_region.zig");
 const VirtualAddress = @import("../kernel/virtual_address.zig");
@@ -20,8 +21,11 @@ devices: []Device,
 
 pub var controller: Controller = undefined;
 
-pub fn init(virtual_address_space: *VirtualAddressSpace) void {
-    controller.enumerate(virtual_address_space);
+const Error = error{
+    no_device_found,
+};
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime child_drivers: []const type) !void {
+    try enumerate(device_manager, virtual_address_space, child_drivers);
 }
 
 const BusScanState = enum(u8) {
@@ -98,13 +102,16 @@ const HeaderType = enum(u8) {
     x2 = 2,
 };
 
-fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void {
+fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime child_drivers: []const type) !void {
+    _ = device_manager;
+    _ = virtual_address_space;
     var bus_scan_states = std.zeroes([256]BusScanState);
     var base_function: u8 = 0;
     const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
-    std.assert(@src(), base_header_type == 0x0);
+    std.assert(base_header_type == 0x0);
     const base_function_count: u8 = if (base_header_type & 0x80 != 0) 8 else 1;
     var buses_to_scan: u8 = 0;
+
     while (base_function < base_function_count) : (base_function += 1) {
         if (!check_vendor(0, 0, base_function)) continue;
         bus_scan_states[base_function] = .scan_next;
@@ -116,7 +123,7 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
     if (buses_to_scan == 0) panic("unable to find any PCI bus", .{});
 
     base_function = 0;
-    std.assert(@src(), base_function == 0);
+    std.assert(base_function == 0);
     var device_count: u64 = 0;
     // First scan the buses to find out how many PCI devices the computer has
     while (buses_to_scan > 0) {
@@ -158,71 +165,78 @@ fn enumerate(pci: *Controller, virtual_address_space: *VirtualAddressSpace) void
         bus_scan_states[base_function] = .scan_next;
     }
 
-    std.assert(@src(), device_count > 0);
-    if (device_count > 0) {
-        buses_to_scan = original_bus_to_scan_count;
-        pci.devices = virtual_address_space.heap.allocator.alloc(Device, device_count) catch @panic("unable to allocate pci devices");
+    if (device_count == 0) {
+        return Error.no_device_found;
+    }
 
-        var registered_device_count: u64 = 0;
+    buses_to_scan = original_bus_to_scan_count;
 
-        base_function = 0;
-        std.assert(@src(), base_function == 0);
+    var registered_device_count: u64 = 0;
 
-        while (buses_to_scan > 0) {
-            var bus_i: u9 = 0;
-            while (bus_i < 256) : (bus_i += 1) {
-                const bus = @intCast(u8, bus_i);
-                if (bus_scan_states[bus] != .scan_next) continue;
+    base_function = 0;
+    std.assert(base_function == 0);
 
-                bus_scan_states[bus] = .scanned;
-                buses_to_scan -= 1;
+    while (buses_to_scan > 0) {
+        var bus_i: u9 = 0;
+        while (bus_i < 256) : (bus_i += 1) {
+            const bus = @intCast(u8, bus_i);
+            if (bus_scan_states[bus] != .scan_next) continue;
 
-                var device: u8 = 0;
+            bus_scan_states[bus] = .scanned;
+            buses_to_scan -= 1;
 
-                while (device < 32) : (device += 1) {
-                    if (!check_vendor(bus, device, base_function)) continue;
+            var device: u8 = 0;
 
-                    const header_type = read_field_from_header(CommonHeader, "header_type", bus, device, base_function);
-                    const function_count: u8 = if (header_type & 0x80 != 0) 8 else 1;
-                    var function: u8 = 0;
+            while (device < 32) : (device += 1) {
+                if (!check_vendor(bus, device, base_function)) continue;
 
-                    while (function < function_count) : (function += 1) {
-                        if (!check_vendor(bus, device, function)) continue;
+                const header_type = read_field_from_header(CommonHeader, "header_type", bus, device, base_function);
+                const function_count: u8 = if (header_type & 0x80 != 0) 8 else 1;
+                var function: u8 = 0;
 
-                        const pci_device = &pci.devices[registered_device_count];
-                        registered_device_count += 1;
+                while (function < function_count) : (function += 1) {
+                    if (!check_vendor(bus, device, function)) continue;
 
-                        pci_device.bus = bus;
-                        pci_device.slot = device;
-                        pci_device.function = function;
+                    registered_device_count += 1;
+                    var pci_device: Device = undefined;
 
-                        pci_device.class_code = pci_device.read_field(CommonHeader, "class_code");
-                        pci_device.subclass_code = pci_device.read_field(CommonHeader, "subclass_code");
-                        pci_device.prog_if = pci_device.read_field(CommonHeader, "prog_if");
+                    pci_device.bus = bus;
+                    pci_device.slot = device;
+                    pci_device.function = function;
 
-                        pci_device.interrupt_pin = pci_device.read_field(HeaderType0x00, "interrupt_pin");
-                        pci_device.interrupt_line = pci_device.read_field(HeaderType0x00, "interrupt_line");
+                    pci_device.class_code = pci_device.read_field(CommonHeader, "class_code");
+                    pci_device.subclass_code = pci_device.read_field(CommonHeader, "subclass_code");
+                    pci_device.prog_if = pci_device.read_field(CommonHeader, "prog_if");
 
-                        pci_device.device_id = pci_device.read_field(CommonHeader, "device_id");
-                        pci_device.vendor_id = pci_device.read_field(CommonHeader, "vendor_id");
-                        pci_device.subsystem_id = pci_device.read_field(HeaderType0x00, "subsystem_id");
-                        pci_device.subsystem_vendor_id = pci_device.read_field(HeaderType0x00, "subsystem_vendor_id");
+                    pci_device.interrupt_pin = pci_device.read_field(HeaderType0x00, "interrupt_pin");
+                    pci_device.interrupt_line = pci_device.read_field(HeaderType0x00, "interrupt_line");
 
-                        pci_device.bars[0] = pci_device.read_field(HeaderType0x00, "bar0");
-                        pci_device.bars[1] = pci_device.read_field(HeaderType0x00, "bar1");
-                        pci_device.bars[2] = pci_device.read_field(HeaderType0x00, "bar2");
-                        pci_device.bars[3] = pci_device.read_field(HeaderType0x00, "bar3");
-                        pci_device.bars[4] = pci_device.read_field(HeaderType0x00, "bar4");
-                        pci_device.bars[5] = pci_device.read_field(HeaderType0x00, "bar5");
+                    pci_device.device_id = pci_device.read_field(CommonHeader, "device_id");
+                    pci_device.vendor_id = pci_device.read_field(CommonHeader, "vendor_id");
+                    pci_device.subsystem_id = pci_device.read_field(HeaderType0x00, "subsystem_id");
+                    pci_device.subsystem_vendor_id = pci_device.read_field(HeaderType0x00, "subsystem_vendor_id");
 
-                        const class_code_name = if (pci_device.class_code < class_code_names.len) class_code_names[pci_device.class_code] else "Unknown";
-                        const subclass_code_name = switch (pci_device.class_code) {
-                            1 => if (pci_device.subclass_code < subclass1_code_names.len) subclass1_code_names[pci_device.subclass_code] else "",
-                            12 => if (pci_device.subclass_code < subclass12_code_names.len) subclass12_code_names[pci_device.subclass_code] else "",
-                            else => "",
-                        };
+                    pci_device.bars[0] = pci_device.read_field(HeaderType0x00, "bar0");
+                    pci_device.bars[1] = pci_device.read_field(HeaderType0x00, "bar1");
+                    pci_device.bars[2] = pci_device.read_field(HeaderType0x00, "bar2");
+                    pci_device.bars[3] = pci_device.read_field(HeaderType0x00, "bar3");
+                    pci_device.bars[4] = pci_device.read_field(HeaderType0x00, "bar4");
+                    pci_device.bars[5] = pci_device.read_field(HeaderType0x00, "bar5");
 
-                        log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: 0x{x}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, pci_device.prog_if });
+                    const class_code_name = if (pci_device.class_code < class_code_names.len) class_code_names[pci_device.class_code] else "Unknown";
+                    const subclass_code_name = switch (pci_device.class_code) {
+                        1 => if (pci_device.subclass_code < subclass1_code_names.len) subclass1_code_names[pci_device.subclass_code] else "",
+                        12 => if (pci_device.subclass_code < subclass12_code_names.len) subclass12_code_names[pci_device.subclass_code] else "",
+                        else => "",
+                    };
+
+                    log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: 0x{x}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, pci_device.prog_if });
+
+                    inline for (child_drivers) |Driver| {
+                        if (Driver.class_code == pci_device.class_code and Driver.subclass_code == pci_device.subclass_code) {
+                            try Driver.init(device_manager, virtual_address_space, pci_device);
+                            break;
+                        }
                     }
                 }
             }
@@ -480,12 +494,12 @@ pub const Device = struct {
 
         const is_size_64 = bar & 0b100 != 0;
         log.debug("Is size 64: {}", .{is_size_64});
-        std.assert(@src(), !is_size_64);
+        std.assert(!is_size_64);
         const bar_header_offset = @offsetOf(HeaderType0x00, "bar0") + (@sizeOf(u32) * bar_i);
         device.write_config(u32, std.max_int(u32), bar_header_offset);
         const size1 = device.read_config(u32, bar_header_offset);
         const size2 = size1 | (@as(u64, std.max_int(u32)) << 32);
-        std.assert(@src(), size2 != 0);
+        std.assert(size2 != 0);
         device.write_config(u32, bar, bar_header_offset);
 
         const size3 = size2 & 0xffff_ffff_ffff_fff0;

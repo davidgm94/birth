@@ -40,5 +40,5 @@ pub var higher_half_direct_map = VirtualAddress.invalid();
 
 pub var main_storage: *Filesystem = undefined;
 
-pub var device_manager: DeviceManager = undefined;
+pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;

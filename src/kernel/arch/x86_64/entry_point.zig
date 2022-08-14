@@ -33,9 +33,9 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     const cpu = current_thread.cpu orelse @panic("cpu");
     cpu.start(&kernel.virtual_address_space);
 
-    drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
-    std.assert(kernel.drivers.Disk.drivers.items.len > 0);
-    std.assert(kernel.drivers.Filesystem.drivers.items.len > 0);
+    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    std.assert(kernel.device_manager.disks.items.len > 0);
+    std.assert(kernel.device_manager.filesystems.items.len > 0);
 
     asm volatile ("int $0x40");
     @panic("This is unreachable");

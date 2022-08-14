@@ -4,7 +4,7 @@ const std = @import("../common/std.zig");
 const crash = @import("../kernel/crash.zig");
 
 const arch = @import("../kernel/arch/common.zig");
-const Drivers = @import("../kernel/drivers.zig");
+const DeviceManager = @import("../kernel/device_manager.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
 const PCI = @import("pci.zig");
@@ -24,29 +24,28 @@ drive_count: u8,
 
 pub const class_code = 0x01;
 pub const subclass_code = 0x06;
-pub const Initialization = struct {
-    pub const Error = error{
-        not_found,
-        allocation_failed,
-    };
-
-    pub fn callback(virtual_address_space: *VirtualAddressSpace, pci: *PCI) Error![]Driver {
-        const found = pci.find_devices(class_code, subclass_code);
-        std.assert(found.count >= 1);
-
-        if (found.count == 0) return &[_]Driver{};
-        log.debug("Found {} AHCI PCI controllers", .{found.count});
-
-        var ahci_drivers = virtual_address_space.heap.allocator.alloc(Driver, found.count) catch return Error.allocation_failed;
-
-        for (ahci_drivers) |*driver, driver_i| {
-            const device = found.devices[driver_i];
-            try driver.initialize(virtual_address_space, device);
-        }
-
-        return ahci_drivers;
-    }
+pub const Initialization = struct {};
+pub const InitError = error{
+    not_found,
+    allocation_failed,
 };
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci: *PCI) InitError![]Driver {
+    _ = device_manager;
+    const found = pci.find_devices(class_code, subclass_code);
+    std.assert(found.count >= 1);
+
+    if (found.count == 0) return &[_]Driver{};
+    log.debug("Found {} AHCI PCI controllers", .{found.count});
+
+    var ahci_drivers = virtual_address_space.heap.allocator.alloc(Driver, found.count) catch return InitError.allocation_failed;
+
+    for (ahci_drivers) |*driver, driver_i| {
+        const device = found.devices[driver_i];
+        try driver.initialize(virtual_address_space, device);
+    }
+
+    return ahci_drivers;
+}
 
 fn initialize(driver: *Driver, virtual_address_space: *VirtualAddressSpace, pci_device: *PCI.Device) Initialization.Error!void {
     driver.pci = pci_device;
@@ -57,7 +56,8 @@ fn initialize(driver: *Driver, virtual_address_space: *VirtualAddressSpace, pci_
     std.assert(driver.drive_count == 1);
     for (driver.drives[0..driver.drive_count]) |*drive| {
         drive.configure(virtual_address_space);
-        Drivers.Driver(Disk, Drive).init(virtual_address_space.heap.allocator, drive) catch panic("Failed to initialized device", .{});
+        @panic("Wtf");
+        //Drivers.Driver(Disk, Drive).init(virtual_address_space.heap.allocator, drive) catch panic("Failed to initialized device", .{});
     }
 }
 

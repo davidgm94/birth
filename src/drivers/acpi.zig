@@ -1,14 +1,17 @@
-const kernel = @import("root");
-const common = @import("../../../common.zig");
-const context = @import("context");
+const std = @import("../common/std.zig");
 
-const x86_64 = common.arch.x86_64;
-const log = common.log.scoped(.ACPI);
-const TODO = common.TODO;
-const PhysicalAddress = common.PhysicalAddress;
-const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-const Allocator = common.Allocator;
+const arch = @import("../kernel/arch/common.zig");
+const crash = @import("../kernel/crash.zig");
+const PhysicalAddress = @import("../kernel/physical_address.zig");
+const interrupts = @import("../kernel/arch/x86_64/interrupts.zig");
+const VirtualAddress = @import("../kernel/virtual_address.zig");
+const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+
+const Allocator = std.Allocator;
+const log = std.log.scoped(.ACPI);
+const page_size = arch.page_size;
+const panic = crash.panic;
+const TODO = crash.TODO;
 
 const Signature = enum(u32) {
     APIC = @ptrCast(*const u32, "APIC").*,
@@ -18,10 +21,14 @@ const Signature = enum(u32) {
     WAET = @ptrCast(*const u32, "WAET").*,
 };
 
+comptime {
+    std.assert(std.cpu.arch == .x86_64);
+}
+
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
+pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) !void {
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    const rsdp_physical_page = rsdp_physical_address.aligned_backward(context.page_size);
+    const rsdp_physical_page = rsdp_physical_address.aligned_backward(page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
     const rsdp1 = rsdp_physical_address.access_kernel(*align(1) RSDP1);
 
@@ -29,7 +36,7 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
         const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
-        const rsdt_physical_page = rsdt_physical_address.aligned_backward(context.page_size);
+        const rsdt_physical_page = rsdt_physical_address.aligned_backward(page_size);
         virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
         const rsdt = rsdt_physical_address.access_kernel(*align(1) Header);
@@ -40,7 +47,7 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_physical_address = PhysicalAddress.new(table_address);
-            const table_physical_page = table_physical_address.aligned_backward(context.page_size);
+            const table_physical_page = table_physical_address.aligned_backward(page_size);
             virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
             const header = table_physical_address.access_kernel(*align(1) Header);
 
@@ -64,10 +71,8 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
                         iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    x86_64.iso = virtual_address_space.heap.allocator.alloc(x86_64.ISO, iso_count) catch @panic("iso");
+                    interrupts.iso = virtual_address_space.heap.allocator.alloc(interrupts.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
-
-                    common.runtime_assert(@src(), processor_count == kernel.scheduler.cpus.len);
 
                     offset = @ptrToInt(madt) + @sizeOf(MADT);
 
@@ -79,22 +84,22 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
                             .LAPIC => {
                                 const lapic = @intToPtr(*align(1) MADT.LAPIC, offset);
                                 log.debug("LAPIC: {}", .{lapic});
-                                common.runtime_assert(@src(), @sizeOf(MADT.LAPIC) == entry_length);
+                                std.assert(@sizeOf(MADT.LAPIC) == entry_length);
                             },
                             .IO_APIC => {
                                 const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
                                 log.debug("IO_APIC: {}", .{ioapic});
-                                common.runtime_assert(@src(), @sizeOf(MADT.IO_APIC) == entry_length);
-                                x86_64.ioapic.gsi = ioapic.global_system_interrupt_base;
-                                x86_64.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
-                                virtual_address_space.map(x86_64.ioapic.address, x86_64.ioapic.address.to_higher_half_virtual_address(), .{ .write = true, .cache_disable = true });
-                                x86_64.ioapic.id = ioapic.IO_APIC_ID;
+                                std.assert(@sizeOf(MADT.IO_APIC) == entry_length);
+                                interrupts.ioapic.gsi = ioapic.global_system_interrupt_base;
+                                interrupts.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
+                                virtual_address_space.map(interrupts.ioapic.address, interrupts.ioapic.address.to_higher_half_virtual_address(), .{ .write = true, .cache_disable = true });
+                                interrupts.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {
                                 const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
                                 log.debug("ISO: {}", .{iso});
-                                common.runtime_assert(@src(), @sizeOf(MADT.InterruptSourceOverride) == entry_length);
-                                const iso_ptr = &x86_64.iso[iso_i];
+                                std.assert(@sizeOf(MADT.InterruptSourceOverride) == entry_length);
+                                const iso_ptr = &interrupts.iso[iso_i];
                                 iso_i += 1;
                                 iso_ptr.gsi = iso.global_system_interrupt;
                                 iso_ptr.source_IRQ = iso.source;
@@ -104,9 +109,9 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
                             .LAPIC_NMI => {
                                 const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
                                 log.debug("LAPIC_NMI: {}", .{lapic_nmi});
-                                common.runtime_assert(@src(), @sizeOf(MADT.LAPIC_NMI) == entry_length);
+                                std.assert(@sizeOf(MADT.LAPIC_NMI) == entry_length);
                             },
-                            else => kernel.crash("ni: {}", .{entry_type}),
+                            else => panic("ni: {}", .{entry_type}),
                         }
                     }
                 },
@@ -116,21 +121,21 @@ pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address:
             }
         }
     } else {
-        common.runtime_assert(@src(), rsdp1.revision == 2);
+        std.assert(rsdp1.revision == 2);
         //const rsdp2 = @ptrCast(*RSDP2, rsdp1);
         log.debug("Second version", .{});
-        TODO(@src());
+        TODO();
     }
 }
 
 const rsdt_signature = [4]u8{ 'R', 'S', 'D', 'T' };
 pub fn check_valid_sdt(rsdt: *align(1) Header) void {
     log.debug("Header size: {}", .{@sizeOf(Header)});
-    common.runtime_assert(@src(), @sizeOf(Header) == 36);
+    std.assert(@sizeOf(Header) == 36);
     if (rsdt.revision != 1) {
         @panic("bad revision");
     }
-    if (!common.string_eq(&rsdt.signature, &rsdt_signature)) {
+    if (!std.string_eq(&rsdt.signature, &rsdt_signature)) {
         @panic("bad signature");
     }
     if (rsdt.length >= 16384) {
@@ -160,7 +165,7 @@ const RSDP1 = extern struct {
     RSDT_address: u32,
 
     comptime {
-        common.comptime_assert(@sizeOf(RSDP1) == 20);
+        std.assert(@sizeOf(RSDP1) == 20);
     }
 };
 
@@ -183,7 +188,7 @@ const Header = extern struct {
     creator_ID: u32,
     creator_revision: u32,
     comptime {
-        common.comptime_assert(@sizeOf(Header) == 36);
+        std.assert(@sizeOf(Header) == 36);
     }
 };
 
@@ -257,8 +262,8 @@ const MCFG = packed struct {
     }
 
     comptime {
-        common.comptime_assert(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
-        common.comptime_assert(@sizeOf(Configuration) == 0x10);
+        std.assert(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
+        std.assert(@sizeOf(Configuration) == 0x10);
     }
 
     const Configuration = packed struct {

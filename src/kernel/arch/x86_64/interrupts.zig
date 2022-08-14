@@ -547,6 +547,7 @@ pub const IOAPIC = struct {
         apic.address.access_kernel([*]volatile u32)[4] = value;
     }
 };
+
 pub var ioapic: IOAPIC = undefined;
 pub const ISO = struct {
     gsi: u32,

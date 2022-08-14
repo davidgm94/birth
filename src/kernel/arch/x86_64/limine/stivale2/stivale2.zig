@@ -348,9 +348,13 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
 
     const entry_point = @ptrToInt(smp_entry);
     const ap_cpu_count = scheduler.cpus.len - 1;
-    const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
-    std.assert(scheduler.all_threads.count == ap_threads.len + 1);
-    std.assert(scheduler.all_threads.count < Thread.Buffer.Bucket.size);
+    var ap_threads: []Thread = &.{};
+    if (ap_cpu_count > 0) {
+        ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
+        std.assert(scheduler.all_threads.count == ap_threads.len + 1);
+        std.assert(scheduler.all_threads.count < Thread.Buffer.Bucket.size);
+    }
+
     const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
     std.assert(&all_threads[0] == bsp_thread);
 
@@ -368,16 +372,18 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     std.assert(std.cpu.arch == .x86_64);
     scheduler.cpus[0].map_lapic(virtual_address_space);
 
-    scheduler.lock.acquire();
-    for (smps[1..]) |*smp, index| {
-        const ap_thread = &ap_threads[index];
-        scheduler.active_threads.remove(&ap_thread.queue_item);
-        const stack_pointer = ap_thread.context.get_stack_pointer();
-        smp.extra_argument = @ptrToInt(&cpu_initialization_context);
-        smp.target_stack = stack_pointer;
-        smp.goto_address = entry_point;
-    }
+    if (ap_cpu_count > 0) {
+        scheduler.lock.acquire();
+        for (smps[1..]) |*smp, index| {
+            const ap_thread = &ap_threads[index];
+            scheduler.active_threads.remove(&ap_thread.queue_item);
+            const stack_pointer = ap_thread.context.get_stack_pointer();
+            smp.extra_argument = @ptrToInt(&cpu_initialization_context);
+            smp.target_stack = stack_pointer;
+            smp.goto_address = entry_point;
+        }
 
-    std.assert(scheduler.active_threads.count == 0);
-    scheduler.lock.release();
+        std.assert(scheduler.active_threads.count == 0);
+        scheduler.lock.release();
+    }
 }
