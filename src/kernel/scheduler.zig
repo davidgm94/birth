@@ -3,13 +3,18 @@ const Scheduler = @This();
 const std = @import("../common/std.zig");
 
 const Context = @import("arch/context.zig");
+const context = @import("context.zig");
+const context_switch = @import("arch/context_switch.zig");
 const CPU = @import("arch/common.zig").CPU;
 const crash = @import("crash.zig");
-const interrupts = @import("interrupts.zig");
+const ELF = @import("../common/elf.zig");
+const Filesystem = @import("../drivers/filesystem.zig");
+const interrupts = @import("arch/interrupts.zig");
 const PhysicalAddressSpace = @import("physical_address_space.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
 const Spinlock = @import("spinlock.zig");
+const Syscall = @import("syscall.zig");
 const Thread = @import("thread.zig");
 const TLS = @import("arch/tls.zig");
 const VirtualAddress = @import("virtual_address.zig");
@@ -19,7 +24,6 @@ const VAS = @import("arch/vas.zig");
 const TODO = crash.TODO;
 const log = std.log.scoped(.Scheduler);
 const Allocator = std.Allocator;
-
 
 lock: Spinlock,
 thread_buffer: Thread.Buffer,
@@ -54,7 +58,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
 
     //log.debug("RSP: 0x{x}", .{context.rsp});
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
-    //common.runtime_assert(@src(), context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
+    //std.assert(context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
 
     //common.arch.next_timer(1);
     //log.debug("New thread address: 0x{x}", .{@ptrToInt(&new_thread)});
@@ -83,9 +87,9 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     if (interrupts.are_enabled()) @panic("interrupts enabled");
     if (cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
-    common.arch.legacy_actions_before_context_switch(new_thread);
-    common.arch.set_new_stack(@ptrToInt(new_thread.context));
-    common.arch.interrupts_epilogue();
+    context_switch.swap_privilege_registers(new_thread);
+    context_switch.set_new_stack(@ptrToInt(new_thread.context));
+    context_switch.epilogue();
 
     @panic("wtfffF");
 }
@@ -102,7 +106,7 @@ const ThreadStack = struct {
 
 pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, thread_count: u64, entry_point: u64) []Thread {
     comptime {
-        common.comptime_assert(privilege_level == .kernel);
+        std.assert(privilege_level == .kernel);
     }
 
     const thread_stack_size = switch (privilege_level) {
@@ -114,10 +118,10 @@ pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *Vir
 
     const existing_threads = scheduler.all_threads.count;
     log.debug("Existing threads: {}", .{existing_threads});
-    common.runtime_assert(@src(), existing_threads + thread_count <= Thread.Buffer.Bucket.size);
-    common.runtime_assert(@src(), scheduler.thread_buffer.element_count == scheduler.all_threads.count);
+    std.assert(existing_threads + thread_count <= Thread.Buffer.Bucket.size);
+    std.assert(scheduler.thread_buffer.element_count == scheduler.all_threads.count);
     const bucket_count = scheduler.thread_buffer.bucket_count;
-    common.runtime_assert(@src(), bucket_count == 1);
+    std.assert(bucket_count == 1);
     var thread_i: u64 = 0;
     while (thread_i < thread_count) : (thread_i += 1) {
         const stack_allocation_offset = thread_i * thread_stack_size;
@@ -133,7 +137,7 @@ pub fn bulk_spawn_same_thread(scheduler: *Scheduler, virtual_address_space: *Vir
 
 pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, entry_point: u64, maybe_thread_stack: ?ThreadStack, cpu: ?*CPU) *Thread {
     if (maybe_thread_stack != null) {
-        common.runtime_assert(@src(), privilege_level == .kernel);
+        std.assert(privilege_level == .kernel);
     }
 
     // TODO: lock
@@ -169,12 +173,12 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
             break :blk result;
         }
     };
-    common.runtime_assert(@src(), kernel_stack.is_higher_half());
+    std.assert(kernel_stack.is_higher_half());
     const user_stack = switch (privilege_level) {
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
-            common.runtime_assert(@src(), common.is_aligned(user_stack_reserve, context.page_size));
+            std.assert(std.is_aligned(user_stack_reserve, context.page_size));
             if (maybe_thread_stack) |thread_stack|
                 break :blk thread_stack.user orelse @panic("Wtffffff")
             else {
@@ -198,7 +202,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     thread.user_stack_commit = user_stack_commit;
     thread.id = new_thread_id;
     thread.type = .normal;
-    common.runtime_assert(@src(), thread.type == .normal);
+    std.assert(thread.type == .normal);
     thread.cpu = cpu;
     thread.state = .active;
     thread.executing = false;
@@ -206,14 +210,14 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     // TODO: don't hardcode this
     const syscall_queue_entry_count = 256;
     thread.syscall_manager = switch (privilege_level) {
-        .user => common.Syscall.Manager.for_kernel(thread.address_space, syscall_queue_entry_count),
+        .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
         .kernel => .{ .kernel = null, .user = null },
     };
 
     if (thread.type != .idle) {
         log.debug("Creating arch-specific thread initialization", .{});
         // TODO: hack
-        thread.context = common.arch.Context.new(thread, entry_point);
+        thread.context = Context.new(thread, entry_point);
     }
 
     scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
@@ -221,14 +225,14 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     return thread;
 }
 
-pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *drivers.Filesystem, executable_filename: []const u8) *Thread {
-    common.runtime_assert(@src(), kernel_address_space.privilege_level == .kernel);
-    common.runtime_assert(@src(), privilege_level == .user);
+pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) *Thread {
+    std.assert(kernel_address_space.privilege_level == .kernel);
+    std.assert(privilege_level == .user);
     const executable_file = drive.read_file(drive, kernel_address_space.heap.allocator, @ptrToInt(kernel_address_space), executable_filename);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space) orelse @panic("wtf2");
-    const elf_result = common.ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
-    //common.runtime_assert(@src(), elf_result.entry_point == 0x200110);
+    const elf_result = ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
+    //std.assert(elf_result.entry_point == 0x200110);
     const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point, null, null);
 
     return thread;

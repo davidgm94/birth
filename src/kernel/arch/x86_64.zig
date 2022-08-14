@@ -277,13 +277,6 @@ pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddr
     }
 }
 
-pub inline fn set_new_stack(new_stack: u64) void {
-    asm volatile ("mov %[in], %%rsp"
-        :
-        : [in] "r" (new_stack),
-        : "nostack"
-    );
-}
 
 pub fn post_context_switch(arch_context: *Context, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});

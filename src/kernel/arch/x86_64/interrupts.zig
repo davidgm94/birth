@@ -3,6 +3,7 @@ const interrupts = @This();
 const std = @import("../../../common/std.zig");
 
 const Context = @import("context.zig");
+const context_switch = @import("context_switch.zig");
 const crash = @import("../../crash.zig");
 const kernel = @import("../../kernel.zig");
 const registers = @import("registers.zig");
@@ -456,33 +457,6 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     log.debug("===================== END INT 0x{x} =====================", .{context.interrupt_number});
 }
 
-inline fn prologue() void {
-    asm volatile (
-        \\cld
-        \\push %%rax
-        \\push %%rbx
-        \\push %%rcx
-        \\push %%rdx
-        \\push %%rdi
-        \\push %%rsi
-        \\push %%rbp
-        \\push %%r8
-        \\push %%r9
-        \\push %%r10
-        \\push %%r11
-        \\push %%r12
-        \\push %%r13
-        \\push %%r14
-        \\push %%r15
-        \\xor %%rax, %%rax
-        \\mov %%ds, %%rax
-        \\push %% rax
-        \\mov %%cr8, %%rax
-        \\push %%rax
-        \\mov %%rsp, %%rdi
-    );
-}
-
 pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) callconv(.Naked) void {
     const has_error_code = switch (interrupt_number) {
         8, 10, 11, 12, 13, 14, 17 => true,
@@ -496,44 +470,15 @@ pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) call
                 : [interrupt_number] "i" (interrupt_number),
             );
 
-            prologue();
+            context_switch.prologue();
 
             asm volatile ("call interrupt_handler");
 
-            epilogue();
+            context_switch.epilogue();
 
             @panic("Interrupt epilogue didn't iret properly");
         }
     }.handler;
-}
-
-pub inline fn epilogue() void {
-    asm volatile (
-        \\cli
-        \\pop %%rax
-        \\mov %%rax, %%cr8
-        \\pop %%rax
-        \\mov %%rax, %%ds
-        \\mov %%rax, %%es
-        \\mov %%rax, %%fs
-        \\pop %%r15
-        \\pop %%r14
-        \\pop %%r13
-        \\pop %%r12
-        \\pop %%r11
-        \\pop %%r10
-        \\pop %%r9
-        \\pop %%r8
-        \\pop %%rbp
-        \\pop %%rsi
-        \\pop %%rdi
-        \\pop %%rdx
-        \\pop %%rcx
-        \\pop %%rbx
-        \\pop %%rax
-        \\add $0x10, %%rsp
-        \\iretq
-    );
 }
 
 pub const interrupt_vector_msi_start = 0x70;
