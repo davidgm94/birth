@@ -24,9 +24,9 @@ pub fn List(comptime T: type) type {
         count: u64 = 0,
 
         pub fn append(list: *@This(), list_item: *ListItem(T), item: T) !void {
-            std.unreachable_assert(@src(), list_item.previous == null);
-            std.unreachable_assert(@src(), list_item.next == null);
-            std.unreachable_assert(@src(), list_item.list == null);
+            std.assert(list_item.previous == null);
+            std.assert(list_item.next == null);
+            std.assert(list_item.list == null);
             list_item.data = item;
 
             if (list.last) |last| {

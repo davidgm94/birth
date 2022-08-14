@@ -12,7 +12,7 @@ pub const KernelManager = struct {
     user: ?*Syscall.Manager,
 
     pub fn new(virtual_address_space: *VirtualAddressSpace, entry_count: u64) KernelManager {
-        std.unreachable_assert(@src(), virtual_address_space.privilege_level == .user);
+        std.assert(virtual_address_space.privilege_level == .user);
         const submission_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Submission), arch.page_size);
         const completion_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Completion), arch.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
@@ -35,7 +35,7 @@ pub const KernelManager = struct {
         const translated_physical = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtff");
         const kernel_syscall_manager_virtual = translated_physical.to_higher_half_virtual_address();
         const trans_result = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");
-        std.unreachable_assert(@src(), trans_result.value == translated_physical.value);
+        std.assert(trans_result.value == translated_physical.value);
         const user_syscall_manager = kernel_syscall_manager_virtual.access(*Syscall.Manager);
         user_syscall_manager.* = Syscall.Manager{
             .buffer = user_virtual_buffer.access([*]u8)[0..total_buffer_size],
@@ -53,7 +53,7 @@ pub const KernelManager = struct {
 
         const physical_kernel = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");
         const physical_user = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtf");
-        std.unreachable_assert(@src(), physical_user.value == physical_kernel.value);
+        std.assert(physical_user.value == physical_kernel.value);
 
         return KernelManager{
             .kernel = kernel_syscall_manager_virtual.access(*Syscall.Manager),

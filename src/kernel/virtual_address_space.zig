@@ -86,7 +86,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            std.unreachable_assert(!flags.user == specific_address.is_higher_half());
+            std.assert(!flags.user == specific_address.is_higher_half());
             break :blk specific_address;
         } else {
             if (flags.user) {
@@ -98,7 +98,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     };
     log.debug("figure out virtual: 0x{x}", .{virtual_address.value});
 
-    if (flags.user) std.unreachable_assert(virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) == null);
+    if (flags.user) std.assert(virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) == null);
     log.debug("Translated", .{});
 
     const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * arch.page_size);
