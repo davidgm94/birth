@@ -1,5 +1,6 @@
 const std = @import("../common/std.zig");
-const context = @import("context.zig");
+
+const arch = @import("arch/common.zig");
 const Syscall = @import("../common/syscall.zig");
 const kernel = @import("kernel.zig");
 
@@ -12,11 +13,11 @@ pub const KernelManager = struct {
 
     pub fn new(virtual_address_space: *VirtualAddressSpace, entry_count: u64) KernelManager {
         std.unreachable_assert(@src(), virtual_address_space.privilege_level == .user);
-        const submission_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Submission), context.page_size);
-        const completion_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Completion), context.page_size);
+        const submission_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Submission), arch.page_size);
+        const completion_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Completion), arch.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
 
-        const syscall_buffer_physical_address = kernel.physical_address_space.allocate(std.bytes_to_pages(total_buffer_size, context.page_size, .must_be_exact)) orelse @panic("wtF");
+        const syscall_buffer_physical_address = kernel.physical_address_space.allocate(std.bytes_to_pages(total_buffer_size, arch.page_size, .must_be_exact)) orelse @panic("wtF");
         const kernel_virtual_buffer = syscall_buffer_physical_address.to_higher_half_virtual_address();
         // TODO: stop hardcoding
         const user_virtual_buffer = VirtualAddress.new(0x0000_7f00_0000_0000);
@@ -30,7 +31,7 @@ pub const KernelManager = struct {
         // TODO: not use a full page
         // TODO: unmap
         // TODO: @Hack undo
-        const user_syscall_manager_virtual = virtual_address_space.allocate(std.align_forward(@sizeOf(Syscall.Manager), context.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
+        const user_syscall_manager_virtual = virtual_address_space.allocate(std.align_forward(@sizeOf(Syscall.Manager), arch.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
         const translated_physical = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtff");
         const kernel_syscall_manager_virtual = translated_physical.to_higher_half_virtual_address();
         const trans_result = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");

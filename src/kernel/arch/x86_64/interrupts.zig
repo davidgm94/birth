@@ -4,6 +4,7 @@ const std = @import("../../../common/std.zig");
 
 const Context = @import("context.zig");
 const context_switch = @import("context_switch.zig");
+const CPU = @import("cpu.zig");
 const crash = @import("../../crash.zig");
 const kernel = @import("../../kernel.zig");
 const registers = @import("registers.zig");
@@ -614,3 +615,7 @@ const IRQHandler = struct {
     line: u64,
     pci_device: *PCI.Device,
 };
+
+pub inline fn end(cpu: *CPU) void {
+    cpu.lapic.end_of_interrupt();
+}

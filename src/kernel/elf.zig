@@ -1,12 +1,14 @@
-const common = @import("../common.zig");
-const context = @import("context");
+const std = @import("../common/std.zig");
 
-const TODO = common.TODO;
-const log = common.log.scoped(.ELF);
-const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-const PhysicalAddressSpace = common.PhysicalAddressSpace;
-const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
+const arch = @import("arch/common.zig");
+const crash = @import("crash.zig");
+const PhysicalAddressSpace = @import("physical_address.zig");
+const PhysicalMemoryRegion = @import("physical_memory_region.zig");
+const VirtualAddress = @import("virtual_address.zig");
+const VirtualAddressSpace = @import("virtual_address_space.zig");
+
+const TODO = crash.TODO;
+const log = std.log.scoped(.ELF);
 
 const FileHeader = extern struct {
     // e_ident
@@ -100,7 +102,7 @@ const ProgramHeader = extern struct {
         reserved: u29,
 
         comptime {
-            common.comptime_assert(@sizeOf(Flags) == @sizeOf(u32));
+            std.assert(@sizeOf(Flags) == @sizeOf(u32));
         }
     };
 };
@@ -175,9 +177,9 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
     //}
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
-    if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
-    common.runtime_assert(@src(), file_header.program_header_size == @sizeOf(ProgramHeader));
-    common.runtime_assert(@src(), file_header.section_header_size == @sizeOf(SectionHeader));
+    if (!std.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
+    std.assert(file_header.program_header_size == @sizeOf(ProgramHeader));
+    std.assert(file_header.section_header_size == @sizeOf(SectionHeader));
     const entry_point = file_header.entry;
     // TODO: further checking
     log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
@@ -189,26 +191,26 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
             .load => {
                 if (ph.size_in_memory == 0) continue;
 
-                const page_size = context.page_size;
+                const page_size = arch.page_size;
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
-                const segment_size = common.align_forward(ph.size_in_memory + misalignment, page_size);
+                const segment_size = std.align_forward(ph.size_in_memory + misalignment, page_size);
 
                 if (!ph.flags.writable) {
                     if (misalignment != 0) {
                         @panic("ELF file with misaligned segments");
                     }
 
-                    if (!common.is_aligned(ph.offset, page_size)) {
+                    if (!std.is_aligned(ph.offset, page_size)) {
                         @panic("ELF file with misaligned offset");
                     }
 
-                    common.runtime_assert(@src(), ph.flags.readable);
+                    std.assert(ph.flags.readable);
 
-                    common.runtime_assert(@src(), address_spaces.kernel.translate_address(base_virtual_address) == null);
-                    common.runtime_assert(@src(), address_spaces.user.translate_address(base_virtual_address) == null);
+                    std.assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
+                    std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
 
-                    const page_count = common.bytes_to_pages(segment_size, page_size, .must_be_exact);
+                    const page_count = std.bytes_to_pages(segment_size, page_size, .must_be_exact);
                     const physical = address_spaces.physical.allocate(page_count) orelse @panic("physical");
                     const physical_region = PhysicalMemoryRegion.new(physical, segment_size);
                     const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
@@ -217,13 +219,13 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     // TODO: load segments and then take the right settings from the sections
                     // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
                     address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = !ph.flags.executable, .user = true });
-                    common.runtime_assert(@src(), ph.size_in_file <= ph.size_in_memory);
-                    common.runtime_assert(@src(), misalignment == 0);
+                    std.assert(ph.size_in_file <= ph.size_in_memory);
+                    std.assert(misalignment == 0);
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
-                    common.runtime_assert(@src(), dst_slice.len >= src_slice.len);
+                    std.assert(dst_slice.len >= src_slice.len);
 
-                    common.copy(u8, dst_slice, src_slice);
+                    std.copy(u8, dst_slice, src_slice);
                     // TODO: unmap
                 } else {
                     TODO(@src());

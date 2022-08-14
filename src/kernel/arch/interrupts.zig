@@ -12,3 +12,4 @@ pub const enable = arch.enable;
 pub const disable = arch.disable;
 pub const disable_all = arch.disable_all;
 pub const are_enabled = arch.are_enabled;
+pub const end = arch.end;

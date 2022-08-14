@@ -2,8 +2,8 @@ const Heap = @This();
 
 const std = @import("../common/std.zig");
 
+const arch = @import("arch/common.zig");
 const crash = @import("crash.zig");
-const context = @import("context.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
 
@@ -87,7 +87,7 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         region.allocated += size;
         return @intToPtr([*]u8, result_address)[0..size];
     } else {
-        const allocation_size = std.align_forward(size, context.page_size);
+        const allocation_size = std.align_forward(size, arch.page_size);
         const virtual_address = try virtual_address_space.allocate(allocation_size, null, flags);
         log.debug("Big allocation happened!", .{});
         return virtual_address.access([*]u8)[0..size];

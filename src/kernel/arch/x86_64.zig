@@ -270,13 +270,6 @@ export fn thread_terminate(thread: *Thread) void {
     TODO();
 }
 
-pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
-    const current_cr3 = cr3.read_raw();
-    if (current_cr3 != new_address_space.arch.cr3) {
-        cr3.write_raw(new_address_space.arch.cr3);
-    }
-}
-
 
 pub fn post_context_switch(arch_context: *Context, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});

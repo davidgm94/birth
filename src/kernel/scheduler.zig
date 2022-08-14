@@ -2,12 +2,12 @@ const Scheduler = @This();
 
 const std = @import("../common/std.zig");
 
-const Context = @import("arch/context.zig");
-const context = @import("context.zig");
+const arch = @import("arch/common.zig");
+const Context = arch.Context;
 const context_switch = @import("arch/context_switch.zig");
-const CPU = @import("arch/common.zig").CPU;
+const CPU = arch.CPU;
 const crash = @import("crash.zig");
-const ELF = @import("../common/elf.zig");
+const ELF = @import("elf.zig");
 const Filesystem = @import("../drivers/filesystem.zig");
 const interrupts = @import("arch/interrupts.zig");
 const PhysicalAddressSpace = @import("physical_address_space.zig");
@@ -19,7 +19,7 @@ const Thread = @import("thread.zig");
 const TLS = @import("arch/tls.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
-const VAS = @import("arch/vas.zig");
+const VAS = arch.VAS;
 
 const TODO = crash.TODO;
 const log = std.log.scoped(.Scheduler);
@@ -44,7 +44,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
     const old_thread = TLS.get_current();
-    std.assert(@src(), old_thread.state == .active);
+    std.assert(old_thread.state == .active);
     old_thread.context = old_context;
     old_address_space = old_thread.address_space;
     const new_thread = scheduler.pick_thread();
@@ -54,7 +54,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     new_thread.state = .active;
     // TODO: idle
     //
-    if (new_thread.context.cs == 0x4b) std.assert(@src(), new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
+    if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
     //log.debug("RSP: 0x{x}", .{context.rsp});
     //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
@@ -178,7 +178,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .kernel => kernel_stack,
         .user => blk: {
             // TODO: lock
-            std.assert(std.is_aligned(user_stack_reserve, context.page_size));
+            std.assert(std.is_aligned(user_stack_reserve, arch.page_size));
             if (maybe_thread_stack) |thread_stack|
                 break :blk thread_stack.user orelse @panic("Wtffffff")
             else {

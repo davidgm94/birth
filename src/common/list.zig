@@ -30,14 +30,14 @@ pub fn List(comptime T: type) type {
             list_item.data = item;
 
             if (list.last) |last| {
-                std.runtime_assert(@src(), list.first != null);
-                std.runtime_assert(@src(), list.count > 0);
+                std.assert(list.first != null);
+                std.assert(list.count > 0);
                 last.next = list_item;
                 list_item.previous = last;
                 list.last = list_item;
             } else {
-                std.runtime_assert(@src(), list.first == null);
-                std.runtime_assert(@src(), list.count == 0);
+                std.assert(list.first == null);
+                std.assert(list.count == 0);
                 list.first = list_item;
                 list.last = list_item;
             }
@@ -47,7 +47,7 @@ pub fn List(comptime T: type) type {
         }
 
         pub fn remove(list: *@This(), list_item: *ListItem(T)) void {
-            std.runtime_assert(@src(), list_item.list == list);
+            std.assert(list_item.list == list);
             if (list_item.previous) |previous| {
                 previous.next = list_item.next;
             } else {
@@ -63,13 +63,13 @@ pub fn List(comptime T: type) type {
 
             list.count -= 1;
             list_item.list = null;
-            std.runtime_assert(@src(), list.count == 0 or (list.first != null and list.last != null));
+            std.assert(list.count == 0 or (list.first != null and list.last != null));
         }
     };
 }
 
 pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
-    std.comptime_assert(bucket_size % 64 == 0);
+    std.assert(bucket_size % 64 == 0);
     return struct {
         first: ?*Bucket = null,
         last: ?*Bucket = null,
@@ -91,7 +91,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 bit_index: u32,
             };
             pub fn allocate_index(bucket: *Bucket) u64 {
-                std.runtime_assert(@src(), bucket.count + 1 <= bucket_size);
+                std.assert(bucket.count + 1 <= bucket_size);
 
                 for (bucket.bitset) |*bitset_elem, bitset_i| {
                     // @ZigBug using a comptime var here ends with an infinite loop

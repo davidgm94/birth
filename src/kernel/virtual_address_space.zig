@@ -2,7 +2,7 @@ const VirtualAddressSpace = @This();
 
 const std = @import("../common/std.zig");
 
-const context = @import("context.zig");
+const arch = @import("arch/common.zig");
 const Heap = @import("heap.zig");
 const kernel = @import("kernel.zig");
 const log = std.log.scoped(.VirtualAddressSpace);
@@ -11,7 +11,7 @@ const PhysicalAddressSpace = @import("physical_address_space.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
 const Spinlock = @import("spinlock.zig");
-const VAS = @import("arch/vas.zig");
+const VAS = arch.VAS;
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualMemoryRegion = @import("virtual_memory_region.zig");
 
@@ -80,7 +80,7 @@ const Result = struct {
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !Result {
     virtual_address_space.lock.acquire();
     defer virtual_address_space.lock.release();
-    const page_count = std.bytes_to_pages(byte_count, context.page_size, .must_be_exact);
+    const page_count = std.bytes_to_pages(byte_count, arch.page_size, .must_be_exact);
     const physical_address = kernel.physical_address_space.allocate(page_count) orelse return std.Allocator.Error.OutOfMemory;
     log.debug("allocated physical: 0x{x}", .{physical_address.value});
 
@@ -101,7 +101,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     if (flags.user) std.unreachable_assert(virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) == null);
     log.debug("Translated", .{});
 
-    const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * context.page_size);
+    const physical_region = PhysicalMemoryRegion.new(physical_address, page_count * arch.page_size);
     virtual_address_space.map_physical_region_extended(physical_region, virtual_address, flags, AlreadyLocked.yes);
 
     return Result{
@@ -167,7 +167,7 @@ pub fn map_virtual_region(virtual_address_space: *VirtualAddressSpace, virtual_r
 
     var physical_address = base_physical_address;
     var virtual_address = virtual_region.address;
-    const page_size = context.page_size;
+    const page_size = arch.page_size;
     std.assert(std.is_aligned(physical_address.value, page_size));
     std.assert(std.is_aligned(virtual_address.value, page_size));
     std.assert(std.is_aligned(virtual_region.size, page_size));
@@ -199,7 +199,7 @@ fn map_physical_region_extended(virtual_address_space: *VirtualAddressSpace, phy
 
     var physical_address = physical_region.address;
     var virtual_address = base_virtual_address;
-    const page_size = context.page_size;
+    const page_size = arch.page_size;
     std.assert(std.is_aligned(physical_address.value, page_size));
     std.assert(std.is_aligned(virtual_address.value, page_size));
     std.assert(std.is_aligned(physical_region.size, page_size));
