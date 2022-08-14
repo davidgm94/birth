@@ -1,21 +1,27 @@
-const kernel = @import("root");
-const common = @import("../../../../../common.zig");
-const stivale = @import("header.zig");
-const context = @import("context");
+const std = @import("../../../../../common/std.zig");
 
-const log = common.log.scoped(.stivale);
-const TODO = common.TODO;
-const Allocator = common.Allocator;
-const VirtualAddress = common.VirtualAddress;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-const VirtualMemoryRegion = common.VirtualMemoryRegion;
-const PhysicalAddress = common.PhysicalAddress;
-const PhysicalAddressSpace = common.PhysicalAddressSpace;
-const PhysicalMemoryRegion = common.PhysicalMemoryRegion;
-const VirtualMemoryRegionWithPermissions = common.VirtualMemoryRegion;
-const Thread = common.Thread;
-const CPU = common.arch.CPU;
-const SegmentedList = common.SegmentedList;
+const common = @import("../../../../common.zig");
+const Context = @import("../../context.zig");
+const CPU = @import("../../cpu.zig");
+const crash = @import("../../../../crash.zig");
+const stivale = @import("header.zig");
+const x86_64 = @import("../../common.zig");
+const VirtualAddress = @import("../../../../virtual_address.zig");
+const VirtualAddressSpace = @import("../../../../virtual_address_space.zig");
+const VirtualMemoryRegion = @import("../../../../virtual_memory_region.zig");
+const PhysicalAddress = @import("../../../../physical_address.zig");
+const PhysicalAddressSpace = @import("../../../../physical_address_space.zig");
+const PhysicalMemoryRegion = @import("../../../../physical_memory_region.zig");
+const Scheduler = @import("../../../../scheduler.zig");
+const SegmentedList = @import("../../../../../common/list.zig").SegmentedList;
+const Thread = @import("../../../../thread.zig");
+const TLS = @import("../../tls.zig");
+
+const FileInMemory = common.FileInMemory;
+const page_size = x86_64.page_size;
+const log = std.log.scoped(.stivale);
+const TODO = crash.TODO;
+const Allocator = std.Allocator;
 
 pub const Struct = stivale.Struct;
 
@@ -27,13 +33,32 @@ pub const Error = error{
     rsdp,
     smp,
 };
+
 const BootloaderInformation = struct {
     kernel_sections_in_memory: []VirtualMemoryRegion,
-    kernel_file: common.File,
+    kernel_file: FileInMemory,
 };
 
-pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!BootloaderInformation {
-    common.runtime_assert(@src(), virtual_address_space.lock.status == 0);
+pub const BootstrapContext = struct {
+    cpu: CPU,
+    thread: Thread,
+    context: Context,
+
+    pub fn preinit_bsp(bootstrap_context: *BootstrapContext, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
+        bootstrap_context.cpu.id = 0;
+        bootstrap_context.thread.cpu = &bootstrap_context.cpu;
+        bootstrap_context.thread.context = &bootstrap_context.context;
+        bootstrap_context.thread.address_space = virtual_address_space;
+        TLS.preset_bsp(&bootstrap_context.thread);
+        TLS.set_current(&bootstrap_context.thread);
+
+        // @ZigBug: @ptrCast here crashes the compiler
+        scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
+    }
+};
+
+pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *BootstrapContext, scheduler: *Scheduler) Error!BootloaderInformation {
+    std.assert(virtual_address_space.lock.status == 0);
     const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
@@ -66,26 +91,25 @@ fn get_tag_from_physical(physical_address: PhysicalAddress) ?*align(1) stivale.T
 }
 
 pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
-    const page_size = context.page_size;
     const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse return Error.memory_map;
     const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
-    var result = PhysicalAddressSpace.new();
+    var result = PhysicalAddressSpace{};
 
     // First, it is required to find a spot in memory big enough to host all the memory map entries in a architecture-independent and bootloader-independent way. This is the host entry
     const host_entry = blk: {
         for (memory_map_entries) |*entry| {
             if (entry.type == .usable) {
-                const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size, page_size);
+                const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size);
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 // INFO: this is separated since the bitset needs to be in a different page than the memory map
-                const bitset_page_count = common.bytes_to_pages(bitset_size, context.page_size, .can_be_not_exact);
+                const bitset_page_count = std.bytes_to_pages(bitset_size, page_size, .can_be_not_exact);
                 // Allocate a bit more memory than needed just in case
                 const memory_map_allocation_size = memory_map_struct.entry_count * @sizeOf(PhysicalAddressSpace.MapEntry);
-                const memory_map_page_count = common.bytes_to_pages(memory_map_allocation_size, context.page_size, .can_be_not_exact);
+                const memory_map_page_count = std.bytes_to_pages(memory_map_allocation_size, page_size, .can_be_not_exact);
                 const total_allocated_page_count = bitset_page_count + memory_map_page_count;
-                const total_allocation_size = context.page_size * total_allocated_page_count;
-                common.runtime_assert(@src(), entry.size > total_allocation_size);
-                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + common.align_forward(bitset_size, context.page_size))[0..1];
+                const total_allocation_size = page_size * total_allocated_page_count;
+                std.assert(entry.size > total_allocation_size);
+                result.usable = @intToPtr([*]PhysicalAddressSpace.MapEntry, entry.address + std.align_forward(bitset_size, page_size))[0..1];
                 var block = &result.usable[0];
                 block.* = PhysicalAddressSpace.MapEntry{
                     .descriptor = PhysicalMemoryRegion{
@@ -96,7 +120,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                     .type = .usable,
                 };
 
-                block.setup_bitset(context.page_size);
+                block.setup_bitset();
 
                 break :blk block;
             }
@@ -122,10 +146,10 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
                 .type = .usable,
             };
 
-            const bitset = result_entry.get_bitset_extended(page_size);
+            const bitset = result_entry.get_bitset_extended();
             const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
-            result_entry.allocated_size = common.align_forward(bitset_size, context.page_size);
-            result_entry.setup_bitset(context.page_size);
+            result_entry.allocated_size = std.align_forward(bitset_size, page_size);
+            result_entry.setup_bitset();
         }
     }
 
@@ -181,7 +205,7 @@ pub fn process_memory_map(stivale2_struct: *Struct) Error!PhysicalAddressSpace {
         }
     }
 
-    common.runtime_assert(@src(), result.kernel_and_modules.len == 1);
+    std.assert(result.kernel_and_modules.len == 1);
 
     result.reserved.ptr = @intToPtr(@TypeOf(result.reserved.ptr), @ptrToInt(result.kernel_and_modules.ptr) + (@sizeOf(PhysicalMemoryRegion) * result.kernel_and_modules.len));
 
@@ -218,7 +242,7 @@ pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct
     const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
     if (pmrs.len == 0) return Error.pmrs;
 
-    common.runtime_assert(@src(), virtual_address_space.lock.status == 0);
+    std.assert(virtual_address_space.lock.status == 0);
     const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
 
     for (pmrs) |pmr, i| {
@@ -241,7 +265,7 @@ pub fn get_pmrs(stivale2_struct: *Struct) []Struct.PMRs.PMR {
 }
 
 /// This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
-pub fn process_kernel_file(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!common.File {
+pub fn process_kernel_file(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!FileInMemory {
     const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
     const file_address = PhysicalAddress.new(kernel_file.kernel_file);
     const file_size = kernel_file.kernel_size;
@@ -251,19 +275,18 @@ pub fn process_kernel_file(virtual_address_space: *VirtualAddressSpace, stivale2
     log.debug("allocation did happen", .{});
     const src = file_address.access_kernel([*]u8)[0..file_size];
     log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
-    common.copy(u8, dst, src);
-    return common.File{
+    std.copy(u8, dst, src);
+    return FileInMemory{
         .address = VirtualAddress.new(@ptrToInt(dst.ptr)),
         .size = file_size,
     };
 }
 
-pub fn process_rsdp(stivale2_struct: *Struct) Error!PhysicalAddress {
+pub fn process_rsdp(stivale2_struct: *Struct) Error!u64 {
     const rsdp_struct = find(stivale.Struct.RSDP, stivale2_struct) orelse return Error.rsdp;
     const rsdp = rsdp_struct.rsdp;
     log.debug("RSDP struct: 0x{x}", .{rsdp});
-    const rsdp_address = PhysicalAddress.new(rsdp);
-    return rsdp_address;
+    return rsdp;
 }
 
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
@@ -272,9 +295,11 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const scheduler = initialization_context.scheduler;
     const cpu_index = smp_info.processor_id;
     // Current thread is already set in the process_smp function
-    common.arch.preset_thread_pointer(cpu_index);
+    TLS.preset(cpu_index);
     virtual_address_space.make_current();
-    common.arch.cpu_start(virtual_address_space);
+    const current_thread = TLS.get_current();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    cpu.start(virtual_address_space);
     log.debug("CPU started", .{});
 
     _ = @atomicRmw(u64, &scheduler.initialized_ap_cpu_count, .Add, 1, .AcqRel);
@@ -285,13 +310,13 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
 
 const CPUInitializationContext = struct {
     kernel_virtual_address_space: *VirtualAddressSpace,
-    scheduler: *common.Scheduler,
+    scheduler: *Scheduler,
 };
 
 var cpu_initialization_context: CPUInitializationContext = undefined;
 
-pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *common.BootstrapContext, scheduler: *common.Scheduler) Error!void {
-    common.runtime_assert(@src(), virtual_address_space.privilege_level == .kernel);
+pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *BootstrapContext, scheduler: *Scheduler) Error!void {
+    std.assert(virtual_address_space.privilege_level == .kernel);
     cpu_initialization_context = CPUInitializationContext{
         .kernel_virtual_address_space = virtual_address_space,
         .scheduler = scheduler,
@@ -304,7 +329,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     const thread_count = cpu_count;
     scheduler.cpus = virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch return Error.smp;
     const smps = smp_struct.smp_info()[0..cpu_count];
-    common.runtime_assert(@src(), smps[0].lapic_id == smp_struct.bsp_lapic_id);
+    std.assert(smps[0].lapic_id == smp_struct.bsp_lapic_id);
     scheduler.cpus[0] = bootstrap_context.cpu;
     scheduler.cpus[0].is_bootstrap = true;
     const bsp_thread = scheduler.thread_buffer.add_one(virtual_address_space.heap.allocator) catch @panic("wtf");
@@ -314,16 +339,16 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     bsp_thread.context = &bootstrap_context.context;
     bsp_thread.state = .active;
     bsp_thread.cpu = &scheduler.cpus[0];
-    common.arch.set_current_thread(bsp_thread);
-    common.arch.allocate_and_setup_thread_pointers(virtual_address_space, scheduler);
+    TLS.set_current(bsp_thread);
+    TLS.allocate_and_setup(virtual_address_space, scheduler);
 
     const entry_point = @ptrToInt(smp_entry);
     const ap_cpu_count = scheduler.cpus.len - 1;
     const ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
-    common.runtime_assert(@src(), scheduler.all_threads.count == ap_threads.len + 1);
-    common.runtime_assert(@src(), scheduler.all_threads.count < Thread.Buffer.Bucket.size);
+    std.assert(scheduler.all_threads.count == ap_threads.len + 1);
+    std.assert(scheduler.all_threads.count < Thread.Buffer.Bucket.size);
     const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
-    common.runtime_assert(@src(), &all_threads[0] == bsp_thread);
+    std.assert(&all_threads[0] == bsp_thread);
 
     for (smps) |smp, index| {
         const cpu = &scheduler.cpus[index];
@@ -335,9 +360,9 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     }
 
     // TODO: don't hardcode stack size
-    common.arch.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
-    common.runtime_assert(@src(), common.cpu.arch == .x86_64);
-    common.arch.x86_64.map_lapic(virtual_address_space);
+    CPU.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
+    std.assert(std.cpu.arch == .x86_64);
+    scheduler.cpus[0].map_lapic(virtual_address_space);
 
     scheduler.lock.acquire();
     for (smps[1..]) |*smp, index| {
@@ -348,7 +373,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         smp.target_stack = stack_pointer;
         smp.goto_address = entry_point;
     }
-    common.runtime_assert(@src(), scheduler.active_threads.count == 0);
+    std.assert(scheduler.active_threads.count == 0);
 
     // @ZigBug if this is written with atomic operations, it gets optimized out by the compiler or LLVM
     //while (@atomicLoad(u64, &scheduler.initalizated_ap_cpu_count, .Acquire) < ap_cpu_count) {}

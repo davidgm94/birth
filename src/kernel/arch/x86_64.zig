@@ -33,120 +33,6 @@ const panic = crash.panic;
 
 var _zero: u64 = 0;
 
-pub var timestamp_ticks_per_ms: u64 = 0;
-
-pub fn init_timer() void {
-    interrupts.disable();
-    const bsp = &kernel.scheduler.cpus[0];
-    std.assert(bsp.is_bootstrap);
-    const timer_calibration_start = read_timestamp();
-    log.debug("About to use LAPIC", .{});
-    bsp.lapic.write(.TIMER_INITCNT, std.max_int(u32));
-    log.debug("After to use LAPIC", .{});
-    var times_i: u64 = 0;
-    const times = 8;
-
-    while (times_i < times) : (times_i += 1) {
-        io_write(u8, IOPort.PIT_command, 0x30);
-        io_write(u8, IOPort.PIT_data, 0xa9);
-        io_write(u8, IOPort.PIT_data, 0x04);
-
-        while (true) {
-            io_write(u8, IOPort.PIT_command, 0xe2);
-            if (io_read(u8, IOPort.PIT_data) & (1 << 7) != 0) break;
-        }
-    }
-    bsp.lapic.ticks_per_ms = std.max_int(u32) - bsp.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
-    const timer_calibration_end = read_timestamp();
-    timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
-    interrupts.enable();
-
-    log.debug("Timer initialized!", .{});
-}
-
-pub fn sleep_on_tsc(ms: u32) void {
-    const sleep_tick_count = ms * timestamp_ticks_per_ms;
-    const start = read_timestamp();
-    while (true) {
-        const now = read_timestamp();
-        const ticks_passed = now - start;
-        if (ticks_passed >> 3 >= sleep_tick_count) break;
-    }
-}
-
-pub inline fn read_timestamp() u64 {
-    var my_rdx: u64 = undefined;
-    var my_rax: u64 = undefined;
-
-    asm volatile (
-        \\rdtsc
-        : [rax] "={rax}" (my_rax),
-          [rdx] "={rdx}" (my_rdx),
-    );
-
-    return my_rdx << 32 | my_rax;
-}
-
-pub const spurious_vector: u8 = 0xFF;
-
-pub fn enable_apic(virtual_address_space: *VirtualAddressSpace) void {
-    const spurious_value = @as(u32, 0x100) | spurious_vector;
-    const cpu = TLS.get_current().cpu orelse @panic("cannot get cpu");
-    log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
-    // TODO: x2APIC
-    const ia32_apic = IA32_APIC_BASE.read();
-    const apic_physical_address = get_apic_base(ia32_apic);
-    log.debug("APIC physical address: 0x{x}", .{apic_physical_address});
-    std.assert(apic_physical_address != 0);
-    const old_lapic_id = cpu.lapic.id;
-    cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
-    cpu.lapic.write(.SPURIOUS, spurious_value);
-    // TODO: getting the lapic id from a LAPIC register is not reporting good ids. Why?
-    //const lapic_id = cpu.lapic.read(.LAPIC_ID);
-    //log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
-    //std.assert(lapic_id == cpu.lapic.id);
-    log.debug("APIC enabled", .{});
-}
-
-var times_mapped: u64 = 0;
-pub fn map_lapic(virtual_address_space: *VirtualAddressSpace) void {
-    if (times_mapped != 0) @panic("called more than once");
-    defer times_mapped += 1;
-
-    const cpu = TLS.get_current().cpu orelse @panic("wtf");
-    std.assert(cpu.id == 0);
-    std.assert(cpu.is_bootstrap);
-
-    const ia32_apic = IA32_APIC_BASE.read();
-    const lapic_physical_address = PhysicalAddress.new(get_apic_base(ia32_apic));
-    const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
-    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
-}
-
-pub fn enable_cpu_features() void {
-    // Initialize FPU
-    var cr0_value = cr0.read();
-    cr0_value.set_bit(.MP);
-    cr0_value.set_bit(.NE);
-    cr0.write(cr0_value);
-    var cr4_value = cr4.read();
-    cr4_value.set_bit(.OSFXSR);
-    cr4_value.set_bit(.OSXMMEXCPT);
-    cr4.write(cr4_value);
-
-    // @TODO: what is this?
-    const cw: u16 = 0x037a;
-    asm volatile (
-        \\fninit
-        \\fldcw (%[cw])
-        :
-        : [cw] "r" (&cw),
-    );
-
-    std.assert(!cr0.get_bit(.CD));
-    std.assert(!cr0.get_bit(.NW));
-}
-
 pub fn cpu_start(virtual_address_space: *VirtualAddressSpace) void {
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
@@ -163,48 +49,7 @@ pub fn cpu_start(virtual_address_space: *VirtualAddressSpace) void {
     log.debug("Scheduler pre-initialization finished!", .{});
 }
 
-pub fn get_physical_address_memory_configuration() void {
-    context.max_physical_address_bit = CPUID.get_max_physical_address_bit();
-}
 
-fn get_apic_base(ia32_apic_base: IA32_APIC_BASE.Flags) u32 {
-    return @truncate(u32, ia32_apic_base.bits & 0xfffff000);
-}
-
-pub const CPUID = struct {
-    eax: u32,
-    ebx: u32,
-    edx: u32,
-    ecx: u32,
-
-    /// Returns the maximum number bits a physical address is allowed to have in this CPU
-    pub inline fn get_max_physical_address_bit() u6 {
-        return @truncate(u6, cpuid(0x80000008).eax);
-    }
-};
-
-pub inline fn cpuid(leaf: u32) CPUID {
-    var eax: u32 = undefined;
-    var ebx: u32 = undefined;
-    var edx: u32 = undefined;
-    var ecx: u32 = undefined;
-
-    asm volatile (
-        \\cpuid
-        : [eax] "={eax}" (eax),
-          [ebx] "={ebx}" (ebx),
-          [edx] "={edx}" (edx),
-          [ecx] "={ecx}" (ecx),
-        : [leaf] "{eax}" (leaf),
-    );
-
-    return CPUID{
-        .eax = eax,
-        .ebx = ebx,
-        .edx = edx,
-        .ecx = ecx,
-    };
-}
 
 pub fn get_memory_map() kernel.Memory.Map {
     const memory_map_struct = Stivale2.find(Stivale2.Struct.MemoryMap) orelse @panic("Stivale had no RSDP struct");
@@ -249,28 +94,6 @@ pub inline fn spinloop_without_wasting_cpu() noreturn {
     }
 }
 
-pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *VirtualAddressSpace, stack_size: u64) void {
-    std.assert(std.is_aligned(stack_size, context.page_size));
-    const cpu_count = cpus.len;
-    const allocation_size = cpu_count * stack_size * 2;
-    const stack_allocation = virtual_address_space.heap.allocator.allocBytes(context.page_size, allocation_size, 0, 0) catch @panic("wtf");
-    const middle = allocation_size / 2;
-    const base = @ptrToInt(stack_allocation.ptr);
-
-    for (cpus) |*cpu, i| {
-        const rsp_offset = base + (i * stack_size);
-        const ist_offset = rsp_offset + middle;
-        cpu.shared_tss.rsp[0] = rsp_offset + stack_size;
-        cpu.shared_tss.IST[0] = ist_offset + stack_size;
-    }
-}
-
-export fn thread_terminate(thread: *Thread) void {
-    _ = thread;
-    TODO();
-}
-
-
 pub fn post_context_switch(arch_context: *Context, new_thread: *Thread, old_address_space: *VirtualAddressSpace) callconv(.C) void {
     log.debug("Context switching", .{});
     if (@import("root").scheduler.lock.were_interrupts_enabled != 0) {
@@ -311,25 +134,6 @@ pub inline fn legacy_actions_before_context_switch(new_thread: *Thread) void {
     const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
     if (should_swap_gs) asm volatile ("swapgs");
 }
-
-pub fn preinit_bsp(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, bootstrap_context: *BootstrapContext) void {
-    // @ZigBug: @ptrCast here crashes the compiler
-
-    bootstrap_context.cpu.id = 0;
-    bootstrap_context.thread.cpu = &bootstrap_context.cpu;
-    bootstrap_context.thread.context = &bootstrap_context.context;
-    bootstrap_context.thread.address_space = virtual_address_space;
-    TLS.preset_bsp(&bootstrap_context.thread);
-    TLS.set_current(&bootstrap_context.thread);
-
-    scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
-}
-
-pub const BootstrapContext = struct {
-    cpu: CPU,
-    thread: Thread,
-    context: Context,
-};
 
 pub const rax = registers.rax;
 pub const rbx = registers.rbx;

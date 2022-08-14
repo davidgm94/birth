@@ -12,14 +12,14 @@ const Spinlock = @import("spinlock.zig");
 const TODO = crash.TODO;
 
 pub const Region = struct {
-    virtual: VirtualAddress,
-    size: u64,
-    allocated: u64,
+    virtual: VirtualAddress = VirtualAddress{ .value = 0 },
+    size: u64 = 0,
+    allocated: u64 = 0,
 };
 
-allocator: std.Allocator,
-regions: [region_count]Region,
-lock: Spinlock,
+allocator: std.Allocator = undefined,
+regions: [region_count]Region = [1]Region{.{}} ** region_count,
+lock: Spinlock = .{},
 
 const region_size = 2 * std.mb;
 pub const region_count = 0x1000_0000 / region_size;
@@ -31,7 +31,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
             .vtable = &vtable,
         },
         .regions = std.zeroes([region_count]Region),
-        .lock = Spinlock.new(),
+        .lock = Spinlock{},
     };
 }
 
@@ -101,7 +101,7 @@ fn resize(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align:
     _ = new_size;
     _ = len_align;
     _ = return_address;
-    TODO(@src());
+    TODO();
 }
 
 fn free(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, return_address: usize) void {
@@ -109,7 +109,7 @@ fn free(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u
     _ = old_mem;
     _ = old_align;
     _ = return_address;
-    TODO(@src());
+    TODO();
 }
 
 const vtable: std.Allocator.VTable = .{

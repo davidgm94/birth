@@ -19,7 +19,7 @@ const Signature = enum(u32) {
 };
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
+pub fn parse(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) void {
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     const rsdp_physical_page = rsdp_physical_address.aligned_backward(context.page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());

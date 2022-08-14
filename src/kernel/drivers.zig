@@ -1,4 +1,4 @@
-const std = @import("common/std.zig");
+const std = @import("../common/std.zig");
 
 const Allocator = std.Allocator;
 

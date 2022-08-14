@@ -41,8 +41,8 @@ pub fn bootstrapping() VirtualAddressSpace {
     return VirtualAddressSpace{
         .arch = bootstrap_arch_specific_vas,
         .privilege_level = .kernel,
-        .heap = undefined,
-        .lock = Spinlock.new(),
+        .heap = Heap{},
+        .lock = Spinlock{},
         .initialized = false,
     };
 }
@@ -231,7 +231,7 @@ pub const Flags = packed struct {
         return std.zeroes(Flags);
     }
 
-    pub inline fn to_arch_specific(flags: Flags) VAS.Flags {
+    pub inline fn to_arch_specific(flags: Flags) VAS.MemoryFlags {
         return VAS.new_flags(flags);
     }
 };

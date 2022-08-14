@@ -8,6 +8,13 @@ comptime {
     @export(EntryPoint.function, .{ .name = "start", .linkage = .Strong });
 }
 
+/// Define root.log_level to override the default
+pub const log_level: std.log.Level = switch (std.build_mode) {
+    .Debug => .debug,
+    .ReleaseSafe => .debug,
+    .ReleaseFast, .ReleaseSmall => .debug,
+};
+
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;

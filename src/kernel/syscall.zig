@@ -87,8 +87,8 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
         .blocking => {
             switch (submission.input.options.type) {
                 .software => {
-                    if (submission.input.id < Syscall.ID.count) {
-                        const id = @intToEnum(Syscall.ID, submission.input.id);
+                    if (submission.input.id < Syscall.ServiceID.count) {
+                        const id = @intToEnum(Syscall.ServiceID, submission.input.id);
                         switch (id) {
                             .thread_exit => {
                                 const exit_code = argument1;
@@ -117,7 +117,7 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
                                     break :blk ptr[0..len];
                                 };
 
-                                const file = kernel.main_storage.read_file(kernel.main_storage, current_thread.address_space.heap.allocator, @ptrToInt(current_thread.address_space), filename);
+                                const file = kernel.main_storage.read_file(kernel.main_storage, current_thread.address_space.heap.allocator, filename, current_thread.address_space);
                                 std.assert(file.len > 0);
                                 logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
                                 logger.debug("Len: {}", .{file.len});
@@ -224,7 +224,7 @@ pub fn thread_exit(exit_code: u64, maybe_message: ?[]const u8) noreturn {
         logger.debug("User message: {s}", .{message});
     }
 
-    TODO(@src());
+    TODO();
 }
 
 pub fn log(message: []const u8) void {
@@ -233,7 +233,7 @@ pub fn log(message: []const u8) void {
     const processor_id = current_cpu.id;
     user_log.lock.acquire();
     defer user_log.lock.release();
-    user_log.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    user_log.writeAll(message) catch unreachable;
-    user_log.writeByte('\n') catch unreachable;
+    user_log.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    user_log.writer.writeAll(message) catch unreachable;
+    user_log.writer.writeByte('\n') catch unreachable;
 }

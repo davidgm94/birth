@@ -10,7 +10,6 @@ const kernel = @import("../../kernel.zig");
 const registers = @import("registers.zig");
 const GDT = @import("gdt.zig");
 const IDT = @import("idt.zig");
-const PIC = @import("pic.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const TLS = @import("tls.zig");
 
@@ -320,23 +319,11 @@ pub const handlers = [IDT.entry_count]Handler{
     get_handler(255),
 };
 
-pub fn install_interrupt_handlers(idt: *IDT) void {
+pub fn install_handlers(idt: *IDT) void {
     for (idt.entries) |*entry, i| {
         const handler = handlers[i];
         entry.* = IDT.Descriptor.from_handler(handler);
     }
-}
-
-pub fn init(idt: *IDT) void {
-    // Initialize interrupts
-    log.debug("Initializing interrupts", .{});
-    PIC.disable();
-    install_interrupt_handlers(idt);
-    log.debug("Installed interrupt handlers", .{});
-    idt.load();
-    log.debug("Loaded IDT", .{});
-    interrupts.enable();
-    log.debug("Enabled interrupts", .{});
 }
 
 const Exception = enum(u5) {

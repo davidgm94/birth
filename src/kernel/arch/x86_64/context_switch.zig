@@ -1,7 +1,7 @@
 const Thread = @import("../../thread.zig");
 const registers = @import("registers.zig");
 
-inline fn prologue() void {
+pub inline fn prologue() void {
     asm volatile (
         \\cld
         \\push %%rax

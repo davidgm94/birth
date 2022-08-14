@@ -2,7 +2,7 @@ const PhysicalAddressSpace = @This();
 
 const std = @import("../common/std.zig");
 
-const context = @import("context");
+const arch = @import("arch/common.zig");
 const crash = @import("crash.zig");
 const PhysicalAddress = @import("physical_address.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
@@ -10,37 +10,19 @@ const Spinlock = @import("spinlock.zig");
 
 const log = std.log.scoped(.PhysicalAddressSpace);
 const TODO = crash.TODO;
+const page_size = arch.page_size;
 
-usable: []MapEntry,
-reclaimable: []MapEntry,
-framebuffer: []PhysicalMemoryRegion,
-kernel_and_modules: []PhysicalMemoryRegion,
-reserved: []PhysicalMemoryRegion,
-lock: Spinlock,
-
-pub fn new() PhysicalAddressSpace {
-    return PhysicalAddressSpace{
-        .usable = &.{},
-        .reclaimable = &.{},
-        .framebuffer = &.{},
-        .kernel_and_modules = &.{},
-        .reserved = &.{},
-        .lock = Spinlock.new(),
-    };
-    //TODO(@src());
-}
-
-pub fn find_address(physical_address_space: *PhysicalAddressSpace, address: PhysicalAddress) void {
-    _ = physical_address_space;
-    _ = address;
-    TODO();
-}
+usable: []MapEntry = &.{},
+reclaimable: []MapEntry = &.{},
+framebuffer: []PhysicalMemoryRegion = &.{},
+kernel_and_modules: []PhysicalMemoryRegion = &.{},
+reserved: []PhysicalMemoryRegion = &.{},
+lock: Spinlock = .{},
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) ?PhysicalAddress {
     physical_address_space.lock.acquire();
     defer physical_address_space.lock.release();
     const take_hint = true;
-    const page_size = context.page_size;
     const size = page_count * page_size;
     // TODO: don't allocate if they are different regions (this can cause issues?)
     //log.debug("Debugging", .{});
@@ -53,7 +35,7 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) 
         if (region.descriptor.size - region.allocated_size >= size) {
             const region_page_count = region.descriptor.size / page_size;
             const supposed_bitset_size = region_page_count / @bitSizeOf(MapEntry.BitsetBaseType);
-            const bitset = region.get_bitset_extended(page_size);
+            const bitset = region.get_bitset_extended();
             std.assert(bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
             const allocated_page_count = region.allocated_size / page_size;
@@ -106,11 +88,11 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) 
             }
 
             if (region_allocated_page_count >= 64) {
-                TODO(@src());
+                TODO();
             }
 
             if (region_allocated_page_count > 0) {
-                TODO(@src());
+                TODO();
             }
 
             region.allocated_size = original_allocated_size;
@@ -134,17 +116,17 @@ pub const MapEntry = struct {
     };
     pub const BitsetBaseType = u64;
 
-    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64, page_size: u64) []BitsetBaseType {
+    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64) []BitsetBaseType {
         const page_count = std.bytes_to_pages(size, page_size, .must_be_exact);
         const bitset_len = std.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
         return physical_address.access_kernel([*]BitsetBaseType)[0..bitset_len];
     }
 
-    pub fn get_bitset_extended(entry: *MapEntry, page_size: u64) []BitsetBaseType {
-        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size, page_size);
+    pub fn get_bitset_extended(entry: *MapEntry) []BitsetBaseType {
+        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
     }
 
-    pub fn setup_bitset(entry: *MapEntry, page_size: u64) void {
+    pub fn setup_bitset(entry: *MapEntry) void {
         const page_count = std.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
@@ -152,7 +134,7 @@ pub const MapEntry = struct {
         const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
         const remainder = @intCast(std.IntType(.unsigned, popcount), page_count % bitsize);
 
-        const bitset = entry.get_bitset_extended(page_size);
+        const bitset = entry.get_bitset_extended();
 
         for (bitset[0..quotient]) |*bitset_elem| {
             bitset_elem.* = std.max_int(BitsetBaseType);

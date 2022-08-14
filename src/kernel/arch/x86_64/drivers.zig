@@ -1,3 +1,18 @@
+const std = @import("../../../common/std.zig");
+
+const AHCI = @import("../../../drivers/ahci.zig");
+const ACPI = @import("../../../drivers/acpi.zig");
+const Disk = @import("../../../drivers/disk.zig");
+const drivers = @import("../../drivers.zig");
+const Filesystem = @import("../../../drivers/filesystem.zig");
+const kernel = @import("../../kernel.zig");
+const PCI = @import("../../../drivers/pci.zig");
+const PhysicalAddress = @import("../../physical_address.zig");
+const RNUFS = @import("../../../drivers/rnufs/rnufs.zig");
+const VirtualAddressSpace = @import("../../virtual_address_space.zig");
+
+const log = std.log.scoped(.Drivers);
+
 pub fn register_main_storage() void {
     kernel.main_storage = kernel.drivers.filesystem.items[0];
 }
@@ -29,7 +44,7 @@ pub fn init_graphics_drivers(allocator: std.Allocator) !void {
     log.debug("TODO: initialize graphics drivers", .{});
 }
 
-pub fn prepare_drivers(virtual_address_space: *VirtualAddressSpace, rsdp: PhysicalAddress) void {
+pub fn prepare(virtual_address_space: *VirtualAddressSpace, rsdp: PhysicalAddress) void {
     ACPI.init(virtual_address_space, rsdp);
     PCI.init(virtual_address_space);
 }

@@ -2,13 +2,15 @@ const Context = @This();
 
 const std = @import("../../../common/std.zig");
 
-const Thread = @import("../../thread.zig");
-const VirtualAddress = @import("../../virtual_address.zig");
+const crash = @import("../../crash.zig");
 const GDT = @import("gdt.zig");
 const registers = @import("registers.zig");
+const Thread = @import("../../thread.zig");
+const VirtualAddress = @import("../../virtual_address.zig");
 
 const log = std.log.scoped(.Context);
 const RFLAGS = registers.RFLAGS;
+const TODO = crash.TODO;
 
 cr8: u64,
 ds: u64,
@@ -114,4 +116,9 @@ fn thread_terminate_stack() callconv(.Naked) void {
         \\jmp thread_terminate
     );
     unreachable;
+}
+
+export fn thread_terminate(thread: *Thread) void {
+    _ = thread;
+    TODO();
 }

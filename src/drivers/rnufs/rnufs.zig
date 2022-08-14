@@ -1,16 +1,19 @@
-const std = @import("../common/std.zig");
-const log = std.log.scoped(.RNUFS);
-const RNUFS = @import("../common/rnufs.zig");
-const drivers = @import("../drivers.zig");
+const Driver = @This();
+
+const std = @import("../../common/std.zig");
+
+const RNUFS = @import("../../common/rnufs.zig");
+const crash = @import("../../kernel/crash.zig");
+const drivers = @import("../../kernel/drivers.zig");
 const Filesystem = drivers.Filesystem;
 const GenericDriver = drivers.Driver;
 const Disk = drivers.Disk;
 const DMA = drivers.DMA;
+const VirtualAddressSpace = @import("../../kernel/virtual_address_space.zig");
 
+const log = std.log.scoped(.RNUFS);
 const Allocator = std.Allocator;
-const VirtualAddressSpace = common.VirtualAddressSpace;
-
-const Driver = @This();
+const panic = crash.panic;
 
 fs: Filesystem,
 
@@ -54,21 +57,21 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
             .operation = .read,
         });
         log.debug("FS driver ending read", .{});
-        if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
+        if (sectors_read != sectors_to_read_at_time) panic("Driver internal error: cannot seek file", .{});
         //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
         //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
         //}
         var node = search_buffer.address.access(*RNUFS.Node);
         if (node.type == .empty) break;
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
-        const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
+        const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
         if (node_name.len == 0) break;
 
         if (name[0] == 0x00) @panic("Wtf");
 
         log.debug("Wanted node name: (\"{s}\", {}) (First byte = 0x{x}). This node name: (\"{s}\", {})", .{ name, name.len, name[0], node_name, node_name.len });
 
-        if (common.string_eq(node_name, name)) {
+        if (std.string_eq(node_name, name)) {
             return SeekResult{
                 .sector = sector,
                 .node = node.*,
@@ -77,7 +80,7 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
 
         log.debug("Names don't match", .{});
 
-        const sectors_to_add = 1 + common.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
+        const sectors_to_add = 1 + std.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
         log.debug("Sectors to add: {}", .{sectors_to_add});
         sector += sectors_to_add;
     }
@@ -92,7 +95,7 @@ pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
-        const sector_count = common.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
+        const sector_count = std.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
         var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };
@@ -105,7 +108,7 @@ pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
             .operation = .read,
         });
 
-        if (sectors_read != sector_count) common.panic(@src(), "Driver internal error: cannot read file", .{});
+        if (sectors_read != sector_count) panic(@src(), "Driver internal error: cannot read file", .{});
 
         return buffer.address.access([*]const u8)[0..node_size];
     } else {
@@ -133,7 +136,7 @@ pub fn write_new_file(fs_driver: *Filesystem, allocator: Allocator, special_cont
                 .sector_count = sectors_to_read_at_time,
                 .operation = .read,
             });
-            if (sectors_read != sectors_to_read_at_time) common.panic(@src(), "Driver internal error: cannot seek file", .{});
+            if (sectors_read != sectors_to_read_at_time) panic("Driver internal error: cannot seek file", .{});
             //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
             //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
             //}
@@ -143,16 +146,16 @@ pub fn write_new_file(fs_driver: *Filesystem, allocator: Allocator, special_cont
             log.debug("Node type: {}", .{node.type});
             if (node.type == .empty) break;
             const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
-            const node_name = node_name_cstr[0..common.cstr_len(node_name_cstr)];
+            const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
             if (node_name.len == 0) break;
 
-            const sectors_to_add = 1 + common.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
+            const sectors_to_add = 1 + std.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
             log.debug("Found file with name: {s} and size: {}. Need to skip {} sectors", .{ node_name, node.size, sectors_to_add });
             sector += sectors_to_add;
         }
     }
 
-    const sector_count = common.bytes_to_sector(file_content.len, fs_driver.disk.sector_size, .can_be_not_exact) + 1;
+    const sector_count = std.bytes_to_sector(file_content.len, fs_driver.disk.sector_size, .can_be_not_exact) + 1;
     log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
     var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
         log.err("Unable to allocate write buffer", .{});
@@ -162,15 +165,15 @@ pub fn write_new_file(fs_driver: *Filesystem, allocator: Allocator, special_cont
     // Copy file metadata
     var node = write_buffer.address.access(*RNUFS.Node);
     node.size = file_content.len;
-    common.runtime_assert(@src(), filename.len < node.name.len);
-    common.copy(u8, &node.name, filename);
+    std.assert(filename.len < node.name.len);
+    std.copy(u8, &node.name, filename);
     node.name[filename.len] = 0;
     node.type = .file;
-    node.parent = common.zeroes([100]u8);
+    node.parent = std.zeroes([100]u8);
     node.last_modification = 0;
 
     // Copy the actual file content
-    common.copy(u8, write_buffer.address.access([*]u8)[sector_size..write_buffer.total_size], file_content);
+    std.copy(u8, write_buffer.address.access([*]u8)[sector_size..write_buffer.total_size], file_content);
 
     const bytes = fs_driver.disk.access(fs_driver.disk, special_context, &write_buffer, Disk.Work{
         .sector_offset = sector,

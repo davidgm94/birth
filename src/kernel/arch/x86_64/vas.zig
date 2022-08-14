@@ -3,25 +3,29 @@ const VAS = @This();
 const std = @import("../../../common/std.zig");
 
 const common = @import("common.zig");
-const Bitflag = @import("../../../common/bitflag.zig");
+const Bitflag = @import("../../../common/bitflag.zig").Bitflag;
 const kernel = @import("../../kernel.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const PhysicalAddressSpace = @import("../../physical_address_space.zig");
 const registers = @import("registers.zig");
+const Stivale2 = @import("limine/stivale2/stivale2.zig");
 const VirtualAddress = @import("../../virtual_address.zig");
 const VirtualAddressSpace = @import("../../virtual_address_space.zig");
+const VirtualMemoryRegion = @import("../../virtual_memory_region.zig");
+const x86_64 = @import("common.zig");
 
-const log = std.log.scoped(.VAS);
 const cr3 = registers.cr3;
+const log = std.log.scoped(.VAS);
+const page_size = common.page_size;
 
 cr3: u64 = 0,
 
 const Indices = [std.enum_count(PageIndex)]u16;
 
-pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VirtualAddressSpace {
+pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VAS {
     const page_count = std.bytes_to_pages(@sizeOf(PML4Table), common.page_size, .must_be_exact);
     const cr3_physical_address = physical_address_space.allocate(page_count) orelse return null;
-    const virtual_address_space = VirtualAddressSpace{
+    const virtual_address_space = VAS{
         .cr3 = cr3_physical_address.value,
     };
 
@@ -35,23 +39,23 @@ pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddr
     }
 }
 
-pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
+pub inline fn is_current(vas: *VAS) bool {
     const current = cr3.read_raw();
-    return current == virtual_address_space.cr3;
+    return current == vas.cr3;
 }
 
-pub inline fn bootstrapping() VirtualAddressSpace {
-    return VirtualAddressSpace{
+pub inline fn bootstrapping() VAS {
+    return VAS{
         .cr3 = cr3.read_raw(),
     };
 }
 
-pub fn get_pml4(address_space: VirtualAddressSpace) PhysicalAddress {
-    return PhysicalAddress.new(address_space.cr3);
+pub fn get_pml4(vas: VAS) PhysicalAddress {
+    return PhysicalAddress.new(vas.cr3);
 }
 
-pub fn map_kernel_address_space_higher_half(address_space: VirtualAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
-    const cr3_physical_address = PhysicalAddress.new(address_space.cr3);
+pub fn map_kernel_address_space_higher_half(vas: VAS, kernel_address_space: *VirtualAddressSpace) void {
+    const cr3_physical_address = PhysicalAddress.new(vas.cr3);
     const cr3_kernel_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
     // TODO: maybe user flag is not necessary?
     kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, .{ .write = true, .user = true });
@@ -61,7 +65,7 @@ pub fn map_kernel_address_space_higher_half(address_space: VirtualAddressSpace, 
     log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }
 
-pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
+pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VAS.MemoryFlags) void {
     std.assert((PhysicalAddress{ .value = vas.cr3 }).is_valid());
     std.assert(std.is_aligned(virtual_address.value, common.page_size));
     std.assert(std.is_aligned(physical_address.value, common.page_size));
@@ -137,7 +141,7 @@ pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: Virtua
     };
 }
 
-pub fn translate_address(address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
+pub fn translate_address(address_space: *VAS, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
     std.assert(asked_virtual_address.is_valid());
     const virtual_address = asked_virtual_address.aligned_backward(common.page_size);
 
@@ -203,7 +207,7 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
     return indices;
 }
 
-pub fn make_current(address_space: *VirtualAddressSpace) void {
+pub fn make_current(address_space: *VAS) void {
     cr3.write_raw(address_space.cr3);
 }
 
@@ -232,7 +236,7 @@ pub const MemoryFlags = Bitflag(true, u64, enum(u6) {
 
 const address_mask: u64 = 0x000000fffffff000;
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
-    std.assert(.max_physical_address_bit == 40);
+    std.assert(x86_64.max_physical_address_bit == 40);
     std.assert(std.is_aligned(new_address.value, common.page_size));
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
@@ -258,7 +262,7 @@ const PageIndex = enum(u3) {
 const PML4E = struct {
     value: Flags,
 
-    const Flags = std.Bitflag(true, u64, enum(u6) {
+    const Flags = Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -273,7 +277,7 @@ const PML4E = struct {
 const PDPTE = struct {
     value: Flags,
 
-    const Flags = std.Bitflag(true, u64, enum(u6) {
+    const Flags = Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -289,7 +293,7 @@ const PDPTE = struct {
 const PDE = struct {
     value: Flags,
 
-    const Flags = std.Bitflag(true, u64, enum(u6) {
+    const Flags = Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -305,7 +309,7 @@ const PDE = struct {
 const PTE = struct {
     value: Flags,
 
-    const Flags = std.Bitflag(true, u64, enum(u6) {
+    const Flags = Bitflag(true, u64, enum(u6) {
         present = 0,
         read_write = 1,
         user = 2,
@@ -325,3 +329,91 @@ const PML4Table = [512]PML4E;
 const PDPTable = [512]PDPTE;
 const PDTable = [512]PDE;
 const PTable = [512]PTE;
+
+pub fn init(kernel_virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, stivale_pmrs: []Stivale2.Struct.PMRs.PMR, cached_higher_half_direct_map: u64) void {
+    log.debug("About to dereference memory regions", .{});
+    var new_virtual_address_space = VirtualAddressSpace{
+        .arch = .{},
+        .privilege_level = .kernel,
+        .heap = .{},
+        .lock = .{},
+        .initialized = false,
+    };
+    // Using pointer initialization for virtual address space because it depends on the allocator pointer being stable
+    VirtualAddressSpace.initialize_kernel_address_space(&new_virtual_address_space, physical_address_space) orelse @panic("unable to initialize kernel address space");
+
+    // Map the kernel and do some tests
+    {
+        // TODO: better flags
+        for (stivale_pmrs) |pmr| {
+            const section_virtual_address = VirtualAddress.new(pmr.address);
+            const kernel_section_virtual_region = VirtualMemoryRegion.new(section_virtual_address, pmr.size);
+            const section_physical_address = kernel_virtual_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
+            new_virtual_address_space.map_virtual_region(kernel_section_virtual_region, section_physical_address, .{
+                .execute = pmr.permissions & Stivale2.Struct.PMRs.PMR.executable != 0,
+                .write = true, //const writable = permissions & Stivale2.Struct.PMRs.PMR.writable != 0;
+            });
+        }
+    }
+
+    // TODO: better flags
+    for (physical_address_space.usable) |region| {
+        // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+        // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+        new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+            .write = true,
+            .user = true,
+        });
+    }
+    log.debug("Mapped usable", .{});
+
+    // TODO: better flags
+    for (physical_address_space.reclaimable) |region| {
+        // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+        // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+        new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+            .write = true,
+            .user = true,
+        });
+    }
+    log.debug("Mapped reclaimable", .{});
+
+    // TODO: better flags
+    for (physical_address_space.framebuffer) |region| {
+        // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+        // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+        new_virtual_address_space.map_physical_region(region, region.address.to_virtual_address_with_offset(cached_higher_half_direct_map), .{
+            .write = true,
+            .user = true,
+        });
+    }
+    log.debug("Mapped framebuffer", .{});
+
+    new_virtual_address_space.make_current();
+    new_virtual_address_space.copy(kernel_virtual_address_space);
+    kernel.higher_half_direct_map = VirtualAddress.new(cached_higher_half_direct_map);
+    // Update identity-mapped pointers to higher-half ones
+    physical_address_space.usable.ptr = @intToPtr(@TypeOf(physical_address_space.usable.ptr), @ptrToInt(physical_address_space.usable.ptr) + cached_higher_half_direct_map);
+    physical_address_space.reclaimable.ptr = @intToPtr(@TypeOf(physical_address_space.reclaimable.ptr), @ptrToInt(physical_address_space.reclaimable.ptr) + cached_higher_half_direct_map);
+    physical_address_space.framebuffer.ptr = @intToPtr(@TypeOf(physical_address_space.framebuffer.ptr), @ptrToInt(physical_address_space.framebuffer.ptr) + cached_higher_half_direct_map);
+    physical_address_space.reserved.ptr = @intToPtr(@TypeOf(physical_address_space.reserved.ptr), @ptrToInt(physical_address_space.reserved.ptr) + cached_higher_half_direct_map);
+    physical_address_space.kernel_and_modules.ptr = @intToPtr(@TypeOf(physical_address_space.kernel_and_modules.ptr), @ptrToInt(physical_address_space.kernel_and_modules.ptr) + cached_higher_half_direct_map);
+    log.debug("Memory mapping initialized!", .{});
+
+    for (physical_address_space.reclaimable) |*region| {
+        const bitset = region.get_bitset_extended();
+        const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
+        region.allocated_size = std.align_forward(bitset_size, page_size);
+        region.setup_bitset();
+    }
+
+    const old_reclaimable = physical_address_space.reclaimable.len;
+    physical_address_space.usable.len += old_reclaimable;
+    physical_address_space.reclaimable.len = 0;
+
+    log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
+
+    // TODO: Handle virtual memory management later on
+
+    log.debug("Paging initialized", .{});
+}

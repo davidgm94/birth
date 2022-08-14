@@ -1,31 +1,30 @@
-const common = @import("../../../common.zig");
-const context = @import("context");
-const x86_64 = common.arch.x86_64;
+const std = @import("../../../common/std.zig");
+const log = std.log.scoped(.Syscall_x86_64);
 
-const log = common.log.scoped(.Syscall_x86_64);
+const GDT = @import("gdt.zig");
+const registers = @import("registers.zig");
+const Thread = @import("../../thread.zig");
+const Syscall = @import("../../syscall.zig");
 
 pub fn enable() void {
-    comptime {
-        common.comptime_assert(context.identity == .kernel);
-    }
     // Enable syscall extensions
-    var efer = x86_64.IA32_EFER.read();
+    var efer = registers.IA32_EFER.read();
     efer.or_flag(.SCE);
-    x86_64.IA32_EFER.write(efer);
+    registers.IA32_EFER.write(efer);
 
-    x86_64.IA32_LSTAR.write(@ptrToInt(kernel_syscall_entry_point));
+    registers.IA32_LSTAR.write(@ptrToInt(kernel_syscall_entry_point));
     // TODO: figure out what this does
-    x86_64.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
+    registers.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
     // Selectors (kernel64 and user32. Syscall MSRs pick from there the correct register
-    const kernel64_code_selector = @offsetOf(x86_64.GDT.Table, "code_64");
-    const user32_code_selector: u32 = @offsetOf(x86_64.GDT.Table, "user_code_32");
+    const kernel64_code_selector = @offsetOf(GDT.Table, "code_64");
+    const user32_code_selector: u32 = @offsetOf(GDT.Table, "user_code_32");
     comptime {
-        common.comptime_assert(@offsetOf(x86_64.GDT.Table, "data_64") == kernel64_code_selector + 8);
-        common.comptime_assert(@offsetOf(x86_64.GDT.Table, "user_data") == user32_code_selector + 8);
-        common.comptime_assert(@offsetOf(x86_64.GDT.Table, "user_code_64") == user32_code_selector + 16);
+        std.assert(@offsetOf(GDT.Table, "data_64") == kernel64_code_selector + 8);
+        std.assert(@offsetOf(GDT.Table, "user_data") == user32_code_selector + 8);
+        std.assert(@offsetOf(GDT.Table, "user_code_64") == user32_code_selector + 16);
     }
     const high_32: u64 = kernel64_code_selector | user32_code_selector << 16;
-    x86_64.IA32_STAR.write(high_32 << 32);
+    registers.IA32_STAR.write(high_32 << 32);
     log.debug("Enabled syscalls", .{});
 }
 
@@ -64,8 +63,8 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\cli
         \\hlt
         :
-        : [offset] "i" (@intCast(u8, @offsetOf(common.Thread, "kernel_stack"))),
-          [handler] "i" (@ptrToInt(&common.Syscall.kernel.handler)),
+        : [offset] "i" (@intCast(u8, @offsetOf(Thread, "kernel_stack"))),
+          [handler] "i" (@ptrToInt(&Syscall.handler)),
     );
 
     @panic("reached unreachable: syscall handler");

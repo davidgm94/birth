@@ -2,8 +2,9 @@ const PhysicalAddress = @This();
 
 const std = @import("../common/std.zig");
 
-const context = @import("context");
+const arch = @import("arch/common.zig");
 const crash = @import("crash.zig");
+const kernel = @import("kernel.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const VirtualAddress = @import("virtual_address.zig");
 
@@ -37,8 +38,8 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
 
 pub inline fn is_valid(physical_address: PhysicalAddress) bool {
     std.assert(physical_address.value != 0);
-    std.assert(context.max_physical_address_bit != 0);
-    const max = @as(u64, 1) << context.max_physical_address_bit;
+    std.assert(arch.max_physical_address_bit != 0);
+    const max = @as(u64, 1) << arch.max_physical_address_bit;
     std.assert(max > std.max_int(u32));
     //log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
     return physical_address.value <= max;
@@ -58,18 +59,11 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
 
 /// This would return the correct address even before initializing the higher half and mapping. This would only fail if it's used with the kernel memory-mapped regions before setting up paging and higher-half
 pub inline fn access_kernel(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    const root = @import("root");
-    comptime std.assert(root.privilege_level != .user);
     return physical_address.access_higher_half(Ptr);
 }
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    const root = @import("root");
-    comptime std.assert(root.privilege_level != .user);
-    var higher_half: u64 = 0;
-    if (@hasDecl(root, "higher_half_direct_map")) {
-        higher_half = root.higher_half_direct_map.value;
-    }
+    const higher_half = kernel.higher_half_direct_map.value;
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;
 }

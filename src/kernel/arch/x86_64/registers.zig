@@ -104,10 +104,15 @@ pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u6) {
     FFXSR = 14,
     TCE = 15,
 });
+
 pub const IA32_APIC_BASE = ComplexMSR(0x0000001B, enum(u6) {
     bsp = 8,
     global_enable = 11,
 });
+
+pub fn get_apic_base() u32 {
+    return @truncate(u32, IA32_APIC_BASE.read().bits & 0xfffff000);
+}
 
 pub fn SimpleR64(comptime name: []const u8) type {
     return struct {
