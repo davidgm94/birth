@@ -1,6 +1,12 @@
 const std = @import("../common/std.zig");
+const crash = @import("crash.zig");
+const EntryPoint = @import("arch/entry_point.zig");
 const TLS = @import("arch/tls.zig");
 const default_logger = @import("log.zig");
+
+comptime {
+    @export(EntryPoint.function, .{ .name = "start", .linkage = .Strong });
+}
 
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
@@ -18,6 +24,5 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
 
 //var panicking: usize = 0;
 pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
-    std.log.err("Panic happened: {s}", .{message});
-    while (true) {}
+    crash.panic("{s}", .{message});
 }

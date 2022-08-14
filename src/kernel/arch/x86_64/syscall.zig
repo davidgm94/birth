@@ -29,31 +29,6 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub extern fn user_syscall_entry_point(arg0: common.Syscall.Input, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) common.Syscall.RawResult;
-
-// INFO: only RSP is handled in the kernel
-comptime {
-    asm (
-        \\.global user_syscall_entry_point
-        \\user_syscall_entry_point:
-        \\push %r15
-        \\push %r14
-        \\push %r13
-        \\push %r12
-        \\push %rbx
-        \\push %rbp
-        \\mov %rcx, %rax
-        \\syscall
-        \\pop %rbp
-        \\pop %rbx
-        \\pop %r12
-        \\pop %r13
-        \\pop %r14
-        \\pop %r15
-        \\ret
-    );
-}
-
 pub fn kernel_syscall_entry_point() callconv(.Naked) void {
     // This function only modifies RSP. The other registers are preserved in user space
     // This sets up the kernel stack before actually starting to run kernel code

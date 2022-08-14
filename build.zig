@@ -32,6 +32,7 @@ pub fn build(b: *Build.Builder) void {
                         .smp = 8,
                         .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
+                        .print_command = false,
                     },
                 },
             },
@@ -146,8 +147,9 @@ const Kernel = struct {
 
         for (unique_programs.items) |userspace_program_name| {
             const out_filename = kernel.builder.fmt("{s}.elf", .{userspace_program_name});
-            const main_source_file = kernel.builder.fmt("src/user/{s}/main.zig", .{userspace_program_name});
+            const main_source_file = kernel.builder.fmt("src/user/programs/{s}/main.zig", .{userspace_program_name});
             const program = kernel.builder.addExecutable(out_filename, main_source_file);
+            program.setMainPkgPath("src");
             program.setTarget(get_target_base(kernel.options.arch));
             program.setOutputDir(cache_dir);
             program.setBuildMode(kernel.builder.standardReleaseOptions());
@@ -349,10 +351,12 @@ const Kernel = struct {
             },
         }
 
-        for (kernel.run_argument_list.items) |arg| {
-            Build.print("{s} ", .{arg});
+        if (kernel.options.run.emulator.qemu.print_command) {
+            for (kernel.run_argument_list.items) |arg| {
+                Build.print("{s} ", .{arg});
+            }
+            Build.print("\n\n", .{});
         }
-        Build.print("\n\n", .{});
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
         run_command.step.dependOn(kernel.builder.default_step);
@@ -636,6 +640,7 @@ const Kernel = struct {
                 log: ?LogOptions,
                 smp: ?u64,
                 run_for_debug: bool,
+                print_command: bool,
                 const VGA = enum {
                     std,
                     virtio,
