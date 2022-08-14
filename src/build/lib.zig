@@ -46,15 +46,15 @@ pub const cwd = std.fs.cwd;
 pub const Dir = std.fs.Dir;
 pub const path = std.fs.path;
 
-pub const QEMU = @import("common/qemu/common.zig");
+pub const QEMU = @import("../common/qemu/common.zig");
 
 pub fn add_qemu_debug_isa_exit(builder: *Builder, list: *ArrayList([]const u8), qemu_debug_isa_exit: QEMU.ISADebugExit) !void {
     try list.append("-device");
     try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
 }
 
-const DiskDevice = @import("drivers/disk.zig");
-const DMA = @import("drivers/dma.zig");
+const DiskDevice = @import("../drivers/disk.zig");
+const DMA = @import("../drivers/dma.zig");
 
 pub const Disk = struct {
     const BufferType = ArrayListAlignedUnmanaged(u8, 0x1000);

@@ -2,8 +2,10 @@ const std = @import("../../../../../common/std.zig");
 
 const common = @import("../../../../common.zig");
 const Context = @import("../../context.zig");
+const context_switch = @import("../../context_switch.zig");
 const CPU = @import("../../cpu.zig");
 const crash = @import("../../../../crash.zig");
+const kernel = @import("../../../../kernel.zig");
 const stivale = @import("header.zig");
 const x86_64 = @import("../../common.zig");
 const VirtualAddress = @import("../../../../virtual_address.zig");
@@ -292,7 +294,6 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!u64 {
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
     const virtual_address_space = initialization_context.kernel_virtual_address_space;
-    const scheduler = initialization_context.scheduler;
     const cpu_index = smp_info.processor_id;
     // Current thread is already set in the process_smp function
     TLS.preset(cpu_index);
@@ -302,10 +303,13 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     cpu.start(virtual_address_space);
     log.debug("CPU started", .{});
 
-    _ = @atomicRmw(u64, &scheduler.initialized_ap_cpu_count, .Add, 1, .AcqRel);
-    while (true) {
+    var drivers_ready = false;
+    while (!drivers_ready) {
+        drivers_ready = @ptrCast(*volatile bool, &kernel.drivers_ready).*;
         asm volatile ("pause" ::: "memory");
     }
+
+    context_switch.force_yield();
 }
 
 const CPUInitializationContext = struct {
@@ -373,11 +377,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         smp.target_stack = stack_pointer;
         smp.goto_address = entry_point;
     }
-    std.assert(scheduler.active_threads.count == 0);
 
-    // @ZigBug if this is written with atomic operations, it gets optimized out by the compiler or LLVM
-    //while (@atomicLoad(u64, &scheduler.initalizated_ap_cpu_count, .Acquire) < ap_cpu_count) {}
-    while (@as(*volatile u64, &scheduler.initialized_ap_cpu_count).* < ap_cpu_count) {}
-    log.debug("Initialized all cores", .{});
+    std.assert(scheduler.active_threads.count == 0);
     scheduler.lock.release();
 }

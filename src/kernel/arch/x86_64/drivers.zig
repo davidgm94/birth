@@ -3,7 +3,7 @@ const std = @import("../../../common/std.zig");
 const AHCI = @import("../../../drivers/ahci.zig");
 const ACPI = @import("../../../drivers/acpi.zig");
 const Disk = @import("../../../drivers/disk.zig");
-const drivers = @import("../../drivers.zig");
+const DeviceManager = @import("../../device_manager.zig");
 const Filesystem = @import("../../../drivers/filesystem.zig");
 const kernel = @import("../../kernel.zig");
 const PCI = @import("../../../drivers/pci.zig");
@@ -14,7 +14,7 @@ const VirtualAddressSpace = @import("../../virtual_address_space.zig");
 const log = std.log.scoped(.Drivers);
 
 pub fn register_main_storage() void {
-    kernel.main_storage = kernel.drivers.filesystem.items[0];
+    kernel.device_manager.main_storage = kernel.drivers.filesystem.items[0];
 }
 
 pub fn drivers_init(virtual_address_space: *VirtualAddressSpace) !void {
@@ -28,15 +28,14 @@ pub fn drivers_init(virtual_address_space: *VirtualAddressSpace) !void {
 pub fn init_block_drivers(virtual_address_space: *VirtualAddressSpace) !void {
     AHCI.drivers = try AHCI.Initialization.callback(virtual_address_space, &PCI.controller);
     std.assert(Disk.drivers.items.len > 0);
-    try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
+    try kernel.device_manager.add_filesystem_driver(
+        RNUFS,
+        virtual_address_space,
+    ).init(virtual_address_space.heap.allocator, Disk.drivers.items[0]);
     // TODO: make ACPI and PCI controller standard
     // TODO: make a category for NVMe and standardize it there
     // INFO: this callback also initialize child drives
     //NVMe.driver = try NVMe.Initialization.callback(virtual_address_space, &PCI.controller);
-
-    //Virtio.Block.driver = try Virtio.Block.from_pci(&PCI.controller);
-    //std.assert(Disk.drivers.items.len == 2);
-    //try drivers.Driver(Filesystem, RNUFS).init(virtual_address_space.heap.allocator, Disk.drivers.items[1]);
 }
 
 pub fn init_graphics_drivers(allocator: std.Allocator) !void {

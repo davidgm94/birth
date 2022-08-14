@@ -71,3 +71,8 @@ pub inline fn set_new_stack(new_stack: u64) void {
         : "nostackssd"
     );
 }
+
+pub inline fn force_yield() noreturn {
+    asm volatile ("int $0x40");
+    unreachable;
+}

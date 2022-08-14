@@ -1,5 +1,6 @@
 const common = @import("common.zig");
 
+const DeviceManager = @import("device_manager.zig");
 const Filesystem = @import("../drivers/filesystem.zig");
 const FileInMemory = common.FileInMemory;
 const Scheduler = @import("scheduler.zig");
@@ -38,3 +39,6 @@ pub var file = FileInMemory{
 pub var higher_half_direct_map = VirtualAddress.invalid();
 
 pub var main_storage: *Filesystem = undefined;
+
+pub var device_manager: DeviceManager = undefined;
+pub var drivers_ready: bool = false;

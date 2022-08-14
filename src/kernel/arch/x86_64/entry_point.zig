@@ -12,6 +12,7 @@ const VirtualAddressSpace = @import("../../virtual_address_space.zig");
 const x86_64 = @import("common.zig");
 
 var bootstrap_context: Stivale2.BootstrapContext = undefined;
+
 pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     kernel.virtual_address_space = VirtualAddressSpace.bootstrapping();
@@ -31,17 +32,17 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
     cpu.start(&kernel.virtual_address_space);
+
+    drivers.init() catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    std.assert(kernel.drivers.Disk.drivers.items.len > 0);
+    std.assert(kernel.drivers.Filesystem.drivers.items.len > 0);
+
     asm volatile ("int $0x40");
     @panic("This is unreachable");
 }
 
 pub fn main() callconv(.C) noreturn {
-    drivers.prepare(&kernel.virtual_address_space, x86_64.rsdp_physical_address);
-    drivers.init(&kernel.virtual_address_space) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
-    std.assert(kernel.drivers.Disk.drivers.items.len > 0);
-    std.assert(kernel.drivers.Filesystem.drivers.items.len > 0);
-    x86_64.register_main_storage();
-    _ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
+    //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
     asm volatile ("int $0x40");
 
     //success_and_end();

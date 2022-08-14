@@ -1,5 +1,5 @@
 const std = @import("src/common/std.zig");
-const Build = @import("src/build.zig");
+const Build = @import("src/build/lib.zig");
 const drivers = @import("src/drivers/common.zig");
 const DiskDriverType = drivers.DiskDriverType;
 const FilesystemDriverType = drivers.FilesystemDriverType;
@@ -129,7 +129,7 @@ const Kernel = struct {
     }
 
     fn create_userspace_programs(kernel: *Kernel) void {
-        const linker_script_path = kernel.builder.fmt("src/common/arch/{s}/user/linker.ld", .{@tagName(kernel.options.arch)});
+        const linker_script_path = kernel.builder.fmt("src/user/arch/{s}/linker.ld", .{@tagName(kernel.options.arch)});
 
         var unique_programs = Build.ArrayList([]const u8).init(kernel.builder.allocator);
         {
@@ -399,7 +399,7 @@ const Kernel = struct {
             const Limine = struct {
                 const build_installer_path = "src/build/arch/x86_64/limine/";
                 const installer = @import("src/build/arch/x86_64/limine/installer.zig");
-                const base_path = "src/common/arch/x86_64/limine/";
+                const base_path = "src/kernel/arch/x86_64/limine/";
                 const to_install_path = build_installer_path ++ "to_install/";
                 const image_path = "zig-cache/universal.iso";
 
