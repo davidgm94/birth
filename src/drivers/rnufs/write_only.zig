@@ -2,7 +2,6 @@ const std = @import("../../common/std.zig");
 const log = std.log.scoped(.RNUFS);
 const RNUFS = @import("../../common/rnufs.zig");
 const Filesystem = @import("../filesystem.zig");
-const GenericDriver = @import("../../drivers.zig").GenericDriver;
 const Disk = @import("../disk.zig");
 const DMA = @import("../dma.zig");
 
