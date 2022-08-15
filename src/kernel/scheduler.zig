@@ -49,7 +49,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     std.assert(old_thread.state == .active);
     old_thread.context = old_context;
     old_address_space = old_thread.address_space;
-    const new_thread = scheduler.pick_thread();
+    const new_thread = scheduler.pick_thread(current_cpu);
     new_thread.cpu = old_thread.cpu;
     new_thread.time_slices += 1;
     old_thread.state = .paused;
@@ -59,6 +59,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
     interrupts.disable_all();
+    log.debug("New thread address space: 0x{x}", .{@ptrToInt(new_thread.address_space)});
     VAS.switch_address_spaces_if_necessary(new_thread.address_space);
 
     if (scheduler.lock.were_interrupts_enabled != 0) {
@@ -247,15 +248,17 @@ pub fn terminate(thread: *Thread) void {
     TODO(@src());
 }
 
-fn pick_thread(scheduler: *Scheduler) *Thread {
+fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
     log.debug("Scheduler active threads: {}", .{scheduler.active_threads.count});
     log.debug("Scheduler paused threads: {}", .{scheduler.paused_threads.count});
+
     var maybe_active_thread_node = scheduler.active_threads.first;
+
     while (maybe_active_thread_node) |active_thread_node| : (active_thread_node = active_thread_node.next) {
         const active_thread = active_thread_node.data;
         scheduler.active_threads.remove(active_thread_node);
         return active_thread;
     }
 
-    @panic("Nothing to schedule");
+    return cpu.idle_thread;
 }

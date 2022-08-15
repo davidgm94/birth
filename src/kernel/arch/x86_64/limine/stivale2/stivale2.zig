@@ -303,14 +303,7 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     cpu.start(virtual_address_space);
     log.debug("CPU started", .{});
 
-    var drivers_ready = false;
-    while (!drivers_ready) {
-        drivers_ready = @ptrCast(*volatile bool, &kernel.device_manager.ready).*;
-        asm volatile ("pause" ::: "memory");
-    }
-
-    log.debug("CORE ACTIVATED", .{});
-    context_switch.force_yield();
+    cpu.make_thread_idle();
 }
 
 const CPUInitializationContext = struct {
@@ -344,6 +337,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     bsp_thread.context = &bootstrap_context.context;
     bsp_thread.state = .active;
     bsp_thread.cpu = &scheduler.cpus[0];
+    bsp_thread.address_space = virtual_address_space;
     TLS.set_current(bsp_thread);
     TLS.allocate_and_setup(virtual_address_space, scheduler);
 
@@ -363,6 +357,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
         const cpu = &scheduler.cpus[index];
         const thread = &all_threads[index];
         cpu.lapic.id = smp.lapic_id;
+        cpu.idle_thread = thread;
         cpu.id = smp.processor_id;
         thread.cpu = cpu;
         thread.executing = true;

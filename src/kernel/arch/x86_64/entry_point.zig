@@ -40,8 +40,7 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
         .address = @ptrToInt(main),
     });
 
-    asm volatile ("int $0x40");
-    @panic("This is unreachable");
+    cpu.make_thread_idle();
 }
 
 pub fn main() callconv(.C) noreturn {

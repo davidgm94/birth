@@ -11,6 +11,7 @@ const PhysicalAddress = @import("../../physical_address.zig");
 const PIC = @import("pic.zig");
 const Syscall = @import("syscall.zig");
 const registers = @import("registers.zig");
+const Thread = @import("../../thread.zig");
 const TLS = @import("tls.zig");
 const TSS = @import("tss.zig");
 const x86_64 = @import("common.zig");
@@ -29,6 +30,7 @@ id: u32 = 0,
 gdt: GDT.Table,
 shared_tss: TSS.Struct,
 idt: IDT,
+idle_thread: *Thread,
 timestamp_ticks_per_ms: u64 = 0,
 ready: bool,
 
@@ -187,4 +189,15 @@ pub fn init_apic(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
     //log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
     //std.assert(lapic_id == cpu.lapic.id);
     log.debug("APIC enabled", .{});
+}
+
+pub fn make_thread_idle(cpu: *CPU) noreturn {
+    cpu.lapic.next_timer(1);
+
+    while (true) {
+        asm volatile (
+            \\sti
+            \\hlt
+        );
+    }
 }
