@@ -18,23 +18,35 @@ const drivers = switch (std.cpu.arch) {
 };
 
 const Allocator = std.Allocator;
+const log = std.log.scoped(.DeviceManager);
 
-disks: std.ArrayList(*Disk) = .{ .items = &.{}, .capacity = 0 },
-filesystems: std.ArrayList(*Filesystem) = .{ .items = &.{}, .capacity = 0 },
+devices: Devices = .{},
 main_storage: u32 = 0,
+
+const Devices = struct {
+    disk: std.ArrayList(*Disk) = .{ .items = &.{}, .capacity = 0 },
+    filesystem: std.ArrayList(*Filesystem) = .{ .items = &.{}, .capacity = 0 },
+};
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     try drivers.init(device_manager, virtual_address_space);
+
+    inline for (std.fields(Devices)) |device_field| {
+        const device_count = @field(device_manager.devices, device_field.name).items.len;
+        log.debug("{s} count: {}", .{ device_field.name, device_count });
+    }
 }
 
 pub fn register_filesystem(device_manager: *DeviceManager, allocator: std.Allocator, filesystem: *Filesystem) !void {
-    try device_manager.filesystems.append(allocator, filesystem);
+    log.debug("Registered new {} filesystem with {} drive", .{ filesystem.interface.type, filesystem.interface.disk.type });
+    try device_manager.devices.filesystem.append(allocator, filesystem);
 }
 
 pub fn register_disk(device_manager: *DeviceManager, allocator: std.Allocator, disk: *Disk) !void {
-    try device_manager.disks.append(allocator, disk);
+    log.debug("Registered new {} disk", .{disk.interface.type});
+    try device_manager.devices.disk.append(allocator, disk);
 }
 
 pub fn get_main_storage(device_manager: *DeviceManager) *Filesystem {
-    return device_manager.filesystems.items[device_manager.main_storage];
+    return device_manager.devices.filesystem.items[device_manager.main_storage];
 }

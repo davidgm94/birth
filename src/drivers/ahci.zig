@@ -313,8 +313,9 @@ pub const Drive = struct {
     const hba_pxis_tfes = 1 << 30;
 
     fn access(disk: *DiskInterface, buffer: *DMA.Buffer, disk_work: Disk.Work, extra_context: ?*anyopaque) u64 {
+        const requested_size = disk_work.sector_count * disk.sector_size;
         std.assert(buffer.completed_size == 0);
-        std.assert(buffer.total_size >= disk_work.sector_count * disk.sector_size);
+        std.assert(buffer.total_size >= requested_size);
         const sector_low = @truncate(u32, disk_work.sector_offset);
         const sector_high = @intCast(u16, disk_work.sector_offset >> 32);
         std.assert(disk_work.sector_count <= std.max_int(u16));
@@ -377,6 +378,8 @@ pub const Drive = struct {
             if (drive.hba_port.command_issue == 0) break;
             if (drive.hba_port.interrupt_status & hba_pxis_tfes != 0) @panic("interrupt status");
         }
+
+        buffer.completed_size += requested_size;
 
         return disk_work.sector_count;
     }

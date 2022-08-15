@@ -397,6 +397,15 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             if (usermode) {
                 @panic("usermode not implemented yet");
             } else {
+                var stack_iterator = std.StackIterator.init(context.rip, context.rbp);
+                log.err("Fault stack trace:", .{});
+                var stack_trace_i: u64 = 0;
+                while (stack_iterator.next()) |return_address| : (stack_trace_i += 1) {
+                    if (return_address != 0) {
+                        log.err("{}: 0x{x}", .{ stack_trace_i, return_address });
+                    }
+                }
+
                 if (context.cs != @offsetOf(GDT.Table, "code_64")) @panic("invalid cs");
                 switch (exception) {
                     .page_fault => {

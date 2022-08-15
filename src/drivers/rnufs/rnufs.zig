@@ -8,6 +8,7 @@ const Disk = @import("../disk.zig");
 const DMA = @import("../dma.zig");
 const Drivers = @import("../common.zig");
 const Filesystem = @import("../filesystem.zig");
+const FilesystemInterface = @import("../filesystem_interface.zig");
 const common = @import("../../common/rnufs.zig");
 const VirtualAddressSpace = @import("../../kernel/virtual_address_space.zig");
 
@@ -16,6 +17,10 @@ const Allocator = std.Allocator;
 const panic = crash.panic;
 
 fs: Filesystem,
+
+const InitError = error{
+    not_found,
+};
 
 // TODO: free
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, disk: *Disk, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
@@ -26,7 +31,22 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         .operation = .read,
     }, virtual_address_space);
     std.assert(result == 1);
+    std.assert(dma_buffer.completed_size == disk.interface.sector_size);
+
+    const possible_signature = @intToPtr([*]const u8, dma_buffer.address)[0..common.default_signature.len];
+    if (!std.string_eq(possible_signature, &common.default_signature)) {
+        return InitError.not_found;
+    }
+
     const rnufs = try virtual_address_space.heap.allocator.create(RNUFS);
+    rnufs.fs = .{
+        .interface = .{
+            .type = .RNU,
+            .disk = &disk.interface,
+            .read_file = read_file,
+            .write_new_file = common.write_new_file,
+        },
+    };
     if (maybe_driver_tree) |driver_tree| {
         inline for (driver_tree) |driver_node| {
             try driver_node.type.init(device_manager, virtual_address_space, &rnufs.fs, driver_node.children);
@@ -34,8 +54,8 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     }
 }
 
-pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: u64, name: []const u8) ?SeekResult {
-    const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
+pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) ?SeekResult {
+    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
     log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     const sector_size = fs_driver.disk.sector_size;
@@ -47,17 +67,17 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
 
     while (true) {
         log.debug("FS driver asking read", .{});
-        const sectors_read = fs_driver.disk.access(fs_driver.disk, @ptrToInt(virtual_address_space), &search_buffer, Disk.Work{
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, Disk.Work{
             .sector_offset = sector,
             .sector_count = sectors_to_read_at_time,
             .operation = .read,
-        });
+        }, virtual_address_space);
         log.debug("FS driver ending read", .{});
         if (sectors_read != sectors_to_read_at_time) panic("Driver internal error: cannot seek file", .{});
         //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
         //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
         //}
-        var node = search_buffer.address.access(*common.Node);
+        var node = @intToPtr(*common.Node, search_buffer.address);
         if (node.type == .empty) break;
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
         const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
@@ -84,10 +104,10 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
     @panic("not found");
 }
 
-pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, special_context: u64, name: []const u8) []const u8 {
-    const virtual_address_space = @intToPtr(*VirtualAddressSpace, special_context);
+pub fn read_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) []const u8 {
+    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
     log.debug("About to read file {s}...", .{name});
-    if (seek_file(fs_driver, allocator, special_context, name)) |seek_result| {
+    if (seek_file(fs_driver, allocator, name, extra_context)) |seek_result| {
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
@@ -98,15 +118,15 @@ pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, special_context: 
         const sector_offset = seek_result.sector + 1;
         log.debug("Sector offset: {}. Sector count: {}", .{ sector_offset, sector_count });
         // Add one to skip the metadata
-        const sectors_read = fs_driver.disk.access(fs_driver.disk, @ptrToInt(virtual_address_space), &buffer, Disk.Work{
+        const sectors_read = fs_driver.disk.access(fs_driver.disk, &buffer, Disk.Work{
             .sector_offset = sector_offset,
             .sector_count = sector_count,
             .operation = .read,
-        });
+        }, virtual_address_space);
 
-        if (sectors_read != sector_count) panic(@src(), "Driver internal error: cannot read file", .{});
+        if (sectors_read != sector_count) panic("Driver internal error: cannot read file", .{});
 
-        return buffer.address.access([*]const u8)[0..node_size];
+        return @intToPtr([*]const u8, buffer.address)[0..node_size];
     } else {
         @panic("unable to find file");
     }
