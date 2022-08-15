@@ -37,9 +37,6 @@ pub fn release(spinlock: *volatile Spinlock) void {
     const were_interrupts_enabled = spinlock.were_interrupts_enabled;
     @fence(.Release);
     spinlock.status = 0;
-    //const result = @cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*bool, &spinlock.status), expected, !expected, .Release, .Monotonic);
-    //common.runtime_assert(@src(), result == null);
-    //common.runtime_assert(@src(), result == null);
     if (were_interrupts_enabled != 0) {
         interrupts.enable();
     }

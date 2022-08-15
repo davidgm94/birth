@@ -310,13 +310,6 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     }
 
     log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-    log.debug("CORE ACTIVATED", .{});
-
     context_switch.force_yield();
 }
 

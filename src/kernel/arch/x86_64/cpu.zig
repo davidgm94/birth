@@ -23,15 +23,16 @@ const log = std.log.scoped(.CPU);
 const page_size = x86_64.page_size;
 
 lapic: LAPIC,
-spinlock_count: u64,
-is_bootstrap: bool,
-id: u32,
+spinlock_count: u64 = 0,
+is_bootstrap: bool = false,
+id: u32 = 0,
 gdt: GDT.Table,
 shared_tss: TSS.Struct,
 idt: IDT,
-timestamp_ticks_per_ms: u64,
+timestamp_ticks_per_ms: u64 = 0,
 
 pub fn start(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
+    cpu.spinlock_count = 0;
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here
     cpu.gdt.initial_setup(cpu.id);

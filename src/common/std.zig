@@ -61,8 +61,8 @@ pub const internal_read_int_big = std.mem.readIntBig;
 pub const read_int_slice_big_endian = std.mem.readIntSliceBig;
 
 // INTERNAL
-const internal_format = std.fmt.format;
-const InternalFormatOptions = std.fmt.FormatOptions;
+pub const internal_format = std.fmt.format;
+pub const InternalFormatOptions = std.fmt.FormatOptions;
 
 // SIZES
 pub const kb = 1024;

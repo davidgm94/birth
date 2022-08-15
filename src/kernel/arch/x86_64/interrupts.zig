@@ -379,19 +379,22 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     if (should_swap_gs) {
         asm volatile ("swapgs");
     }
+
     defer {
         if (should_swap_gs) asm volatile ("swapgs");
     }
 
     if (TLS.get_current().cpu) |current_cpu| {
         if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
-            @panic("spinlock count bug");
+            //log.debug("Current cpu spinlock count: {}", .{current_cpu.spinlock_count});
+            //log.debug("CR8: 0x{x}", .{context.cr8});
+            panic("Spinlocks active ({}) while interrupts were enabled\nContext:\n{}\n", .{ current_cpu.spinlock_count, context });
         }
     }
 
     switch (context.interrupt_number) {
         0x0...0x19 => {
-            context.debug();
+            log.debug("Exception context: {}", .{context});
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
             if (usermode) {
@@ -421,7 +424,6 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                     },
                     else => panic("{s}", .{@tagName(exception)}),
                 }
-                log.debug("Exception: {s}", .{@tagName(exception)});
             }
         },
         0x40 => {
@@ -438,9 +440,10 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             TLS.get_current().cpu.?.lapic.end_of_interrupt();
         },
         0x80 => {
-            log.debug("We are getting a syscall", .{});
-            context.debug();
-            unreachable;
+            @panic("Syscalls are not implemented through interrupts");
+            //log.debug("We are getting a syscall", .{});
+            //context.debug();
+            //unreachable;
         },
         else => unreachable,
     }

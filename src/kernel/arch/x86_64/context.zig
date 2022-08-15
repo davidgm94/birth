@@ -9,6 +9,7 @@ const Thread = @import("../../thread.zig");
 const VirtualAddress = @import("../../virtual_address.zig");
 
 const log = std.log.scoped(.Context);
+const panic = crash.panic;
 const RFLAGS = registers.RFLAGS;
 const TODO = crash.TODO;
 
@@ -90,10 +91,10 @@ pub fn from_thread(thread: *Thread) *Context {
     return from_kernel_stack(get_kernel_stack(thread));
 }
 
-pub fn debug(arch_context: *Context) void {
-    log.debug("Context address: 0x{x}", .{@ptrToInt(arch_context)});
+pub fn format(context: *const Context, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try std.internal_format(writer, "Context address: 0x{x}", .{@ptrToInt(context)});
     inline for (std.fields(Context)) |field| {
-        log.debug("{s}: 0x{x}", .{ field.name, @field(arch_context, field.name) });
+        try std.internal_format(writer, "\t{s}: 0x{x}\n", .{ field.name, @field(context, field.name) });
     }
 }
 
@@ -103,10 +104,9 @@ pub fn check(arch_context: *Context, src: std.SourceLocation) void {
     failed = failed or arch_context.ss > 0x100;
     // TODO: more checking
     if (failed) {
-        arch_context.debug();
+        panic("context check failed: {}", .{arch_context});
         //TODO: kernel.crash("check failed: {s}:{}:{} {s}()", .{ src.file, src.line, src.column, src.fn_name });
         _ = src;
-        @panic("context check failed");
     }
 }
 

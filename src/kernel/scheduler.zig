@@ -40,7 +40,9 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
         @panic("spins active when yielding");
     }
     interrupts.disable();
+    log.debug("Acquiring scheduler lock", .{});
     scheduler.lock.acquire();
+    log.debug("Scheduler lock acquired", .{});
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
     const old_thread = TLS.get_current();
@@ -56,14 +58,6 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     //
     if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
-    //log.debug("RSP: 0x{x}", .{context.rsp});
-    //log.debug("Stack top: 0x{x}", .{new_thread.kernel_stack_base.value + new_thread.kernel_stack_size});
-    //std.assert(context.rsp < new_thread.kernel_stack_base.value + new_thread.kernel_stack_size);
-
-    //common.arch.next_timer(1);
-    //log.debug("New thread address: 0x{x}", .{@ptrToInt(&new_thread)});
-    //log.debug("New address space offset: 0x{x}", .{@ptrToInt(&new_thread) + @offsetOf(Thread, "address_space")});
-    //log.debug("New thread address: 0x{x}", .{@intToPtr(*u64, @ptrToInt(&new_thread) + @offsetOf(Thread, "address_space")).*});
     interrupts.disable_all();
     VAS.switch_address_spaces_if_necessary(new_thread.address_space);
 
