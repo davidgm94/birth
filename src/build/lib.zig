@@ -53,16 +53,16 @@ pub fn add_qemu_debug_isa_exit(builder: *Builder, list: *ArrayList([]const u8), 
     try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
 }
 
-const DiskDevice = @import("../drivers/disk.zig");
+const DiskInterface = @import("../drivers/disk_interface.zig");
 const DMA = @import("../drivers/dma.zig");
 
 pub const Disk = struct {
     const BufferType = ArrayListAlignedUnmanaged(u8, 0x1000);
 
-    disk: DiskDevice,
+    disk: DiskInterface,
     buffer: BufferType,
 
-    fn access(disk: *DiskDevice, buffer: *DMA.Buffer, disk_work: DiskDevice.Work, extra_context: ?*anyopaque) u64 {
+    fn access(disk: *DiskInterface, buffer: *DMA.Buffer, disk_work: DiskInterface.Work, extra_context: ?*anyopaque) u64 {
         const build_disk = @fieldParentPtr(Disk, "disk", disk);
         _ = extra_context;
         const sector_size = disk.sector_size;
@@ -93,7 +93,7 @@ pub const Disk = struct {
         }
     }
 
-    fn get_dma_buffer(disk: *DiskDevice, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *DiskInterface, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
         const allocation_size = disk.sector_size * sector_count;
         const alignment = 0x1000;
         log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });
@@ -105,7 +105,7 @@ pub const Disk = struct {
 
     pub fn new(buffer: BufferType) Disk {
         return Disk{
-            .disk = DiskDevice{
+            .disk = DiskInterface{
                 .sector_size = 0x200,
                 .access = access,
                 .get_dma_buffer = get_dma_buffer,

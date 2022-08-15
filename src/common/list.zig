@@ -69,7 +69,19 @@ pub fn List(comptime T: type) type {
 }
 
 pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
-    std.assert(bucket_size % 64 == 0);
+    const IntType = switch (bucket_size) {
+        8 => u8,
+        16 => u16,
+        32 => u32,
+        64 => u64,
+        else => unreachable,
+    };
+
+    const IntShifterType = std.IntType(.unsigned, @ctz(u64, @bitSizeOf(IntType)));
+
+    const bitset_size = bucket_size / @bitSizeOf(IntType);
+    std.assert(bucket_size % @bitSizeOf(IntType) == 0);
+
     return struct {
         first: ?*Bucket = null,
         last: ?*Bucket = null,
@@ -77,30 +89,30 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
         element_count: u64 = 0,
 
         pub const Bucket = struct {
-            bitset: [bitset_size]u64 = [1]u64{0} ** bitset_size,
+            bitset: [bitset_size]IntType = [1]IntType{0} ** bitset_size,
             count: u64 = 0,
             previous: ?*@This() = null,
             next: ?*@This() = null,
             data: [bucket_size]T,
 
-            pub const bitset_size = bucket_size / 64;
             pub const size = bucket_size;
 
             pub const FindIndexResult = struct {
                 bitset_index: u32,
                 bit_index: u32,
             };
+
             pub fn allocate_index(bucket: *Bucket) u64 {
                 std.assert(bucket.count + 1 <= bucket_size);
 
                 for (bucket.bitset) |*bitset_elem, bitset_i| {
                     // @ZigBug using a comptime var here ends with an infinite loop
                     var bit_i: u8 = 0;
-                    while (bit_i < @bitSizeOf(u64)) : (bit_i += 1) {
-                        if (bitset_elem.* & (@as(@TypeOf(bitset_elem.*), 1) << @intCast(u6, bit_i)) == 0) {
-                            bitset_elem.* |= @as(@TypeOf(bitset_elem.*), 1) << @intCast(u6, bit_i);
+                    while (bit_i < @bitSizeOf(IntType)) : (bit_i += 1) {
+                        if (bitset_elem.* & (@as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i)) == 0) {
+                            bitset_elem.* |= @as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i);
                             bucket.count += 1;
-                            return bitset_i * @bitSizeOf(u64) + bit_i;
+                            return bitset_i * @bitSizeOf(IntType) + bit_i;
                         }
                     }
                 }

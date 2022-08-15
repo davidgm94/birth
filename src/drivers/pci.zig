@@ -6,6 +6,7 @@ const std = @import("../common/std.zig");
 const Bitflag = @import("../common/bitflag.zig").Bitflag;
 const crash = @import("../kernel/crash.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
+const Drivers = @import("../drivers/common.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const PhysicalMemoryRegion = @import("../kernel/physical_memory_region.zig");
 const VirtualAddress = @import("../kernel/virtual_address.zig");
@@ -24,8 +25,8 @@ pub var controller: Controller = undefined;
 const Error = error{
     no_device_found,
 };
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime child_drivers: []const type) !void {
-    try enumerate(device_manager, virtual_address_space, child_drivers);
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime driver_tree: ?[]const Drivers.Tree) !void {
+    try enumerate(device_manager, virtual_address_space, driver_tree);
 }
 
 const BusScanState = enum(u8) {
@@ -102,7 +103,7 @@ const HeaderType = enum(u8) {
     x2 = 2,
 };
 
-fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime child_drivers: []const type) !void {
+fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
     _ = device_manager;
     _ = virtual_address_space;
     var bus_scan_states = std.zeroes([256]BusScanState);
@@ -232,10 +233,13 @@ fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddr
 
                     log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: 0x{x}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, pci_device.prog_if });
 
-                    inline for (child_drivers) |Driver| {
-                        if (Driver.class_code == pci_device.class_code and Driver.subclass_code == pci_device.subclass_code) {
-                            try Driver.init(device_manager, virtual_address_space, pci_device);
-                            break;
+                    if (maybe_driver_tree) |driver_tree| {
+                        inline for (driver_tree) |node| {
+                            const Driver = node.type;
+                            if (Driver.class_code == pci_device.class_code and Driver.subclass_code == pci_device.subclass_code) {
+                                try Driver.init(device_manager, virtual_address_space, pci_device, node.children);
+                                break;
+                            }
                         }
                     }
                 }

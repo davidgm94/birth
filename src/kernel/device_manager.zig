@@ -27,15 +27,14 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     try drivers.init(device_manager, virtual_address_space);
 }
 
-pub fn add_filesystem(device_manager: *DeviceManager, comptime Driver: type, disk: *Disk) void {
-    _ = device_manager;
-    _ = Driver;
-    _ = disk;
-    unreachable;
+pub fn register_filesystem(device_manager: *DeviceManager, allocator: std.Allocator, filesystem: *Filesystem) !void {
+    try device_manager.filesystems.append(allocator, filesystem);
+}
+
+pub fn register_disk(device_manager: *DeviceManager, allocator: std.Allocator, disk: *Disk) !void {
+    try device_manager.disks.append(allocator, disk);
 }
 
 pub fn get_main_storage(device_manager: *DeviceManager) *Filesystem {
-    std.assert(device_manager.filesystems.bucket_count == 1);
-    const main_storage_bucket = device_manager.filesystems.first orelse @panic("wtf");
-    return &main_storage_bucket.data[device_manager.main_storage];
+    return device_manager.filesystems.items[device_manager.main_storage];
 }

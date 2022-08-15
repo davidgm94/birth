@@ -124,6 +124,3 @@ pub const Line = struct {
         };
     }
 };
-
-pub var drivers: []*Driver = undefined;
-pub var _drivers_array: [64]*Driver = undefined;

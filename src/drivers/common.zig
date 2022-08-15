@@ -12,3 +12,9 @@ pub const FilesystemDriverType = enum(u32) {
     RNU = 0,
     ext2 = 1,
 };
+
+/// This is only meant to be used at comptime
+pub const Tree = struct {
+    type: type,
+    children: ?[]const Tree,
+};

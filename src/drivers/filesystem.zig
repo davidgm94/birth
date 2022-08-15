@@ -1,20 +1,25 @@
+const Filesystem = @This();
+
 const std = @import("../common/std.zig");
-const Allocator = std.Allocator;
 
+const DeviceManager = @import("../kernel/device_manager.zig");
 const Drivers = @import("common.zig");
-const Disk = @import("disk.zig");
-const Type = Drivers.FilesystemDriverType;
+const FilesystemInterface = @import("filesystem_interface.zig");
+const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
 
-const Driver = @This();
+const Allocator = std.Allocator;
+const Type = FilesystemInterface.FilesystemDriverType;
 
-type: Type,
-disk: *Disk,
-/// At the moment, the memory returned by the filesystem driver is constant
-read_file: fn (driver: *Driver, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) []const u8,
-write_new_file: fn (driver: *Driver, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) void,
+interface: FilesystemInterface,
 
-pub const InitializationError = error{
-    allocation_failure,
-};
+const ReadFileCallback = FilesystemInterface.ReadFileCallback;
+const WriteFileCallback = FilesystemInterface.WriteFileCallback;
 
-pub var drivers: std.ArrayList(*Driver) = undefined;
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, filesystem: *Filesystem, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+    try device_manager.register_filesystem(virtual_address_space.heap.allocator, filesystem);
+    if (maybe_driver_tree) |driver_tree| {
+        inline for (driver_tree) |driver_node| {
+            try driver_node.type.init(device_manager, virtual_address_space, filesystem, driver_node.children);
+        }
+    }
+}

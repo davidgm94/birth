@@ -1,33 +1,24 @@
-const std = @import("../common/std.zig");
+const Disk = @This();
+
+const DeviceManager = @import("../kernel/device_manager.zig");
+const DiskInterface = @import("disk_interface.zig");
 const Drivers = @import("common.zig");
-const DMA = @import("dma.zig");
+const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
 
-const Driver = @This();
+pub const Type = DiskInterface.Type;
 
-pub const Type = Drivers.DiskDriverType;
+interface: DiskInterface,
 
-sector_size: u64,
-access: fn (driver: *Driver, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
-get_dma_buffer: fn (driver: *Driver, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer,
+pub const Work = DiskInterface.Work;
 
-type: Type,
+pub const Operation = DiskInterface.Operation;
 
-pub const Work = struct {
-    sector_offset: u64,
-    sector_count: u64,
-    operation: Operation,
-};
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, disk: *Disk, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+    try device_manager.register_disk(virtual_address_space.heap.allocator, disk);
 
-pub const Operation = enum(u1) {
-    read = 0,
-    write = 1,
-
-    // This is used by NVMe and AHCI
-    comptime {
-        std.assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-        std.assert(@enumToInt(Operation.read) == 0);
-        std.assert(@enumToInt(Operation.write) == 1);
+    if (maybe_driver_tree) |driver_tree| {
+        inline for (driver_tree) |driver_node| {
+            try driver_node.type.init(device_manager, virtual_address_space, disk, driver_node.children);
+        }
     }
-};
-
-pub var drivers: std.ArrayList(*Driver) = undefined;
+}

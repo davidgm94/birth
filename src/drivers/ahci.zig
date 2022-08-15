@@ -5,6 +5,9 @@ const crash = @import("../kernel/crash.zig");
 
 const arch = @import("../kernel/arch/common.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
+const DiskInterface = @import("disk_interface.zig");
+const Drivers = @import("common.zig");
+const List = @import("../common/list.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const VirtualAddress = @import("../kernel/virtual_address.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
@@ -13,6 +16,7 @@ const Disk = @import("disk.zig");
 const DMA = @import("dma.zig");
 
 const panic = crash.panic;
+const StableBuffer = List.StableBuffer;
 const TODO = crash.TODO;
 const log = std.log.scoped(.AHCI);
 
@@ -21,31 +25,36 @@ abar: *HBAMemory,
 drives: [32]Drive,
 drive_count: u8,
 
+pub var drivers: StableBuffer(Driver, 8) = undefined;
+
 pub const class_code = 0x01;
 pub const subclass_code = 0x06;
+
 pub const Initialization = struct {};
 pub const InitError = error{
     not_found,
     allocation_failed,
 };
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device) InitError!void {
-    var driver: Driver = undefined;
-    try driver.initialize(device_manager, virtual_address_space, pci_device);
-}
 
-fn initialize(driver: *Driver, device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device) !void {
-    _ = device_manager;
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+    const driver = try drivers.add_one(virtual_address_space.heap.allocator);
     driver.pci = pci_device;
     driver.pci.enable_bar(virtual_address_space, 5) catch @panic("wtf");
     driver.abar = PhysicalAddress.new(driver.pci.bars[5]).access_kernel(*HBAMemory);
 
     driver.probe_ports();
+
     log.debug("Drives found: {}", .{driver.drive_count});
     std.assert(driver.drive_count == 1);
+
     for (driver.drives[0..driver.drive_count]) |*drive| {
         drive.configure(virtual_address_space);
-        @panic("TODO: AHCI");
-        //Drivers.Driver(Disk, Drive).init(virtual_address_space.heap.allocator, drive) catch panic("Failed to initialized device", .{});
+
+        if (maybe_driver_tree) |driver_tree| {
+            inline for (driver_tree) |driver_node| {
+                try driver_node.type.init(device_manager, virtual_address_space, &drive.disk, driver_node.children);
+            }
+        }
     }
 }
 
@@ -71,10 +80,12 @@ fn probe_ports(driver: *Driver) void {
                 driver.drive_count += 1;
                 drive.* = Drive{
                     .disk = Disk{
-                        .sector_size = 0x200, // TODO: stop hardcoding this
-                        .access = Drive.access,
-                        .get_dma_buffer = Drive.get_dma_buffer,
-                        .type = .ahci,
+                        .interface = .{
+                            .sector_size = 0x200, // TODO: stop hardcoding this
+                            .access = Drive.access,
+                            .get_dma_buffer = Drive.get_dma_buffer,
+                            .type = .ahci,
+                        },
                     },
                     .hba_port = hba_port,
                     .port_number = i,
@@ -186,18 +197,6 @@ pub const Drive = struct {
     const pxcmd_fre = 0x0010;
     const pxcmd_st = 0x0001;
     const pxcmd_fr = 0x4000;
-
-    pub const Initialization = struct {
-        pub const Context = *Drive;
-        pub const Error = error{
-            allocation_failure,
-        };
-
-        pub fn callback(allocator: std.Allocator, drive: Context) Error!*Drive {
-            _ = allocator;
-            return drive;
-        }
-    };
 
     fn configure(drive: *Drive, virtual_address_space: *VirtualAddressSpace) void {
         drive.stop_command();
@@ -313,7 +312,7 @@ pub const Drive = struct {
 
     const hba_pxis_tfes = 1 << 30;
 
-    fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work, extra_context: ?*anyopaque) u64 {
+    fn access(disk: *DiskInterface, buffer: *DMA.Buffer, disk_work: Disk.Work, extra_context: ?*anyopaque) u64 {
         std.assert(buffer.completed_size == 0);
         std.assert(buffer.total_size >= disk_work.sector_count * disk.sector_size);
         const sector_low = @truncate(u32, disk_work.sector_offset);
@@ -382,7 +381,7 @@ pub const Drive = struct {
         return disk_work.sector_count;
     }
 
-    fn get_dma_buffer(disk: *Disk, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *DiskInterface, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer {
         const sector_size = disk.sector_size;
         const byte_size = sector_count * sector_size;
         return DMA.Buffer.new(allocator, .{ .size = std.align_forward(byte_size, arch.page_size), .alignment = std.align_forward(sector_size, arch.page_size) }) catch @panic("unable to initialize buffer");

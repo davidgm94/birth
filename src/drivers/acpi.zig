@@ -1,11 +1,14 @@
 const std = @import("../common/std.zig");
 
 const arch = @import("../kernel/arch/common.zig");
+const DeviceManager = @import("../kernel/device_manager.zig");
+const Drivers = @import("common.zig");
 const crash = @import("../kernel/crash.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const interrupts = @import("../kernel/arch/x86_64/interrupts.zig");
 const VirtualAddress = @import("../kernel/virtual_address.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+const x86_64 = @import("../kernel/arch/x86_64/common.zig");
 
 const Allocator = std.Allocator;
 const log = std.log.scoped(.ACPI);
@@ -26,7 +29,10 @@ comptime {
 }
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(virtual_address_space: *VirtualAddressSpace, rsdp_physical_address: PhysicalAddress) !void {
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime driver_tree: ?[]const Drivers.Tree) !void {
+    _ = device_manager;
+    _ = driver_tree;
+    const rsdp_physical_address = PhysicalAddress.new(x86_64.rsdp_physical_address);
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     const rsdp_physical_page = rsdp_physical_address.aligned_backward(page_size);
     virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
