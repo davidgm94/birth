@@ -17,10 +17,6 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     //try AHCI.init(device_manager, virtual_address_space, &PCI.controller);
 }
 
-comptime {
-    @compileLog(@TypeOf(AHCI.init));
-}
-
 pub const child_drivers = [_]ChildDriver{
     AHCI,
 };

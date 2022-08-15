@@ -1,6 +1,7 @@
 const std = @import("../../../common/std.zig");
 
 const CPUID = @import("../../../common/arch/x86_64/cpuid.zig");
+const crash = @import("../../crash.zig");
 const drivers = @import("drivers.zig");
 const kernel = @import("../../kernel.zig");
 const log = std.log.scoped(.Entry);
@@ -10,6 +11,8 @@ const TLS = @import("tls.zig");
 const VAS = @import("vas.zig");
 const VirtualAddressSpace = @import("../../virtual_address_space.zig");
 const x86_64 = @import("common.zig");
+
+const panic = crash.panic;
 
 var bootstrap_context: Stivale2.BootstrapContext = undefined;
 
@@ -33,7 +36,7 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     const cpu = current_thread.cpu orelse @panic("cpu");
     cpu.start(&kernel.virtual_address_space);
 
-    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| kernel.crash("Failed to initialize drivers: {}", .{driver_init_error});
+    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| panic("Failed to initialize drivers: {}", .{driver_init_error});
     std.assert(kernel.device_manager.disks.items.len > 0);
     std.assert(kernel.device_manager.filesystems.items.len > 0);
 
