@@ -30,8 +30,11 @@ gdt: GDT.Table,
 shared_tss: TSS.Struct,
 idt: IDT,
 timestamp_ticks_per_ms: u64 = 0,
+ready: bool,
 
 pub fn start(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
+    cpu.ready = false;
+    defer cpu.ready = true;
     cpu.spinlock_count = 0;
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here

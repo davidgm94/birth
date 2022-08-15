@@ -394,6 +394,13 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
 
     switch (context.interrupt_number) {
         0x0...0x19 => {
+            if (context.interrupt_number == @enumToInt(Exception.non_maskable_interrupt)) {
+                asm volatile (
+                    \\cli
+                    \\hlt
+                );
+            }
+
             log.debug("Exception context: {}", .{context});
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
@@ -618,4 +625,42 @@ const IRQHandler = struct {
 
 pub inline fn end(cpu: *CPU) void {
     cpu.lapic.end_of_interrupt();
+}
+
+pub fn send_panic_interrupt_to_all_cpus() void {
+    const current_thread = TLS.get_current();
+    const panicked_cpu = current_thread.cpu orelse while (true) {
+        // TODO: Hang in another way
+        asm volatile (
+            \\cli
+            \\pause
+            \\hlt
+        );
+    };
+
+    var bitset: u2048 = 0;
+    std.assert(kernel.scheduler.cpus.len <= @bitSizeOf(@TypeOf(bitset)));
+    for (kernel.scheduler.cpus) |*cpu| {
+        if (cpu.id == panicked_cpu.id) continue;
+        if (!cpu.ready) {
+            bitset |= (@as(@TypeOf(bitset), 1) << @intCast(u11, cpu.id));
+            continue;
+        }
+
+        const destination = cpu.lapic.id << 24;
+        const command = 0x41 | (1 << 14) | 0x400;
+        cpu.lapic.write(.ICR_HIGH, destination);
+        cpu.lapic.write(.ICR_LOW, command);
+
+        while (cpu.lapic.read(.ICR_LOW) & (1 << 12) != 0) {}
+    }
+
+    std.log.scoped(.PANIC).err("CPUs not ready:", .{});
+
+    var i: u64 = 0;
+    while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
+        if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
+            std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i]});
+        }
+    }
 }

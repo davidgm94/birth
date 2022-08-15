@@ -5,11 +5,12 @@ pub fn TODO() noreturn {
     @panic("TODO");
 }
 
+const log = std.log.scoped(.PANIC);
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @setCold(true);
+    interrupts.disable();
+    interrupts.send_panic_interrupt_to_all_cpus();
 
-    const log = std.log.scoped(.PANIC);
-    interrupts.disable_all();
     log.err(format, arguments);
 
     var stack_iterator = std.StackIterator.init(@returnAddress(), @frameAddress());
