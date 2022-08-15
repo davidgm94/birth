@@ -305,9 +305,17 @@ fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
 
     var drivers_ready = false;
     while (!drivers_ready) {
-        drivers_ready = @ptrCast(*volatile bool, &kernel.drivers_ready).*;
+        drivers_ready = @ptrCast(*volatile bool, &kernel.device_manager.ready).*;
         asm volatile ("pause" ::: "memory");
     }
+
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
+    log.debug("CORE ACTIVATED", .{});
 
     context_switch.force_yield();
 }

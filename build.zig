@@ -29,7 +29,7 @@ pub fn build(b: *Build.Builder) void {
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
-                        .smp = null,
+                        .smp = 8,
                         .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                         .print_command = false,

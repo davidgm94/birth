@@ -22,6 +22,7 @@ const log = std.log.scoped(.DeviceManager);
 
 devices: Devices = .{},
 main_storage: u32 = 0,
+ready: bool = false,
 
 const Devices = struct {
     disk: std.ArrayList(*Disk) = .{ .items = &.{}, .capacity = 0 },
@@ -29,12 +30,17 @@ const Devices = struct {
 };
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
+    defer device_manager.ready = true;
+
     try drivers.init(device_manager, virtual_address_space);
 
     inline for (std.fields(Devices)) |device_field| {
         const device_count = @field(device_manager.devices, device_field.name).items.len;
         log.debug("{s} count: {}", .{ device_field.name, device_count });
     }
+
+    std.assert(device_manager.devices.disk.items.len > 0);
+    std.assert(device_manager.devices.filesystem.items.len > 0);
 }
 
 pub fn register_filesystem(device_manager: *DeviceManager, allocator: std.Allocator, filesystem: *Filesystem) !void {

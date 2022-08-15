@@ -225,6 +225,16 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     return thread;
 }
 
+pub const ThreadEntryPoint = struct {
+    address: u64,
+    arguments: [6]u64 = [1]u64{0} ** 6,
+};
+
+// TODO: take into account parameters
+pub fn spawn_kernel_thread(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, thread_entry_point: ThreadEntryPoint) ?*Thread {
+    return scheduler.spawn_thread(kernel_address_space, kernel_address_space, .kernel, thread_entry_point.address, null, null);
+}
+
 pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, comptime privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) *Thread {
     std.assert(kernel_address_space.privilege_level == .kernel);
     std.assert(privilege_level == .user);

@@ -36,15 +36,16 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     const cpu = current_thread.cpu orelse @panic("cpu");
     cpu.start(&kernel.virtual_address_space);
 
-    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| panic("Failed to initialize drivers: {}", .{driver_init_error});
-    std.assert(kernel.device_manager.devices.disk.items.len > 0);
-    std.assert(kernel.device_manager.devices.filesystem.items.len > 0);
+    _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
+        .address = @ptrToInt(main),
+    });
 
     asm volatile ("int $0x40");
     @panic("This is unreachable");
 }
 
 pub fn main() callconv(.C) noreturn {
+    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| panic("Failed to initialize drivers: {}", .{driver_init_error});
     //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
     asm volatile ("int $0x40");
 
