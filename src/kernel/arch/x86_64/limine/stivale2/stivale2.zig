@@ -334,5 +334,70 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     bootstrap_context.cpu.idle_thread.address_space = virtual_address_space;
     bootstrap_context.thread.context = &foo2;
     bootstrap_context.thread.address_space = virtual_address_space;
-    scheduler.bootstrap_cpus(virtual_address_space, @ptrToInt(smp_entry), cpu_count);
+
+    scheduler.lock.acquire();
+    //const bsp_thread = TLS.get_current();
+    //const bsp_cpu = bsp_thread.cpu orelse @panic("cpu");
+    const threads = scheduler.thread_buffer.add_many(virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
+    scheduler.current_threads = virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
+    const thread_stack_size = Scheduler.default_kernel_stack_size;
+    const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
+    const thread_stacks = virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+    scheduler.cpus = virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
+
+    for (threads) |*thread, thread_i| {
+        scheduler.current_threads[thread_i] = thread;
+        const cpu = &scheduler.cpus[thread_i];
+
+        const stack_allocation_offset = thread_i * thread_stack_size;
+        const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
+        const thread_stack = Scheduler.ThreadStack{
+            .kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
+            .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
+        };
+        scheduler.initialize_thread(thread, thread_i, virtual_address_space, .kernel, .idle, @ptrToInt(smp_entry), thread_stack);
+        thread.cpu = cpu;
+        cpu.idle_thread = thread;
+    }
+
+    // Update bsp CPU
+    TLS.preset(scheduler, &scheduler.cpus[0]);
+    TLS.set_current(scheduler, &threads[0], &scheduler.cpus[0]);
+    // TODO: maybe this is necessary?
+    // threads[0].context = bsp_cpu.context;
+
+    scheduler.lock.release();
+
+    @panic("TODO bootstrap cpus");
+
+    //for (smps) |smp, index| {
+    //const cpu = &scheduler.cpus[index];
+    //const thread = &all_threads[index];
+    //cpu.lapic.id = smp.lapic_id;
+    //cpu.idle_thread = thread;
+    //cpu.id = smp.processor_id;
+    //thread.cpu = cpu;
+    //thread.executing = true;
+    //}
+
+    //// TODO: don't hardcode stack size
+    //// @Allocation
+    //CPU.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
+    //std.assert(std.cpu.arch == .x86_64);
+    //scheduler.cpus[0].map_lapic(virtual_address_space);
+
+    //if (ap_cpu_count > 0) {
+    //scheduler.lock.acquire();
+    //for (smps[1..]) |*smp, index| {
+    //const ap_thread = &ap_threads[index];
+    //scheduler.active_threads.remove(&ap_thread.queue_item);
+    //const stack_pointer = ap_thread.context.get_stack_pointer();
+    //smp.extra_argument = @ptrToInt(&cpu_initialization_context);
+    //smp.target_stack = stack_pointer;
+    //smp.goto_address = entry_point;
+    //}
+
+    //std.assert(scheduler.active_threads.count == 0);
+    //scheduler.lock.release();
+    //}
 }

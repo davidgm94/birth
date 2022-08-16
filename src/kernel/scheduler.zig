@@ -19,6 +19,7 @@ const Thread = @import("thread.zig");
 const TLS = @import("arch/tls.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
+const VirtualMemoryRegion = @import("virtual_memory_region.zig");
 const VAS = arch.VAS;
 
 const TODO = crash.TODO;
@@ -94,14 +95,12 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     @panic("wtfffF");
 }
 
-const default_kernel_stack_size = 0x5000;
-const default_kernel_stack_reserve = default_kernel_stack_size;
-const default_user_stack_reserve = 0x400000;
-const default_user_stack_commit = 0x10000;
+pub const default_kernel_stack_size = 0x5000;
+const default_user_stack_size = 0x400000;
 
-const ThreadStack = struct {
-    kernel: VirtualAddress,
-    user: ?VirtualAddress,
+pub const ThreadStack = struct {
+    kernel: VirtualMemoryRegion,
+    user: VirtualMemoryRegion,
 };
 
 pub const ThreadEntryPoint = struct {
@@ -112,7 +111,7 @@ pub const ThreadEntryPoint = struct {
 // TODO: take into account parameters
 // TODO: take into account thread type
 pub fn spawn_kernel_thread(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, thread_entry_point: ThreadEntryPoint) ?*Thread {
-    return scheduler.spawn_thread(kernel_address_space, kernel_address_space, .kernel, .normal, thread_entry_point.address, null, null);
+    return scheduler.spawn_thread(kernel_address_space, kernel_address_space, .kernel, thread_entry_point.address);
 }
 
 pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) *Thread {
@@ -149,239 +148,58 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
     return cpu.idle_thread;
 }
 
-pub fn bootstrap_cpus(scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace, entry_point: u64, cpu_count: u64) void {
+pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
+    //pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack) void {
     scheduler.lock.acquire();
-    //const bsp_thread = TLS.get_current();
-    //const bsp_cpu = bsp_thread.cpu orelse @panic("cpu");
-    const threads = scheduler.thread_buffer.add_many(virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
-    scheduler.current_threads = virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
-    const thread_stack_size = default_kernel_stack_reserve;
-    const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
-    _ = thread_bulk_stack_allocation_size;
-    const thread_stacks = virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+    defer scheduler.lock.release();
 
-    for (threads) |*thread, thread_i| {
-        scheduler.current_threads[thread_i] = thread;
-
-        const stack_allocation_offset = thread_i * thread_stack_size;
-        const thread_stack = ThreadStack{
-            .kernel = thread_stacks.offset(stack_allocation_offset),
-            .user = null,
-        };
-        //pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack, cpu: ?*CPU) *Thread {
-        scheduler.initialize_thread(thread, thread_i, virtual_address_space, .kernel, .idle, entry_point, thread_stack);
-        thread.cpu = &scheduler.cpus[thread_i];
-    }
-
-    // Update bsp CPU
-    TLS.preset(scheduler, &scheduler.cpus[0]);
-    TLS.set_current(scheduler, &scheduler.cpus[0]);
-    // threads[0].context = bsp_cpu.context;
-
-    scheduler.lock.release();
-
-    @panic("TODO bootstrap cpus");
-
-    //scheduler.cpus[0] = bootstrap_context.cpu;
-    //scheduler.cpus[0].is_bootstrap = true;
-    //const bsp_thread = scheduler.thread_buffer.add_one(virtual_address_space.heap.allocator) catch @panic("wtf");
-    //scheduler.all_threads.append(&bsp_thread.all_item, bsp_thread) catch @panic("wtF");
-    //bsp_thread.context = &bootstrap_context.context;
-    //bsp_thread.state = .active;
-    //bsp_thread.cpu = &scheduler.cpus[0];
-    //bsp_thread.address_space = virtual_address_space;
-    //TLS.set_current(bsp_thread);
-    //// @Allocation
-    //const cpu_count = scheduler.cpus.len;
-    //const bsp_thread = tls_pointers[0];
-    //std.assert(bsp_thread.cpu.?.is_bootstrap);
-    //tls_pointers = virtual_address_space.heap.allocator.alloc(*Thread, cpu_count) catch @panic("wtf");
-    //std.assert(tls_pointers[0] == bsp_thread);
-    //TLS.allocate_and_setup(virtual_address_space, scheduler);
-
-    //const entry_point = @ptrToInt(smp_entry);
-    //const ap_cpu_count = scheduler.cpus.len - 1;
-    //var ap_threads: []Thread = &.{};
-    //if (ap_cpu_count > 0) {
-    //// @Allocation
-    //ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
-    //std.assert(scheduler.all_threads.count == ap_threads.len + 1);
-    //std.assert(scheduler.all_threads.count < Thread.Buffer.Bucket.size);
-    //}
-
-    //const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
-    //std.assert(&all_threads[0] == bsp_thread);
-
-    //for (smps) |smp, index| {
-    //const cpu = &scheduler.cpus[index];
-    //const thread = &all_threads[index];
-    //cpu.lapic.id = smp.lapic_id;
-    //cpu.idle_thread = thread;
-    //cpu.id = smp.processor_id;
-    //thread.cpu = cpu;
-    //thread.executing = true;
-    //}
-
-    //// TODO: don't hardcode stack size
-    //// @Allocation
-    //CPU.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
-    //std.assert(std.cpu.arch == .x86_64);
-    //scheduler.cpus[0].map_lapic(virtual_address_space);
-
-    //if (ap_cpu_count > 0) {
-    //scheduler.lock.acquire();
-    //for (smps[1..]) |*smp, index| {
-    //const ap_thread = &ap_threads[index];
-    //scheduler.active_threads.remove(&ap_thread.queue_item);
-    //const stack_pointer = ap_thread.context.get_stack_pointer();
-    //smp.extra_argument = @ptrToInt(&cpu_initialization_context);
-    //smp.target_stack = stack_pointer;
-    //smp.goto_address = entry_point;
-    //}
-
-    //std.assert(scheduler.active_threads.count == 0);
-    //scheduler.lock.release();
-    //}
-}
-
-pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, maybe_thread_stack: ?ThreadStack, cpu: ?*CPU) *Thread {
-    if (maybe_thread_stack != null) {
-        std.assert(privilege_level == .kernel);
-    }
-
-    // TODO: lock
-    const new_thread_id = scheduler.thread_buffer.element_count;
-    log.debug("About to allocate 1", .{});
+    const thread_id = scheduler.thread_buffer.element_count;
     const thread = scheduler.thread_buffer.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
-    scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
-    log.debug("Ended to allocate", .{});
 
-    // TODO: should we always use the same address space for kernel tasks?
-    thread.address_space = thread_virtual_address_space;
-
-    var kernel_stack_size: u64 = 0x5000;
-    const user_stack_reserve: u64 = switch (privilege_level) {
-        .kernel => default_kernel_stack_reserve,
-        .user => default_user_stack_reserve,
-    };
-    const user_stack_commit: u64 = switch (privilege_level) {
-        .kernel => 0,
-        .user => default_user_stack_commit,
-    };
-    // TODO: implemented idle thread
-
-    // TODO: should this be kernel virtual address space?
-    // TODO: this may crash
-    const kernel_stack = blk: {
-        if (maybe_thread_stack) |thread_stack|
-            break :blk thread_stack.kernel
-        else {
-            log.debug("About to allocate 2", .{});
-            const result = thread_virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
-            log.debug("Ended to allocate", .{});
-            break :blk result;
-        }
-    };
-    std.assert(kernel_stack.is_higher_half());
-    const user_stack = switch (privilege_level) {
-        .kernel => kernel_stack,
+    const kernel_stack_size = default_kernel_stack_size;
+    const kernel_stack = thread_virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
+    const thread_stack = switch (privilege_level) {
+        .kernel => ThreadStack{
+            .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
+            .user = .{ .address = kernel_stack, .size = kernel_stack_size },
+        },
         .user => blk: {
-            // TODO: lock
-            std.assert(std.is_aligned(user_stack_reserve, arch.page_size));
-            if (maybe_thread_stack) |thread_stack|
-                break :blk thread_stack.user orelse @panic("Wtffffff")
-            else {
-                log.debug("About to allocate 3", .{});
-                const result = thread_virtual_address_space.allocate(user_stack_reserve, null, .{ .write = true, .user = true }) catch @panic("user stack");
-                log.debug("Ended to allocate", .{});
-                break :blk result;
-            }
+            const user_stack_size = default_user_stack_size;
+            std.assert(std.is_aligned(user_stack_size, arch.page_size));
+            log.debug("About to allocate 3", .{});
+            const user_stack = thread_virtual_address_space.allocate(user_stack_size, null, .{ .write = true, .user = true }) catch @panic("user stack");
+            break :blk ThreadStack{
+                .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
+                .user = .{ .address = user_stack, .size = user_stack_size },
+            };
         },
     };
-    thread.privilege_level = privilege_level;
-    log.debug("Thread privilege: {}", .{thread.privilege_level});
-    thread.kernel_stack_base = kernel_stack;
-    thread.kernel_stack_size = kernel_stack_size;
-    thread.user_stack_base = switch (privilege_level) {
-        .kernel => VirtualAddress.invalid(),
-        .user => user_stack,
-    };
-    log.debug("User stack address: 0x{x}", .{thread.user_stack_base.value});
-    thread.user_stack_reserve = user_stack_reserve;
-    thread.user_stack_commit = user_stack_commit;
-    thread.id = new_thread_id;
-    thread.type = thread_type;
-    thread.cpu = cpu;
-    thread.state = .active;
-    thread.executing = false;
 
-    // TODO: don't hardcode this
-    const syscall_queue_entry_count = 256;
-    thread.syscall_manager = switch (privilege_level) {
-        .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
-        .kernel => .{ .kernel = null, .user = null },
-    };
-
-    if (thread.type != .idle) {
-        log.debug("Creating arch-specific thread initialization", .{});
-        // TODO: hack
-        thread.context = Context.new(thread, entry_point);
-    }
-
-    scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
+    scheduler.initialize_thread(thread, thread_id, thread_virtual_address_space, privilege_level, .normal, entry_point, thread_stack);
 
     return thread;
 }
 
 pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack) void {
     scheduler.lock.assert_locked();
+    if (true) @panic("implement idle threads");
+
     thread.all_item = Thread.ListItem.new(thread);
     thread.queue_item = Thread.ListItem.new(thread);
     scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
-    log.debug("Ended to allocate", .{});
 
-    // TODO: should we always use the same address space for kernel tasks?
     thread.address_space = thread_virtual_address_space;
-
-    var kernel_stack_size: u64 = 0x5000;
-    const user_stack_reserve: u64 = switch (privilege_level) {
-        .kernel => default_kernel_stack_reserve,
-        .user => default_user_stack_reserve,
-    };
-    const user_stack_commit: u64 = switch (privilege_level) {
-        .kernel => 0,
-        .user => default_user_stack_commit,
-    };
-    // TODO: implemented idle thread
-
-    // TODO: should this be kernel virtual address space?
-    // TODO: this may crash
-    const kernel_stack = thread_stack.kernel;
-    std.assert(kernel_stack.is_higher_half());
-    const user_stack = switch (privilege_level) {
-        .kernel => kernel_stack,
-        .user => blk: {
-            // TODO: lock
-            std.assert(std.is_aligned(user_stack_reserve, arch.page_size));
-            break :blk thread_stack.user orelse @panic("Wtffffff");
-        },
-    };
     thread.privilege_level = privilege_level;
-    log.debug("Thread privilege: {}", .{thread.privilege_level});
-    thread.kernel_stack_base = kernel_stack;
-    thread.kernel_stack_size = kernel_stack_size;
-    thread.user_stack_base = switch (privilege_level) {
-        .kernel => VirtualAddress.invalid(),
-        .user => user_stack,
-    };
-    log.debug("User stack address: 0x{x}", .{thread.user_stack_base.value});
-    thread.user_stack_reserve = user_stack_reserve;
-    thread.user_stack_commit = user_stack_commit;
     thread.id = thread_id;
     thread.type = thread_type;
     thread.cpu = null;
     thread.state = .active;
     thread.executing = false;
+
+    thread.kernel_stack_base = thread_stack.kernel.address;
+    thread.kernel_stack_size = thread_stack.kernel.size;
+    thread.user_stack_base = thread_stack.user.address;
+    thread.user_stack_size = thread_stack.user.size;
 
     // TODO: don't hardcode this
     const syscall_queue_entry_count = 256;

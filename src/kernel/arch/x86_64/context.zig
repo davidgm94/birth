@@ -79,7 +79,7 @@ fn get_kernel_stack(thread: *Thread) u64 {
 
 fn get_user_stack(thread: *Thread) u64 {
     const user_stack_base = if (thread.user_stack_base.value == 0) thread.kernel_stack_base.value else thread.user_stack_base.value;
-    const user_stack = thread.user_stack_reserve - 8 + user_stack_base;
+    const user_stack = thread.user_stack_size - 8 + user_stack_base;
     return user_stack;
 }
 

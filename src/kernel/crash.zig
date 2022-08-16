@@ -1,4 +1,5 @@
 const std = @import("../common/std.zig");
+const kernel = @import("kernel.zig");
 const interrupts = @import("arch/interrupts.zig");
 
 pub fn TODO() noreturn {
@@ -9,7 +10,9 @@ const log = std.log.scoped(.PANIC);
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @setCold(true);
     interrupts.disable();
-    interrupts.send_panic_interrupt_to_all_cpus();
+    if (kernel.scheduler.cpus.len > 1) {
+        interrupts.send_panic_interrupt_to_all_cpus();
+    }
 
     log.err(format, arguments);
 
