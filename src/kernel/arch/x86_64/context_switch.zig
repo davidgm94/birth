@@ -76,3 +76,8 @@ pub inline fn force_yield() noreturn {
     asm volatile ("int $0x40");
     unreachable;
 }
+
+pub fn set_new_kernel_stack(thread: *Thread) void {
+    const current_cpu = thread.cpu orelse @panic("Wtf");
+    current_cpu.tss.rsp[0] = thread.kernel_stack.value;
+}

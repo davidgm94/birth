@@ -34,7 +34,7 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
 
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
-    cpu.start(&kernel.virtual_address_space);
+    cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
 
     _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
         .address = @ptrToInt(main),

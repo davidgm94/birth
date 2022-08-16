@@ -77,10 +77,10 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
         else => unreachable,
     };
 
-    const IntShifterType = std.IntType(.unsigned, @ctz(u64, @bitSizeOf(IntType)));
+    //const IntShifterType = std.IntType(.unsigned, @ctz(u64, @bitSizeOf(IntType)));
 
-    const bitset_size = bucket_size / @bitSizeOf(IntType);
-    std.assert(bucket_size % @bitSizeOf(IntType) == 0);
+    //const bitset_size = bucket_size / @bitSizeOf(IntType);
+    //std.assert(bucket_size % @bitSizeOf(IntType) == 0);
 
     return struct {
         first: ?*Bucket = null,
@@ -89,7 +89,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
         element_count: u64 = 0,
 
         pub const Bucket = struct {
-            bitset: [bitset_size]IntType = [1]IntType{0} ** bitset_size,
+            bitset: IntType = 0,
             count: u64 = 0,
             previous: ?*@This() = null,
             next: ?*@This() = null,
@@ -102,19 +102,26 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 bit_index: u32,
             };
 
-            pub fn allocate_index(bucket: *Bucket) u64 {
-                std.assert(bucket.count + 1 <= bucket_size);
-
-                for (bucket.bitset) |*bitset_elem, bitset_i| {
-                    // @ZigBug using a comptime var here ends with an infinite loop
-                    var bit_i: u8 = 0;
-                    while (bit_i < @bitSizeOf(IntType)) : (bit_i += 1) {
-                        if (bitset_elem.* & (@as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i)) == 0) {
-                            bitset_elem.* |= @as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i);
-                            bucket.count += 1;
-                            return bitset_i * @bitSizeOf(IntType) + bit_i;
-                        }
+            pub fn allocate_indices(bucket: *Bucket, count: u64) u64 {
+                if (bucket.count + count <= bucket_size) {
+                    const leading_zeroes = @clz(IntType, bucket.bitset);
+                    if (leading_zeroes >= count) {
+                        return Bucket.size - leading_zeroes;
+                    } else {
+                        // TODO: Handle the case in which the allocation can be done between two allocated indices
+                        @panic("unable to perform linear allocation of indices");
                     }
+                    //for (bucket.bitset) |*bitset_elem, bitset_i| {
+                    //// @ZigBug using a comptime var here ends with an infinite loop
+                    //var bit_i: u8 = 0;
+                    //while (bit_i < @bitSizeOf(IntType)) : (bit_i += 1) {
+                    //if (bitset_elem.* & (@as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i)) == 0) {
+                    //bitset_elem.* |= @as(@TypeOf(bitset_elem.*), 1) << @intCast(IntShifterType, bit_i);
+                    //bucket.count += 1;
+                    //return bitset_i * @bitSizeOf(IntType) + bit_i;
+                    //}
+                    //}
+                    //}
                 }
 
                 @panic("wtf");
@@ -126,7 +133,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 const first_bucket = try allocator.create(Bucket);
                 first_bucket.* = Bucket{ .data = std.zeroes([bucket_size]T) };
                 stable_buffer.first = first_bucket;
-                first_bucket.bitset[0] = 1;
+                first_bucket.bitset = 1;
                 stable_buffer.bucket_count += 1;
                 stable_buffer.element_count += 1;
 
@@ -136,9 +143,64 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 var last: ?*Bucket = null;
                 while (iterator) |next| {
                     if (next.count < bucket_size) {
-                        const index = next.allocate_index();
+                        const index = next.allocate_indices(1);
                         stable_buffer.element_count += 1;
                         const result = &next.data[index];
+                        return result;
+                    }
+
+                    last = next;
+                    iterator = next.next;
+                }
+
+                @panic("buffer end");
+            }
+        }
+
+        pub fn add_many(stable_buffer: *@This(), allocator: Allocator, count: u64) std.Allocator.Error![]T {
+            if (stable_buffer.first == null) {
+                const bucket_count = std.remainder_division_maybe_exact(count, Bucket.size, .can_be_not_exact);
+                std.assert(bucket_count == 1);
+                const buckets = try allocator.alloc(Bucket, bucket_count);
+
+                var elements_allocated: u64 = count;
+                var i: u64 = 0;
+                var maybe_previous: ?*Bucket = null;
+
+                while (elements_allocated > Bucket.size) : ({
+                    elements_allocated -= Bucket.size;
+                    i += 1;
+                }) {
+                    const bucket = &buckets[i];
+                    defer {
+                        if (maybe_previous) |previous| {
+                            previous.next = bucket;
+                        }
+                        maybe_previous = bucket;
+                    }
+
+                    bucket.* = Bucket{ .bitset = std.max_int(IntType), .count = Bucket.size, .previous = maybe_previous, .data = std.zeroes([bucket_size]T) };
+                }
+
+                const last_bucket = &buckets[i];
+                var last_bucket_bitset: IntType = std.max_int(IntType);
+                last_bucket_bitset >>= @intCast(u6, Bucket.size - elements_allocated);
+                last_bucket.* = Bucket{ .bitset = last_bucket_bitset, .count = elements_allocated, .previous = maybe_previous, .data = std.zeroes([bucket_size]T) };
+
+                stable_buffer.bucket_count += buckets.len;
+                stable_buffer.element_count += count;
+                stable_buffer.first = &buckets[0];
+                stable_buffer.last = last_bucket;
+
+                return stable_buffer.first.?.data[0..count];
+            } else {
+                var iterator = stable_buffer.first;
+                var last: ?*Bucket = null;
+                while (iterator) |next| {
+                    if (next.count < bucket_size) {
+                        const index = next.allocate_indices(count);
+                        stable_buffer.element_count += 1;
+                        const result = next.data[index .. index + count];
                         return result;
                     }
 

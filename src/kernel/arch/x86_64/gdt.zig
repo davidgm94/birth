@@ -32,7 +32,7 @@ pub const Table = packed struct {
         std.assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
     }
 
-    pub fn initial_setup(gdt: *Table, cpu_id: u64) void {
+    pub fn setup(gdt: *Table) void {
         log.debug("Loading GDT...", .{});
         gdt.* = Table{
             .tss = bootstrap_tss.get_descriptor(),
@@ -50,8 +50,6 @@ pub const Table = packed struct {
             :
             : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
         );
-        TLS.preset(cpu_id);
-        log.debug("GDT loaded", .{});
     }
 
     pub inline fn load(gdt: *Table) void {

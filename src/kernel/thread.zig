@@ -31,8 +31,7 @@ all_item: ListItem,
 queue_item: ListItem,
 executing: bool,
 
-// TODO: idle thread
-const Type = enum(u1) {
+pub const Type = enum(u1) {
     normal = 0,
     idle = 1,
 };

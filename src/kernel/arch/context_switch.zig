@@ -8,3 +8,4 @@ const arch = switch (std.cpu.arch) {
 pub const epilogue = arch.epilogue;
 pub const set_new_stack = arch.set_new_stack;
 pub const swap_privilege_registers = arch.swap_privilege_registers;
+pub const set_new_kernel_stack = arch.set_new_kernel_stack;

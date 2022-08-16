@@ -10,3 +10,4 @@ comptime {
 
 pub const get_current = arch.get_current;
 pub const set_current = arch.set_current;
+pub const preset = arch.preset;

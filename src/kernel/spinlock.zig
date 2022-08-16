@@ -45,3 +45,7 @@ pub fn release(spinlock: *volatile Spinlock) void {
 inline fn assert_lock_status(spinlock: *volatile Spinlock, expected_status: u8) void {
     if (expected_status != spinlock.status or interrupts.are_enabled()) @panic("Spinlock not in a desired state");
 }
+
+pub fn assert_locked(spinlock: *volatile Spinlock) void {
+    if (spinlock.status != ~@as(@TypeOf(spinlock.status), 0)) @panic("Spinlock not locked when must be");
+}

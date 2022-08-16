@@ -17,6 +17,7 @@ pub var scheduler = Scheduler{
     .active_threads = Thread.List{},
     .paused_threads = Thread.List{},
     .cpus = &.{},
+    .current_threads = &.{},
     .initialized_ap_cpu_count = 0,
 };
 

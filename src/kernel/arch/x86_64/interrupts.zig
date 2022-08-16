@@ -640,6 +640,7 @@ pub fn send_panic_interrupt_to_all_cpus() void {
 
     var bitset: u2048 = 0;
     std.assert(kernel.scheduler.cpus.len <= @bitSizeOf(@TypeOf(bitset)));
+
     for (kernel.scheduler.cpus) |*cpu| {
         if (cpu.id == panicked_cpu.id) continue;
         if (!cpu.ready) {
@@ -655,12 +656,14 @@ pub fn send_panic_interrupt_to_all_cpus() void {
         while (cpu.lapic.read(.ICR_LOW) & (1 << 12) != 0) {}
     }
 
-    std.log.scoped(.PANIC).err("CPUs not ready:", .{});
+    if (bitset != 0) {
+        std.log.scoped(.PANIC).err("CPUs not ready:", .{});
 
-    var i: u64 = 0;
-    while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
-        if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
-            std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i]});
+        var i: u64 = 0;
+        while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
+            if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
+                std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i]});
+            }
         }
     }
 }

@@ -9,14 +9,14 @@ const io = @import("io.zig");
 const LAPIC = @import("lapic.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const PIC = @import("pic.zig");
+const Scheduler = @import("../../scheduler.zig");
 const Syscall = @import("syscall.zig");
 const registers = @import("registers.zig");
 const Thread = @import("../../thread.zig");
 const TLS = @import("tls.zig");
 const TSS = @import("tss.zig");
-const x86_64 = @import("common.zig");
-
 const VirtualAddressSpace = @import("../../virtual_address_space.zig");
+const x86_64 = @import("common.zig");
 
 const cr0 = registers.cr0;
 const cr4 = registers.cr4;
@@ -25,48 +25,33 @@ const page_size = x86_64.page_size;
 
 lapic: LAPIC,
 spinlock_count: u64 = 0,
-is_bootstrap: bool = false,
 id: u32 = 0,
 gdt: GDT.Table,
-shared_tss: TSS.Struct,
+tss: TSS.Struct,
 idt: IDT,
 idle_thread: *Thread,
 timestamp_ticks_per_ms: u64 = 0,
 ready: bool,
 
-pub fn start(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
+pub fn start(cpu: *CPU, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
     cpu.ready = false;
     defer cpu.ready = true;
     cpu.spinlock_count = 0;
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here
-    cpu.gdt.initial_setup(cpu.id);
+    cpu.gdt.setup();
+    // Reload GS after loading GDT (it resets it)
+    TLS.preset(scheduler, cpu);
     cpu.init_interrupts();
     cpu.init_apic(virtual_address_space);
     Syscall.enable();
 
-    cpu.shared_tss = TSS.Struct{};
-    cpu.gdt.update_tss(&cpu.shared_tss);
+    cpu.tss = TSS.Struct{};
+    cpu.gdt.update_tss(&cpu.tss);
 
     cpu.init_timer();
 
     log.debug("Scheduler pre-initialization finished!", .{});
-}
-
-pub fn bootstrap_stacks(cpus: []CPU, virtual_address_space: *VirtualAddressSpace, stack_size: u64) void {
-    std.assert(std.is_aligned(stack_size, page_size));
-    const cpu_count = cpus.len;
-    const allocation_size = cpu_count * stack_size * 2;
-    const stack_allocation = virtual_address_space.heap.allocator.allocBytes(page_size, allocation_size, 0, 0) catch @panic("wtf");
-    const middle = allocation_size / 2;
-    const base = @ptrToInt(stack_allocation.ptr);
-
-    for (cpus) |*cpu, i| {
-        const rsp_offset = base + (i * stack_size);
-        const ist_offset = rsp_offset + middle;
-        cpu.shared_tss.rsp[0] = rsp_offset + stack_size;
-        cpu.shared_tss.IST[0] = ist_offset + stack_size;
-    }
 }
 
 pub fn enable_cpu_features() void {

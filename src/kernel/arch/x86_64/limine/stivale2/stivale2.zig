@@ -48,11 +48,9 @@ pub const BootstrapContext = struct {
 
     pub fn preinit_bsp(bootstrap_context: *BootstrapContext, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
         bootstrap_context.cpu.id = 0;
-        bootstrap_context.thread.cpu = &bootstrap_context.cpu;
+        TLS.preset_bsp(scheduler, &bootstrap_context.thread, &bootstrap_context.cpu);
         bootstrap_context.thread.context = &bootstrap_context.context;
         bootstrap_context.thread.address_space = virtual_address_space;
-        TLS.preset_bsp(&bootstrap_context.thread);
-        TLS.set_current(&bootstrap_context.thread);
 
         // @ZigBug: @ptrCast here crashes the compiler
         scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
@@ -294,13 +292,14 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!u64 {
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
     const virtual_address_space = initialization_context.kernel_virtual_address_space;
+    const scheduler = initialization_context.scheduler;
     const cpu_index = smp_info.processor_id;
     // Current thread is already set in the process_smp function
-    TLS.preset(cpu_index);
+    TLS.preset(scheduler, &scheduler.cpus[cpu_index]);
     virtual_address_space.make_current();
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
-    cpu.start(virtual_address_space);
+    cpu.start(scheduler, virtual_address_space);
     log.debug("CPU started", .{});
 
     cpu.make_thread_idle();
@@ -312,6 +311,8 @@ const CPUInitializationContext = struct {
 };
 
 var cpu_initialization_context: CPUInitializationContext = undefined;
+var foo: Thread = undefined;
+var foo2: Context = undefined;
 
 pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *BootstrapContext, scheduler: *Scheduler) Error!void {
     std.assert(virtual_address_space.privilege_level == .kernel);
@@ -324,62 +325,14 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
     log.debug("SMP struct: {}", .{smp_struct});
 
     const cpu_count = smp_struct.cpu_count;
-    const thread_count = cpu_count;
-    scheduler.cpus = virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch return Error.smp;
     const smps = smp_struct.smp_info()[0..cpu_count];
     std.assert(smps[0].lapic_id == smp_struct.bsp_lapic_id);
-    scheduler.cpus[0] = bootstrap_context.cpu;
-    scheduler.cpus[0].is_bootstrap = true;
-    const bsp_thread = scheduler.thread_buffer.add_one(virtual_address_space.heap.allocator) catch @panic("wtf");
-    bsp_thread.all_item = Thread.ListItem.new(bsp_thread);
-    bsp_thread.queue_item = Thread.ListItem.new(bsp_thread);
-    scheduler.all_threads.append(&bsp_thread.all_item, bsp_thread) catch @panic("wtF");
-    bsp_thread.context = &bootstrap_context.context;
-    bsp_thread.state = .active;
-    bsp_thread.cpu = &scheduler.cpus[0];
-    bsp_thread.address_space = virtual_address_space;
-    TLS.set_current(bsp_thread);
-    TLS.allocate_and_setup(virtual_address_space, scheduler);
-
-    const entry_point = @ptrToInt(smp_entry);
-    const ap_cpu_count = scheduler.cpus.len - 1;
-    var ap_threads: []Thread = &.{};
-    if (ap_cpu_count > 0) {
-        ap_threads = scheduler.bulk_spawn_same_thread(virtual_address_space, .kernel, ap_cpu_count, entry_point);
-        std.assert(scheduler.all_threads.count == ap_threads.len + 1);
-        std.assert(scheduler.all_threads.count < Thread.Buffer.Bucket.size);
-    }
-
-    const all_threads = scheduler.thread_buffer.first.?.data[0..thread_count];
-    std.assert(&all_threads[0] == bsp_thread);
-
-    for (smps) |smp, index| {
-        const cpu = &scheduler.cpus[index];
-        const thread = &all_threads[index];
-        cpu.lapic.id = smp.lapic_id;
-        cpu.idle_thread = thread;
-        cpu.id = smp.processor_id;
-        thread.cpu = cpu;
-        thread.executing = true;
-    }
-
-    // TODO: don't hardcode stack size
-    CPU.bootstrap_stacks(scheduler.cpus, virtual_address_space, 0x10000);
-    std.assert(std.cpu.arch == .x86_64);
-    scheduler.cpus[0].map_lapic(virtual_address_space);
-
-    if (ap_cpu_count > 0) {
-        scheduler.lock.acquire();
-        for (smps[1..]) |*smp, index| {
-            const ap_thread = &ap_threads[index];
-            scheduler.active_threads.remove(&ap_thread.queue_item);
-            const stack_pointer = ap_thread.context.get_stack_pointer();
-            smp.extra_argument = @ptrToInt(&cpu_initialization_context);
-            smp.target_stack = stack_pointer;
-            smp.goto_address = entry_point;
-        }
-
-        std.assert(scheduler.active_threads.count == 0);
-        scheduler.lock.release();
-    }
+    // @Allocation
+    bootstrap_context.cpu.idle_thread = &foo;
+    bootstrap_context.cpu.idle_thread.context = &foo2;
+    bootstrap_context.cpu.idle_thread.context = &foo2;
+    bootstrap_context.cpu.idle_thread.address_space = virtual_address_space;
+    bootstrap_context.thread.context = &foo2;
+    bootstrap_context.thread.address_space = virtual_address_space;
+    scheduler.bootstrap_cpus(virtual_address_space, @ptrToInt(smp_entry), cpu_count);
 }
