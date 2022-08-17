@@ -193,7 +193,6 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
     thread.user_stack_base = thread_stack.user.address;
     thread.user_stack_size = thread_stack.user.size;
 
-    // TODO: hack
     thread.context = Context.new(thread, entry_point);
     if (thread.type == .normal) {
         // TODO: don't hardcode this

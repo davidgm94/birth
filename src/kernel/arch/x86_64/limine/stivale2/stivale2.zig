@@ -34,12 +34,16 @@ pub const Error = error{
     pmrs,
     rsdp,
     smp,
+    framebuffer,
 };
 
 const BootloaderInformation = struct {
     kernel_sections_in_memory: []VirtualMemoryRegion,
     kernel_file: FileInMemory,
+    framebuffer: Framebuffer,
 };
+
+const Framebuffer = struct {};
 
 pub const BootstrapContext = struct {
     cpu: CPU,
@@ -63,12 +67,15 @@ pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpac
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
     log.debug("Processed kernel file in memory", .{});
+    const framebuffer = try process_framebuffer(virtual_address_space, stivale2_struct);
+    log.debug("Processed framebuffer", .{});
     try process_smp(virtual_address_space, stivale2_struct, bootstrap_context, scheduler);
     log.debug("Processed SMP info", .{});
 
     return BootloaderInformation{
         .kernel_sections_in_memory = kernel_sections_in_memory,
         .kernel_file = kernel_file,
+        .framebuffer = framebuffer,
     };
 }
 
@@ -287,6 +294,14 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!u64 {
     const rsdp = rsdp_struct.rsdp;
     log.debug("RSDP struct: 0x{x}", .{rsdp});
     return rsdp;
+}
+
+pub fn process_framebuffer(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!Framebuffer {
+    _ = virtual_address_space;
+    const framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
+    log.debug("Framebuffer: {}", .{framebuffer});
+    TODO();
+    return Framebuffer{};
 }
 
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
