@@ -35,26 +35,22 @@ cpus: []CPU,
 current_threads: []*Thread,
 initialized_ap_cpu_count: u64,
 
-var yield_times: u64 = 0;
-
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
-    yield_times += 1;
-    if (yield_times == 3) @panic("STOP");
-    log.debug("Yielding", .{});
     const current_cpu = TLS.get_current().cpu.?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
     }
     interrupts.disable();
-    log.debug("Acquiring scheduler lock", .{});
     scheduler.lock.acquire();
-    log.debug("Scheduler lock acquired", .{});
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
     const old_thread = TLS.get_current();
     std.assert(old_thread.state == .active);
     old_thread.context = old_context;
     old_address_space = old_thread.address_space;
+    if (old_thread.state == .active and old_thread.type != .idle) {
+        scheduler.active_threads.append(&old_thread.queue_item, old_thread) catch @panic("Wtf");
+    }
     const new_thread = scheduler.pick_thread(current_cpu);
     new_thread.time_slices += 1;
     old_thread.state = .paused;
@@ -62,7 +58,6 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
     interrupts.disable_all();
-    log.debug("New thread address space: 0x{x}", .{@ptrToInt(new_thread.address_space)});
     VAS.switch_address_spaces_if_necessary(new_thread.address_space);
 
     if (scheduler.lock.were_interrupts_enabled != 0) {
@@ -81,9 +76,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
 
     const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
     // TODO: this is only supposed to be called from an interrupt
-    log.debug("LAPIC EOI start", .{});
     interrupts.end(cpu);
-    log.debug("LAPIC EOI end", .{});
     if (interrupts.are_enabled()) @panic("interrupts enabled");
     if (cpu.spinlock_count > 0) @panic("spinlocks active");
     // TODO: profiling
@@ -134,8 +127,6 @@ pub fn terminate(thread: *Thread) void {
 
 fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
     scheduler.lock.assert_locked();
-    log.debug("Scheduler active threads: {}", .{scheduler.active_threads.count});
-    log.debug("Scheduler paused threads: {}", .{scheduler.paused_threads.count});
 
     var maybe_active_thread_node = scheduler.active_threads.first;
 
@@ -180,9 +171,10 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
     return thread;
 }
 
+/// Can't log inside this function, early initialization migh crash
 pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack) void {
     scheduler.lock.assert_locked();
-    if (true) @panic("implement idle threads");
+    //if (true) @panic("implement idle threads");
 
     thread.all_item = Thread.ListItem.new(thread);
     thread.queue_item = Thread.ListItem.new(thread);
@@ -201,18 +193,16 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
     thread.user_stack_base = thread_stack.user.address;
     thread.user_stack_size = thread_stack.user.size;
 
-    // TODO: don't hardcode this
-    const syscall_queue_entry_count = 256;
-    thread.syscall_manager = switch (privilege_level) {
-        .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
-        .kernel => .{ .kernel = null, .user = null },
-    };
+    // TODO: hack
+    thread.context = Context.new(thread, entry_point);
+    if (thread.type == .normal) {
+        // TODO: don't hardcode this
+        const syscall_queue_entry_count = 256;
+        thread.syscall_manager = switch (privilege_level) {
+            .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
+            .kernel => .{ .kernel = null, .user = null },
+        };
 
-    if (thread.type != .idle) {
-        log.debug("Creating arch-specific thread initialization", .{});
-        // TODO: hack
-        thread.context = Context.new(thread, entry_point);
+        scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
     }
-
-    scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
 }

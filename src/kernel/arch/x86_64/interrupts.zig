@@ -374,7 +374,6 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         @panic("interrupts are enabled");
     }
 
-    log.debug("===================== START INT 0x{x} =====================", .{context.interrupt_number});
     const should_swap_gs = @truncate(u2, context.cs) == ~@truncate(u2, registers.cs.read());
     if (should_swap_gs) {
         asm volatile ("swapgs");
@@ -384,12 +383,12 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
         if (should_swap_gs) asm volatile ("swapgs");
     }
 
-    if (TLS.get_current().cpu) |current_cpu| {
-        if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
-            //log.debug("Current cpu spinlock count: {}", .{current_cpu.spinlock_count});
-            //log.debug("CR8: 0x{x}", .{context.cr8});
-            panic("Spinlocks active ({}) while interrupts were enabled\nContext:\n{}\n", .{ current_cpu.spinlock_count, context });
-        }
+    const current_thread = TLS.get_current();
+    const current_cpu = current_thread.cpu orelse @panic("wtf");
+    if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
+        //log.debug("Current cpu spinlock count: {}", .{current_cpu.spinlock_count});
+        //log.debug("CR8: 0x{x}", .{context.cr8});
+        panic("Spinlocks active ({}) while interrupts were enabled\nContext:\n{}\n", .{ current_cpu.spinlock_count, context });
     }
 
     switch (context.interrupt_number) {
@@ -434,7 +433,11 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             }
         },
         0x40 => {
-            kernel.scheduler.yield(context);
+            if (current_cpu.ready) {
+                kernel.scheduler.yield(context);
+                @panic("we should not return from yield");
+            }
+            current_cpu.lapic.end_of_interrupt();
         },
         irq_base...irq_base + 0x20 => {
             // TODO: @Lock
@@ -460,8 +463,6 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     if (interrupts.are_enabled()) {
         @panic("interrupts should not be enabled");
     }
-
-    log.debug("===================== END INT 0x{x} =====================", .{context.interrupt_number});
 }
 
 pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) callconv(.Naked) void {

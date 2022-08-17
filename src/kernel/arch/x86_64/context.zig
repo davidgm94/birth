@@ -43,7 +43,6 @@ pub fn new(thread: *Thread, entry_point: u64) *Context {
     const user_stack = get_user_stack(thread);
     const arch_context = from_kernel_stack(kernel_stack);
     thread.kernel_stack = VirtualAddress.new(kernel_stack);
-    log.debug("Arch Kernel stack: 0x{x}", .{thread.kernel_stack.value});
     thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
     // TODO: FPU
     switch (thread.privilege_level) {
@@ -56,7 +55,6 @@ pub fn new(thread: *Thread, entry_point: u64) *Context {
             arch_context.cs = @offsetOf(GDT.Table, "user_code_64") | 0b11;
             arch_context.ss = @offsetOf(GDT.Table, "user_data") | 0b11;
             arch_context.ds = @offsetOf(GDT.Table, "user_data") | 0b11;
-            log.debug("CS: 0x{x}. SS: 0x{x}", .{ arch_context.cs, arch_context.ss });
         },
     }
 

@@ -40,23 +40,27 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
         .address = @ptrToInt(main),
     });
 
+    cpu.ready = true;
     cpu.make_thread_idle();
 }
 
 pub fn main() callconv(.C) noreturn {
     kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| panic("Failed to initialize drivers: {}", .{driver_init_error});
+    for (kernel.scheduler.cpus) |*cpu| {
+        cpu.ready = true;
+    }
     //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
-    asm volatile ("int $0x40");
 
     //success_and_end();
 
     //next_timer(1);
     while (true) {
-        asm volatile (
-            \\cli
-            \\pause
-            \\hlt
-            ::: "memory");
+        log.debug("we spinning", .{});
+        //asm volatile (
+        //\\cli
+        //\\pause
+        //\\hlt
+        //::: "memory");
     }
 }
 

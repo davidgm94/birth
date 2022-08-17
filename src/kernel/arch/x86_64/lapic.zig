@@ -61,6 +61,5 @@ pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
 }
 
 pub inline fn end_of_interrupt(lapic: LAPIC) void {
-    log.debug("Signaling end of interrupt", .{});
     lapic.write(.EOI, 0);
 }

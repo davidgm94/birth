@@ -35,7 +35,6 @@ ready: bool,
 
 pub fn start(cpu: *CPU, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
     cpu.ready = false;
-    defer cpu.ready = true;
     cpu.spinlock_count = 0;
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here
@@ -92,9 +91,7 @@ pub fn init_interrupts(cpu: *CPU) void {
 
 var map_lapic_address_times_called: u8 = 0;
 /// This function is only meant to be called once
-pub fn map_lapic(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
-    std.assert(cpu.id == 0);
-    std.assert(cpu.is_bootstrap);
+pub fn map_lapic(virtual_address_space: *VirtualAddressSpace) void {
     if (@ptrCast(*volatile u8, &map_lapic_address_times_called).* != 0) @panic("Trying to map LAPIC address more than once");
     defer _ = @atomicRmw(u8, &map_lapic_address_times_called, .Add, 1, .SeqCst);
 
