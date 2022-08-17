@@ -20,6 +20,7 @@ const Thread = @import("../../../../thread.zig");
 const TLS = @import("../../tls.zig");
 
 const FileInMemory = common.FileInMemory;
+const Framebuffer = common.Framebuffer;
 const page_size = x86_64.page_size;
 const log = std.log.scoped(.stivale);
 const TODO = crash.TODO;
@@ -43,8 +44,6 @@ const BootloaderInformation = struct {
     framebuffer: Framebuffer,
 };
 
-const Framebuffer = struct {};
-
 pub const BootstrapContext = struct {
     cpu: CPU,
     thread: Thread,
@@ -67,7 +66,7 @@ pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpac
     log.debug("Processed sections in memory", .{});
     const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
     log.debug("Processed kernel file in memory", .{});
-    const framebuffer = try process_framebuffer(virtual_address_space, stivale2_struct);
+    const framebuffer = try process_framebuffer(stivale2_struct);
     log.debug("Processed framebuffer", .{});
     try process_smp(virtual_address_space, stivale2_struct, bootstrap_context, scheduler);
     log.debug("Processed SMP info", .{});
@@ -296,12 +295,18 @@ pub fn process_rsdp(stivale2_struct: *Struct) Error!u64 {
     return rsdp;
 }
 
-pub fn process_framebuffer(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!Framebuffer {
-    _ = virtual_address_space;
-    const framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
-    log.debug("Framebuffer: {}", .{framebuffer});
-    TODO();
-    return Framebuffer{};
+pub fn process_framebuffer(stivale2_struct: *Struct) Error!Framebuffer {
+    const stivale_framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
+    std.assert(stivale_framebuffer.framebuffer_pitch % stivale_framebuffer.framebuffer_width == 0);
+    std.assert(stivale_framebuffer.framebuffer_bpp % @bitSizeOf(u8) == 0);
+    const bytes_per_pixel = @intCast(u8, stivale_framebuffer.framebuffer_bpp / @bitSizeOf(u8));
+    std.assert(stivale_framebuffer.framebuffer_pitch / stivale_framebuffer.framebuffer_width == bytes_per_pixel);
+    return Framebuffer{
+        .physical_address = PhysicalAddress.new(stivale_framebuffer.framebuffer_addr),
+        .width = stivale_framebuffer.framebuffer_width,
+        .height = stivale_framebuffer.framebuffer_height,
+        .bytes_per_pixel = bytes_per_pixel,
+    };
 }
 
 fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {

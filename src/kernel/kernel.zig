@@ -2,6 +2,7 @@ const common = @import("common.zig");
 
 const DeviceManager = @import("device_manager.zig");
 const FileInMemory = common.FileInMemory;
+const Framebuffer = common.Framebuffer;
 const Scheduler = @import("scheduler.zig");
 const Spinlock = @import("spinlock.zig");
 const Thread = @import("thread.zig");
@@ -35,6 +36,8 @@ pub var file = FileInMemory{
     .address = VirtualAddress.invalid(),
     .size = 0,
 };
+
+pub var bootloader_framebuffer: Framebuffer = undefined;
 
 pub var higher_half_direct_map = VirtualAddress.invalid();
 

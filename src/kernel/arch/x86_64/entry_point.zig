@@ -31,6 +31,7 @@ pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
     const bootloader_information = Stivale2.process_bootloader_information(&kernel.virtual_address_space, stivale2_struct_physical_address.access_kernel(*Stivale2.Struct), &bootstrap_context, &kernel.scheduler) catch unreachable;
     kernel.sections_in_memory = bootloader_information.kernel_sections_in_memory;
     kernel.file = bootloader_information.kernel_file;
+    kernel.bootloader_framebuffer = bootloader_information.framebuffer;
 
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
