@@ -663,7 +663,7 @@ pub fn send_panic_interrupt_to_all_cpus() void {
         var i: u64 = 0;
         while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
             if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
-                std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i]});
+                std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i].id});
             }
         }
     }

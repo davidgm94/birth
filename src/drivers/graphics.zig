@@ -1,9 +1,17 @@
-const common = @import("common");
-
-const Font = common.PSF1.Font;
-
-const log = common.log.scoped(.graphics);
 const Driver = @This();
+
+const std = @import("../common/std.zig");
+
+const common = @import("../kernel/common.zig");
+const crash = @import("../kernel/crash.zig");
+const Drivers = @import("common.zig");
+const DeviceManager = @import("../kernel/device_manager.zig");
+const Font = @import("../common/psf1.zig");
+const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+
+const Framebuffer = common.Framebuffer;
+const log = std.log.scoped(.graphics);
+const TODO = crash.TODO;
 
 const Type = enum(u64) {
     virtio = 0,
@@ -11,6 +19,20 @@ const Type = enum(u64) {
 
 type: Type,
 framebuffer: Framebuffer,
+
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, framebuffer: Framebuffer, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+    _ = device_manager;
+    _ = virtual_address_space;
+    _ = maybe_driver_tree;
+
+    const framebuffer_virtual = framebuffer.physical_address.access_kernel([*]volatile u32);
+    log.debug("Virtual framebuffer: 0x{x}", .{@ptrToInt(framebuffer_virtual)});
+    const framebuffer_size = @as(u32, framebuffer.width) * framebuffer.height;
+    for (framebuffer_virtual[0..framebuffer_size]) |*pixel| {
+        pixel.* = std.max_int(u32);
+    }
+    TODO();
+}
 
 pub fn draw_char(driver: *Driver, font: Font, color: Color, point: Point, character: u8) void {
     const framebuffer = driver.framebuffer.buffer[0 .. driver.framebuffer.width * driver.framebuffer.height];
@@ -80,12 +102,12 @@ pub fn test_draw_rect(driver: *Driver) void {
     }, Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
 }
 
-pub const Framebuffer = struct {
-    buffer: [*]u32,
-    width: u32,
-    height: u32,
-    cursor: Point,
-};
+//pub const Framebuffer = struct {
+//buffer: [*]u32,
+//width: u32,
+//height: u32,
+//cursor: Point,
+//};
 
 pub const Point = struct {
     x: u32,
