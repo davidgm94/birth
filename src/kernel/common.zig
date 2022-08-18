@@ -7,22 +7,16 @@ pub const FileInMemory = struct {
 };
 
 pub const Framebuffer = struct {
-    physical_address: PhysicalAddress,
+    virtual_address: VirtualAddress,
     width: u16,
     height: u16,
     bytes_per_pixel: u8,
-    //tag: Tag,
-    //framebuffer_addr: u64,
-    //framebuffer_width: u16,
-    //framebuffer_height: u16,
-    //framebuffer_pitch: u16,
-    //framebuffer_bpp: u16,
-    //memory_model: u8,
-    //red_mask_size: u8,
-    //red_mask_shift: u8,
-    //green_mask_size: u8,
-    //green_mask_shift: u8,
-    //blue_mask_size: u8,
-    //blue_mask_shift: u8,
-    //_unused: u8,
+    red_mask: ColorMask,
+    blue_mask: ColorMask,
+    green_mask: ColorMask,
+};
+
+pub const ColorMask = struct {
+    size: u8,
+    shift: u8,
 };

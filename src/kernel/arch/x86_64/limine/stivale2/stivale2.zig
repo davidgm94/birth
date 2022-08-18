@@ -302,10 +302,13 @@ pub fn process_framebuffer(stivale2_struct: *Struct) Error!Framebuffer {
     const bytes_per_pixel = @intCast(u8, stivale_framebuffer.framebuffer_bpp / @bitSizeOf(u8));
     std.assert(stivale_framebuffer.framebuffer_pitch / stivale_framebuffer.framebuffer_width == bytes_per_pixel);
     return Framebuffer{
-        .physical_address = PhysicalAddress.new(stivale_framebuffer.framebuffer_addr),
+        .virtual_address = PhysicalAddress.new(stivale_framebuffer.framebuffer_addr).to_higher_half_virtual_address(),
         .width = stivale_framebuffer.framebuffer_width,
         .height = stivale_framebuffer.framebuffer_height,
         .bytes_per_pixel = bytes_per_pixel,
+        .red_mask = .{ .size = stivale_framebuffer.red_mask_size, .shift = stivale_framebuffer.red_mask_shift },
+        .blue_mask = .{ .size = stivale_framebuffer.blue_mask_size, .shift = stivale_framebuffer.blue_mask_shift },
+        .green_mask = .{ .size = stivale_framebuffer.green_mask_size, .shift = stivale_framebuffer.green_mask_shift },
     };
 }
 

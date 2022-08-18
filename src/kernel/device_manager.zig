@@ -9,6 +9,7 @@ const AHCI = @import("../drivers/ahci.zig");
 const ACPI = @import("../drivers/acpi.zig");
 const Disk = @import("../drivers/disk.zig");
 const Filesystem = @import("../drivers/filesystem.zig");
+const Graphics = @import("../drivers/graphics.zig");
 const PCI = @import("../drivers/pci.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
 
@@ -27,6 +28,7 @@ ready: bool = false,
 const Devices = struct {
     disk: std.ArrayList(*Disk) = .{ .items = &.{}, .capacity = 0 },
     filesystem: std.ArrayList(*Filesystem) = .{ .items = &.{}, .capacity = 0 },
+    graphics_adapters: std.ArrayList(*Graphics) = .{ .items = &.{}, .capacity = 0 },
 };
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {

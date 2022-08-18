@@ -19,7 +19,7 @@ const log = std.log.scoped(.Drivers);
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     try driver_tree[0].type.init(device_manager, virtual_address_space, driver_tree[0].children);
     try driver_tree[1].type.init(device_manager, virtual_address_space, driver_tree[1].children);
-    try Graphics.init(device_manager, virtual_address_space, kernel.bootloader_framebuffer, driver_tree[2].children);
+    try Graphics.init(device_manager, virtual_address_space, &.{kernel.bootloader_framebuffer}, driver_tree[2].children);
 }
 
 pub const driver_tree = [_]Driver.Tree{

@@ -7,30 +7,43 @@ const crash = @import("../kernel/crash.zig");
 const Drivers = @import("common.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
 const Font = @import("../common/psf1.zig");
+const List = @import("../common/list.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
 
 const Framebuffer = common.Framebuffer;
 const log = std.log.scoped(.graphics);
+const StableBuffer = List.StableBuffer;
 const TODO = crash.TODO;
 
 const Type = enum(u64) {
     virtio = 0,
+    limine = 1,
 };
 
-type: Type,
-framebuffer: Framebuffer,
+type: Type = .limine,
+framebuffers: StableBuffer(Framebuffer, 8) = .{ .items = &.{}, .capacity = 0 },
+primary: u8 = 0,
 
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, framebuffer: Framebuffer, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, framebuffers: []const Framebuffer, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
     _ = device_manager;
     _ = virtual_address_space;
     _ = maybe_driver_tree;
 
-    const framebuffer_virtual = framebuffer.physical_address.access_kernel([*]volatile u32);
-    log.debug("Virtual framebuffer: 0x{x}", .{@ptrToInt(framebuffer_virtual)});
-    const framebuffer_size = @as(u32, framebuffer.width) * framebuffer.height;
-    for (framebuffer_virtual[0..framebuffer_size]) |*pixel| {
-        pixel.* = std.max_int(u32);
+    const adapter = try virtual_address_space.heap.allocator.create(Driver);
+    std.assert(adapter.framebuffers.bucket_count == 0);
+    std.assert(adapter.framebuffers.element_count == 0);
+    std.assert(framebuffers.len > 0);
+    for (framebuffers) |framebuffer| {
+        const new_framebuffer = try adapter.framebuffers.add_one(virtual_address_space.heap.allocator);
+        new_framebuffer.* = framebuffer;
     }
+
+    //const framebuffer_virtual = framebuffer.virtual_address.access([*]volatile u32);
+    //log.debug("Virtual framebuffer: 0x{x}", .{@ptrToInt(framebuffer_virtual)});
+    //const framebuffer_size = @as(u32, framebuffer.width) * framebuffer.height;
+    //for (framebuffer_virtual[0..framebuffer_size]) |*pixel| {
+    //pixel.* = 0xff_ff_ff_00;
+    //}
     TODO();
 }
 
