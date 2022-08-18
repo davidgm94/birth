@@ -3,6 +3,7 @@ const std = @import("../../../common/std.zig");
 const CPUID = @import("../../../common/arch/x86_64/cpuid.zig");
 const crash = @import("../../crash.zig");
 const drivers = @import("drivers.zig");
+const Graphics = @import("../../../drivers/graphics.zig");
 const kernel = @import("../../kernel.zig");
 const log = std.log.scoped(.Entry);
 const PhysicalAddress = @import("../../physical_address.zig");
@@ -54,9 +55,15 @@ pub fn main() callconv(.C) noreturn {
 
     //success_and_end();
 
-    //next_timer(1);
-    while (true) {
-        log.debug("we spinning", .{});
+    var i: u8 = 0;
+    const framebuffer = kernel.device_manager.get_primary(Graphics).get_main_framebuffer();
+    const pixel_count = framebuffer.get_pixel_count();
+    const framebuffer_pixels = framebuffer.virtual_address.access([*]volatile u32)[0..pixel_count];
+    log.debug("Pixels: {}", .{pixel_count});
+    while (true) : (i += 1) {
+        for (framebuffer_pixels) |*pixel| {
+            pixel.* = (@as(u32, i) << 24) | (@as(u32, i) << 16) | (@as(u32, i) << 8) | i;
+        }
         //asm volatile (
         //\\cli
         //\\pause

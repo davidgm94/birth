@@ -14,6 +14,10 @@ pub const Framebuffer = struct {
     red_mask: ColorMask,
     blue_mask: ColorMask,
     green_mask: ColorMask,
+
+    pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
+        return @as(u32, framebuffer.width) * framebuffer.height;
+    }
 };
 
 pub const ColorMask = struct {

@@ -117,7 +117,7 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
                                     break :blk ptr[0..len];
                                 };
 
-                                const main_storage = kernel.device_manager.get_main_storage();
+                                const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
                                 const file = main_storage.interface.read_file.?(&main_storage.interface, current_thread.address_space.heap.allocator, filename, current_thread.address_space);
                                 std.assert(file.len > 0);
                                 logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});

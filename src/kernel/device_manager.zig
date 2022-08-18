@@ -22,14 +22,26 @@ const Allocator = std.Allocator;
 const log = std.log.scoped(.DeviceManager);
 
 devices: Devices = .{},
-main_storage: u32 = 0,
 ready: bool = false,
 
 const Devices = struct {
-    disk: std.ArrayList(*Disk) = .{ .items = &.{}, .capacity = 0 },
-    filesystem: std.ArrayList(*Filesystem) = .{ .items = &.{}, .capacity = 0 },
-    graphics_adapters: std.ArrayList(*Graphics) = .{ .items = &.{}, .capacity = 0 },
+    disk: Device(Disk) = .{},
+    filesystem: Device(Filesystem) = .{},
+    graphics_adapter: Device(Graphics) = .{},
 };
+
+fn Device(comptime T: type) type {
+    return struct {
+        list: std.ArrayList(*T) = .{ .items = &.{}, .capacity = 0 },
+        main: u32 = 0,
+
+        pub const Type = T;
+
+        pub fn get_main_device(device: *@This()) *T {
+            return device.list.items[device.main];
+        }
+    };
+}
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     defer device_manager.ready = true;
@@ -37,24 +49,29 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     try drivers.init(device_manager, virtual_address_space);
 
     inline for (std.fields(Devices)) |device_field| {
-        const device_count = @field(device_manager.devices, device_field.name).items.len;
+        const device_count = @field(device_manager.devices, device_field.name).list.items.len;
         log.debug("{s} count: {}", .{ device_field.name, device_count });
     }
 
-    std.assert(device_manager.devices.disk.items.len > 0);
-    std.assert(device_manager.devices.filesystem.items.len > 0);
+    std.assert(device_manager.devices.disk.list.items.len > 0);
+    std.assert(device_manager.devices.filesystem.list.items.len > 0);
 }
 
-pub fn register_filesystem(device_manager: *DeviceManager, allocator: std.Allocator, filesystem: *Filesystem) !void {
-    log.debug("Registered new {} filesystem with {} drive", .{ filesystem.interface.type, filesystem.interface.disk.type });
-    try device_manager.devices.filesystem.append(allocator, filesystem);
+pub fn register(device_manager: *DeviceManager, comptime DeviceT: type, allocator: Allocator, new_device: *DeviceT) !void {
+    defer log.debug("Registered new {} device", .{DeviceT});
+    switch (DeviceT) {
+        Filesystem => try device_manager.devices.filesystem.list.append(allocator, new_device),
+        Disk => try device_manager.devices.disk.list.append(allocator, new_device),
+        Graphics => try device_manager.devices.graphics_adapter.list.append(allocator, new_device),
+        else => @compileError("Unknown device type"),
+    }
 }
 
-pub fn register_disk(device_manager: *DeviceManager, allocator: std.Allocator, disk: *Disk) !void {
-    log.debug("Registered new {} disk", .{disk.interface.type});
-    try device_manager.devices.disk.append(allocator, disk);
-}
-
-pub fn get_main_storage(device_manager: *DeviceManager) *Filesystem {
-    return device_manager.devices.filesystem.items[device_manager.main_storage];
+pub fn get_primary(device_manager: *DeviceManager, comptime DeviceT: type) *DeviceT {
+    return switch (DeviceT) {
+        Filesystem => device_manager.devices.filesystem.list.items[device_manager.devices.filesystem.main],
+        Disk => device_manager.devices.disk.list.items[device_manager.devices.disk.main],
+        Graphics => device_manager.devices.graphics_adapter.list.items[device_manager.devices.graphics_adapter.main],
+        else => @compileError("Unknown device type"),
+    };
 }

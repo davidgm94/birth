@@ -21,30 +21,25 @@ const Type = enum(u64) {
 };
 
 type: Type = .limine,
-framebuffers: StableBuffer(Framebuffer, 8) = .{ .items = &.{}, .capacity = 0 },
+framebuffers: StableBuffer(Framebuffer, 8) = .{},
 primary: u8 = 0,
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, framebuffers: []const Framebuffer, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
-    _ = device_manager;
-    _ = virtual_address_space;
     _ = maybe_driver_tree;
 
     const adapter = try virtual_address_space.heap.allocator.create(Driver);
-    std.assert(adapter.framebuffers.bucket_count == 0);
-    std.assert(adapter.framebuffers.element_count == 0);
+    adapter.* = Driver{};
     std.assert(framebuffers.len > 0);
     for (framebuffers) |framebuffer| {
         const new_framebuffer = try adapter.framebuffers.add_one(virtual_address_space.heap.allocator);
         new_framebuffer.* = framebuffer;
     }
 
-    //const framebuffer_virtual = framebuffer.virtual_address.access([*]volatile u32);
-    //log.debug("Virtual framebuffer: 0x{x}", .{@ptrToInt(framebuffer_virtual)});
-    //const framebuffer_size = @as(u32, framebuffer.width) * framebuffer.height;
-    //for (framebuffer_virtual[0..framebuffer_size]) |*pixel| {
-    //pixel.* = 0xff_ff_ff_00;
-    //}
-    TODO();
+    try device_manager.register(Driver, virtual_address_space.heap.allocator, adapter);
+}
+
+pub fn get_main_framebuffer(driver: *Driver) *Framebuffer {
+    return &driver.framebuffers.first.?.data[driver.primary];
 }
 
 pub fn draw_char(driver: *Driver, font: Font, color: Color, point: Point, character: u8) void {
