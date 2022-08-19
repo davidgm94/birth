@@ -8,8 +8,8 @@ pub const Type = Drivers.DiskDriverType;
 
 type: Type,
 sector_size: u64,
-access: fn (disk_interface: *DiskInterface, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
-get_dma_buffer: fn (disk_interface: *DiskInterface, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer,
+access: *const fn (disk_interface: *DiskInterface, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
+get_dma_buffer: *const fn (disk_interface: *DiskInterface, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer,
 
 pub const Work = struct {
     sector_offset: u64,

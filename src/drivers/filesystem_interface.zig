@@ -13,8 +13,8 @@ disk: *DiskInterface,
 read_file: ?ReadFileCallback,
 write_new_file: ?WriteFileCallback,
 
-const ReadFileCallback = fn (driver: *Driver, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) []const u8;
-const WriteFileCallback = fn (driver: *Driver, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) void;
+const ReadFileCallback = *const fn (driver: *Driver, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) []const u8;
+const WriteFileCallback = *const fn (driver: *Driver, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) void;
 
 pub const InitializationParameters = struct {
     filesystem_type: Type,
