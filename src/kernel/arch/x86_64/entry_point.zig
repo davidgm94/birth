@@ -17,7 +17,7 @@ const panic = crash.panic;
 
 var bootstrap_context: Stivale2.BootstrapContext = undefined;
 
-pub fn function(stivale2_struct_address: u64) callconv(.C) noreturn {
+pub export fn entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     kernel.virtual_address_space = VirtualAddressSpace.bootstrapping();
     bootstrap_context.preinit_bsp(&kernel.scheduler, &kernel.virtual_address_space);

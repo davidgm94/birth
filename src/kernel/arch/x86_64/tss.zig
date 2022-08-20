@@ -21,17 +21,17 @@ pub const Descriptor = packed struct {
     }
 };
 
-pub const Struct = packed struct {
+pub const Struct = extern struct {
     reserved0: u32 = 0,
-    rsp: [3]u64 = [3]u64{ 0, 0, 0 },
-    reserved1: u64 = 0,
-    IST: [7]u64 = [7]u64{ 0, 0, 0, 0, 0, 0, 0 },
-    reserved3: u64 = 0,
+    rsp: [3]u64 align(4) = [3]u64{ 0, 0, 0 },
+    reserved1: u64 align(4) = 0,
+    IST: [7]u64 align(4) = [7]u64{ 0, 0, 0, 0, 0, 0, 0 },
+    reserved3: u64 align(4) = 0,
     reserved4: u16 = 0,
     IO_map_base_address: u16 = 104,
 
     comptime {
-        std.assert(@sizeOf(Struct) == 0x68);
+        std.assert(@sizeOf(Struct) == 104);
     }
 
     pub fn get_descriptor(tss: *const Struct) Descriptor {

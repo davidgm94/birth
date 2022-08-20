@@ -495,7 +495,7 @@ pub const interrupt_vector_msi_count = 0x40;
 pub var msi_handlers: [interrupt_vector_msi_count]HandlerInfo = undefined;
 
 pub const HandlerInfo = struct {
-    const Callback = fn (u64, u64) bool;
+    const Callback = *const fn (u64, u64) bool;
     callback: Callback,
     context: u64,
 

@@ -1,4 +1,4 @@
-ENTRY(start)
+ENTRY(entry_point)
 
 PHDRS {
   none   PT_NULL FLAGS(0);

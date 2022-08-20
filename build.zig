@@ -155,7 +155,7 @@ const Kernel = struct {
             program.setBuildMode(kernel.builder.standardReleaseOptions());
             //program.setBuildMode(.ReleaseSafe);
             program.setLinkerScriptPath(Build.FileSource.relative(linker_script_path));
-            program.entry_symbol_name = "_start";
+            program.entry_symbol_name = "entry_point";
 
             kernel.builder.default_step.dependOn(&program.step);
 

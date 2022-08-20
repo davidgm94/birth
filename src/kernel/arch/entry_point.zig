@@ -4,4 +4,8 @@ const entry_point = switch (std.cpu.arch) {
     else => unreachable,
 };
 
+comptime {
+    std.reference_all_declarations(entry_point);
+}
+
 pub const function = entry_point.function;

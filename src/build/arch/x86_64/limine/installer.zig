@@ -14,21 +14,21 @@ const InstallerError = error{
 };
 
 const GPT = struct {
-    const Header = packed struct {
-        signature: u64,
+    const Header = extern struct {
+        signature: u64 align(4),
         revision: u32,
         header_size: u32,
         CRC32: u32,
         _reserved0: u32,
 
-        LBA: u64,
-        alternate_LBA: u64,
-        first_usable_LBA: u64,
-        last_usable_LBA: u64,
+        LBA: u64 align(4),
+        alternate_LBA: u64 align(4),
+        first_usable_LBA: u64 align(4),
+        last_usable_LBA: u64 align(4),
 
-        disk_GUID: [2]u64,
+        disk_GUID_0: [2]u64 align(4),
 
-        partition_entry_LBA: u64,
+        partition_entry_LBA: u64 align(4),
         partition_entry_count: u32,
         partition_entry_size: u32,
         partition_entry_array_CRC32: u32,
@@ -40,7 +40,7 @@ const GPT = struct {
         }
     };
 
-    const Entry = packed struct {
+    const Entry = extern struct {
         partition_type_guid0: u64,
         partition_type_guid1: u64,
         unique_partition_guid0: u64,
