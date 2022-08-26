@@ -464,15 +464,7 @@ const Kernel = struct {
             const max_file_length = Build.maxInt(usize);
 
             for (kernel.options.run.disks) |disk, disk_i| {
-                const disk_memory = Build.mmap(
-                    null,
-                    1024 * 1024 * 1024,
-                    Build.PROT.READ | Build.PROT.WRITE,
-                    Build.MAP.PRIVATE | Build.MAP.ANONYMOUS,
-                    -1,
-                    0,
-                ) catch unreachable;
-                defer Build.munmap(disk_memory);
+                const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024);
                 var build_disk_buffer = Build.ArrayListAlignedUnmanaged(u8, 0x1000){
                     .items = disk_memory,
                     .capacity = disk_memory.len,
