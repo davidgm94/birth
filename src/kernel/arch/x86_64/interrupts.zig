@@ -56,7 +56,7 @@ pub inline fn are_enabled() bool {
     }
 }
 
-pub const Handler = fn () callconv(.Naked) void;
+pub const Handler = *const fn () callconv(.Naked) void;
 
 pub const handlers = [IDT.entry_count]Handler{
     get_handler(0),

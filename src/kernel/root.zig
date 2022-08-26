@@ -5,7 +5,7 @@ const TLS = @import("arch/tls.zig");
 const default_logger = @import("log.zig");
 
 comptime {
-    std.reference_all_declarations(EntryPoint);
+    std.reference_all_declarations(EntryPoint.entry_point);
 }
 
 /// Define root.log_level to override the default

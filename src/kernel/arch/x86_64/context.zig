@@ -43,7 +43,7 @@ pub fn new(thread: *Thread, entry_point: u64) *Context {
     const user_stack = get_user_stack(thread);
     const arch_context = from_kernel_stack(kernel_stack);
     thread.kernel_stack = VirtualAddress.new(kernel_stack);
-    thread.kernel_stack.access(*u64).* = @ptrToInt(thread_terminate_stack);
+    thread.kernel_stack.access(*u64).* = @ptrToInt(&thread_terminate_stack);
     // TODO: FPU
     switch (thread.privilege_level) {
         .kernel => {

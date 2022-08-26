@@ -8,7 +8,17 @@ pub const RawResult = extern struct {
     b: u64,
 };
 
-pub const Input = extern struct {
+pub const Options = packed struct(u48) {
+    execution_mode: ExecutionMode,
+    type: Type,
+    unused: u46 = 0,
+
+    comptime {
+        std.assert(@bitSizeOf(Options) == @bitSizeOf(u48));
+    }
+};
+
+pub const Input = packed struct(u64) {
     const IDIntType = u16;
     id: IDIntType,
     options: Options,
@@ -16,12 +26,6 @@ pub const Input = extern struct {
     comptime {
         std.assert(@sizeOf(Input) == @sizeOf(u64));
     }
-};
-
-pub const Options = packed struct {
-    execution_mode: ExecutionMode,
-    type: Type,
-    unused: u46 = 0,
 };
 
 pub const Type = enum(u1) {

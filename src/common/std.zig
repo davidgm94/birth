@@ -138,11 +138,7 @@ pub inline fn zeroes(comptime T: type) T {
 }
 
 pub fn assert(condition: bool) void {
-    if (!condition) {
-        if (is_comptime()) unreachable else {
-            @panic("Assert failed");
-        }
-    }
+    if (!condition) unreachable;
 }
 
 pub const MustBeExact = enum {
