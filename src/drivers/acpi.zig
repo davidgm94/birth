@@ -228,32 +228,48 @@ const MADT = extern struct {
         ACPI_processor_UID: u8,
         APIC_ID: u8,
         flags: u32,
+
+        comptime {
+            std.assert(@sizeOf(@This()) == @sizeOf(u64));
+        }
     };
 
-    const IO_APIC = struct {
+    const IO_APIC = extern struct {
         type: Type,
         length: u8,
         IO_APIC_ID: u8,
         reserved: u8,
         IO_APIC_address: u32,
         global_system_interrupt_base: u32,
+
+        comptime {
+            std.assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u32));
+        }
     };
 
-    const InterruptSourceOverride = packed struct {
+    const InterruptSourceOverride = extern struct {
         type: Type,
         length: u8,
         bus: u8,
         source: u8,
-        global_system_interrupt: u32,
-        flags: u16,
+        global_system_interrupt: u32 align(2),
+        flags: u16 align(2),
+
+        comptime {
+            std.assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u16));
+        }
     };
 
-    const LAPIC_NMI = packed struct {
+    const LAPIC_NMI = extern struct {
         type: Type,
         length: u8,
         ACPI_processor_UID: u8,
-        flags: u16,
+        flags: u16 align(1),
         LAPIC_lint: u8,
+
+        comptime {
+            std.assert(@sizeOf(@This()) == @sizeOf(u32) + @sizeOf(u16));
+        }
     };
 };
 
