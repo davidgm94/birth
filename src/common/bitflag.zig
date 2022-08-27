@@ -4,7 +4,7 @@ pub fn Bitflag(comptime is_volatile: bool, comptime BackingType: type, comptime 
     return struct {
         pub const Enum = EnumT;
         pub const Int = BackingType;
-        const EnumBitSize = @popCount(u64, @bitSizeOf(BackingType) - 1);
+        const EnumBitSize = @popCount(@as(u64, @bitSizeOf(BackingType) - 1));
         comptime {
             std.assert(EnumBitSize == @bitSizeOf(EnumT));
         }

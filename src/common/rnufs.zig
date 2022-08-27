@@ -59,7 +59,7 @@ pub fn write_new_file(fs_driver: *FilesystemInterface, allocator: Allocator, fil
             //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
             //}
             log.debug("Search buffer address: 0x{x}", .{search_buffer.address});
-            log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)});
+            //log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)}); TODO: this crashes stage2 https://github.com/ziglang/zig/issues/12488
             var node = @intToPtr(*RNUFS.Node, search_buffer.address);
             log.debug("Node type: {}", .{node.type});
             if (node.type == .empty) break;

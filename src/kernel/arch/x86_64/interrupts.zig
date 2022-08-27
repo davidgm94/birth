@@ -56,7 +56,7 @@ pub inline fn are_enabled() bool {
     }
 }
 
-pub const Handler = fn () callconv(.Naked) void;
+pub const Handler = *const fn () callconv(.Naked) void;
 
 pub const handlers = [IDT.entry_count]Handler{
     get_handler(0),
@@ -495,7 +495,7 @@ pub const interrupt_vector_msi_count = 0x40;
 pub var msi_handlers: [interrupt_vector_msi_count]HandlerInfo = undefined;
 
 pub const HandlerInfo = struct {
-    const Callback = fn (u64, u64) bool;
+    const Callback = *const fn (u64, u64) bool;
     callback: Callback,
     context: u64,
 

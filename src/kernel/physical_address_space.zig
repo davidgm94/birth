@@ -131,7 +131,7 @@ pub const MapEntry = struct {
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
         const remainder_bitsize_max: u64 = bitsize - 1;
-        const popcount = @popCount(@TypeOf(remainder_bitsize_max), remainder_bitsize_max);
+        const popcount = @popCount(remainder_bitsize_max);
         const remainder = @intCast(std.IntType(.unsigned, popcount), page_count % bitsize);
 
         const bitset = entry.get_bitset_extended();

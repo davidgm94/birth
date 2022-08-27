@@ -113,7 +113,7 @@ fn free(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u
 }
 
 const vtable: std.Allocator.VTable = .{
-    .alloc = @ptrCast(fn alloc(context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) std.Allocator.Error![]u8, alloc),
-    .resize = @ptrCast(fn resize(context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, resize),
-    .free = @ptrCast(fn free(context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, free),
+    .alloc = @ptrCast(*const fn alloc(context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) std.Allocator.Error![]u8, &alloc),
+    .resize = @ptrCast(*const fn resize(context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize, &resize),
+    .free = @ptrCast(*const fn free(context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void, &free),
 };

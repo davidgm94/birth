@@ -138,11 +138,7 @@ pub inline fn zeroes(comptime T: type) T {
 }
 
 pub fn assert(condition: bool) void {
-    if (!condition) {
-        if (is_comptime()) unreachable else {
-            @panic("Assert failed");
-        }
-    }
+    if (!condition) unreachable;
 }
 
 pub const MustBeExact = enum {
@@ -150,19 +146,19 @@ pub const MustBeExact = enum {
     can_be_not_exact,
 };
 
-pub inline fn bytes_to_pages_extended(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
+pub fn bytes_to_pages_extended(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
 }
 
-pub inline fn bytes_to_sector(bytes: u64, sector_size: u64, comptime must_be_exact: MustBeExact) u64 {
+pub fn bytes_to_sector(bytes: u64, sector_size: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, sector_size, must_be_exact);
 }
 
-pub inline fn bytes_to_pages(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
+pub fn bytes_to_pages(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
     return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
 }
 
-pub inline fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: MustBeExact) u64 {
+pub fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: MustBeExact) u64 {
     if (divisor == 0) unreachable;
     const quotient = dividend / divisor;
     const remainder = dividend % divisor;

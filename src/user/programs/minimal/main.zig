@@ -7,7 +7,7 @@ pub const logger = std.log.scoped(.main);
 const Syscall = @import("../../syscall.zig");
 pub var syscall_manager: *Syscall.Manager = undefined;
 
-export fn _start() callconv(.C) void {
+export fn user_entry_point() callconv(.C) void {
     //syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
     //logger.debug("Hello world from userspace", .{});
     //const file = syscall_manager.syscall(.read_file, .blocking, .{ .name = "zap-light16.psf" });

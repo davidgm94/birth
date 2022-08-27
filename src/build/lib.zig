@@ -36,11 +36,19 @@ pub const log = std.log;
 
 pub const fork = std.os.fork;
 pub const ChildProcess = std.ChildProcess;
-pub const mmap = std.os.mmap;
-pub const PROT = std.os.PROT;
-pub const MAP = std.os.MAP;
-pub const munmap = std.os.munmap;
 pub const waitpid = std.os.waitpid;
+
+pub fn allocate_zero_memory(bytes: u64) []align(0x1000) u8 {
+    switch (os) {
+        .windows => unreachable,
+        else => {
+            const mmap = std.os.mmap;
+            const PROT = std.os.PROT;
+            const MAP = std.os.MAP;
+            return mmap(null, bytes, PROT.READ | PROT.WRITE, MAP.PRIVATE | MAP.ANONYMOUS, -1, 0) catch unreachable;
+        },
+    }
+}
 
 pub const cwd = std.fs.cwd;
 pub const Dir = std.fs.Dir;

@@ -104,7 +104,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
             pub fn allocate_indices(bucket: *Bucket, count: u64) u64 {
                 if (bucket.count + count <= bucket_size) {
-                    const leading_zeroes = @clz(IntType, bucket.bitset);
+                    const leading_zeroes = @clz(bucket.bitset);
                     if (leading_zeroes >= count) {
                         return Bucket.size - leading_zeroes;
                     } else {

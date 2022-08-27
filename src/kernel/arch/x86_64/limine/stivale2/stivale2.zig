@@ -396,7 +396,7 @@ pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct:
             .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
         };
 
-        const entry_point = @ptrToInt(smp_entry);
+        const entry_point = @ptrToInt(&smp_entry);
         scheduler.initialize_thread(thread, thread_i, virtual_address_space, .kernel, .idle, entry_point, thread_stack);
         thread.cpu = cpu;
         cpu.idle_thread = thread;

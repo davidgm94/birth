@@ -241,12 +241,14 @@ pub const Drive = struct {
     const ata_dev_busy = 0x80;
     const ata_dev_drq = 0x08;
 
-    const FISRegisterHardwareToDevice = packed struct {
+    const FISRegisterHardwareToDeviceFirstBytes = packed struct {
         fis_type: FISType,
         port_multiplier: u4,
         reserved: u3,
         command_control: bool,
-
+    };
+    const FISRegisterHardwareToDevice = extern struct {
+        f: FISRegisterHardwareToDeviceFirstBytes,
         command: AtaCommand,
         feature_low: u8,
 
@@ -325,8 +327,8 @@ pub const Drive = struct {
         drive.hba_port.interrupt_status = std.max_int(u32);
 
         const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).access_higher_half(*volatile HBACommandHeader);
-        command_header.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
-        command_header.operation = disk_work.operation;
+        command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
+        command_header.f.operation = disk_work.operation;
         // TODO: why 1
         command_header.prdt_length = 1;
 
@@ -347,8 +349,8 @@ pub const Drive = struct {
         entry.interrupt_on_completion = true;
 
         const command_fis = @ptrCast(*FISRegisterHardwareToDevice, &command_table.command_fis);
-        command_fis.fis_type = .reg_h2d;
-        command_fis.command_control = true;
+        command_fis.f.fis_type = .reg_h2d;
+        command_fis.f.command_control = true;
         command_fis.command = .read_dma_ex;
 
         command_fis.lba0 = @truncate(u8, sector_low);
@@ -411,18 +413,20 @@ pub const Drive = struct {
     }
 };
 
-const HBACommandHeader = packed struct {
+const HBACommandHeaderFirstBytes = packed struct {
     command_fis_length: u5,
     atapi: bool,
     operation: Disk.Operation,
     prefetchable: bool,
-
     reset: bool,
     bist: bool,
     clear_busy: bool,
     reserved: bool,
     port_multiplier: u4,
+};
 
+const HBACommandHeader = extern struct {
+    f: HBACommandHeaderFirstBytes,
     prdt_length: u16,
     prdb_count: u32,
     command_table_base_address_low: u32,

@@ -12,7 +12,7 @@ pub fn enable() void {
     efer.or_flag(.SCE);
     registers.IA32_EFER.write(efer);
 
-    registers.IA32_LSTAR.write(@ptrToInt(kernel_syscall_entry_point));
+    registers.IA32_LSTAR.write(@ptrToInt(&kernel_syscall_entry_point));
     // TODO: figure out what this does
     registers.IA32_FMASK.write(@truncate(u22, ~@as(u64, 1 << 1)));
     // Selectors (kernel64 and user32. Syscall MSRs pick from there the correct register
