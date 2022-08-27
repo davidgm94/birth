@@ -65,30 +65,13 @@ const Kernel = struct {
     }
 
     fn create_executable(kernel: *Kernel) void {
-        kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/root.zig");
         var target = get_target_base(kernel.options.arch);
 
         switch (kernel.options.arch) {
-            .riscv64 => {
-                target.cpu_features_sub.addFeature(@enumToInt(Build.Target.riscv.Feature.d));
-                kernel.executable.code_model = .medium;
-
-                const assembly_files = [_][]const u8{
-                    "start.S",
-                    "interrupt.S",
-                };
-
-                const arch_source_dir = kernel.builder.fmt("src/kernel/arch/{s}/", .{@tagName(kernel.options.arch)});
-
-                for (assembly_files) |asm_file| {
-                    const asm_file_path = Build.concatenate(kernel.builder.allocator, u8, &.{ arch_source_dir, asm_file }) catch unreachable;
-                    kernel.executable.addAssemblyFile(asm_file_path);
-                }
-
-                const linker_path = Build.concatenate(kernel.builder.allocator, u8, &.{ arch_source_dir, "linker.ld" }) catch unreachable;
-                kernel.executable.setLinkerScriptPath(Build.FileSource.relative(linker_path));
-            },
             .x86_64 => {
+                const limine_entry_point = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".zig" }) catch unreachable;
+                const linker_script_path = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
+                kernel.executable = kernel.builder.addExecutable(kernel_name, limine_entry_point);
                 kernel.executable.code_model = .kernel;
                 //kernel.executable.pie = true;
                 kernel.executable.force_pic = true;
@@ -97,7 +80,7 @@ const Kernel = struct {
                 kernel.executable.code_model = .kernel;
                 kernel.executable.red_zone = false;
                 kernel.executable.omit_frame_pointer = false;
-                const linker_script_path = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
+                kernel.executable.entry_symbol_name = "kernel_entry_point";
                 kernel.executable.setLinkerScriptPath(Build.FileSource.relative(linker_script_path));
             },
             else => unreachable,
@@ -155,7 +138,7 @@ const Kernel = struct {
             program.setBuildMode(kernel.builder.standardReleaseOptions());
             //program.setBuildMode(.ReleaseSafe);
             program.setLinkerScriptPath(Build.FileSource.relative(linker_script_path));
-            program.entry_symbol_name = "entry_point";
+            program.entry_symbol_name = "user_entry_point";
 
             kernel.builder.default_step.dependOn(&program.step);
 
@@ -377,6 +360,7 @@ const Kernel = struct {
         gdb_script_buffer.appendSlice(
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
+            \\b entry_point
             \\b start
             \\c
         ) catch unreachable;

@@ -1,5 +1,3 @@
-ENTRY(entry_point)
-
 PHDRS {
   none   PT_NULL FLAGS(0);
   text   PT_LOAD FLAGS((1 << 2) | (1 << 0) /* Readable | Executable */);
@@ -12,7 +10,7 @@ SECTIONS {
   kernel_start = .;
 
   .stivale2hdr . : {
-    QUAD(entry_point) /* Entry point */
+    QUAD(kernel_entry_point) /* Entry point */
     QUAD(__stack_high) /* Stack */
     QUAD(1 << 2 | 1 << 3) /* Flags */
     QUAD(__stivale2_tags) /* Tags */
