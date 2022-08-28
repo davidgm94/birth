@@ -57,14 +57,9 @@ pub fn kernel_syscall_entry_point() callconv(.Naked) void {
         \\swapgs
         // Go back to user mode
         \\sysretq
-        // Crash if syscall array bounds check failed
-        // TODO: we should crash if the index of a syscall is wrong
-        \\0:
-        \\cli
-        \\hlt
         :
         : [offset] "i" (@intCast(u8, @offsetOf(Thread, "kernel_stack"))),
-          [handler] "i" (@ptrToInt(&Syscall.handler)),
+          [handler] "i" (&Syscall.handler),
     );
 
     @panic("reached unreachable: syscall handler");
