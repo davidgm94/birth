@@ -50,7 +50,7 @@ pub fn main() callconv(.C) noreturn {
         cpu.ready = true;
     }
 
-    device_manager.initialize_graphics();
+    device_manager.initialize_graphics(&virtual_address_space);
 
     while (true) {}
     //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");

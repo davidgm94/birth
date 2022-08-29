@@ -394,10 +394,12 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     switch (context.interrupt_number) {
         0x0...0x19 => {
             if (context.interrupt_number == @enumToInt(Exception.non_maskable_interrupt)) {
-                asm volatile (
-                    \\cli
-                    \\hlt
-                );
+                while (true) {
+                    asm volatile ("cli");
+                    //log.err("Another core panicked", .{});
+                    asm volatile ("pause" ::: "memory");
+                    asm volatile ("hlt");
+                }
             }
 
             log.debug("Exception context: {}", .{context});

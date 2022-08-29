@@ -110,6 +110,18 @@ pub fn test_draw_rect(driver: *Driver) void {
     }, Color{ .red = 0, .green = 0, .blue = 0, .alpha = 0 });
 }
 
+pub const FontFileFormat = enum {
+    ttf,
+    otf,
+};
+
+pub fn load_font(driver: *Driver, file: []const u8, file_format: FontFileFormat) void {
+    _ = driver;
+    _ = file;
+    _ = file_format;
+    unreachable;
+}
+
 //pub const Framebuffer = struct {
 //buffer: [*]u32,
 //width: u32,

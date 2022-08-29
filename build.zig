@@ -23,7 +23,7 @@ pub fn build(b: *Build.Builder) void {
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
             .run = .{
                 .disks = &.{
-                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf" } },
+                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf", "FiraSans-Regular.otf", } },
                 },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -91,6 +91,8 @@ const Kernel = struct {
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
         kernel.executable.emit_llvm_ir = .{ .emit_to = "zig-cache/kernel_llvm.ir" };
+
+        kernel.executable.addCSourceFile("./src/dependencies/stb_truetype/stb_truetype.c", &.{});
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
