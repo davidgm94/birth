@@ -22,6 +22,9 @@ pub const min = std.math.min;
 
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;
+pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;
+pub const AllocatorResizeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize;
+pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void;
 
 // DATA STRUCTURES
 pub const ArrayList = std.ArrayListUnmanaged;

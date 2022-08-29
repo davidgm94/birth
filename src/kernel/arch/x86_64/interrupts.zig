@@ -56,7 +56,8 @@ pub inline fn are_enabled() bool {
     }
 }
 
-pub const Handler = *const fn () callconv(.Naked) void;
+pub const HandlerPrototype = fn () align(0x10) callconv(.Naked) void;
+pub const Handler = *const HandlerPrototype;
 
 pub const handlers = [IDT.entry_count]Handler{
     get_handler(0),
@@ -467,7 +468,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     }
 }
 
-pub fn get_handler(comptime interrupt_number: u64) fn handler() align(0x10) callconv(.Naked) void {
+pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
     const has_error_code = switch (interrupt_number) {
         8, 10, 11, 12, 13, 14, 17 => true,
         else => false,
