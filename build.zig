@@ -418,7 +418,11 @@ const Kernel = struct {
                     try Build.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
                     try Build.Dir.copyFile(cwd, kernel_path, img_dir, Build.path.basename(kernel_path), .{});
 
-                    var xorriso_process = Build.ChildProcess.init(&.{ "xorriso", "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, kernel.builder.allocator);
+                    const xorriso_executable = switch (std.os) {
+                        .windows => "tools/xorriso-windows/xorriso.exe",
+                        else => "xorriso",
+                    };
+                    var xorriso_process = Build.ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, kernel.builder.allocator);
                     // Ignore stderr and stdout
                     xorriso_process.stdin_behavior = Build.ChildProcess.StdIo.Ignore;
                     xorriso_process.stdout_behavior = Build.ChildProcess.StdIo.Ignore;
@@ -448,7 +452,7 @@ const Kernel = struct {
             const max_file_length = Build.maxInt(usize);
 
             for (kernel.options.run.disks) |disk, disk_i| {
-                const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024);
+                const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024) catch unreachable;
                 var build_disk_buffer = Build.ArrayListAlignedUnmanaged(u8, 0x1000){
                     .items = disk_memory,
                     .capacity = disk_memory.len,
