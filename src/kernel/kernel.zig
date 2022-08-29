@@ -43,3 +43,18 @@ pub var higher_half_direct_map = VirtualAddress.invalid();
 
 pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;
+
+pub fn main() callconv(.C) noreturn {
+    device_manager.init(&virtual_address_space) catch @panic("Failed to initialize drivers");
+    for (scheduler.cpus) |*cpu| {
+        cpu.ready = true;
+    }
+
+    device_manager.initialize_graphics();
+
+    while (true) {}
+    //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
+
+    //success_and_end();
+
+}

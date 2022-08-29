@@ -41,37 +41,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
 
     _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
-        .address = @ptrToInt(&main),
+        .address = @ptrToInt(&kernel.main),
     });
 
     cpu.ready = true;
     cpu.make_thread_idle();
-}
-
-pub fn main() callconv(.C) noreturn {
-    kernel.device_manager.init(&kernel.virtual_address_space) catch |driver_init_error| crash.panic("Failed to initialize drivers: {}", .{driver_init_error});
-    for (kernel.scheduler.cpus) |*cpu| {
-        cpu.ready = true;
-    }
-    //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
-
-    //success_and_end();
-
-    var i: u8 = 0;
-    const framebuffer = kernel.device_manager.get_primary(Graphics).get_main_framebuffer();
-    const pixel_count = framebuffer.get_pixel_count();
-    const framebuffer_pixels = framebuffer.virtual_address.access([*]volatile u32)[0..pixel_count];
-    std.log.scoped(.Main).debug("Pixels: {}", .{pixel_count});
-    while (true) : (i += 1) {
-        for (framebuffer_pixels) |*pixel| {
-            pixel.* = (@as(u32, i) << 24) | (@as(u32, i) << 16) | (@as(u32, i) << 8) | i;
-        }
-        //asm volatile (
-        //\\cli
-        //\\pause
-        //\\hlt
-        //::: "memory");
-    }
 }
 
 /// Define root.log_level to override the default
