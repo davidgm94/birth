@@ -76,22 +76,22 @@ pub fn get_primary(device_manager: *DeviceManager, comptime DeviceT: type) *Devi
     };
 }
 
-pub fn initialize_graphics(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) void {
-    //var i: u8 = 0;
-    const graphics = device_manager.get_primary(Graphics);
-    const framebuffer = graphics.get_main_framebuffer();
-    const pixel_count = framebuffer.get_pixel_count();
-    const framebuffer_pixels = framebuffer.virtual_address.access([*]volatile u32)[0..pixel_count];
-    _ = framebuffer_pixels;
-    //std.log.scoped(.Main).debug("Pixels: {}", .{pixel_count});
-    //while (true) : (i +%= 1) {
-    //for (framebuffer_pixels) |*pixel| {
-    //pixel.* = (@as(u32, i) << 24) | (@as(u32, i) << 16) | (@as(u32, i) << 8) | i;
-    //}
-    //}
+//pub fn initialize_graphics(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) void {
+////var i: u8 = 0;
+//const graphics = device_manager.get_primary(Graphics);
+//const framebuffer = graphics.get_main_framebuffer();
+//const pixel_count = framebuffer.get_pixel_count();
+//const framebuffer_pixels = framebuffer.virtual_address.access([*]volatile u32)[0..pixel_count];
+//_ = framebuffer_pixels;
+////std.log.scoped(.Main).debug("Pixels: {}", .{pixel_count});
+////while (true) : (i +%= 1) {
+////for (framebuffer_pixels) |*pixel| {
+////pixel.* = (@as(u32, i) << 24) | (@as(u32, i) << 16) | (@as(u32, i) << 8) | i;
+////}
+////}
 
-    const fs = device_manager.get_primary(Filesystem);
-    const font_file = fs.read_file(virtual_address_space, "FiraSans-Regular.otf") catch unreachable;
-    graphics.load_font(font_file, .otf);
-    unreachable;
-}
+////const fs = device_manager.get_primary(Filesystem);
+////const font_file = fs.read_file(virtual_address_space, "FiraSans-Regular.otf") catch unreachable;
+////graphics.load_font(font_file, .otf);
+////unreachable;
+//}

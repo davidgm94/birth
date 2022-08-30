@@ -55,7 +55,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .arch = arch_virtual_space,
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
-        .lock = Spinlock.new(),
+        .lock = Spinlock{},
         .initialized = false,
     };
 

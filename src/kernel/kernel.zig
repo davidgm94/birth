@@ -50,10 +50,12 @@ pub fn main() callconv(.C) noreturn {
         cpu.ready = true;
     }
 
-    device_manager.initialize_graphics(&virtual_address_space);
+    const main_storage = device_manager.devices.filesystem.get_main_device();
+    _ = scheduler.load_executable(&virtual_address_space, .user, &physical_address_space, main_storage, "minimal.elf") catch unreachable;
+    asm volatile ("int $0x40");
+    //device_manager.initialize_graphics(&virtual_address_space);
 
     while (true) {}
-    //_ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, kernel.main_storage, "minimal.elf");
 
     //success_and_end();
 
