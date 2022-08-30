@@ -13,7 +13,7 @@ fs: FilesystemInterface,
 
 pub fn new(disk: *DiskInterface) Driver {
     return Driver{
-        .fs = FilesystemInterface.new(.{ .filesystem_type = .RNU, .disk = disk, .read_file_callback = null, .write_file_callback = RNUFS.write_new_file }),
+        .fs = FilesystemInterface.new(.{ .filesystem_type = .RNU, .disk = disk, .callback_read_file = null, .callback_write_file = RNUFS.write_file }),
     };
 }
 

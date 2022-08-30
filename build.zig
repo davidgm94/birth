@@ -29,8 +29,8 @@ pub fn build(b: *Build.Builder) void {
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
-                        .smp = 8,
-                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = false, },
+                        .smp = null,
+                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                         .print_command = false,
                     },
@@ -65,7 +65,7 @@ const Kernel = struct {
     }
 
     fn create_executable(kernel: *Kernel) void {
-        var target = get_target_base(kernel.options.arch);
+        var target = get_target(kernel.options.arch, false);
 
         switch (kernel.options.arch) {
             .x86_64 => {
@@ -135,7 +135,7 @@ const Kernel = struct {
             const main_source_file = kernel.builder.fmt("src/user/programs/{s}/main.zig", .{userspace_program_name});
             const program = kernel.builder.addExecutable(out_filename, main_source_file);
             program.setMainPkgPath("src");
-            program.setTarget(get_target_base(kernel.options.arch));
+            program.setTarget(get_target(kernel.options.arch, true));
             program.setOutputDir(cache_dir);
             program.setBuildMode(kernel.builder.standardReleaseOptions());
             //program.setBuildMode(.ReleaseSafe);
@@ -470,7 +470,7 @@ const Kernel = struct {
 
                 for (disk.resource_files) |resource_file| {
                     const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
-                    build_fs.fs.write_new_file.?(&build_fs.fs, kernel.builder.allocator, resource_file, file, null);
+                    build_fs.fs.write_file(kernel.builder.allocator, resource_file, file, null) catch unreachable;
                 }
 
                 for (disk.userspace_programs) |userspace_program_name| {
@@ -478,7 +478,7 @@ const Kernel = struct {
                     const exe_name = userspace_program.out_filename;
                     const exe_path = userspace_program.output_path_source.getPath();
                     const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, Build.maxInt(usize));
-                    build_fs.fs.write_new_file.?(&build_fs.fs, kernel.builder.allocator, exe_name, exe_file_content, null);
+                    build_fs.fs.write_file(kernel.builder.allocator, exe_name, exe_file_content, null) catch unreachable;
                 }
 
                 const disk_size = build_disk.buffer.items.len;
@@ -655,18 +655,30 @@ const Kernel = struct {
 const CPUFeatures = struct {
     enabled: Build.Target.Cpu.Feature.Set,
     disabled: Build.Target.Cpu.Feature.Set,
+
+    fn disable_fpu(features: *CPUFeatures) void {
+        const Feature = Build.Target.x86.Feature;
+        features.disabled.addFeature(@enumToInt(Feature.x87));
+        features.disabled.addFeature(@enumToInt(Feature.mmx));
+        features.disabled.addFeature(@enumToInt(Feature.sse));
+        features.disabled.addFeature(@enumToInt(Feature.sse2));
+        features.disabled.addFeature(@enumToInt(Feature.avx));
+        features.disabled.addFeature(@enumToInt(Feature.avx2));
+
+        features.enabled.addFeature(@enumToInt(Feature.soft_float));
+    }
 };
 
-fn get_riscv_base_features() CPUFeatures {
-    var features = CPUFeatures{
-        .enabled = Build.Target.Cpu.Feature.Set.empty,
-        .disabled = Build.Target.Cpu.Feature.Set.empty,
-    };
-    const Feature = Build.Target.riscv.Feature;
-    features.enabled.addFeature(@enumToInt(Feature.a));
+//fn get_riscv_base_features() CPUFeatures {
+//var features = CPUFeatures{
+//.enabled = Build.Target.Cpu.Feature.Set.empty,
+//.disabled = Build.Target.Cpu.Feature.Set.empty,
+//};
+//const Feature = Build.Target.riscv.Feature;
+//features.enabled.addFeature(@enumToInt(Feature.a));
 
-    return features;
-}
+//return features;
+//}
 
 fn get_x86_base_features() CPUFeatures {
     var features = CPUFeatures{
@@ -674,25 +686,20 @@ fn get_x86_base_features() CPUFeatures {
         .disabled = Build.Target.Cpu.Feature.Set.empty,
     };
 
-    const Feature = Build.Target.x86.Feature;
-    features.disabled.addFeature(@enumToInt(Feature.x87));
-    features.disabled.addFeature(@enumToInt(Feature.mmx));
-    features.disabled.addFeature(@enumToInt(Feature.sse));
-    features.disabled.addFeature(@enumToInt(Feature.sse2));
-    features.disabled.addFeature(@enumToInt(Feature.avx));
-    features.disabled.addFeature(@enumToInt(Feature.avx2));
-
-    features.enabled.addFeature(@enumToInt(Feature.soft_float));
-
     return features;
 }
+//
+//fn CPUFeatures
 
-fn get_target_base(arch: Arch) Build.CrossTarget {
-    const cpu_features = switch (arch) {
-        .riscv64 => get_riscv_base_features(),
-        .x86_64 => get_x86_base_features(),
-        else => unreachable,
+fn get_target(arch: Arch, user: bool) Build.CrossTarget {
+    var cpu_features = CPUFeatures{
+        .enabled = Build.Target.Cpu.Feature.Set.empty,
+        .disabled = Build.Target.Cpu.Feature.Set.empty,
     };
+
+    if (!user) {
+        cpu_features.disable_fpu();
+    }
 
     const target = Build.CrossTarget{
         .cpu_arch = arch,

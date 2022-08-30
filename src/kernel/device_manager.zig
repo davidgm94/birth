@@ -91,7 +91,7 @@ pub fn initialize_graphics(device_manager: *DeviceManager, virtual_address_space
     //}
 
     const fs = device_manager.get_primary(Filesystem);
-    const font_file = fs.interface.read_file.?(&fs.interface, virtual_address_space.heap.allocator, "FiraSans-Regular.otf", virtual_address_space);
+    const font_file = fs.read_file(virtual_address_space, "FiraSans-Regular.otf") catch unreachable;
     graphics.load_font(font_file, .otf);
     unreachable;
 }

@@ -43,8 +43,8 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         .interface = .{
             .type = .RNU,
             .disk = &disk.interface,
-            .read_file = read_file,
-            .write_new_file = common.write_new_file,
+            .callback_read_file = read_file,
+            .callback_write_file = common.write_file,
         },
     };
     if (maybe_driver_tree) |driver_tree| {
@@ -106,7 +106,7 @@ pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
     @panic("not found");
 }
 
-pub fn read_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) []const u8 {
+pub fn read_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) Filesystem.ReadError![]const u8 {
     const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
     log.debug("About to read file {s}...", .{name});
     if (seek_file(fs_driver, allocator, name, extra_context)) |seek_result| {

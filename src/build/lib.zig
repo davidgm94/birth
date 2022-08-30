@@ -38,12 +38,11 @@ pub const fork = std.os.fork;
 pub const ChildProcess = std.ChildProcess;
 pub const waitpid = std.os.waitpid;
 
-pub const VirtualAlloc = std.os.windows.VirtualAlloc;
-
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
         .windows => {
-            return @ptrCast([*]align(0x1000) u8, try VirtualAlloc(null, bytes, std.os.windows.MEM_RESERVE | std.os.windows.MEM_COMMIT, std.os.windows.PAGE_READWRITE))[0..bytes];
+            const windows = std.os.windows;
+            return @ptrCast([*]align(0x1000) u8, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE))[0..bytes];
         },
         else => {
             const mmap = std.os.mmap;

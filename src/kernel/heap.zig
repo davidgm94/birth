@@ -83,9 +83,14 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
 
             @panic("heap out of memory");
         };
+
         const result_address = region.virtual.value + region.allocated;
+        log.debug("Result address: 0x{x}", .{result_address});
+        std.assert(virtual_address_space.translate_address(VirtualAddress.new(std.align_backward(result_address, 0x1000))) != null);
         region.allocated += size;
-        return @intToPtr([*]u8, result_address)[0..size];
+        const result = @intToPtr([*]u8, result_address)[0..size];
+
+        return result;
     } else {
         const allocation_size = std.align_forward(size, arch.page_size);
         const virtual_address = try virtual_address_space.allocate(allocation_size, null, flags);

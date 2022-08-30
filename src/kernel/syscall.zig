@@ -118,7 +118,7 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
                                 };
 
                                 const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
-                                const file = main_storage.interface.read_file.?(&main_storage.interface, current_thread.address_space.heap.allocator, filename, current_thread.address_space);
+                                const file = main_storage.read_file(current_thread.address_space, filename) catch unreachable;
                                 std.assert(file.len > 0);
                                 logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
                                 logger.debug("Len: {}", .{file.len});

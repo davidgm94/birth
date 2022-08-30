@@ -487,6 +487,8 @@ int main(int arg, char **argv)
    #define STBTT_memcpy       memcpy
    #define STBTT_memset       memset
    #endif
+
+   extern void puts(const char* str);
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2729,9 +2731,13 @@ STBTT_DEF void stbtt_GetGlyphBitmapBoxSubpixel(const stbtt_fontinfo *font, int g
       if (iy1) *iy1 = 0;
    } else {
       // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
+       puts("floor1");
       if (ix0) *ix0 = STBTT_ifloor( x0 * scale_x + shift_x);
+       puts("floor2");
       if (iy0) *iy0 = STBTT_ifloor(-y1 * scale_y + shift_y);
+       puts("ceil1");
       if (ix1) *ix1 = STBTT_iceil ( x1 * scale_x + shift_x);
+       puts("ceil2");
       if (iy1) *iy1 = STBTT_iceil (-y0 * scale_y + shift_y);
    }
 }
@@ -3716,6 +3722,7 @@ STBTT_DEF unsigned char *stbtt_GetGlyphBitmapSubpixel(const stbtt_fontinfo *info
    stbtt__bitmap gbm;
    stbtt_vertex *vertices;
    int num_verts = stbtt_GetGlyphShape(info, glyph, &vertices);
+   puts("Got glyph shape");
 
    if (scale_x == 0) scale_x = scale_y;
    if (scale_y == 0) {
@@ -3727,6 +3734,7 @@ STBTT_DEF unsigned char *stbtt_GetGlyphBitmapSubpixel(const stbtt_fontinfo *info
    }
 
    stbtt_GetGlyphBitmapBoxSubpixel(info, glyph, scale_x, scale_y, shift_x, shift_y, &ix0,&iy0,&ix1,&iy1);
+   puts("Got glyph bitmap box subpixel");
 
    // now we get the size
    gbm.w = (ix1 - ix0);
@@ -3739,6 +3747,7 @@ STBTT_DEF unsigned char *stbtt_GetGlyphBitmapSubpixel(const stbtt_fontinfo *info
    if (yoff  ) *yoff   = iy0;
 
    if (gbm.w && gbm.h) {
+       puts("inside if");
       gbm.pixels = (unsigned char *) STBTT_malloc(gbm.w * gbm.h, info->userdata);
       if (gbm.pixels) {
          gbm.stride = gbm.w;

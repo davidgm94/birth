@@ -31,7 +31,7 @@ pub const NodeType = enum(u64) {
 
 pub const presupposed_sector_size = 0x200;
 
-pub fn write_new_file(fs_driver: *FilesystemInterface, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) void {
+pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) FilesystemInterface.WriteError!void {
     log.debug("Writing new file: {s}. Size: {}", .{ filename, file_content.len });
 
     const sector_size = fs_driver.disk.sector_size;

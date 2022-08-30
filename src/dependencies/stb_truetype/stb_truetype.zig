@@ -1,6 +1,7 @@
 const std = @import("../../common/std.zig");
 const libc = @import("../../libc/libc.zig");
 const log = std.log.scoped(.STBTrueType);
+const kernel = @import("../../kernel/kernel.zig");
 
 comptime {
     std.reference_all_declarations(libc);
@@ -38,11 +39,34 @@ const Buffer = extern struct {
     size: c_int,
 };
 
-//STBTT_DEF int stbtt_InitFont(stbtt_fontinfo *info, const unsigned char *data, int offset);
 extern fn stbtt_InitFont(font_info: *FontInfo, data: [*]const u8, offset: c_int) callconv(.C) c_int;
+extern fn stbtt_GetCodepointBitmap(font_info: *const FontInfo, scale_x: f32, scale_y: f32, codepoint: c_int, width: *c_int, height: *c_int, xoff: *c_int, yoff: *c_int) callconv(.C) ?[*]const u8;
+extern fn stbtt_ScaleForPixelHeight(font_info: *const FontInfo, height: f32) callconv(.C) f32;
 
 pub fn initialize(file: []const u8) void {
     var info: FontInfo = undefined;
-    const result = stbtt_InitFont(&info, file.ptr, 0);
-    log.debug("Result: {}", .{result});
+    const init_result = stbtt_InitFont(&info, file.ptr, 0);
+    log.debug("Init Result: {}", .{init_result});
+    var width: c_int = 0;
+    var height: c_int = 0;
+    var x_offset: c_int = 0;
+    var y_offset: c_int = 0;
+
+    const result = stbtt_GetCodepointBitmap(&info, 0, stbtt_ScaleForPixelHeight(&info, 120.0), 'D', &width, &height, &x_offset, &y_offset);
+    log.debug("Result: {?*}", .{result});
+}
+
+export fn malloc(size: usize) ?*anyopaque {
+    const result = kernel.virtual_address_space.heap.allocator.allocBytes(0x1000, size, 0, 0) catch return null;
+    log.debug("allocated {} bytes into 0x{x}", .{ size, @ptrToInt(result.ptr) });
+    return result.ptr;
+}
+
+export fn free(ptr: ?*anyopaque) void {
+    _ = ptr;
+    unreachable;
+}
+
+export fn puts(message: [*:0]const u8) void {
+    std.log.scoped(.stbtt).debug("{s}", .{message});
 }
