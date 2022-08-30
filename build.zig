@@ -362,8 +362,7 @@ const Kernel = struct {
         gdb_script_buffer.appendSlice(
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
-            \\b entry_point
-            \\b start
+            \\b kernel_entry_point
             \\c
         ) catch unreachable;
 

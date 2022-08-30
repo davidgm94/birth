@@ -9,6 +9,7 @@ const DeviceManager = @import("../kernel/device_manager.zig");
 const Font = @import("../common/psf1.zig");
 const List = @import("../common/list.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+const STBTrueType = @import("../dependencies/stb_truetype/stb_truetype.zig");
 
 const Framebuffer = common.Framebuffer;
 const log = std.log.scoped(.graphics);
@@ -119,6 +120,8 @@ pub fn load_font(driver: *Driver, file: []const u8, file_format: FontFileFormat)
     _ = driver;
     _ = file;
     _ = file_format;
+    log.debug("Font file len: {}", .{file.len});
+    STBTrueType.initialize(file);
     unreachable;
 }
 

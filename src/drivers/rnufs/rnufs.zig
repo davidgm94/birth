@@ -66,6 +66,8 @@ pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
     };
 
     while (true) {
+        defer search_buffer.completed_size = 0;
+
         log.debug("FS driver asking read", .{});
         const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, Disk.Work{
             .sector_offset = sector,
