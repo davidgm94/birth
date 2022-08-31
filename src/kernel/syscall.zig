@@ -13,6 +13,9 @@ const logger = std.log.scoped(.Syscall);
 const panic = crash.panic;
 const TODO = crash.TODO;
 
+pub const Input = Syscall.Input;
+pub const RawResult = Syscall.RawResult;
+
 pub const KernelManager = struct {
     kernel: ?*Syscall.Manager,
     user: ?*Syscall.Manager,
@@ -68,7 +71,10 @@ pub const KernelManager = struct {
     }
 };
 
-pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
+const HandlerPrototype = fn (Syscall.Input, u64, u64, u64, u64, u64) callconv(.C) Syscall.RawResult;
+pub const handler: *const HandlerPrototype = kernel_syscall_handler;
+
+pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
     //{
     //const thread = common.arch.get_current_thread();
     //for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
@@ -79,7 +85,7 @@ pub noinline fn handler(input: Syscall.Input, argument1: u64, argument2: u64, ar
 
     const submission = Syscall.Submission{
         .input = input,
-        .arguments = .{ argument1, argument2, argument3, argument4, argument5 },
+        .arguments = [_]u64{ argument1, argument2, argument3, argument4, argument5 },
     };
     const current_thread = TLS.get_current();
 
@@ -202,8 +208,8 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
             const id = @intToEnum(Syscall.ID, id_arg);
             switch (id) {
                 .log => {
-                    const message_ptr = @intToPtr(?[*]const u8, submission.arguments[1]) orelse @panic("null message ptr");
-                    const message_len = submission.arguments[2];
+                    const message_ptr = @intToPtr(?[*]const u8, submission.arguments[0]) orelse @panic("null message ptr");
+                    const message_len = submission.arguments[1];
                     log(message_ptr[0..message_len]);
                 },
                 else => panic("NI: {s}", .{@tagName(id)}),

@@ -28,7 +28,7 @@ pub fn enable() void {
     log.debug("Enabled syscalls", .{});
 }
 
-pub fn kernel_syscall_entry_point() callconv(.Naked) void {
+pub export fn kernel_syscall_entry_point() callconv(.Naked) void {
     // This function only modifies RSP. The other registers are preserved in user space
     // This sets up the kernel stack before actually starting to run kernel code
     asm volatile (

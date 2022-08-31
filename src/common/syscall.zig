@@ -8,20 +8,23 @@ pub const RawResult = extern struct {
     b: u64,
 };
 
-pub const Options = packed struct(u48) {
+pub const Options = packed struct(u8) {
     execution_mode: ExecutionMode,
     type: Type,
-    unused: u46 = 0,
+    unused: u6 = 0,
 
     comptime {
-        std.assert(@bitSizeOf(Options) == @bitSizeOf(u48));
+        std.assert(@bitSizeOf(Options) == @bitSizeOf(u8));
     }
 };
 
-pub const Input = packed struct(u64) {
+pub const Input = extern struct {
     const IDIntType = u16;
     id: IDIntType,
     options: Options,
+    unused0: u8 = 0,
+    unused1: u16 = 0,
+    unused2: u16 = 0,
 
     comptime {
         std.assert(@sizeOf(Input) == @sizeOf(u64));
