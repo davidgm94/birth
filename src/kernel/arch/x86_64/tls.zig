@@ -23,11 +23,14 @@ pub inline fn preset(scheduler: *Scheduler, cpu: *CPU) void {
 pub inline fn set_current(scheduler: *Scheduler, thread: *Thread, cpu: *CPU) void {
     scheduler.current_threads[cpu.id] = thread;
     thread.cpu = cpu;
+    std.log.scoped(.TLS).debug("Setting current thread #{}", .{thread.id});
 }
 
 pub inline fn get_current() *Thread {
-    return asm volatile (
+    const thread = asm volatile (
         \\mov %%gs:[0], %[result]
         : [result] "=r" (-> *Thread),
     );
+
+    return thread;
 }

@@ -36,24 +36,25 @@ current_threads: []*Thread,
 initialized_ap_cpu_count: u64,
 
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
-    const current_cpu = TLS.get_current().cpu.?;
+    const current_thread = TLS.get_current();
+    const current_cpu = current_thread.cpu.?;
     if (current_cpu.spinlock_count > 0) {
         @panic("spins active when yielding");
     }
     interrupts.disable();
     scheduler.lock.acquire();
+    std.log.scoped(.Yield).debug("Current thread: #{}", .{current_thread.id});
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
-    const old_thread = TLS.get_current();
-    std.assert(old_thread.state == .active);
-    old_thread.context = old_context;
-    old_address_space = old_thread.address_space;
-    if (old_thread.state == .active and old_thread.type != .idle) {
-        scheduler.active_threads.append(&old_thread.queue_item, old_thread) catch @panic("Wtf");
+    std.assert(current_thread.state == .active);
+    current_thread.context = old_context;
+    old_address_space = current_thread.address_space;
+    if (current_thread.state == .active and current_thread.type != .idle) {
+        scheduler.active_threads.append(&current_thread.queue_item, current_thread) catch @panic("Wtf");
     }
     const new_thread = scheduler.pick_thread(current_cpu);
     new_thread.time_slices += 1;
-    old_thread.state = .paused;
+    //current_thread.state = .paused;
     new_thread.state = .active;
     if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
@@ -64,7 +65,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
         @panic("interrupts were enabled");
     }
     //old_context.check(@src());
-    TLS.set_current(scheduler, new_thread, old_thread.cpu.?);
+    TLS.set_current(scheduler, new_thread, current_cpu);
     scheduler.lock.release();
 
     // TODO: checks
@@ -74,11 +75,10 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     _ = old_address_space;
     // TODO: set up last know instruction address
 
-    const cpu = new_thread.cpu orelse @panic("CPU pointer is missing in the post-context switch routine");
     // TODO: this is only supposed to be called from an interrupt
-    interrupts.end(cpu);
+    interrupts.end(current_cpu);
     if (interrupts.are_enabled()) @panic("interrupts enabled");
-    if (cpu.spinlock_count > 0) @panic("spinlocks active");
+    if (@as(*volatile u64, &current_cpu.spinlock_count).* > 0) @panic("spinlocks active");
     // TODO: profiling
     context_switch.swap_privilege_registers(new_thread);
     context_switch.set_new_kernel_stack(new_thread);
@@ -115,8 +115,8 @@ pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddr
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space) orelse @panic("wtf2");
     const elf_result = ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     //std.assert(elf_result.entry_point == 0x200110);
+    std.log.scoped(.load).debug("Before spawning", .{});
     const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point);
-    std.log.debug("Thread spawned", .{});
 
     return thread;
 }
@@ -136,6 +136,8 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
         scheduler.active_threads.remove(active_thread_node);
         return active_thread;
     }
+
+    if (true) @panic("wtf");
 
     return cpu.idle_thread;
 }
@@ -158,7 +160,6 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .user => blk: {
             const user_stack_size = default_user_stack_size;
             std.assert(std.is_aligned(user_stack_size, arch.page_size));
-            log.debug("About to allocate 3", .{});
             const user_stack = thread_virtual_address_space.allocate(user_stack_size, null, .{ .write = true, .user = true }) catch @panic("user stack");
             break :blk ThreadStack{
                 .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
@@ -167,7 +168,10 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         },
     };
 
+    log.debug("JBS #{}", .{thread_id});
     scheduler.initialize_thread(thread, thread_id, thread_virtual_address_space, privilege_level, .normal, entry_point, thread_stack);
+
+    log.debug("Spawning thread with id #{}", .{thread_id});
 
     return thread;
 }

@@ -1,6 +1,8 @@
 const std = @import("std.zig");
 const Allocator = std.Allocator;
 
+const log = std.log.scoped(.List);
+
 /// This list works when you are having multiple lists of the same type
 pub fn ListItem(comptime T: type) type {
     return struct {
@@ -77,7 +79,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
         else => unreachable,
     };
 
-    //const IntShifterType = std.IntType(.unsigned, @ctz(u64, @bitSizeOf(IntType)));
+    const IntShifterType = std.IntType(.unsigned, @ctz(@bitSizeOf(IntType)));
 
     //const bitset_size = bucket_size / @bitSizeOf(IntType);
     //std.assert(bucket_size % @bitSizeOf(IntType) == 0);
@@ -103,10 +105,18 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             };
 
             pub fn allocate_indices(bucket: *Bucket, count: u64) u64 {
+                std.assert(count == 1);
                 if (bucket.count + count <= bucket_size) {
                     const leading_zeroes = @clz(bucket.bitset);
                     if (leading_zeroes >= count) {
-                        return Bucket.size - leading_zeroes;
+                        const start_index = Bucket.size - leading_zeroes;
+
+                        var index = start_index;
+                        while (index < start_index) : (index += 1) {
+                            bucket.bitset |= @as(IntType, 1) << @intCast(IntShifterType, start_index);
+                        }
+
+                        return start_index;
                     } else {
                         // TODO: Handle the case in which the allocation can be done between two allocated indices
                         @panic("unable to perform linear allocation of indices");
@@ -144,6 +154,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 while (iterator) |next| {
                     if (next.count < bucket_size) {
                         const index = next.allocate_indices(1);
+                        log.debug("Index: {}", .{index});
                         stable_buffer.element_count += 1;
                         const result = &next.data[index];
                         return result;
@@ -194,21 +205,22 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
                 return stable_buffer.first.?.data[0..count];
             } else {
-                var iterator = stable_buffer.first;
-                var last: ?*Bucket = null;
-                while (iterator) |next| {
-                    if (next.count < bucket_size) {
-                        const index = next.allocate_indices(count);
-                        stable_buffer.element_count += 1;
-                        const result = next.data[index .. index + count];
-                        return result;
-                    }
+                @panic("Wtfffffffffffffff");
+                //var iterator = stable_buffer.first;
+                //var last: ?*Bucket = null;
+                //while (iterator) |next| {
+                //if (next.count < bucket_size) {
+                //const index = next.allocate_indices(count);
+                //stable_buffer.element_count += 1;
+                //const result = next.data[index .. index + count];
+                //return result;
+                //}
 
-                    last = next;
-                    iterator = next.next;
-                }
+                //last = next;
+                //iterator = next.next;
+                //}
 
-                @panic("buffer end");
+                //@panic("buffer end");
             }
         }
     };

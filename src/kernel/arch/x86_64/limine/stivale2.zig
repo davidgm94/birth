@@ -5,6 +5,7 @@ const crash = @import("../../../crash.zig");
 const drivers = @import("../drivers.zig");
 const Graphics = @import("../../../../drivers/graphics.zig");
 const kernel = @import("../../../kernel.zig");
+const main = @import("../../../main.zig").main;
 const PhysicalAddress = @import("../../../physical_address.zig");
 const Stivale2 = @import("stivale2/stivale2.zig");
 const TLS = @import("../../tls.zig");
@@ -41,7 +42,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
 
     _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
-        .address = @ptrToInt(&kernel.main),
+        .address = @ptrToInt(&main),
     });
 
     cpu.ready = true;
@@ -58,12 +59,15 @@ pub const log_level: std.log.Level = switch (std.build_mode) {
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    const current_thread = TLS.get_current();
-    const current_cpu = current_thread.cpu orelse while (true) {};
-    const processor_id = current_cpu.id;
     default_logger.lock.acquire();
     defer default_logger.lock.release();
-    default_logger.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    const current_thread = TLS.get_current();
+    if (current_thread.cpu) |current_cpu| {
+        const processor_id = current_cpu.id;
+        default_logger.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    } else {
+        default_logger.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
+    }
     default_logger.writer.writeAll(prefix) catch unreachable;
     default_logger.writer.print(format, args) catch unreachable;
     default_logger.writer.writeByte('\n') catch unreachable;

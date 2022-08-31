@@ -30,7 +30,7 @@ pub fn build(b: *Build.Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = null,
-                        .log = .{ .file = "logfile", .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
+                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                         .print_command = false,
                     },
@@ -92,7 +92,7 @@ const Kernel = struct {
         kernel.executable.setOutputDir(cache_dir);
         kernel.executable.emit_llvm_ir = .{ .emit_to = "zig-cache/kernel_llvm.ir" };
 
-        kernel.executable.addCSourceFile("./src/dependencies/stb_truetype/stb_truetype.c", &.{});
+        //kernel.executable.addCSourceFile("./src/dependencies/stb_truetype/stb_truetype.c", &.{});
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }

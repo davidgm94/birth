@@ -174,7 +174,9 @@ pub fn init_apic(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
 }
 
 pub fn make_thread_idle(cpu: *CPU) noreturn {
-    cpu.lapic.next_timer(1);
+    _ = cpu;
+    asm volatile ("int $0x40");
+    //cpu.lapic.next_timer(1);
 
     while (true) {
         asm volatile (

@@ -43,20 +43,3 @@ pub var higher_half_direct_map = VirtualAddress.invalid();
 
 pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;
-
-pub fn main() callconv(.C) noreturn {
-    device_manager.init(&virtual_address_space) catch @panic("Failed to initialize drivers");
-    for (scheduler.cpus) |*cpu| {
-        cpu.ready = true;
-    }
-
-    const main_storage = device_manager.devices.filesystem.get_main_device();
-    _ = scheduler.load_executable(&virtual_address_space, .user, &physical_address_space, main_storage, "minimal.elf") catch unreachable;
-    asm volatile ("int $0x40");
-    //device_manager.initialize_graphics(&virtual_address_space);
-
-    while (true) {}
-
-    //success_and_end();
-
-}

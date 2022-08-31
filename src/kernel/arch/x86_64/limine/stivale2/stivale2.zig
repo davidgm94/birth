@@ -312,7 +312,7 @@ pub fn process_framebuffer(stivale2_struct: *Struct) Error!Framebuffer {
     };
 }
 
-fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
+export fn smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
     const virtual_address_space = initialization_context.kernel_virtual_address_space;
     const scheduler = initialization_context.scheduler;

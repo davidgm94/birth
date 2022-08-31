@@ -385,7 +385,9 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
     }
 
     const current_thread = TLS.get_current();
-    const current_cpu = current_thread.cpu orelse @panic("wtf");
+    const current_cpu = current_thread.cpu orelse {
+        panic("Thread #{} has no CPU", .{current_thread.id});
+    };
     if (current_cpu.spinlock_count != 0 and context.cr8 != 0xe) {
         //log.debug("Current cpu spinlock count: {}", .{current_cpu.spinlock_count});
         //log.debug("CR8: 0x{x}", .{context.cr8});
