@@ -318,6 +318,7 @@ pub const Drive = struct {
         const requested_size = disk_work.sector_count * disk.sector_size;
         std.assert(buffer.completed_size == 0);
         std.assert(buffer.total_size >= requested_size);
+        log.debug("Disk work sector offset: {}", .{disk_work.sector_offset});
         const sector_low = @truncate(u32, disk_work.sector_offset);
         const sector_high = @intCast(u16, disk_work.sector_offset >> 32);
         std.assert(disk_work.sector_count <= std.max_int(u16));
