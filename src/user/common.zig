@@ -26,11 +26,13 @@ const Lock = struct {
 
     fn acquire(lock: *Lock) void {
         const expected: @TypeOf(lock.status) = 0;
-        while (@cmpxchgStrong(@TypeOf(lock.status), @ptrCast(*@TypeOf(lock.status), &lock.status), expected, ~expected, .Acquire, .Monotonic) != null) {
+        while (@cmpxchgStrong(@TypeOf(lock.status), @ptrCast(*@TypeOf(lock.status), &lock.status), expected, ~expected, .Acquire, .Monotonic)) |lock_status| {
+            if (lock_status != 0xff) @panic("wtf");
             asm volatile ("pause" ::: "memory");
         }
         @fence(.Acquire);
     }
+
     fn release(lock: *Lock) void {
         const expected = ~@as(@TypeOf(lock.status), 0);
         lock.assert_status(expected);
