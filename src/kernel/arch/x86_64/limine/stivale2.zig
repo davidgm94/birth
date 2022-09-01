@@ -73,7 +73,6 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     default_logger.writer.writeByte('\n') catch unreachable;
 }
 
-//var panicking: usize = 0;
 pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
-    @call(.{ .modifier = .always_inline }, crash.panic, .{ "{s}", .{message} });
+    crash.panic_extended("{s}", .{message}, @returnAddress(), null);
 }

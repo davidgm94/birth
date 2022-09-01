@@ -61,6 +61,7 @@ pub fn new(thread: *Thread, entry_point: u64) *Context {
     arch_context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
     arch_context.rip = entry_point;
     arch_context.rsp = user_stack;
+    arch_context.rbp = 0;
     // TODO: arguments
     arch_context.rdi = 0;
 

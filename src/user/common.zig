@@ -11,7 +11,7 @@ const ExecutionMode = @import("../common/syscall.zig").ExecutionMode;
 const Writer = struct {
     const Error = error{};
     const execution_mode = ExecutionMode.blocking;
-    var lock: Lock = undefined;
+    var lock = Lock{};
 
     // TODO: handle errors
     fn write(_: void, bytes: []const u8) Error!usize {
@@ -22,25 +22,48 @@ const Writer = struct {
 };
 
 const Lock = struct {
-    status: u8,
+    status: u8 = 0,
 
-    fn acquire(lock: *Lock) void {
+    fn acquire(lock: *volatile Lock) void {
+        if (lock.status != 0 and lock.status != 0xff) {
+            var foo: u64 = 0;
+            foo += 1;
+        }
+
         const expected: @TypeOf(lock.status) = 0;
-        while (@cmpxchgStrong(@TypeOf(lock.status), @ptrCast(*@TypeOf(lock.status), &lock.status), expected, ~expected, .Acquire, .Monotonic)) |lock_status| {
-            if (lock_status != 0xff) @panic("wtf");
+        while (@cmpxchgStrong(@TypeOf(lock.status), @ptrCast(*@TypeOf(lock.status), &lock.status), expected, ~expected, .Acquire, .Monotonic) == null) {
             asm volatile ("pause" ::: "memory");
         }
         @fence(.Acquire);
+
+        if (lock.status != 0 and lock.status != 0xff) {
+            var foo: u64 = 0;
+            foo += 1;
+        }
     }
 
-    fn release(lock: *Lock) void {
+    fn release(lock: *volatile Lock) void {
+        if (lock.status != 0 and lock.status != 0xff) {
+            var foo: u64 = 0;
+            while (true) {
+                foo += 1;
+            }
+        }
+
         const expected = ~@as(@TypeOf(lock.status), 0);
         lock.assert_status(expected);
         @fence(.Release);
         lock.status = 0;
+
+        if (lock.status != 0 and lock.status != 0xff) {
+            var foo: u64 = 0;
+            while (true) {
+                foo += 1;
+            }
+        }
     }
 
-    fn assert_status(lock: *Lock, expected: u8) void {
+    fn assert_status(lock: *volatile Lock, expected: u8) void {
         if (lock.status != expected) {
             @panic("User lock wtf");
         }

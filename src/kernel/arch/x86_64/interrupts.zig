@@ -409,7 +409,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
             if (usermode) {
-                @panic("usermode not implemented yet");
+                crash.panic_extended("Panic in user mode", .{}, context.rip, context.rbp);
             } else {
                 //var stack_iterator = std.StackIterator.init(context.rip, context.rbp);
                 //log.err("Fault stack trace:", .{});
