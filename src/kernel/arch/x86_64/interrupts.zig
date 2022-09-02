@@ -426,12 +426,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                         const error_code_int = @truncate(u16, context.error_code);
                         const error_code = @bitCast(PageFaultErrorCode, error_code_int);
                         const page_fault_address = registers.cr2.read();
-                        log.debug("Page fault address: 0x{x}. Error code: {}", .{ page_fault_address, error_code });
-                        if (error_code.reserved_write) {
-                            @panic("reserved write");
-                        }
-
-                        @panic("Unresolvable page fault");
+                        crash.panic_extended("Unresolvable page fault in the kernel. Virtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
                     },
                     else => panic("{s}", .{@tagName(exception)}),
                 }
@@ -630,6 +625,7 @@ const IRQHandler = struct {
 };
 
 pub inline fn end(cpu: *CPU) void {
+    std.assert(kernel.virtual_address_space.translate_address(cpu.lapic.address) != null);
     cpu.lapic.end_of_interrupt();
 }
 

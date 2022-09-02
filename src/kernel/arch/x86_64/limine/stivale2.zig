@@ -9,6 +9,7 @@ const main = @import("../../../main.zig").main;
 const PhysicalAddress = @import("../../../physical_address.zig");
 const Stivale2 = @import("stivale2/stivale2.zig");
 const TLS = @import("../../tls.zig");
+const Timer = @import("../../../timer.zig");
 const VAS = @import("../vas.zig");
 const VirtualAddressSpace = @import("../../../virtual_address_space.zig");
 const x86_64 = @import("../../common.zig");
@@ -21,6 +22,7 @@ comptime {
 }
 
 pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
+    var timer = Timer.new();
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     kernel.virtual_address_space = VirtualAddressSpace.bootstrapping();
     bootstrap_context.preinit_bsp(&kernel.scheduler, &kernel.virtual_address_space);
@@ -45,6 +47,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         .address = @ptrToInt(&main),
     });
 
+    const entry_point_cycles = timer.end_and_get_metric();
+    std.log.scoped(.EntryPoint).info("Entry point took {} cycles", .{entry_point_cycles});
     cpu.ready = true;
     cpu.make_thread_idle();
 }

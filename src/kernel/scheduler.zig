@@ -113,9 +113,7 @@ pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddr
     const executable_file = try drive.read_file(kernel_address_space, executable_filename);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space) orelse @panic("wtf2");
-    const elf_result = ELF.parse(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
-    //std.assert(elf_result.entry_point == 0x200110);
-    std.log.scoped(.load).debug("Before spawning", .{});
+    const elf_result = ELF.load(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point);
 
     return thread;
@@ -143,7 +141,6 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
 }
 
 pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
-    //pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack) void {
     scheduler.lock.acquire();
     defer scheduler.lock.release();
 

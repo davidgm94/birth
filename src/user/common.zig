@@ -8,10 +8,10 @@ const std = @import("../common/std.zig");
 
 const ExecutionMode = @import("../common/syscall.zig").ExecutionMode;
 
-const Writer = struct {
+pub const Writer = struct {
     const Error = error{};
     const execution_mode = ExecutionMode.blocking;
-    var lock = Lock{};
+    pub var lock = Lock{};
 
     // TODO: handle errors
     fn write(_: void, bytes: []const u8) Error!usize {
@@ -79,8 +79,11 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     _ = buffer;
     Writer.lock.acquire();
     defer Writer.lock.release();
+    const lock_address = @ptrToInt(&Writer.lock);
     const resulting_slice = std.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
     writer.writeAll(resulting_slice) catch unreachable;
+    const resulting_slice2 = std.bufPrint(&buffer, "Writer lock: 0x{x}. Address in kernel: 0x{x}\n", .{ lock_address, lock_address + 0xffff_ffff_8000_0000 }) catch unreachable;
+    writer.writeAll(resulting_slice2) catch unreachable;
 }
 
 // TODO: improve user panic implementation

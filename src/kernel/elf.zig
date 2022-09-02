@@ -171,7 +171,7 @@ pub const ElfAddressSpaces = struct {
     physical: *PhysicalAddressSpace,
 };
 
-pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
+pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
     //for (file) |byte, byte_i| {
     //log.debug("[{}] = 0x{x}", .{ byte_i, byte });
     //}
@@ -190,6 +190,8 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
         switch (ph.type) {
             .load => {
                 if (ph.size_in_memory == 0) continue;
+
+                log.debug("Segment virtual address: (0x{x}, 0x{x})", .{ ph.virtual_address, ph.virtual_address + ph.size_in_memory });
 
                 const page_size = arch.page_size;
                 const misalignment = ph.virtual_address & (page_size - 1);
@@ -226,6 +228,7 @@ pub fn parse(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     std.assert(dst_slice.len >= src_slice.len);
 
                     std.copy(u8, dst_slice, src_slice);
+                    log.debug("Last byte: 0x{x}", .{dst_slice[dst_slice.len - 1]});
                     // TODO: unmap
                 } else {
                     TODO();
