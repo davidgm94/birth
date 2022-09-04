@@ -72,16 +72,6 @@ pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
     crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
 }
 
-pub const Error = error{
-    memory_map,
-    higher_half_direct_map,
-    kernel_file,
-    pmrs,
-    rsdp,
-    smp,
-    framebuffer,
-};
-
 const BootloaderInformation = struct {
     kernel_sections_in_memory: []VirtualMemoryRegion,
     kernel_file: FileInMemory,
@@ -166,7 +156,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     stivale_log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
 
     const stivale2_struct_physical_address = PhysicalAddress.new(stivale2_struct_address);
-    const stivale2_struct = stivale2_struct_physical_address.access_kernel(*Struct);
+    var stivale2_struct = stivale2_struct_physical_address.access_kernel(*Struct);
     // This is just a cached version, not the global one (which is set after kernel address space initialization)
     const higher_half_direct_map = blk: {
         const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse @panic("Unable to find higher half direct map struct");
@@ -459,24 +449,28 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             // @ZigBug This crashes the compiler. Can't find minimal repro
             //kernel.physical_address_space.usable.len += old_reclaimable;
             kernel.physical_address_space.usable = now_usable_ptr[0 .. now_usable_length + old_reclaimable];
-        }
-        //kernel.physical_address_space.reclaimable.len = 0;
+            // Empty the reclaimable memory array since we have recovered everything
+            // TODO: don't make reclaimable memory a member of physical address space if the memory is reclaimed here
+            kernel.physical_address_space.reclaimable = &.{};
 
-        //stivale_log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
+            //stivale_log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
+        }
 
         // TODO: Handle virtual memory management later on
 
-        //stivale_log.debug("Paging initialized", .{});
+        stivale_log.debug("Paging initialized", .{});
     }
 
+    // Compute again the struct
+    stivale2_struct = stivale2_struct_physical_address.access_kernel(*Struct);
+
     {
-        std.assert(kernel.virtual_address_space.lock.status == 0);
-        const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
+        const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse @panic("PMRs struct not found");
         const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
-        if (pmrs.len == 0) return Error.pmrs;
+        if (pmrs.len == 0) @panic("PMRs empty");
 
         std.assert(kernel.virtual_address_space.lock.status == 0);
-        kernel.sections_in_memory = kernel.virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
+        kernel.sections_in_memory = kernel.virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch @panic("failed to allocate memory for PMRs");
 
         for (pmrs) |pmr, i| {
             const kernel_section = &kernel.sections_in_memory[i];
@@ -492,12 +486,12 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
     // This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
     {
-        const kernel_file_struct = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
+        const kernel_file_struct = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse @panic("Kernel file struct not found");
         const file_address = PhysicalAddress.new(kernel_file_struct.kernel_file);
         const file_size = kernel_file_struct.kernel_size;
         // TODO: consider alignment?
         stivale_log.debug("allocation about to happen", .{});
-        const dst = kernel.virtual_address_space.heap.allocator.alloc(u8, file_size) catch return Error.kernel_file;
+        const dst = kernel.virtual_address_space.heap.allocator.alloc(u8, file_size) catch @panic("Unable to allocate memory for kernel file");
         stivale_log.debug("allocation did happen", .{});
         const src = file_address.access_kernel([*]u8)[0..file_size];
         stivale_log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
@@ -510,7 +504,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     }
 
     {
-        const stivale_framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
+        const stivale_framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse @panic("Framebuffer struct not found");
         std.assert(stivale_framebuffer.framebuffer_pitch % stivale_framebuffer.framebuffer_width == 0);
         std.assert(stivale_framebuffer.framebuffer_bpp % @bitSizeOf(u8) == 0);
         const bytes_per_pixel = @intCast(u8, stivale_framebuffer.framebuffer_bpp / @bitSizeOf(u8));
@@ -533,7 +527,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             .scheduler = &kernel.scheduler,
         };
 
-        const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
+        const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse @panic("SMP struct not found");
         stivale_log.debug("SMP struct: {}", .{smp_struct});
 
         const cpu_count = smp_struct.cpu_count;
@@ -557,7 +551,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
         kernel.scheduler.cpus[0].id = smps[0].processor_id;
         // Dummy context
-        TLS.preset(kernel.scheduler, &kernel.scheduler.cpus[0]);
+        TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[0]);
         TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
         // Map LAPIC address on just one CPU (since it's global)
         CPU.map_lapic(&kernel.virtual_address_space);
