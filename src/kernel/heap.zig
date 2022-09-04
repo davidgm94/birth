@@ -69,7 +69,10 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
                     // TODO: revisit arguments @MaybeBug
 
                     region.* = Region{
-                        .virtual = try virtual_address_space.allocate(region_size, null, flags),
+                        .virtual = virtual_address_space.allocate(region_size, null, flags) catch |err| {
+                            log.err("Error allocating small memory from VAS: {}", .{err});
+                            return std.Allocator.Error.OutOfMemory;
+                        },
                         .size = region_size,
                         .allocated = 0,
                     };
@@ -93,7 +96,10 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         return result;
     } else {
         const allocation_size = std.align_forward(size, arch.page_size);
-        const virtual_address = try virtual_address_space.allocate(allocation_size, null, flags);
+        const virtual_address = virtual_address_space.allocate(allocation_size, null, flags) catch |err| {
+            log.err("Error allocating big chunk from VAS: {}", .{err});
+            return std.Allocator.Error.OutOfMemory;
+        };
         log.debug("Big allocation happened!", .{});
         return virtual_address.access([*]u8)[0..size];
     }

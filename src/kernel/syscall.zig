@@ -26,16 +26,16 @@ pub const KernelManager = struct {
         const completion_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Completion), arch.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
 
-        const syscall_buffer_physical_address = kernel.physical_address_space.allocate(std.bytes_to_pages(total_buffer_size, arch.page_size, .must_be_exact)) orelse @panic("wtF");
+        const syscall_buffer_physical_address = kernel.physical_address_space.allocate(@divFloor(total_buffer_size, arch.page_size)) orelse @panic("wtF");
         const kernel_virtual_buffer = syscall_buffer_physical_address.to_higher_half_virtual_address();
         // TODO: stop hardcoding
         const user_virtual_buffer = VirtualAddress.new(0x0000_7f00_0000_0000);
         const submission_physical_address = syscall_buffer_physical_address;
         const completion_physical_address = submission_physical_address.offset(submission_queue_buffer_size);
-        virtual_address_space.map(submission_physical_address, kernel_virtual_buffer, .{ .write = false, .user = false });
-        virtual_address_space.map(completion_physical_address, kernel_virtual_buffer.offset(submission_queue_buffer_size), .{ .write = true, .user = false });
-        virtual_address_space.map(submission_physical_address, user_virtual_buffer, .{ .write = true, .user = true });
-        virtual_address_space.map(completion_physical_address, user_virtual_buffer.offset(submission_queue_buffer_size), .{ .write = false, .user = true });
+        virtual_address_space.map(submission_physical_address, kernel_virtual_buffer, 1, .{ .write = false, .user = false }) catch unreachable;
+        virtual_address_space.map(completion_physical_address, kernel_virtual_buffer.offset(submission_queue_buffer_size), 1, .{ .write = true, .user = false }) catch unreachable;
+        virtual_address_space.map(submission_physical_address, user_virtual_buffer, 1, .{ .write = true, .user = true }) catch unreachable;
+        virtual_address_space.map(completion_physical_address, user_virtual_buffer.offset(submission_queue_buffer_size), 1, .{ .write = false, .user = true }) catch unreachable;
 
         // TODO: not use a full page
         // TODO: unmap

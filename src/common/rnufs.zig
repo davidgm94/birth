@@ -36,7 +36,7 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
 
     const sector_size = fs_driver.disk.sector_size;
     std.assert(presupposed_sector_size == sector_size);
-    var sector: u64 = std.bytes_to_sector(@sizeOf(Superblock), sector_size, .must_be_exact);
+    var sector: u64 = @divExact(@sizeOf(Superblock), sector_size);
     {
         log.debug("Seeking file {s}", .{filename});
         const sectors_to_read_at_time = 1;
@@ -67,13 +67,13 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
             const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
             if (node_name.len == 0) break;
 
-            const sectors_to_add = 1 + std.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
+            const sectors_to_add = 1 + (std.div_ceil(u64, node.size, sector_size) catch unreachable);
             log.debug("Found file with name: {s} and size: {}. Need to skip {} sectors", .{ node_name, node.size, sectors_to_add });
             sector += sectors_to_add;
         }
     }
 
-    const sector_count = std.bytes_to_sector(file_content.len, fs_driver.disk.sector_size, .can_be_not_exact) + 1;
+    const sector_count = 1 + (std.div_ceil(u64, file_content.len, fs_driver.disk.sector_size) catch unreachable);
     log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
     var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
         log.err("Unable to allocate write buffer", .{});

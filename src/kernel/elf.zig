@@ -212,15 +212,19 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     std.assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
                     std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
 
-                    const page_count = std.bytes_to_pages(segment_size, page_size, .must_be_exact);
+                    const page_count = @divExact(segment_size, page_size);
                     const physical = address_spaces.physical.allocate(page_count) orelse @panic("physical");
-                    const physical_region = PhysicalMemoryRegion.new(physical, segment_size);
+                    const physical_region = PhysicalMemoryRegion{
+                        .address = physical,
+                        .size = segment_size,
+                    };
                     const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
                     // Giving executable permissions here to perform the copy
-                    address_spaces.kernel.map_physical_region(physical_region, kernel_segment_virtual_address, .{ .write = true });
+                    std.assert(std.is_aligned(physical_region.size, arch.page_size));
+                    address_spaces.kernel.map(physical_region.address, kernel_segment_virtual_address, physical_region.size / arch.page_size, .{ .write = true }) catch unreachable;
                     // TODO: load segments and then take the right settings from the sections
                     // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
-                    address_spaces.user.map_physical_region(physical_region, base_virtual_address, .{ .execute = ph.flags.executable, .write = !ph.flags.executable, .user = true });
+                    address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size / arch.page_size, .{ .execute = ph.flags.executable, .write = !ph.flags.executable, .user = true }) catch unreachable;
                     std.assert(ph.size_in_file <= ph.size_in_memory);
                     std.assert(misalignment == 0);
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];

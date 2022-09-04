@@ -558,7 +558,7 @@ pub const IOAPIC = struct {
     id: u8,
 
     pub inline fn read(apic: IOAPIC, register: u32) u32 {
-        apic.address.access_kernel([*]volatile u32)[0] = register;
+        apic.address.to_higher_half_virtual_address().access([*]volatile u32)[0] = register;
         return apic.address.access_kernel([*]volatile u32)[4];
     }
 

@@ -29,10 +29,6 @@ pub export fn main() callconv(.C) noreturn {
     asm volatile ("int $0x40");
     current_thread = TLS.get_current();
     log.debug("Current thread after yielding: #{}", .{current_thread.id});
-    //device_manager.initialize_graphics(&virtual_address_space);
 
     while (true) {}
-
-    //success_and_end();
-
 }

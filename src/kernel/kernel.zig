@@ -29,8 +29,9 @@ pub var virtual_address_space = VirtualAddressSpace{
     .privilege_level = .kernel,
     .heap = .{},
     .lock = .{},
-    .initialized = false,
 };
+pub var memory_initialized = false;
+
 pub var sections_in_memory: []VirtualMemoryRegion = &.{};
 pub var file = FileInMemory{
     .address = VirtualAddress.invalid(),

@@ -7,8 +7,6 @@ const WriteOnlyRNUFS = @import("src/drivers/rnufs/write_only.zig");
 
 const Arch = Build.Arch;
 
-pub const sector_size = 0x200;
-
 const cache_dir = "zig-cache";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
@@ -30,7 +28,7 @@ pub fn build(b: *Build.Builder) void {
                     .qemu = .{
                         .vga = .std,
                         .smp = null,
-                        .log = .{ .file = null, .guest_errors = false, .cpu = false, .assembly = false, .interrupts = false, },
+                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
                         .print_command = false,
                     },
@@ -482,7 +480,7 @@ const Kernel = struct {
                 }
 
                 const disk_size = build_disk.buffer.items.len;
-                const disk_sector_count = std.bytes_to_sector(disk_size, build_disk.disk.sector_size, .must_be_exact);
+                const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
                 Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
                 try Build.cwd().writeFile(kernel.builder.fmt("zig-cache/disk{}.bin", .{disk_i}), build_disk.buffer.items);

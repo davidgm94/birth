@@ -98,7 +98,7 @@ pub fn map_lapic(virtual_address_space: *VirtualAddressSpace) void {
     const apic_base = registers.get_apic_base();
     const lapic_physical_address = PhysicalAddress.new(apic_base);
     const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
-    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, .{ .write = true, .cache_disable = true });
+    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, 1, .{ .write = true, .cache_disable = true }) catch @panic("Unable to map LAPIC address");
 }
 
 pub fn init_timer(cpu: *CPU) void {

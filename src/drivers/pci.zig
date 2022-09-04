@@ -3,6 +3,7 @@ const Controller = @This();
 
 const std = @import("../common/std.zig");
 
+const arch = @import("../kernel/arch/common.zig");
 const Bitflag = @import("../common/bitflag.zig").Bitflag;
 const crash = @import("../kernel/crash.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
@@ -347,143 +348,12 @@ pub const Device = struct {
         return PCI.write_config(T, value, device.bus, device.slot, device.function, offset);
     }
 
-    //pub inline fn read_bar(device: *Device, comptime T: type, index: u64, offset: u64) T {
-    //const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    //comptime {
-    //std.assert(@sizeOf(T) >= @sizeOf(u32));
-    //std.assert(@sizeOf(T) <= @sizeOf(u64));
-    //}
-
-    //const base_address = device.base_addresses[index];
-    //const mmio_base_address = device.base_virtual_addresses[index];
-    //const mmio_address = mmio_base_address.offset(offset);
-    //log.debug("MMIO base address: 0x{x}. MMIO address: 0x{x}. Index: {}. Offset: {}. Type: {}", .{ mmio_base_address.value, mmio_address.value, index, offset, T });
-    //const do_mmio = base_address & 1 == 0;
-    //if (do_mmio) {
-    //// Info: @ZigBug. After a read, the value must be bitcasted and assigned of a new variable of the same type in order to work.
-    //// If you don't do this, the Zig compiler splits the reads, emitting two or more operations and stopping us to get a good PCI interaction
-    //const mmio_ptr = mmio_address.access(*volatile IntType);
-    //const mmio_read_value = mmio_ptr.*;
-    //const mmio_result: T = @bitCast(T, mmio_read_value);
-    //return mmio_result;
-    //} else {
-    //if (T != u64) {
-    //const port = @intCast(u16, (base_address & ~@as(u32, 3)) + offset);
-    //return io.read(T, port);
-    //} else {
-    //return device.read_bar(u32, index, offset) | (@intCast(u64, device.read_bar(u64, index, offset + @sizeOf(u32))) << 32);
-    //}
-    //}
-    //}
-
-    //pub fn write_bar(device: *Device, comptime T: type, index: u64, offset: u64, value: T) void {
-    //const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    //comptime {
-    //std.assert(@sizeOf(T) >= @sizeOf(u32));
-    //std.assert(@sizeOf(T) <= @sizeOf(u64));
-    //}
-    //const base_address = device.base_addresses[index];
-    //const do_mmio = base_address & 1 == 0;
-    //const mmio_address = device.base_virtual_addresses[index].offset(offset);
-    //if (do_mmio) {
-    //// Info: @ZigBug. The value must be bitcasted and assigned of a new variable of the same type and the write it to the MMIO register
-    //// in order to work. If you don't do this, the Zig compiler splits the writes, emitting two or more operations and stopping us to get a good PCI interaction
-    //const int_value: IntType = @bitCast(IntType, value);
-    //mmio_address.access(*align(@alignOf(IntType)) volatile IntType).* = int_value;
-    //} else {
-    //if (T != u64) {
-    //const port = @intCast(u16, (base_address & ~@as(@TypeOf(base_address), 3)) + offset);
-    //io.write(T, port, value);
-    //} else {
-    //device.write_bar(u32, index, offset, @truncate(u32, value));
-    //device.write_bar(u32, index, offset + @sizeOf(u32), @truncate(u32, value >> 32));
-    //}
-    //}
-    //}
-
-    //pub const Features = Bitflag(false, u64, enum(u6) {
-    //bar0 = 0,
-    //bar1 = 1,
-    //bar2 = 2,
-    //bar3 = 3,
-    //bar4 = 4,
-    //bar5 = 5,
-    //interrupts = 8,
-    //busmastering_dma = 9,
-    //memory_space_access = 10,
-    //io_port_access = 11,
-    //});
-
-    //pub fn enable_features(device: *Device, features: Features, virtual_address_space: *VirtualAddressSpace) bool {
-    //log.debug("Enabling features for device {}", .{device});
-    //var config = device.read_config(u32, 4);
-    //if (features.contains(.interrupts)) config &= ~@as(u32, 1 << 10);
-    //if (features.contains(.busmastering_dma)) config |= 1 << 2;
-    //if (features.contains(.memory_space_access)) config |= 1 << 1;
-    //if (features.contains(.io_port_access)) config |= 1 << 0;
-    //log.debug("Writing config: 0x{x}", .{config});
-    //device.write_config(u32, config, 4);
-
-    //if (device.read_config(u32, 4) != config) {
-    //return false;
-    //}
-
-    //for (device.base_addresses) |*base_address_ptr, i| {
-    //if (~features.bits & (@as(u64, 1) << @intCast(u3, i)) != 0) continue;
-    //const base_address = base_address_ptr.*;
-    //if (base_address & 1 != 0) continue; // BAR is an IO port
-    //log.debug("Actually setting up base address #{}", .{i});
-
-    //if (base_address & 0b1000 == 0) {
-    //// TODO: not prefetchable
-    //}
-
-    //const is_size_64 = base_address & 0b100 != 0;
-
-    //var address: u64 = 0;
-    //var size: u64 = 0;
-
-    //if (is_size_64) {
-    //device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i));
-    //device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i + 1));
-    //size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
-    //size |= @intCast(u64, device.read_config(u32, 0x10 + 4 * @intCast(u8, i + 1))) << 32;
-    //device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
-    //device.write_config(u32, device.base_addresses[i + 1], 0x10 + 4 * @intCast(u8, i + 1));
-    //address = base_address;
-    //address |= @intCast(u64, device.base_addresses[i + 1]) << 32;
-    //} else {
-    //device.write_config(u32, std.max_int(u32), 0x10 + 4 * @intCast(u8, i));
-    //size = device.read_config(u32, 0x10 + 4 * @intCast(u8, i));
-    //size |= @as(u64, std.max_int(u32)) << 32;
-    //device.write_config(u32, base_address, 0x10 + 4 * @intCast(u8, i));
-    //address = base_address;
-    //}
-
-    //if (size == 0 or address == 0) return false;
-    //size &= ~@as(u64, 0xf);
-    //size = ~size + 1;
-    //address &= ~@as(u64, 0xf);
-    //log.debug("Address: 0x{x}. Size: {}", .{ address, size });
-
-    //device.base_physical_addresses[i] = PhysicalAddress.new(address);
-    //device.base_virtual_addresses[i] = device.base_physical_addresses[i].to_higher_half_virtual_address();
-    //const physical_region = PhysicalMemoryRegion.new(device.base_physical_addresses[i], size);
-    //virtual_address_space.map_physical_region(physical_region, device.base_virtual_addresses[i], .{ .write = true, .cache_disable = true });
-
-    //log.debug("Virtual 0x{x}. Physical 0x{x}", .{ device.base_virtual_addresses[i].value, device.base_physical_addresses[i].value });
-    //device.base_addresses_size[i] = size;
-    //}
-
-    //return true;
-    //}
-
     const BarEnableError = error{
         bar_is_an_io_port,
         todo_prefetch,
     };
 
-    pub fn enable_bar(device: *Device, virtual_address_space: *VirtualAddressSpace, comptime bar_i: comptime_int) BarEnableError!void {
+    pub fn enable_bar(device: *Device, virtual_address_space: *VirtualAddressSpace, comptime bar_i: comptime_int) !VirtualAddress {
         const bar = device.bars[bar_i];
 
         if (@truncate(u1, bar) != 0) {
@@ -513,8 +383,9 @@ pub const Device = struct {
         device.bar_physical_addresses[bar_i] = physical_address;
         device.bar_sizes[bar_i] = size;
         const virtual_address = physical_address.to_higher_half_virtual_address();
-        const physical_memory_region = PhysicalMemoryRegion.new(physical_address, size);
-        virtual_address_space.map_physical_region(physical_memory_region, virtual_address, .{ .write = true, .cache_disable = true });
+        try virtual_address_space.map(physical_address, virtual_address, @divExact(size, arch.page_size), .{ .write = true, .cache_disable = true });
+
+        return virtual_address;
     }
 
     pub fn read_field(device: *Device, comptime HT: type, comptime field_name: []const u8) TypeFromFieldName(HT, field_name) {

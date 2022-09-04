@@ -1,7 +1,8 @@
 const kernel = @import("root");
-const common = @import("common");
 
-const log = common.log.scoped(.AVL);
+const std = @import("std.zig");
+
+const log = std.log.scoped(.AVL);
 
 pub fn Tree(comptime T: type) type {
     return struct {
@@ -30,7 +31,8 @@ pub fn Tree(comptime T: type) type {
             //log.debug("Validated before insertion of {*} with key 0x{x}", .{ item, key });
 
             if (item.tree != null) {
-                kernel.crash("item with key 0x{x} already in tree {*}", .{ key, item.tree });
+                @panic("wtf");
+                //kernel.("item with key 0x{x} already in tree {*}", .{ key, item.tree });
             }
 
             item.tree = self;
@@ -60,7 +62,7 @@ pub fn Tree(comptime T: type) type {
                 }
             }
 
-            var fake_root = common.zeroes(Item);
+            var fake_root = std.zeroes(Item);
             self.root.?.parent = &fake_root;
             fake_root.tree = self;
             fake_root.children[0] = self.root;
@@ -148,7 +150,7 @@ pub fn Tree(comptime T: type) type {
             self.validate();
             if (item.tree != self) @panic("item not in tree");
 
-            var fake_root = common.zeroes(Item);
+            var fake_root = std.zeroes(Item);
             self.root.?.parent = &fake_root;
             fake_root.tree = self;
             fake_root.children[0] = self.root;
@@ -323,8 +325,14 @@ pub fn Tree(comptime T: type) type {
 
             fn validate(self: *@This(), tree: *Self, parent: ?*@This()) i32 {
                 //log.debug("Validating node with key 0x{x}", .{self.key});
-                if (self.parent != parent) kernel.crash("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
-                if (self.tree != tree) kernel.crash("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
+                if (self.parent != parent) {
+                    @panic("Wtf");
+                    //kernel.crash("Expected parent: {*}, got parent: {*}", .{ parent, self.parent });
+                }
+                if (self.tree != tree) {
+                    @panic("Wtf");
+                    //kernel.crash("Expected tree: {*}, got tree: {*}", .{ tree, self.tree });
+                }
 
                 const left_height = blk: {
                     if (self.children[0]) |left| {

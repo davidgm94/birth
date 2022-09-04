@@ -39,8 +39,7 @@ pub const InitError = error{
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
     const driver = try drivers.add_one(virtual_address_space.heap.allocator);
     driver.pci = pci_device;
-    driver.pci.enable_bar(virtual_address_space, 5) catch @panic("wtf");
-    driver.abar = PhysicalAddress.new(driver.pci.bars[5]).access_kernel(*HBAMemory);
+    driver.abar = (driver.pci.enable_bar(virtual_address_space, 5) catch @panic("wtf")).access(*HBAMemory);
 
     driver.probe_ports();
 
@@ -204,21 +203,21 @@ pub const Drive = struct {
         {
             // TODO: maybe don't allocate as much?
             // TODO: batch allocations
-            const command_list_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }) catch @panic("wtf");
+            const command_list_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("wtf");
             // TODO: what's 1024?
             std.zero(command_list_alloc_result.virtual_address.access([*]u8)[0..1024]);
             const command_list_base = command_list_alloc_result.physical_address.value;
             drive.hba_port.command_list_base_low = @truncate(u32, command_list_base);
             drive.hba_port.command_list_base_high = @truncate(u32, command_list_base >> 32);
 
-            const fis_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }) catch @panic("Wtf");
+            const fis_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
             std.zero(fis_alloc_result.virtual_address.access([*]u8)[0..256]);
             const fis_base = fis_alloc_result.physical_address.value;
             drive.hba_port.fis_base_address_low = @truncate(u32, fis_base);
             drive.hba_port.fis_base_address_high = @truncate(u32, fis_base >> 32);
 
             const command_headers = command_list_alloc_result.virtual_address.access([*]volatile HBACommandHeader)[0..32];
-            const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }) catch @panic("Wtf");
+            const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
             std.zero(command_table_address.virtual_address.access([*]u8)[0..arch.page_size]);
             for (command_headers) |*header, i| {
                 header.prdt_length = 8; // TODO: figure out how to get the value

@@ -117,9 +117,11 @@ pub const MapEntry = struct {
     pub const BitsetBaseType = u64;
 
     pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64) []BitsetBaseType {
-        const page_count = std.bytes_to_pages(size, page_size, .must_be_exact);
-        const bitset_len = std.remainder_division_maybe_exact(page_count, @bitSizeOf(BitsetBaseType), .can_be_not_exact);
-        return physical_address.access_kernel([*]BitsetBaseType)[0..bitset_len];
+        const page_count = @divFloor(size, page_size);
+        const bitset_len = std.div_ceil(u64, page_count, @bitSizeOf(BitsetBaseType)) catch unreachable;
+        // INFO: this assumes the address is linearly mapped to the higher half
+        const virtual_address = physical_address.to_higher_half_virtual_address();
+        return virtual_address.access([*]BitsetBaseType)[0..bitset_len];
     }
 
     pub fn get_bitset_extended(entry: *MapEntry) []BitsetBaseType {
@@ -127,7 +129,7 @@ pub const MapEntry = struct {
     }
 
     pub fn setup_bitset(entry: *MapEntry) void {
-        const page_count = std.bytes_to_pages(entry.allocated_size, page_size, .must_be_exact);
+        const page_count = @divFloor(entry.allocated_size, page_size);
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
         const remainder_bitsize_max: u64 = bitsize - 1;

@@ -35,17 +35,19 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     const rsdp_physical_address = PhysicalAddress.new(x86_64.rsdp_physical_address);
     log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
     const rsdp_physical_page = rsdp_physical_address.aligned_backward(page_size);
-    virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
-    const rsdp1 = rsdp_physical_address.access_kernel(*align(1) RSDP1);
+    virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
+    const rsdp_virtual_address = rsdp_physical_address.to_higher_half_virtual_address();
+    const rsdp1 = rsdp_virtual_address.access(*align(1) RSDP1);
 
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
         const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
+        const rsdt_virtual_address = rsdt_physical_address.to_higher_half_virtual_address();
         const rsdt_physical_page = rsdt_physical_address.aligned_backward(page_size);
-        virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
+        virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
         log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
-        const rsdt = rsdt_physical_address.access_kernel(*align(1) Header);
+        const rsdt = rsdt_virtual_address.access(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
         const rsdt_table_count = (rsdt.length - @sizeOf(Header)) / @sizeOf(u32);
         log.debug("RSDT table count: {}", .{rsdt_table_count});
@@ -53,9 +55,10 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_physical_address = PhysicalAddress.new(table_address);
+            const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
             const table_physical_page = table_physical_address.aligned_backward(page_size);
-            virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), VirtualAddressSpace.Flags.empty());
-            const header = table_physical_address.access_kernel(*align(1) Header);
+            virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
+            const header = table_virtual_address.access(*align(1) Header);
 
             switch (header.signature) {
                 .APIC => {
@@ -98,7 +101,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                                 std.assert(@sizeOf(MADT.IO_APIC) == entry_length);
                                 interrupts.ioapic.gsi = ioapic.global_system_interrupt_base;
                                 interrupts.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
-                                virtual_address_space.map(interrupts.ioapic.address, interrupts.ioapic.address.to_higher_half_virtual_address(), .{ .write = true, .cache_disable = true });
+                                virtual_address_space.map(interrupts.ioapic.address, interrupts.ioapic.address.to_higher_half_virtual_address(), 1, .{ .write = true, .cache_disable = true }) catch unreachable;
                                 interrupts.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {

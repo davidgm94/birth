@@ -19,12 +19,14 @@ pub const IntType = std.meta.Int;
 pub const max_int = std.math.maxInt;
 pub const max = std.math.max;
 pub const min = std.math.min;
+pub const div_ceil = std.math.divCeil;
 
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;
 pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;
 pub const AllocatorResizeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize;
 pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void;
+pub const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
 // DATA STRUCTURES
 pub const ArrayList = std.ArrayListUnmanaged;
@@ -142,33 +144,6 @@ pub inline fn zeroes(comptime T: type) T {
 
 pub fn assert(condition: bool) void {
     if (!condition) unreachable;
-}
-
-pub const MustBeExact = enum {
-    must_be_exact,
-    can_be_not_exact,
-};
-
-pub fn bytes_to_pages_extended(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
-    return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
-}
-
-pub fn bytes_to_sector(bytes: u64, sector_size: u64, comptime must_be_exact: MustBeExact) u64 {
-    return remainder_division_maybe_exact(bytes, sector_size, must_be_exact);
-}
-
-pub fn bytes_to_pages(bytes: u64, page_size: u64, comptime must_be_exact: MustBeExact) u64 {
-    return remainder_division_maybe_exact(bytes, page_size, must_be_exact);
-}
-
-pub fn remainder_division_maybe_exact(dividend: u64, divisor: u64, comptime must_be_exact: MustBeExact) u64 {
-    if (divisor == 0) unreachable;
-    const quotient = dividend / divisor;
-    const remainder = dividend % divisor;
-    const remainder_not_zero = remainder != 0;
-    if (must_be_exact == .must_be_exact and remainder_not_zero) @panic("remainder not exact when asked to be exact}");
-
-    return quotient + @boolToInt(remainder_not_zero);
 }
 
 pub fn cstr_len(cstr: [*:0]const u8) u64 {

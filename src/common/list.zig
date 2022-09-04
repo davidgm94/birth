@@ -136,7 +136,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
         pub fn add_many(stable_buffer: *@This(), allocator: Allocator, count: u64) std.Allocator.Error![]T {
             if (stable_buffer.first == null) {
-                const bucket_count = std.remainder_division_maybe_exact(count, Bucket.size, .can_be_not_exact);
+                const bucket_count = std.div_ceil(u64, count, Bucket.size) catch unreachable;
                 //std.assert(bucket_count == 1);
                 const buckets = try allocator.alloc(Bucket, bucket_count);
 

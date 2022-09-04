@@ -59,7 +59,7 @@ pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
     log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     const sector_size = fs_driver.disk.sector_size;
-    var sector: u64 = std.bytes_to_sector(@sizeOf(common.Superblock), sector_size, .must_be_exact);
+    var sector: u64 = @divExact(@sizeOf(common.Superblock), sector_size);
     var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sectors_to_read_at_time) catch {
         log.err("Unable to allocate search buffer", .{});
         return null;
@@ -98,7 +98,7 @@ pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
 
         log.debug("Names don't match", .{});
 
-        const sectors_to_add = 1 + std.bytes_to_sector(node.size, sector_size, .can_be_not_exact);
+        const sectors_to_add = 1 + (std.div_ceil(u64, node.size, sector_size) catch unreachable);
         log.debug("Sectors to add: {}", .{sectors_to_add});
         sector += sectors_to_add;
     }
@@ -113,7 +113,7 @@ pub fn read_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
-        const sector_count = std.bytes_to_sector(node_size, sector_size, .can_be_not_exact);
+        const sector_count = std.div_ceil(u64, node_size, sector_size) catch unreachable;
         var buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };

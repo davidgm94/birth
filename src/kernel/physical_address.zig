@@ -57,11 +57,6 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
     return PhysicalAddress.new(physical_address.value + asked_offset);
 }
 
-/// This would return the correct address even before initializing the higher half and mapping. This would only fail if it's used with the kernel memory-mapped regions before setting up paging and higher-half
-pub inline fn access_kernel(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    return physical_address.access_higher_half(Ptr);
-}
-
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
     const address = VirtualAddress.new(physical_address.value + higher_half);
