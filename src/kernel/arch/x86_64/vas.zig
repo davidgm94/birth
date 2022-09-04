@@ -33,10 +33,31 @@ pub inline fn new(physical_address_space: *PhysicalAddressSpace) ?VAS {
     return virtual_address_space;
 }
 
+const safe_map = false;
+const time_map = false;
+
+var map_timer_register = Timer.Register{};
+
+pub fn log_map_timer_register() void {
+    log.debug("Registered mappings without allocations: {}", .{map_timer_register.count});
+    log.debug("Mean: {}", .{map_timer_register.get_integer_mean()});
+}
+
 pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VAS.MemoryFlags) void {
-    var timer_accumulator = Timer.Accumulator(.MapFn, 10).new();
-    {
-        defer timer_accumulator.register();
+    var allocation_count: u64 = 0;
+
+    if (time_map) {
+        map_timer_register.register_start();
+    }
+    defer {
+        if (time_map) {
+            if (allocation_count == 0) {
+                map_timer_register.register_end();
+            }
+        }
+    }
+
+    if (safe_map) {
         std.assert((PhysicalAddress{ .value = vas.cr3 }).is_valid());
         std.assert(std.is_aligned(virtual_address.value, common.page_size));
         std.assert(std.is_aligned(physical_address.value, common.page_size));
@@ -46,8 +67,6 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
 
     var pdp: *volatile PDPTable = undefined;
     {
-        defer timer_accumulator.register();
-
         var pml4 = vas.get_pml4().access_kernel(*PML4Table);
         var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
         var pml4_entry_value = pml4_entry.value;
@@ -55,6 +74,8 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
         if (pml4_entry_value.contains(.present)) {
             pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
         } else {
+            defer allocation_count += 1;
+
             const pdp_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDPTable), common.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
             pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
             pdp.* = std.zeroes(PDPTable);
@@ -68,14 +89,14 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
 
     var pd: *volatile PDTable = undefined;
     {
-        defer timer_accumulator.register();
-
         var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
         var pdp_entry_value = pdp_entry.value;
 
         if (pdp_entry_value.contains(.present)) {
             pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
         } else {
+            defer allocation_count += 1;
+
             const pd_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDTable), common.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
             pd = pd_allocation.access_kernel(@TypeOf(pd));
             pd.* = std.zeroes(PDTable);
@@ -89,14 +110,14 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
 
     var pt: *volatile PTable = undefined;
     {
-        defer timer_accumulator.register();
-
         var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
         var pd_entry_value = pd_entry.value;
 
         if (pd_entry_value.contains(.present)) {
             pt = get_address_from_entry_bits(pd_entry_value.bits).access_kernel(@TypeOf(pt));
         } else {
+            defer allocation_count += 1;
+
             const pt_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PTable), common.page_size, .must_be_exact)) orelse @panic("unable to alloc pt");
             pt = pt_allocation.access_kernel(@TypeOf(pt));
             pt.* = std.zeroes(PTable);
@@ -109,8 +130,6 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
     }
 
     pt[indices[@enumToInt(PageIndex.PT)]] = blk: {
-        defer timer_accumulator.register();
-
         var pte = PTE{
             .value = PTE.Flags.from_bits(flags.bits),
         };
@@ -119,8 +138,6 @@ pub fn map(vas: VAS, physical_address: PhysicalAddress, virtual_address: Virtual
 
         break :blk pte;
     };
-
-    timer_accumulator.end_by_logging(true);
 }
 
 pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
@@ -249,20 +266,26 @@ pub const MemoryFlags = Bitflag(true, u64, enum(u6) {
     execute_disable = 63,
 });
 
-const address_mask: u64 = 0x000000fffffff000;
+const address_mask: u64 = 0x0000_00ff_ffff_f000;
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
-    std.assert(x86_64.max_physical_address_bit == 40);
-    std.assert(std.is_aligned(new_address.value, common.page_size));
+    if (safe_map) {
+        std.assert(x86_64.max_physical_address_bit == 40);
+        std.assert(std.is_aligned(new_address.value, common.page_size));
+    }
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
     const result = address_masked | old_entry_value_masked;
     return result;
 }
 
-fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
-    std.assert(common.max_physical_address_bit == 40);
+inline fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
+    if (safe_map) {
+        std.assert(common.max_physical_address_bit == 40);
+    }
     const address = entry_bits & address_mask;
-    std.assert(std.is_aligned(address, common.page_size));
+    if (safe_map) {
+        std.assert(std.is_aligned(address, common.page_size));
+    }
 
     return PhysicalAddress.new(address);
 }

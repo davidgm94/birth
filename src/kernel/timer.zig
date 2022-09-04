@@ -78,3 +78,39 @@ pub fn Accumulator(comptime ID: @TypeOf(.EnumLiteral), comptime array_size: comp
         }
     };
 }
+
+pub const Register = struct {
+    timestamps: [1024 * 1024]u64 = undefined,
+    count: u64 = 0,
+    current_start: u64 = undefined,
+
+    pub inline fn register_start(register: *Register) void {
+        register.current_start = CPU.read_timestamp();
+    }
+
+    pub inline fn register_end(register: *Register) void {
+        defer register.count += 1;
+        register.timestamps[register.count] = CPU.read_timestamp() - register.current_start;
+    }
+
+    pub fn get_integer_mean(register: *Register) IntegerMean {
+        var sum: u64 = 0;
+        for (register.timestamps[0..register.count]) |timestamp| {
+            sum += timestamp;
+        }
+
+        return IntegerMean{
+            .sum = sum,
+            .count = register.count,
+            .result = sum / register.count,
+            .remainder = sum % register.count,
+        };
+    }
+
+    const IntegerMean = struct {
+        sum: u64,
+        count: u64,
+        result: u64,
+        remainder: u64,
+    };
+};
