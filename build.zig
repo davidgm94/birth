@@ -69,7 +69,7 @@ const Kernel = struct {
 
         switch (kernel.options.arch) {
             .x86_64 => {
-                const limine_entry_point = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".zig" }) catch unreachable;
+                const limine_entry_point = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), "/entry_point.zig" }) catch unreachable;
                 const linker_script_path = Build.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
                 kernel.executable = kernel.builder.addExecutable(kernel_name, limine_entry_point);
                 kernel.executable.code_model = .kernel;

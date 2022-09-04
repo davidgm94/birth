@@ -62,7 +62,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     virtual_address_space.arch.map_kernel_address_space_higher_half(kernel_address_space);
 }
 
-pub fn copy(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
+pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
     new.* = old.*;
     new.heap.allocator.ptr = new;
 }

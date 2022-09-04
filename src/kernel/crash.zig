@@ -12,7 +12,7 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     panic_extended(format, arguments, @returnAddress(), @frameAddress());
 }
 
-pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_address: usize, maybe_frame_pointer: ?usize) noreturn {
+pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_address: usize, frame_pointer: usize) noreturn {
     @setCold(true);
     interrupts.disable();
     if (kernel.scheduler.cpus.len > 1) {
@@ -22,7 +22,7 @@ pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_add
 
     log.err(format, arguments);
 
-    dump_stack_trace(start_address, maybe_frame_pointer);
+    dump_stack_trace(start_address, frame_pointer);
 
     while (true) {
         asm volatile (
@@ -35,9 +35,7 @@ pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_add
 
 const use_zig_stack_iterator = false;
 
-pub fn dump_stack_trace(start_address: usize, maybe_frame_pointer: ?usize) void {
-    const frame_pointer = if (maybe_frame_pointer) |frame_pointer| frame_pointer else @frameAddress();
-
+pub fn dump_stack_trace(start_address: usize, frame_pointer: usize) void {
     if (use_zig_stack_iterator) {
         var stack_iterator = std.StackIterator.init(start_address, frame_pointer);
         log.err("Stack trace:", .{});
