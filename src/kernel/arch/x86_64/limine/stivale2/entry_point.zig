@@ -94,24 +94,6 @@ pub const BootstrapContext = struct {
     context: Context,
 };
 
-pub fn process_bootloader_information(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *BootstrapContext, scheduler: *Scheduler) Error!BootloaderInformation {
-    std.assert(virtual_address_space.lock.status == 0);
-    const kernel_sections_in_memory = try process_pmrs(virtual_address_space, stivale2_struct);
-    stivale_log.debug("Processed sections in memory", .{});
-    const kernel_file = try process_kernel_file(virtual_address_space, stivale2_struct);
-    stivale_log.debug("Processed kernel file in memory", .{});
-    const framebuffer = try process_framebuffer(stivale2_struct);
-    stivale_log.debug("Processed framebuffer", .{});
-    try process_smp(virtual_address_space, stivale2_struct, bootstrap_context, scheduler);
-    stivale_log.debug("Processed SMP info", .{});
-
-    return BootloaderInformation{
-        .kernel_sections_in_memory = kernel_sections_in_memory,
-        .kernel_file = kernel_file,
-        .framebuffer = framebuffer,
-    };
-}
-
 pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
     var tag_opt = PhysicalAddress.new(stivale2_struct.tags).access_kernel(?*align(1) stivale.Tag);
 
@@ -126,63 +108,6 @@ pub fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT
     return null;
 }
 
-pub fn process_pmrs(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error![]VirtualMemoryRegion {
-    const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
-    stivale_log.debug("PMRS struct: 0x{x}", .{@ptrToInt(pmrs_struct)});
-    const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
-    if (pmrs.len == 0) return Error.pmrs;
-
-    std.assert(virtual_address_space.lock.status == 0);
-    const kernel_sections = virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
-
-    for (pmrs) |pmr, i| {
-        const kernel_section = &kernel_sections[i];
-        kernel_section.address = VirtualAddress.new(pmr.address);
-        kernel_section.size = pmr.size;
-        //const permissions = pmr.permissions;
-        //kernel_section.read = permissions & (1 << stivale.Struct.PMRs.PMR.readable) != 0;
-        //kernel_section.write = permissions & (1 << stivale.Struct.PMRs.PMR.writable) != 0;
-        //kernel_section.execute = permissions & (1 << stivale.Struct.PMRs.PMR.executable) != 0;
-    }
-
-    return kernel_sections;
-}
-
-/// This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
-pub fn process_kernel_file(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct) Error!FileInMemory {
-    const kernel_file = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
-    const file_address = PhysicalAddress.new(kernel_file.kernel_file);
-    const file_size = kernel_file.kernel_size;
-    // TODO: consider alignment?
-    stivale_log.debug("allocation about to happen", .{});
-    const dst = virtual_address_space.heap.allocator.alloc(u8, file_size) catch return Error.kernel_file;
-    stivale_log.debug("allocation did happen", .{});
-    const src = file_address.access_kernel([*]u8)[0..file_size];
-    stivale_log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
-    std.copy(u8, dst, src);
-    return FileInMemory{
-        .address = VirtualAddress.new(@ptrToInt(dst.ptr)),
-        .size = file_size,
-    };
-}
-
-pub fn process_framebuffer(stivale2_struct: *Struct) Error!Framebuffer {
-    const stivale_framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
-    std.assert(stivale_framebuffer.framebuffer_pitch % stivale_framebuffer.framebuffer_width == 0);
-    std.assert(stivale_framebuffer.framebuffer_bpp % @bitSizeOf(u8) == 0);
-    const bytes_per_pixel = @intCast(u8, stivale_framebuffer.framebuffer_bpp / @bitSizeOf(u8));
-    std.assert(stivale_framebuffer.framebuffer_pitch / stivale_framebuffer.framebuffer_width == bytes_per_pixel);
-    return Framebuffer{
-        .virtual_address = PhysicalAddress.new(stivale_framebuffer.framebuffer_addr).to_higher_half_virtual_address(),
-        .width = stivale_framebuffer.framebuffer_width,
-        .height = stivale_framebuffer.framebuffer_height,
-        .bytes_per_pixel = bytes_per_pixel,
-        .red_mask = .{ .size = stivale_framebuffer.red_mask_size, .shift = stivale_framebuffer.red_mask_shift },
-        .blue_mask = .{ .size = stivale_framebuffer.blue_mask_size, .shift = stivale_framebuffer.blue_mask_shift },
-        .green_mask = .{ .size = stivale_framebuffer.green_mask_size, .shift = stivale_framebuffer.green_mask_shift },
-    };
-}
-
 const CPUInitializationContext = struct {
     kernel_virtual_address_space: *VirtualAddressSpace,
     scheduler: *Scheduler,
@@ -191,75 +116,6 @@ const CPUInitializationContext = struct {
 var cpu_initialization_context: CPUInitializationContext = undefined;
 var foo: Thread = undefined;
 var foo2: Context = undefined;
-
-pub fn process_smp(virtual_address_space: *VirtualAddressSpace, stivale2_struct: *Struct, bootstrap_context: *BootstrapContext, scheduler: *Scheduler) Error!void {
-    std.assert(virtual_address_space.privilege_level == .kernel);
-    cpu_initialization_context = CPUInitializationContext{
-        .kernel_virtual_address_space = virtual_address_space,
-        .scheduler = scheduler,
-    };
-
-    const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
-    stivale_log.debug("SMP struct: {}", .{smp_struct});
-
-    const cpu_count = smp_struct.cpu_count;
-    const smps = smp_struct.smp_info()[0..cpu_count];
-    std.assert(smps[0].lapic_id == smp_struct.bsp_lapic_id);
-    // @Allocation
-    bootstrap_context.cpu.idle_thread = &foo;
-    bootstrap_context.cpu.idle_thread.context = &foo2;
-    bootstrap_context.cpu.idle_thread.context = &foo2;
-    bootstrap_context.cpu.idle_thread.address_space = virtual_address_space;
-    bootstrap_context.thread.context = &foo2;
-    bootstrap_context.thread.address_space = virtual_address_space;
-
-    scheduler.lock.acquire();
-
-    const threads = scheduler.thread_buffer.add_many(virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
-    scheduler.current_threads = virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
-    const thread_stack_size = Scheduler.default_kernel_stack_size;
-    const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
-    const thread_stacks = virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
-    scheduler.cpus = virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
-    scheduler.cpus[0].id = smps[0].processor_id;
-    // Dummy context
-    TLS.preset(scheduler, &scheduler.cpus[0]);
-    TLS.set_current(scheduler, &threads[0], &scheduler.cpus[0]);
-    // Map LAPIC address on just one CPU (since it's global)
-    CPU.map_lapic(virtual_address_space);
-
-    // TODO: ignore BSP cpu when AP initialization?
-    for (threads) |*thread, thread_i| {
-        scheduler.current_threads[thread_i] = thread;
-        const cpu = &scheduler.cpus[thread_i];
-        const smp = &smps[thread_i];
-
-        const stack_allocation_offset = thread_i * thread_stack_size;
-        const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
-        const thread_stack = Scheduler.ThreadStack{
-            .kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
-            .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
-        };
-
-        const entry_point = @ptrToInt(&kernel_smp_entry);
-        scheduler.initialize_thread(thread, thread_i, virtual_address_space, .kernel, .idle, entry_point, thread_stack);
-        thread.cpu = cpu;
-        cpu.idle_thread = thread;
-        cpu.id = smp.processor_id;
-        cpu.lapic.id = smp.lapic_id;
-        const stack_pointer = thread.context.get_stack_pointer();
-        smp.extra_argument = @ptrToInt(&cpu_initialization_context);
-        smp.target_stack = stack_pointer;
-        smp.goto_address = entry_point;
-    }
-
-    // TODO: TSS
-
-    // Update bsp CPU
-    // TODO: maybe this is necessary?
-
-    scheduler.lock.release();
-}
 
 export fn kernel_smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
     const logger = std.log.scoped(.SMPEntry);
@@ -474,6 +330,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         break :blk result;
     };
 
+    // Init paging
     {
         stivale_log.debug("About to dereference memory regions", .{});
         var new_virtual_address_space = VirtualAddressSpace{
@@ -612,10 +469,133 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         //stivale_log.debug("Paging initialized", .{});
     }
 
-    const bootloader_information = process_bootloader_information(&kernel.virtual_address_space, stivale2_struct_physical_address.access_kernel(*Struct), &bootstrap_context, &kernel.scheduler) catch unreachable;
-    kernel.sections_in_memory = bootloader_information.kernel_sections_in_memory;
-    kernel.file = bootloader_information.kernel_file;
-    kernel.bootloader_framebuffer = bootloader_information.framebuffer;
+    {
+        std.assert(kernel.virtual_address_space.lock.status == 0);
+        const pmrs_struct = find(stivale.Struct.PMRs, stivale2_struct) orelse return Error.pmrs;
+        const pmrs = pmrs_struct.pmrs()[0..pmrs_struct.entry_count];
+        if (pmrs.len == 0) return Error.pmrs;
+
+        std.assert(kernel.virtual_address_space.lock.status == 0);
+        kernel.sections_in_memory = kernel.virtual_address_space.heap.allocator.alloc(VirtualMemoryRegion, pmrs.len) catch return Error.pmrs;
+
+        for (pmrs) |pmr, i| {
+            const kernel_section = &kernel.sections_in_memory[i];
+            kernel_section.address = VirtualAddress.new(pmr.address);
+            kernel_section.size = pmr.size;
+            //const permissions = pmr.permissions;
+            //kernel_section.read = permissions & (1 << stivale.Struct.PMRs.PMR.readable) != 0;
+            //kernel_section.write = permissions & (1 << stivale.Struct.PMRs.PMR.writable) != 0;
+            //kernel_section.execute = permissions & (1 << stivale.Struct.PMRs.PMR.executable) != 0;
+        }
+        stivale_log.debug("Processed sections in memory", .{});
+    }
+
+    // This procedure copies the kernel file in a region which is usable and whose allocationcan be registered in the physical allocator bitset
+    {
+        const kernel_file_struct = find(stivale.Struct.KernelFileV2, stivale2_struct) orelse return Error.kernel_file;
+        const file_address = PhysicalAddress.new(kernel_file_struct.kernel_file);
+        const file_size = kernel_file_struct.kernel_size;
+        // TODO: consider alignment?
+        stivale_log.debug("allocation about to happen", .{});
+        const dst = kernel.virtual_address_space.heap.allocator.alloc(u8, file_size) catch return Error.kernel_file;
+        stivale_log.debug("allocation did happen", .{});
+        const src = file_address.access_kernel([*]u8)[0..file_size];
+        stivale_log.debug("Copying kernel file to (0x{x}, 0x{x})", .{ @ptrToInt(dst.ptr), @ptrToInt(dst.ptr) + dst.len });
+        std.copy(u8, dst, src);
+        kernel.file = FileInMemory{
+            .address = VirtualAddress.new(@ptrToInt(dst.ptr)),
+            .size = file_size,
+        };
+        stivale_log.debug("Processed kernel file in memory", .{});
+    }
+
+    {
+        const stivale_framebuffer = find(stivale.Struct.Framebuffer, stivale2_struct) orelse return Error.framebuffer;
+        std.assert(stivale_framebuffer.framebuffer_pitch % stivale_framebuffer.framebuffer_width == 0);
+        std.assert(stivale_framebuffer.framebuffer_bpp % @bitSizeOf(u8) == 0);
+        const bytes_per_pixel = @intCast(u8, stivale_framebuffer.framebuffer_bpp / @bitSizeOf(u8));
+        std.assert(stivale_framebuffer.framebuffer_pitch / stivale_framebuffer.framebuffer_width == bytes_per_pixel);
+        kernel.bootloader_framebuffer = Framebuffer{
+            .virtual_address = PhysicalAddress.new(stivale_framebuffer.framebuffer_addr).to_higher_half_virtual_address(),
+            .width = stivale_framebuffer.framebuffer_width,
+            .height = stivale_framebuffer.framebuffer_height,
+            .bytes_per_pixel = bytes_per_pixel,
+            .red_mask = .{ .size = stivale_framebuffer.red_mask_size, .shift = stivale_framebuffer.red_mask_shift },
+            .blue_mask = .{ .size = stivale_framebuffer.blue_mask_size, .shift = stivale_framebuffer.blue_mask_shift },
+            .green_mask = .{ .size = stivale_framebuffer.green_mask_size, .shift = stivale_framebuffer.green_mask_shift },
+        };
+        stivale_log.debug("Processed framebuffer", .{});
+    }
+
+    {
+        cpu_initialization_context = CPUInitializationContext{
+            .kernel_virtual_address_space = &kernel.virtual_address_space,
+            .scheduler = &kernel.scheduler,
+        };
+
+        const smp_struct = find(stivale.Struct.SMP, stivale2_struct) orelse return Error.smp;
+        stivale_log.debug("SMP struct: {}", .{smp_struct});
+
+        const cpu_count = smp_struct.cpu_count;
+        const smps = smp_struct.smp_info()[0..cpu_count];
+        std.assert(smps[0].lapic_id == smp_struct.bsp_lapic_id);
+        // @Allocation
+        bootstrap_context.cpu.idle_thread = &foo;
+        bootstrap_context.cpu.idle_thread.context = &foo2;
+        bootstrap_context.cpu.idle_thread.context = &foo2;
+        bootstrap_context.cpu.idle_thread.address_space = &kernel.virtual_address_space;
+        bootstrap_context.thread.context = &foo2;
+        bootstrap_context.thread.address_space = &kernel.virtual_address_space;
+
+        kernel.scheduler.lock.acquire();
+
+        const threads = kernel.scheduler.thread_buffer.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
+        kernel.scheduler.current_threads = kernel.virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
+        const thread_stack_size = Scheduler.default_kernel_stack_size;
+        const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
+        const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+        kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
+        kernel.scheduler.cpus[0].id = smps[0].processor_id;
+        // Dummy context
+        TLS.preset(kernel.scheduler, &kernel.scheduler.cpus[0]);
+        TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
+        // Map LAPIC address on just one CPU (since it's global)
+        CPU.map_lapic(&kernel.virtual_address_space);
+
+        // TODO: ignore BSP cpu when AP initialization?
+        for (threads) |*thread, thread_i| {
+            kernel.scheduler.current_threads[thread_i] = thread;
+            const cpu = &kernel.scheduler.cpus[thread_i];
+            const smp = &smps[thread_i];
+
+            const stack_allocation_offset = thread_i * thread_stack_size;
+            const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
+            const thread_stack = Scheduler.ThreadStack{
+                .kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
+                .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
+            };
+
+            const entry_point = @ptrToInt(&kernel_smp_entry);
+            kernel.scheduler.initialize_thread(thread, thread_i, &kernel.virtual_address_space, .kernel, .idle, entry_point, thread_stack);
+            thread.cpu = cpu;
+            cpu.idle_thread = thread;
+            cpu.id = smp.processor_id;
+            cpu.lapic.id = smp.lapic_id;
+            const stack_pointer = thread.context.get_stack_pointer();
+            smp.extra_argument = @ptrToInt(&cpu_initialization_context);
+            smp.target_stack = stack_pointer;
+            smp.goto_address = entry_point;
+        }
+
+        // TODO: TSS
+
+        // Update bsp CPU
+        // TODO: maybe this is necessary?
+
+        kernel.scheduler.lock.release();
+
+        stivale_log.debug("Processed SMP info", .{});
+    }
 
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
