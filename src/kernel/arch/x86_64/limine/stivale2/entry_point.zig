@@ -40,7 +40,6 @@ const FileInMemory = common.FileInMemory;
 const Framebuffer = common.Framebuffer;
 const page_size = x86_64.page_size;
 //const log = std.log.scoped(.stivale);
-const ScopedTimer = Timer.ScopedTimer;
 const Struct = stivale.Struct;
 const TODO = crash.TODO;
 const Allocator = std.Allocator;
@@ -137,7 +136,7 @@ export fn kernel_smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
 
 pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
     // Start a timer to count the CPU cycles the entry point function takes
-    var entry_point_timer = ScopedTimer(.EntryPoint).start();
+    var entry_point_timer = Timer.Scoped(.EntryPoint).start();
     // Get maximum physical address information
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
@@ -178,7 +177,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     };
 
     kernel.physical_address_space = blk: {
-        var timer = ScopedTimer(.PhysicalAddressSpaceInitialization).start();
+        var timer = Timer.Scoped(.PhysicalAddressSpaceInitialization).start();
         defer timer.end_and_log();
 
         const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse @panic("Unable to find memory map struct");
@@ -326,7 +325,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
     // Init paging
     {
-        var timer = ScopedTimer(.VirtualAddressSpaceInitialization).start();
+        var timer = Timer.Scoped(.VirtualAddressSpaceInitialization).start();
         defer timer.end_and_log();
 
         stivale_log.debug("About to dereference memory regions", .{});
@@ -345,7 +344,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
         // Map the kernel and do some tests
         {
-            var map_timer = ScopedTimer(.KernelMap).start();
+            var map_timer = Timer.Scoped(.KernelMap).start();
             defer map_timer.end_and_log();
 
             // TODO: better flags
@@ -361,7 +360,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         }
 
         {
-            var map_timer = ScopedTimer(.UsableMap).start();
+            var map_timer = Timer.Scoped(.UsableMap).start();
             defer map_timer.end_and_log();
             // TODO: better flags
             for (kernel.physical_address_space.usable) |region| {
@@ -375,7 +374,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         }
 
         {
-            var map_timer = ScopedTimer(.ReclaimableMap).start();
+            var map_timer = Timer.Scoped(.ReclaimableMap).start();
             defer map_timer.end_and_log();
             // TODO: better flags
             for (kernel.physical_address_space.reclaimable) |region| {
@@ -389,7 +388,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         }
 
         {
-            var map_timer = ScopedTimer(.Framebuffer).start();
+            var map_timer = Timer.Scoped(.Framebuffer).start();
             defer map_timer.end_and_log();
             // TODO: better flags
             for (kernel.physical_address_space.framebuffer) |region| {
@@ -455,7 +454,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         stivale_log.debug("Memory mapping initialized!", .{});
 
         {
-            var reclaimable_consuming_timer = ScopedTimer(.ConsumeReclaimable).start();
+            var reclaimable_consuming_timer = Timer.Scoped(.ConsumeReclaimable).start();
             defer reclaimable_consuming_timer.end_and_log();
 
             for (kernel.physical_address_space.reclaimable) |*region| {
