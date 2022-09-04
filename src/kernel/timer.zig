@@ -36,7 +36,12 @@ pub fn ScopedTimer(comptime ID: @TypeOf(.EnumLiteral)) type {
 
         pub fn end_and_log(scoped_timer: *@This()) void {
             const cycles = scoped_timer.timer.end_and_get_metric();
-            std.log.scoped(ID).info("{s} took {} cycles", .{ @tagName(ID), cycles });
+            std.log.scoped(ID).info("{} cycles", .{cycles});
+        }
+
+        pub fn end_and_custom_log(scoped_timer: *@This(), comptime format: []const u8, args: anytype) void {
+            scoped_timer.end_and_log();
+            std.log.scoped(ID).debug(format, args);
         }
     };
 }

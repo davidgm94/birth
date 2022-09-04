@@ -116,6 +116,8 @@ const AlreadyLocked = enum {
     yes,
 };
 
+const debug_with_translate_address = false;
+
 fn map_extended(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) void {
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
@@ -128,9 +130,11 @@ fn map_extended(virtual_address_space: *VirtualAddressSpace, physical_address: P
         }
     }
     virtual_address_space.arch.map(physical_address, virtual_address, flags.to_arch_specific());
-    const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) orelse @panic("address not present");
-    std.assert(new_physical_address.is_valid());
-    std.assert(new_physical_address.is_equal(physical_address));
+    if (debug_with_translate_address) {
+        const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes) orelse @panic("address not present");
+        std.assert(new_physical_address.is_valid());
+        std.assert(new_physical_address.is_equal(physical_address));
+    }
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {

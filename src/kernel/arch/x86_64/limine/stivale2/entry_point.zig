@@ -345,6 +345,9 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
         // Map the kernel and do some tests
         {
+            var map_timer = ScopedTimer(.KernelMap).start();
+            defer map_timer.end_and_log();
+
             // TODO: better flags
             for (stivale_pmrs) |pmr| {
                 const section_virtual_address = VirtualAddress.new(pmr.address);
@@ -357,38 +360,47 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             }
         }
 
-        // TODO: better flags
-        for (kernel.physical_address_space.usable) |region| {
-            // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
-            // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-            new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), .{
-                .write = true,
-                .user = true,
-            });
+        {
+            var map_timer = ScopedTimer(.UsableMap).start();
+            defer map_timer.end_and_log();
+            // TODO: better flags
+            for (kernel.physical_address_space.usable) |region| {
+                // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+                // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+                new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), .{
+                    .write = true,
+                    .user = true,
+                });
+            }
         }
-        stivale_log.debug("Mapped usable", .{});
 
-        // TODO: better flags
-        for (kernel.physical_address_space.reclaimable) |region| {
-            // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
-            // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-            new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), .{
-                .write = true,
-                .user = true,
-            });
+        {
+            var map_timer = ScopedTimer(.ReclaimableMap).start();
+            defer map_timer.end_and_log();
+            // TODO: better flags
+            for (kernel.physical_address_space.reclaimable) |region| {
+                // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+                // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+                new_virtual_address_space.map_physical_region(region.descriptor, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), .{
+                    .write = true,
+                    .user = true,
+                });
+            }
         }
-        stivale_log.debug("Mapped reclaimable", .{});
 
-        // TODO: better flags
-        for (kernel.physical_address_space.framebuffer) |region| {
-            // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
-            // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-            new_virtual_address_space.map_physical_region(region, region.address.to_virtual_address_with_offset(higher_half_direct_map), .{
-                .write = true,
-                .user = true,
-            });
+        {
+            var map_timer = ScopedTimer(.Framebuffer).start();
+            defer map_timer.end_and_log();
+            // TODO: better flags
+            for (kernel.physical_address_space.framebuffer) |region| {
+                // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
+                // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
+                new_virtual_address_space.map_physical_region(region, region.address.to_virtual_address_with_offset(higher_half_direct_map), .{
+                    .write = true,
+                    .user = true,
+                });
+            }
         }
-        stivale_log.debug("Mapped framebuffer", .{});
 
         new_virtual_address_space.make_current();
         new_virtual_address_space.copy_to_new(&kernel.virtual_address_space);
@@ -442,14 +454,17 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
         stivale_log.debug("Memory mapping initialized!", .{});
 
-        for (kernel.physical_address_space.reclaimable) |*region| {
-            const bitset = region.get_bitset_extended();
-            const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
-            region.allocated_size = std.align_forward(bitset_size, page_size);
-            region.setup_bitset();
-        }
-
         {
+            var reclaimable_consuming_timer = ScopedTimer(.ConsumeReclaimable).start();
+            defer reclaimable_consuming_timer.end_and_log();
+
+            for (kernel.physical_address_space.reclaimable) |*region| {
+                const bitset = region.get_bitset_extended();
+                const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
+                region.allocated_size = std.align_forward(bitset_size, page_size);
+                region.setup_bitset();
+            }
+
             const old_reclaimable = kernel.physical_address_space.reclaimable.len;
             const now_usable_ptr = kernel.physical_address_space.usable.ptr;
             const now_usable_length = kernel.physical_address_space.usable.len;
@@ -465,7 +480,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         }
 
         // TODO: Handle virtual memory management later on
-
         stivale_log.debug("Paging initialized", .{});
     }
 
@@ -609,5 +623,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
     entry_point_timer.end_and_log();
     cpu.ready = true;
-    cpu.make_thread_idle();
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+        );
+    }
+    //cpu.make_thread_idle();
 }

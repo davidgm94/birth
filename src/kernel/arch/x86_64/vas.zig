@@ -8,6 +8,7 @@ const kernel = @import("../../kernel.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const PhysicalAddressSpace = @import("../../physical_address_space.zig");
 const registers = @import("registers.zig");
+const Timer = @import("../../timer.zig");
 const VirtualAddress = @import("../../virtual_address.zig");
 const VirtualAddressSpace = @import("../../virtual_address_space.zig");
 const VirtualMemoryRegion = @import("../../virtual_memory_region.zig");
@@ -16,6 +17,8 @@ const x86_64 = @import("common.zig");
 const cr3 = registers.cr3;
 const log = std.log.scoped(.VAS);
 const page_size = common.page_size;
+
+const ScopedTimer = Timer.ScopedTimer;
 
 cr3: u64 = 0,
 
@@ -65,6 +68,12 @@ pub fn map_kernel_address_space_higher_half(vas: VAS, kernel_address_space: *Vir
 }
 
 pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VAS.MemoryFlags) void {
+    var allocations: u64 = 0;
+    var timer = ScopedTimer(.MapFn).start();
+    defer {
+        if (allocations > 0) timer.end_and_custom_log("Allocations: {}", .{allocations});
+    }
+
     std.assert((PhysicalAddress{ .value = vas.cr3 }).is_valid());
     std.assert(std.is_aligned(virtual_address.value, common.page_size));
     std.assert(std.is_aligned(physical_address.value, common.page_size));
@@ -77,9 +86,11 @@ pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: Virtua
         var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
         var pml4_entry_value = pml4_entry.value;
 
-        if (pml4_entry_value.contains(.present)) {
+        const present = pml4_entry_value.contains(.present);
+        if (present) {
             pdp = get_address_from_entry_bits(pml4_entry_value.bits).access_kernel(@TypeOf(pdp));
         } else {
+            defer allocations += 1;
             const pdp_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDPTable), common.page_size, .must_be_exact)) orelse @panic("unable to alloc pdp");
             pdp = pdp_allocation.access_kernel(@TypeOf(pdp));
             pdp.* = std.zeroes(PDPTable);
@@ -99,6 +110,7 @@ pub fn map(vas: *VAS, physical_address: PhysicalAddress, virtual_address: Virtua
         if (pdp_entry_value.contains(.present)) {
             pd = get_address_from_entry_bits(pdp_entry_value.bits).access_kernel(@TypeOf(pd));
         } else {
+            defer allocations += 1;
             const pd_allocation = kernel.physical_address_space.allocate(std.bytes_to_pages(@sizeOf(PDTable), common.page_size, .must_be_exact)) orelse @panic("unable to alloc pd");
             pd = pd_allocation.access_kernel(@TypeOf(pd));
             pd.* = std.zeroes(PDTable);
