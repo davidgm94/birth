@@ -429,7 +429,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             }
         }
 
-        result.kernel_and_modules.ptr = @intToPtr(@TypeOf(result.kernel_and_modules.ptr), @ptrToInt(result.framebuffer.ptr) + (@sizeOf(PhysicalMemoryRegion) * result.framebuffer.len));
+        {
+            const framebuffer_size = @sizeOf(PhysicalMemoryRegion) * result.framebuffer.len;
+            const kernel_and_modules_slice_address = @ptrToInt(result.framebuffer.ptr) + framebuffer_size;
+            result.kernel_and_modules.ptr = @intToPtr([*]PhysicalMemoryRegion, kernel_and_modules_slice_address);
+        }
 
         for (memory_map_entries) |*entry| {
             if (entry.type == .kernel_and_modules) {
@@ -445,9 +449,12 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             }
         }
 
-        std.assert(result.kernel_and_modules.len == 1);
-
-        result.reserved.ptr = @intToPtr(@TypeOf(result.reserved.ptr), @ptrToInt(result.kernel_and_modules.ptr) + (@sizeOf(PhysicalMemoryRegion) * result.kernel_and_modules.len));
+        {
+            std.assert(result.kernel_and_modules.len == 1);
+            const kernels_and_modules_size = @sizeOf(PhysicalMemoryRegion) * result.kernel_and_modules.len;
+            const reserved_slice_address = @ptrToInt(result.kernel_and_modules.ptr) + kernels_and_modules_size;
+            result.reserved.ptr = @intToPtr([*]PhysicalMemoryRegion, reserved_slice_address);
+        }
 
         for (memory_map_entries) |*entry| {
             if (entry.type == .reserved) {
@@ -532,12 +539,53 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         new_virtual_address_space.make_current();
         new_virtual_address_space.copy_to_new(&kernel.virtual_address_space);
         kernel.higher_half_direct_map = VirtualAddress.new(higher_half_direct_map);
+
         // Update identity-mapped pointers to higher-half ones
-        kernel.physical_address_space.usable.ptr = @intToPtr(@TypeOf(kernel.physical_address_space.usable.ptr), @ptrToInt(kernel.physical_address_space.usable.ptr) + higher_half_direct_map);
-        kernel.physical_address_space.reclaimable.ptr = @intToPtr(@TypeOf(kernel.physical_address_space.reclaimable.ptr), @ptrToInt(kernel.physical_address_space.reclaimable.ptr) + higher_half_direct_map);
-        kernel.physical_address_space.framebuffer.ptr = @intToPtr(@TypeOf(kernel.physical_address_space.framebuffer.ptr), @ptrToInt(kernel.physical_address_space.framebuffer.ptr) + higher_half_direct_map);
-        kernel.physical_address_space.reserved.ptr = @intToPtr(@TypeOf(kernel.physical_address_space.reserved.ptr), @ptrToInt(kernel.physical_address_space.reserved.ptr) + higher_half_direct_map);
-        kernel.physical_address_space.kernel_and_modules.ptr = @intToPtr(@TypeOf(kernel.physical_address_space.kernel_and_modules.ptr), @ptrToInt(kernel.physical_address_space.kernel_and_modules.ptr) + higher_half_direct_map);
+        {
+            var ptr = kernel.physical_address_space.usable.ptr;
+            const len = kernel.physical_address_space.usable.len;
+            _ = ptr;
+            const ptrtoint = @ptrToInt(ptr);
+            _ = ptrtoint;
+            const final_address = ptrtoint + higher_half_direct_map;
+            ptr = @intToPtr([*]PhysicalAddressSpace.MapEntry, final_address);
+            kernel.physical_address_space.usable = ptr[0..len];
+        }
+        {
+            var ptr = kernel.physical_address_space.reclaimable.ptr;
+            const len = kernel.physical_address_space.reclaimable.len;
+            const ptrtoint = @ptrToInt(ptr);
+            _ = ptr;
+            _ = len;
+            const final_address = ptrtoint + higher_half_direct_map;
+            ptr = @intToPtr([*]PhysicalAddressSpace.MapEntry, final_address);
+            kernel.physical_address_space.reclaimable = ptr[0..len];
+        }
+        {
+            var ptr = kernel.physical_address_space.framebuffer.ptr;
+            const len = kernel.physical_address_space.framebuffer.len;
+            const ptrtoint = @ptrToInt(ptr);
+            const final_address = ptrtoint + higher_half_direct_map;
+            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            kernel.physical_address_space.framebuffer = ptr[0..len];
+        }
+        {
+            var ptr = kernel.physical_address_space.reserved.ptr;
+            const len = kernel.physical_address_space.reserved.len;
+            const ptrtoint = @ptrToInt(ptr);
+            const final_address = ptrtoint + higher_half_direct_map;
+            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            kernel.physical_address_space.reserved = ptr[0..len];
+        }
+        {
+            var ptr = kernel.physical_address_space.kernel_and_modules.ptr;
+            const len = kernel.physical_address_space.kernel_and_modules.len;
+            const ptrtoint = @ptrToInt(ptr);
+            const final_address = ptrtoint + higher_half_direct_map;
+            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            kernel.physical_address_space.kernel_and_modules = ptr[0..len];
+        }
+
         stivale_log.debug("Memory mapping initialized!", .{});
 
         for (kernel.physical_address_space.reclaimable) |*region| {
@@ -547,15 +595,21 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             region.setup_bitset();
         }
 
-        const old_reclaimable = kernel.physical_address_space.reclaimable.len;
-        kernel.physical_address_space.usable.len += old_reclaimable;
-        kernel.physical_address_space.reclaimable.len = 0;
+        {
+            const old_reclaimable = kernel.physical_address_space.reclaimable.len;
+            const now_usable_ptr = kernel.physical_address_space.usable.ptr;
+            const now_usable_length = kernel.physical_address_space.usable.len;
+            // @ZigBug This crashes the compiler. Can't find minimal repro
+            //kernel.physical_address_space.usable.len += old_reclaimable;
+            kernel.physical_address_space.usable = now_usable_ptr[0 .. now_usable_length + old_reclaimable];
+        }
+        //kernel.physical_address_space.reclaimable.len = 0;
 
-        stivale_log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
+        //stivale_log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
 
         // TODO: Handle virtual memory management later on
 
-        stivale_log.debug("Paging initialized", .{});
+        //stivale_log.debug("Paging initialized", .{});
     }
 
     const bootloader_information = process_bootloader_information(&kernel.virtual_address_space, stivale2_struct_physical_address.access_kernel(*Struct), &bootstrap_context, &kernel.scheduler) catch unreachable;
