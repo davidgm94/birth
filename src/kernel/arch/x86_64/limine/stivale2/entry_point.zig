@@ -40,6 +40,7 @@ const FileInMemory = common.FileInMemory;
 const Framebuffer = common.Framebuffer;
 const page_size = x86_64.page_size;
 //const log = std.log.scoped(.stivale);
+const ScopedTimer = Timer.ScopedTimer;
 const Struct = stivale.Struct;
 const TODO = crash.TODO;
 const Allocator = std.Allocator;
@@ -48,7 +49,7 @@ const Allocator = std.Allocator;
 pub const log_level: std.log.Level = switch (std.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
-    .ReleaseFast, .ReleaseSmall => .debug,
+    .ReleaseFast, .ReleaseSmall => .info,
 };
 
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
@@ -136,7 +137,7 @@ export fn kernel_smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
 
 pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
     // Start a timer to count the CPU cycles the entry point function takes
-    var timer = Timer.new();
+    var entry_point_timer = ScopedTimer(.EntryPoint).start();
     // Get maximum physical address information
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
@@ -177,6 +178,9 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     };
 
     kernel.physical_address_space = blk: {
+        var timer = ScopedTimer(.PhysicalAddressSpaceInitialization).start();
+        defer timer.end_and_log();
+
         const memory_map_struct = find(Struct.MemoryMap, stivale2_struct) orelse @panic("Unable to find memory map struct");
         const memory_map_entries = memory_map_struct.memmap()[0..memory_map_struct.entry_count];
         var result = PhysicalAddressSpace{};
@@ -322,6 +326,9 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
     // Init paging
     {
+        var timer = ScopedTimer(.VirtualAddressSpaceInitialization).start();
+        defer timer.end_and_log();
+
         stivale_log.debug("About to dereference memory regions", .{});
         var new_virtual_address_space = VirtualAddressSpace{
             .arch = .{},
@@ -451,6 +458,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             kernel.physical_address_space.usable = now_usable_ptr[0 .. now_usable_length + old_reclaimable];
             // Empty the reclaimable memory array since we have recovered everything
             // TODO: don't make reclaimable memory a member of physical address space if the memory is reclaimed here
+            // Setting slice len here also crashes the compiler
             kernel.physical_address_space.reclaimable = &.{};
 
             //stivale_log.debug("Reclaimed reclaimable physical memory. Counting with {} more regions", .{old_reclaimable});
@@ -599,8 +607,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         .address = @ptrToInt(&main),
     });
 
-    const entry_point_cycles = timer.end_and_get_metric();
-    stivale_log.info("Entry point took {} cycles", .{entry_point_cycles});
+    entry_point_timer.end_and_log();
     cpu.ready = true;
     cpu.make_thread_idle();
 }
