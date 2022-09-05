@@ -17,7 +17,7 @@ const log = std.log.scoped(.VAS);
 const MapError = VirtualAddressSpace.MapError;
 const page_size = common.page_size;
 
-const VAS = struct {
+pub const Specific = struct {
     cr3: u64 = 0,
 };
 
@@ -26,13 +26,14 @@ const Indices = [std.enum_count(PageIndex)]u16;
 pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) void {
     const page_count = @divExact(@sizeOf(PML4Table), common.page_size);
     const cr3_physical_address = physical_address_space.allocate(page_count) orelse @panic("wtf");
-    virtual_address_space.arch = VAS{
+    virtual_address_space.arch = Specific{
         .cr3 = cr3_physical_address.value,
     };
 
-    std.zero(virtual_address_space.arch.get_pml4().to_higher_half_virtual_address().access([*]u8)[0 .. @sizeOf(PML4Table) / 2]);
+    const pml4_virtual_address = get_pml4(virtual_address_space).to_higher_half_virtual_address();
+    std.zero(pml4_virtual_address.access([*]u8)[0 .. @sizeOf(PML4Table) / 2]);
     if (virtual_address_space.privilege_level == .kernel) {
-        const pml4_table = virtual_address_space.arch.get_pml4().to_higher_half_virtual_address().access([*]volatile PML4Table)[@sizeOf(PML4Table) / 2 ..];
+        const pml4_table = pml4_virtual_address.access([*]volatile PML4Table)[@sizeOf(PML4Table) / 2 ..];
         const allocation_size = pml4_table.len * x86_64.page_size;
 
         const result = virtual_address_space.allocate_extended(allocation_size, null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.no) catch @panic("wtf");
@@ -63,7 +64,7 @@ fn fill_pml4e(pml4e: *volatile PML4E, pdp_physical_address: PhysicalAddress, pdp
     pml4e.value = pml4_entry.value;
 }
 
-pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: VAS.MemoryFlags) MapError!void {
+pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags) MapError!void {
     var allocation_count: u64 = 0;
 
     if (time_map) {
@@ -87,7 +88,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
     var pdp: *volatile PDPTable = undefined;
     {
-        var pml4 = virtual_address_space.arch.get_pml4().to_higher_half_virtual_address().access(*PML4Table);
+        var pml4 = get_pml4(virtual_address_space).to_higher_half_virtual_address().access(*PML4Table);
         var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
         var pml4_entry_value = pml4_entry.value;
 
@@ -167,23 +168,23 @@ pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddr
     }
 }
 
-pub inline fn is_current(vas: VAS) bool {
+pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
     const current = cr3.read_raw();
-    return current == vas.cr3;
+    return current == virtual_address_space.arch.cr3;
 }
 
-pub inline fn bootstrapping() VAS {
-    return VAS{
+pub inline fn bootstrapping() Specific {
+    return Specific{
         .cr3 = cr3.read_raw(),
     };
 }
 
-pub fn get_pml4(vas: VAS) PhysicalAddress {
-    return PhysicalAddress.new(vas.cr3);
+pub fn get_pml4(virtual_address_space: *VirtualAddressSpace) PhysicalAddress {
+    return PhysicalAddress.new(virtual_address_space.arch.cr3);
 }
 
-pub fn map_kernel_address_space_higher_half(vas: *VAS, kernel_address_space: *VirtualAddressSpace) void {
-    const cr3_physical_address = PhysicalAddress.new(vas.cr3);
+pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
+    const cr3_physical_address = PhysicalAddress.new(virtual_address_space.arch.cr3);
     const cr3_kernel_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
     // TODO: maybe user flag is not necessary?
     kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, 1, .{ .write = true, .user = true }) catch unreachable;
@@ -193,7 +194,7 @@ pub fn map_kernel_address_space_higher_half(vas: *VAS, kernel_address_space: *Vi
     log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }
 
-pub fn translate_address(address_space: *VAS, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
+pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) ?PhysicalAddress {
     std.assert(asked_virtual_address.is_valid());
     const virtual_address = asked_virtual_address.aligned_backward(common.page_size);
 
@@ -202,7 +203,7 @@ pub fn translate_address(address_space: *VAS, asked_virtual_address: VirtualAddr
     var pdp: *volatile PDPTable = undefined;
     {
         //log.debug("CR3: 0x{x}", .{address_space.cr3});
-        var pml4 = address_space.get_pml4().to_higher_half_virtual_address().access(*PML4Table);
+        var pml4 = get_pml4(virtual_address_space).to_higher_half_virtual_address().access(*PML4Table);
         const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
         var pml4_entry_value = pml4_entry.value;
 
@@ -259,8 +260,8 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
     return indices;
 }
 
-pub inline fn make_current(address_space: VAS) void {
-    cr3.write_raw(address_space.cr3);
+pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
+    cr3.write_raw(virtual_address_space.arch.cr3);
 }
 
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {

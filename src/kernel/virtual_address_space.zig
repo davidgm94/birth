@@ -19,7 +19,7 @@ const VirtualMemoryRegion = @import("virtual_memory_region.zig");
 // TODO: Make this safe
 var tree_buffer: [1024 * 1024 * 50]u8 = undefined;
 
-arch: VAS,
+arch: VAS.Specific,
 privilege_level: PrivilegeLevel,
 heap: Heap,
 lock: Spinlock,
@@ -62,7 +62,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     };
     VAS.new(virtual_address_space, physical_address_space);
 
-    virtual_address_space.arch.map_kernel_address_space_higher_half(kernel_address_space);
+    VAS.map_kernel_address_space_higher_half(virtual_address_space, kernel_address_space);
 }
 
 pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
@@ -186,16 +186,16 @@ fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtu
         }
     }
 
-    const result = virtual_address_space.arch.translate_address(virtual_address);
+    const result = VAS.translate_address(virtual_address_space, virtual_address);
     return result;
 }
 
 pub inline fn make_current(virtual_address_space: *VirtualAddressSpace) void {
-    virtual_address_space.arch.make_current();
+    VAS.make_current(virtual_address_space);
 }
 
 pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
-    return virtual_address_space.arch.is_current();
+    return VAS.is_current(virtual_address_space);
 }
 
 pub const Flags = packed struct {
