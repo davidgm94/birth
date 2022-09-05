@@ -40,6 +40,7 @@ pub var file = FileInMemory{
 };
 
 pub var bootloader_framebuffer: Framebuffer = undefined;
+pub var bootstrap_virtual_address_space: *VirtualAddressSpace = undefined;
 
 pub var higher_half_direct_map = VirtualAddress.invalid();
 

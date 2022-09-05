@@ -4,9 +4,11 @@ const CPUID = @import("../../../../../common/arch/x86_64/cpuid.zig");
 const crash = @import("../../../../crash.zig");
 const drivers = @import("../../drivers.zig");
 const Graphics = @import("../../../../../drivers/graphics.zig");
+const Heap = @import("../../../../heap.zig");
 const kernel = @import("../../../../kernel.zig");
 const main = @import("../../../../main.zig").main;
 const PhysicalAddress = @import("../../../../physical_address.zig");
+const Spinlock = @import("../../../../spinlock.zig");
 const TLS = @import("../../tls.zig");
 const Timer = @import("../../../../timer.zig");
 const VAS = @import("../../vas.zig");
@@ -44,99 +46,8 @@ const Struct = stivale.Struct;
 const TODO = crash.TODO;
 const Allocator = std.Allocator;
 
-var bootstrap_memory: [0x1000 * 0x1000 * 2]u8 = undefined;
+var bootstrap_memory: [0x1000 * 30]u8 = undefined;
 var bootstrap_allocator = std.FixedBufferAllocator.init(&bootstrap_memory);
-
-/// Define root.log_level to override the default
-pub const log_level: std.log.Level = switch (std.build_mode) {
-    .Debug => .debug,
-    .ReleaseSafe => .debug,
-    .ReleaseFast, .ReleaseSmall => .info,
-};
-
-pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    default_logger.lock.acquire();
-    defer default_logger.lock.release();
-    const current_thread = TLS.get_current();
-    if (current_thread.cpu) |current_cpu| {
-        const processor_id = current_cpu.id;
-        default_logger.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    } else {
-        default_logger.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
-    }
-    default_logger.writer.writeAll(prefix) catch unreachable;
-    default_logger.writer.print(format, args) catch unreachable;
-    default_logger.writer.writeByte('\n') catch unreachable;
-}
-
-pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
-    crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
-}
-
-const BootloaderInformation = struct {
-    kernel_sections_in_memory: []VirtualMemoryRegion,
-    kernel_file: FileInMemory,
-    framebuffer: Framebuffer,
-};
-
-pub const BootstrapContext = struct {
-    cpu: CPU,
-    thread: Thread,
-    context: Context,
-};
-
-fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
-    const offset = kernel.higher_half_direct_map.value;
-    var tag_opt = @intToPtr(?*align(1) stivale.Tag, stivale2_struct.tags + offset);
-
-    while (tag_opt) |tag| {
-        if (tag.identifier == StructT.id) {
-            return @ptrCast(*align(1) StructT, tag);
-        }
-
-        tag_opt = @intToPtr(?*align(1) stivale.Tag, tag.next + offset);
-    }
-
-    return null;
-}
-
-const CPUInitializationContext = struct {
-    kernel_virtual_address_space: *VirtualAddressSpace,
-    scheduler: *Scheduler,
-};
-
-var cpu_initialization_context: CPUInitializationContext = undefined;
-var foo: Thread = undefined;
-var foo2: Context = undefined;
-
-export fn kernel_smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
-    const logger = std.log.scoped(.SMPEntry);
-    const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
-    const virtual_address_space = initialization_context.kernel_virtual_address_space;
-    const scheduler = initialization_context.scheduler;
-    const cpu_index = smp_info.processor_id;
-    // Current thread is already set in the process_smp function
-    TLS.preset(scheduler, &scheduler.cpus[cpu_index]);
-    virtual_address_space.make_current();
-    const current_thread = TLS.get_current();
-    const cpu = current_thread.cpu orelse @panic("cpu");
-    cpu.start(scheduler, virtual_address_space);
-    logger.debug("CPU started", .{});
-
-    while (!cpu.ready) {
-        cpu.lapic.next_timer(10);
-        asm volatile (
-            \\sti
-            \\pause
-            \\hlt
-        );
-    }
-
-    logger.debug("cpu is now ready", .{});
-    cpu.make_thread_idle();
-}
 
 pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
     // Start a timer to count the CPU cycles the entry point function takes
@@ -144,13 +55,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     // Get maximum physical address information
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
-    kernel.virtual_address_space = VirtualAddressSpace.bootstrapping();
     var bootstrap_context = std.zeroes(BootstrapContext);
     {
         bootstrap_context.cpu.id = 0;
         TLS.preset_bsp(&kernel.scheduler, &bootstrap_context.thread, &bootstrap_context.cpu);
         bootstrap_context.thread.context = &bootstrap_context.context;
-        bootstrap_context.thread.address_space = &kernel.virtual_address_space;
 
         // @ZigBug: @ptrCast here crashes the compiler
         kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
@@ -193,7 +102,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         const host_entry = host_entry_blk: {
             for (memory_map_entries) |*entry| {
                 if (entry.type == .usable) {
-                    const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size);
+                    const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size, 0);
                     const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                     // INFO: this is separated since the bitset needs to be in a different page than the memory map
                     const bitset_page_count = std.div_ceil(u64, bitset_size, page_size) catch unreachable;
@@ -214,7 +123,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                         .type = .usable,
                     };
 
-                    block.setup_bitset();
+                    const virtual_address_offset = 0;
+                    block.setup_bitset(virtual_address_offset);
 
                     break :host_entry_blk block;
                 }
@@ -240,10 +150,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .type = .usable,
                 };
 
-                const bitset = result_entry.get_bitset_extended();
+                const virtual_address_offset = 0;
+                const bitset = result_entry.get_bitset_extended(virtual_address_offset);
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 result_entry.allocated_size = std.align_forward(bitset_size, page_size);
-                result_entry.setup_bitset();
+                result_entry.setup_bitset(virtual_address_offset);
             }
         }
 
@@ -333,16 +244,19 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         var timer = Timer.Scoped(.VirtualAddressSpaceInitialization).start();
         defer timer.end_and_log();
 
-        stivale_log.debug("About to dereference memory regions", .{});
-        var new_virtual_address_space = VirtualAddressSpace{
+        // Kernel address space initialization
+        kernel.bootstrap_virtual_address_space = bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
+        VirtualAddressSpace.from_current(kernel.bootstrap_virtual_address_space);
+        var new_virtual_address_space: VirtualAddressSpace = undefined;
+        new_virtual_address_space = VirtualAddressSpace{
             .arch = .{},
             .privilege_level = .kernel,
-            .heap = .{},
-            .lock = .{},
+            .heap = Heap.new(&new_virtual_address_space),
+            .lock = Spinlock{},
         };
-        // Using pointer initialization for virtual address space because it depends on the allocator pointer being stable
-        VirtualAddressSpace.initialize_kernel_address_space(&new_virtual_address_space, &kernel.physical_address_space) orelse @panic("unable to initialize kernel address space");
+        VAS.new(&new_virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
 
+        // Get protected memory regions from the bootloader
         const stivale_pmrs_struct = find(Struct.PMRs, stivale2_struct) orelse @panic("Unable to find Stivale PMRs");
         const stivale_pmrs = stivale_pmrs_struct.pmrs()[0..stivale_pmrs_struct.entry_count];
 
@@ -465,10 +379,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             defer reclaimable_consuming_timer.end_and_log();
 
             for (kernel.physical_address_space.reclaimable) |*region| {
-                const bitset = region.get_bitset_extended();
+                const bitset = region.get_bitset_extended(higher_half_direct_map);
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 region.allocated_size = std.align_forward(bitset_size, page_size);
-                region.setup_bitset();
+                region.setup_bitset(higher_half_direct_map);
             }
 
             const old_reclaimable = kernel.physical_address_space.reclaimable.len;
@@ -700,4 +614,95 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         );
     }
     //cpu.make_thread_idle();
+}
+
+/// Define root.log_level to override the default
+pub const log_level: std.log.Level = switch (std.build_mode) {
+    .Debug => .debug,
+    .ReleaseSafe => .debug,
+    .ReleaseFast, .ReleaseSmall => .info,
+};
+
+pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+    default_logger.lock.acquire();
+    defer default_logger.lock.release();
+    const current_thread = TLS.get_current();
+    if (current_thread.cpu) |current_cpu| {
+        const processor_id = current_cpu.id;
+        default_logger.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+    } else {
+        default_logger.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
+    }
+    default_logger.writer.writeAll(prefix) catch unreachable;
+    default_logger.writer.print(format, args) catch unreachable;
+    default_logger.writer.writeByte('\n') catch unreachable;
+}
+
+pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
+    crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
+}
+
+const BootloaderInformation = struct {
+    kernel_sections_in_memory: []VirtualMemoryRegion,
+    kernel_file: FileInMemory,
+    framebuffer: Framebuffer,
+};
+
+pub const BootstrapContext = struct {
+    cpu: CPU,
+    thread: Thread,
+    context: Context,
+};
+
+fn find(comptime StructT: type, stivale2_struct: *Struct) ?*align(1) StructT {
+    const offset = kernel.higher_half_direct_map.value;
+    var tag_opt = @intToPtr(?*align(1) stivale.Tag, stivale2_struct.tags + offset);
+
+    while (tag_opt) |tag| {
+        if (tag.identifier == StructT.id) {
+            return @ptrCast(*align(1) StructT, tag);
+        }
+
+        tag_opt = @intToPtr(?*align(1) stivale.Tag, tag.next + offset);
+    }
+
+    return null;
+}
+
+const CPUInitializationContext = struct {
+    kernel_virtual_address_space: *VirtualAddressSpace,
+    scheduler: *Scheduler,
+};
+
+var cpu_initialization_context: CPUInitializationContext = undefined;
+var foo: Thread = undefined;
+var foo2: Context = undefined;
+
+export fn kernel_smp_entry(smp_info: *Struct.SMP.Info) callconv(.C) noreturn {
+    const logger = std.log.scoped(.SMPEntry);
+    const initialization_context = @intToPtr(*CPUInitializationContext, smp_info.extra_argument);
+    const virtual_address_space = initialization_context.kernel_virtual_address_space;
+    const scheduler = initialization_context.scheduler;
+    const cpu_index = smp_info.processor_id;
+    // Current thread is already set in the process_smp function
+    TLS.preset(scheduler, &scheduler.cpus[cpu_index]);
+    virtual_address_space.make_current();
+    const current_thread = TLS.get_current();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    cpu.start(scheduler, virtual_address_space);
+    logger.debug("CPU started", .{});
+
+    while (!cpu.ready) {
+        cpu.lapic.next_timer(10);
+        asm volatile (
+            \\sti
+            \\pause
+            \\hlt
+        );
+    }
+
+    logger.debug("cpu is now ready", .{});
+    cpu.make_thread_idle();
 }

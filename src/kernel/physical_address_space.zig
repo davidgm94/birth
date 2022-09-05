@@ -4,6 +4,7 @@ const std = @import("../common/std.zig");
 
 const arch = @import("arch/common.zig");
 const crash = @import("crash.zig");
+const kernel = @import("kernel.zig");
 const PhysicalAddress = @import("physical_address.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const Spinlock = @import("spinlock.zig");
@@ -35,7 +36,7 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, page_count: u64) 
         if (region.descriptor.size - region.allocated_size >= size) {
             const region_page_count = region.descriptor.size / page_size;
             const supposed_bitset_size = region_page_count / @bitSizeOf(MapEntry.BitsetBaseType);
-            const bitset = region.get_bitset_extended();
+            const bitset = region.get_bitset_extended(kernel.higher_half_direct_map.value);
             std.assert(bitset.len >= supposed_bitset_size);
             var region_allocated_page_count: u64 = 0;
             const allocated_page_count = region.allocated_size / page_size;
@@ -116,19 +117,21 @@ pub const MapEntry = struct {
     };
     pub const BitsetBaseType = u64;
 
-    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64) []BitsetBaseType {
+    pub fn get_bitset_from_address_and_size(physical_address: PhysicalAddress, size: u64, virtual_address_offset: u64) []BitsetBaseType {
         const page_count = @divFloor(size, page_size);
         const bitset_len = std.div_ceil(u64, page_count, @bitSizeOf(BitsetBaseType)) catch unreachable;
         // INFO: this assumes the address is linearly mapped to the higher half
-        const virtual_address = physical_address.to_higher_half_virtual_address();
+        const virtual_address = physical_address.to_virtual_address_with_offset(virtual_address_offset);
         return virtual_address.access([*]BitsetBaseType)[0..bitset_len];
     }
 
-    pub fn get_bitset_extended(entry: *MapEntry) []BitsetBaseType {
-        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size);
+    pub fn get_bitset_extended(entry: *MapEntry, virtual_address_offset: u64) []BitsetBaseType {
+        std.assert(!kernel.memory_initialized);
+        return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size, virtual_address_offset);
     }
 
-    pub fn setup_bitset(entry: *MapEntry) void {
+    pub fn setup_bitset(entry: *MapEntry, virtual_address_offset: u64) void {
+        std.assert(!kernel.memory_initialized);
         const page_count = @divFloor(entry.allocated_size, page_size);
         const bitsize = @bitSizeOf(BitsetBaseType);
         const quotient = page_count / bitsize;
@@ -136,7 +139,7 @@ pub const MapEntry = struct {
         const popcount = @popCount(remainder_bitsize_max);
         const remainder = @intCast(std.IntType(.unsigned, popcount), page_count % bitsize);
 
-        const bitset = entry.get_bitset_extended();
+        const bitset = entry.get_bitset_extended(virtual_address_offset);
 
         for (bitset[0..quotient]) |*bitset_elem| {
             bitset_elem.* = std.max_int(BitsetBaseType);

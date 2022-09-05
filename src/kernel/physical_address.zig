@@ -65,7 +65,6 @@ pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) 
 }
 
 pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, asked_offset: u64) VirtualAddress {
-    if (asked_offset == 0) @panic("wtf");
     return VirtualAddress.new(physical_address.value + asked_offset);
 }
 
