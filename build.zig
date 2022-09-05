@@ -712,13 +712,22 @@ fn get_target(arch: Arch, user: bool) Build.CrossTarget {
 
 fn do_debug_step(step: *Build.Step) !void {
     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
+    const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
     switch (Build.os) {
-        .linux => {
-            const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
+        .linux, .macos => {
             const first_pid = try Build.fork();
             if (first_pid == 0) {
-                var debugger_process = Build.ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
-                _ = try debugger_process.spawnAndWait();
+                switch (Build.os) {
+                    .linux => {
+                        var debugger_process = Build.ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
+                        _ = try debugger_process.spawnAndWait();
+                    },
+                    .macos => {
+                        var debugger_process = Build.ChildProcess.init(&[_][]const u8{ "wezterm", "start", "--cwd", kernel.builder.build_root, "--", "x86_64-elf-gdb", "-x", gdb_script_path }, kernel.builder.allocator);
+                        _ = try debugger_process.spawnAndWait();
+                    },
+                    else => unreachable,
+                }
             } else {
                 var qemu_process = Build.ChildProcess.init(kernel.debug_argument_list.items, kernel.builder.allocator);
                 try qemu_process.spawn();

@@ -27,7 +27,7 @@ BIG DISCLAIMER: Running on real hardware is not supported as of now.
 - MacOS
 
 * [x] Run
-* [ ] Debug
+* [x] Debug
 
 ## External dependencies to compile and run the code (executables your machine should have in the PATH variable)
 * The Zig compiler - This is required to compile and run the code. Apart from the kernel being written in Zig, Zig is used as a build system, so no platform-specific scripting language is needed.
