@@ -30,6 +30,7 @@ pub var virtual_address_space = VirtualAddressSpace{
     .heap = .{},
     .lock = .{},
 };
+
 pub var memory_initialized = false;
 
 pub var sections_in_memory: []VirtualMemoryRegion = &.{};

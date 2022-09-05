@@ -59,17 +59,14 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
+    if (higher_half == 0) @panic("wtf");
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;
 }
 
 pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, asked_offset: u64) VirtualAddress {
+    if (asked_offset == 0) @panic("wtf");
     return VirtualAddress.new(physical_address.value + asked_offset);
-}
-
-pub inline fn access_higher_half(physical_address: PhysicalAddress, comptime Ptr: type) Ptr {
-    const address = physical_address.to_higher_half_virtual_address().value;
-    return @intToPtr(Ptr, address);
 }
 
 pub inline fn aligned_forward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {

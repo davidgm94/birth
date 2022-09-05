@@ -31,9 +31,12 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
     };
 
     const pml4_virtual_address = get_pml4(virtual_address_space).to_higher_half_virtual_address();
-    std.zero(pml4_virtual_address.access([*]u8)[0 .. @sizeOf(PML4Table) / 2]);
+    std.zero(pml4_virtual_address.access([*]u8)[0..(@sizeOf(PML4Table) / 2)]);
+    if (!kernel.memory_initialized) {
+        @panic("wtf");
+    }
     if (virtual_address_space.privilege_level == .kernel) {
-        const pml4_table = pml4_virtual_address.access([*]volatile PML4Table)[@sizeOf(PML4Table) / 2 ..];
+        const pml4_table = pml4_virtual_address.access([*]volatile PML4E)[0x100..0x200];
         const allocation_size = pml4_table.len * x86_64.page_size;
 
         const result = virtual_address_space.allocate_extended(allocation_size, null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.no) catch @panic("wtf");
@@ -53,7 +56,7 @@ pub fn log_map_timer_register() void {
     log.debug("Mean: {}", .{map_timer_register.get_integer_mean()});
 }
 
-fn fill_pml4e(pml4e: *volatile PML4E, pdp_physical_address: PhysicalAddress, pdp_virtual_address: VirtualAddress) void {
+inline fn fill_pml4e(pml4e: *volatile PML4E, pdp_physical_address: PhysicalAddress, pdp_virtual_address: VirtualAddress) void {
     var pdp = pdp_virtual_address.access(*PDPTable);
     pdp.* = std.zeroes(PDPTable);
     var pml4_entry = pml4e.*;
@@ -98,6 +101,9 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
             defer allocation_count += 1;
 
             const pdp_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PDPTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes) catch @panic("unable to alloc pdp");
+            if (!kernel.memory_initialized) {
+                @panic("wtf");
+            }
             fill_pml4e(pml4_entry, pdp_allocation_result.physical_address, pdp_allocation_result.virtual_address);
         }
     }
@@ -113,6 +119,9 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
             defer allocation_count += 1;
 
             const pd_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PDTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes) catch @panic("unable to alloc pdp");
+            if (!kernel.memory_initialized) {
+                @panic("wtf");
+            }
             //const pd_allocation = kernel.physical_address_space.allocate(@divExact(@sizeOf(PDTable), common.page_size)) orelse @panic("unable to alloc pd");
             pd = pd_allocation_result.virtual_address.access(@TypeOf(pd));
             pd.* = std.zeroes(PDTable);
@@ -135,6 +144,9 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
             defer allocation_count += 1;
 
             const pt_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes) catch @panic("unable to alloc pdp");
+            if (!kernel.memory_initialized) {
+                @panic("wtf");
+            }
             pt = pt_allocation_result.virtual_address.access(@TypeOf(pt));
             pt.* = std.zeroes(PTable);
             pd_entry_value.or_flag(.present);
@@ -190,7 +202,8 @@ pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddre
     kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, 1, .{ .write = true, .user = true }) catch unreachable;
     const pml4 = cr3_kernel_virtual_address.access(*PML4Table);
     std.zero_slice(PML4E, pml4[0..0x100]);
-    std.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
+    if (true) @panic("fix this");
+    //std.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
     log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }
 
