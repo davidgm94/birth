@@ -131,6 +131,8 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                 check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
                 log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
                 bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
+            } else {
+                virtual_address_space.map_extended(entry_physical_address, entry_virtual_address, page_count, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, false, 0) catch unreachable;
             }
 
             pt = entry_virtual_address.access(@TypeOf(pt));

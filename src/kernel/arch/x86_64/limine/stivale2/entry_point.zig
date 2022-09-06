@@ -410,6 +410,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         kernel.memory_initialized = true;
 
         {
+            // Use the bootstrap allocator since we don't want any allocation happening here
             const usable_regions = kernel.bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, kernel.physical_address_space.usable.len * 2) catch @panic("Wtc");
             var usable_i: u64 = 0;
             for (kernel.physical_address_space.usable) |*map_entry| {
