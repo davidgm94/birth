@@ -126,7 +126,6 @@ pub const MapEntry = struct {
     }
 
     pub fn get_bitset_extended(entry: *MapEntry, virtual_address_offset: u64) []BitsetBaseType {
-        std.assert(!kernel.memory_initialized);
         return get_bitset_from_address_and_size(entry.descriptor.address, entry.descriptor.size, virtual_address_offset);
     }
 

@@ -1,3 +1,5 @@
+const std = @import("../common/std.zig");
+
 const common = @import("common.zig");
 
 const DeviceManager = @import("device_manager.zig");
@@ -41,6 +43,8 @@ pub var file = FileInMemory{
 
 pub var bootloader_framebuffer: Framebuffer = undefined;
 pub var bootstrap_virtual_address_space: *VirtualAddressSpace = undefined;
+var bootstrap_memory: [0x1000 * 30]u8 = undefined;
+pub var bootstrap_allocator = std.FixedBufferAllocator.init(&bootstrap_memory);
 
 pub var higher_half_direct_map = VirtualAddress.invalid();
 

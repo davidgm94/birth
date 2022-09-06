@@ -46,9 +46,6 @@ const Struct = stivale.Struct;
 const TODO = crash.TODO;
 const Allocator = std.Allocator;
 
-var bootstrap_memory: [0x1000 * 30]u8 = undefined;
-var bootstrap_allocator = std.FixedBufferAllocator.init(&bootstrap_memory);
-
 pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) noreturn {
     // Start a timer to count the CPU cycles the entry point function takes
     var entry_point_timer = Timer.Scoped(.EntryPoint).start();
@@ -245,16 +242,15 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         defer timer.end_and_log();
 
         // Kernel address space initialization
-        kernel.bootstrap_virtual_address_space = bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
+        kernel.bootstrap_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
         VirtualAddressSpace.from_current(kernel.bootstrap_virtual_address_space);
-        var new_virtual_address_space: VirtualAddressSpace = undefined;
-        new_virtual_address_space = VirtualAddressSpace{
+        kernel.virtual_address_space = VirtualAddressSpace{
             .arch = .{},
             .privilege_level = .kernel,
-            .heap = Heap.new(&new_virtual_address_space),
+            .heap = Heap.new(&kernel.virtual_address_space),
             .lock = Spinlock{},
         };
-        VAS.new(&new_virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
+        VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
 
         // Get protected memory regions from the bootloader
         const stivale_pmrs_struct = find(Struct.PMRs, stivale2_struct) orelse @panic("Unable to find Stivale PMRs");
@@ -269,14 +265,15 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             for (stivale_pmrs) |pmr| {
                 const section_virtual_address = VirtualAddress.new(pmr.address);
                 const section_page_count = @divExact(pmr.size, x86_64.page_size);
-                const section_physical_address = kernel.virtual_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
-                new_virtual_address_space.map(section_physical_address, section_virtual_address, section_page_count, .{
+                const section_physical_address = kernel.bootstrap_virtual_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
+                kernel.virtual_address_space.map_extended(section_physical_address, section_virtual_address, section_page_count, .{
                     .execute = pmr.permissions & Struct.PMRs.PMR.executable != 0,
                     .write = true, //const writable = permissions & Stivale2.Struct.PMRs.PMR.writable != 0;
-                }) catch unreachable;
+                }, .no, true, higher_half_direct_map) catch unreachable;
             }
         }
 
+        var mapping_pages_mapped = x86_64.VAS.bootstrapping_physical_addresses.items.len;
         {
             var map_timer = Timer.Scoped(.UsableMap).start();
             defer map_timer.end_and_log();
@@ -284,11 +281,14 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             for (kernel.physical_address_space.usable) |region| {
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
-                std.assert(std.is_aligned(region.descriptor.size, x86_64.page_size));
-                new_virtual_address_space.map(region.descriptor.address, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), region.allocated_size / x86_64.page_size, .{
+                const physical_address = region.descriptor.address;
+                const virtual_address = region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map);
+                const page_count = @divExact(region.allocated_size, x86_64.page_size);
+                std.log.scoped(.Mappppp).debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.offset(region.allocated_size).value, virtual_address.value, virtual_address.offset(region.allocated_size).value });
+                kernel.virtual_address_space.map_extended(physical_address, virtual_address, page_count, .{
                     .write = true,
                     .user = true,
-                }) catch unreachable;
+                }, .no, true, higher_half_direct_map) catch unreachable;
             }
         }
 
@@ -300,10 +300,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
                 std.assert(std.is_aligned(region.descriptor.size, x86_64.page_size));
-                new_virtual_address_space.map(region.descriptor.address, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), region.descriptor.size / x86_64.page_size, .{
+                kernel.virtual_address_space.map_extended(region.descriptor.address, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), region.descriptor.size / x86_64.page_size, .{
                     .write = true,
                     .user = true,
-                }) catch unreachable;
+                }, .no, true, higher_half_direct_map) catch unreachable;
             }
         }
 
@@ -315,15 +315,23 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
                 std.assert(std.is_aligned(region.size, x86_64.page_size));
-                new_virtual_address_space.map(region.address, region.address.to_virtual_address_with_offset(higher_half_direct_map), region.size / x86_64.page_size, .{
+                kernel.virtual_address_space.map_extended(region.address, region.address.to_virtual_address_with_offset(higher_half_direct_map), region.size / x86_64.page_size, .{
                     .write = true,
                     .user = true,
-                }) catch unreachable;
+                }, .no, true, higher_half_direct_map) catch unreachable;
             }
         }
 
-        new_virtual_address_space.make_current();
-        new_virtual_address_space.copy_to_new(&kernel.virtual_address_space);
+        // Make sure we have mapped all the needed pages
+        while (mapping_pages_mapped < x86_64.VAS.bootstrapping_physical_addresses.items.len) : (mapping_pages_mapped += 1) {
+            const physical_address = x86_64.VAS.bootstrapping_physical_addresses.items[mapping_pages_mapped];
+            std.log.scoped(.MappingPage).debug("Mapping 0x{x}", .{physical_address.value});
+            const virtual_address = physical_address.to_virtual_address_with_offset(higher_half_direct_map);
+            kernel.virtual_address_space.map_extended(physical_address, virtual_address, 1, .{ .write = true }, .no, true, higher_half_direct_map) catch unreachable;
+        }
+
+        kernel.virtual_address_space.make_current();
+        kernel.virtual_address_space.copy_to_new(&kernel.virtual_address_space);
         kernel.higher_half_direct_map = VirtualAddress.new(higher_half_direct_map);
 
         // Update identity-mapped pointers to higher-half ones
@@ -402,7 +410,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         kernel.memory_initialized = true;
 
         {
-            const usable_regions = bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, kernel.physical_address_space.usable.len * 2) catch @panic("Wtc");
+            const usable_regions = kernel.bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, kernel.physical_address_space.usable.len * 2) catch @panic("Wtc");
             var usable_i: u64 = 0;
             for (kernel.physical_address_space.usable) |*map_entry| {
                 // Track all of it as linearly mapped for now

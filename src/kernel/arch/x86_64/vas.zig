@@ -23,6 +23,142 @@ pub const Specific = struct {
 
 const Indices = [std.enum_count(PageIndex)]u16;
 
+pub var bootstrapping_physical_addresses: std.ArrayList(PhysicalAddress) = undefined;
+
+pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags, comptime is_bootstraping: bool, higher_half_direct_map: u64) MapError!void {
+    var allocation_count: u64 = 0;
+
+    if (time_map) {
+        map_timer_register.register_start();
+    }
+
+    defer {
+        if (time_map) {
+            if (allocation_count == 0) {
+                map_timer_register.register_end();
+            }
+        }
+    }
+
+    if (safe_map) {
+        std.assert((PhysicalAddress{ .value = virtual_address_space.arch.cr3 }).is_valid());
+        std.assert(std.is_aligned(virtual_address.value, common.page_size));
+        std.assert(std.is_aligned(physical_address.value, common.page_size));
+    }
+
+    const indices = compute_indices(virtual_address);
+
+    var pdp: *volatile PDPTable = undefined;
+    {
+        const pml4_physical_address = get_pml4_physical_address(virtual_address_space);
+        const pml4_virtual_address = if (is_bootstraping) pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else pml4_physical_address.to_higher_half_virtual_address();
+        if (is_bootstraping) {
+            check_mapped_address_bootstraping(pml4_virtual_address, pml4_physical_address);
+        }
+
+        var pml4 = pml4_virtual_address.access(*PML4Table);
+        var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
+        var pml4_entry_value = pml4_entry.value;
+
+        if (pml4_entry_value.contains(.present)) {
+            const entry_physical_address = get_address_from_entry_bits(pml4_entry_value.bits);
+            const entry_virtual_address = if (is_bootstraping) entry_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else entry_physical_address.to_higher_half_virtual_address();
+            pdp = entry_virtual_address.access(@TypeOf(pdp));
+        } else {
+            defer allocation_count += 1;
+            @panic("todo fix this pdp");
+
+            //const pdp_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PDPTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch @panic("unable to alloc pdp");
+            //if (!kernel.memory_initialized) {
+            //@panic("wtf");
+            //}
+            //fill_pml4e(pml4_entry, pdp_allocation_result.physical_address, pdp_allocation_result.virtual_address);
+        }
+    }
+
+    var pd: *volatile PDTable = undefined;
+    {
+        var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
+        var pdp_entry_value = pdp_entry.value;
+
+        if (pdp_entry_value.contains(.present)) {
+            const entry_physical_address = get_address_from_entry_bits(pdp_entry_value.bits);
+            const entry_virtual_address = if (is_bootstraping) entry_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else entry_physical_address.to_higher_half_virtual_address();
+            pd = entry_virtual_address.access(@TypeOf(pd));
+        } else {
+            defer allocation_count += 1;
+
+            const page_count = @divExact(@sizeOf(PDTable), common.page_size);
+            const entry_physical_address = kernel.physical_address_space.allocate(page_count) orelse @panic("unable to alloc pd");
+            // This address does not need to be mapped since it will be mapped later on when the used physical address space bitset memory
+            const entry_virtual_address = if (is_bootstraping) entry_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else entry_physical_address.to_higher_half_virtual_address();
+            log.debug("Allocating PD: (0x{x}, 0x{x})", .{ entry_physical_address.value, entry_virtual_address.value });
+
+            if (is_bootstraping) {
+                check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
+                log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
+                bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
+            }
+
+            pd = entry_virtual_address.access(@TypeOf(pd));
+            pd.* = std.zeroes(PDTable);
+            pdp_entry_value.or_flag(.present);
+            pdp_entry_value.or_flag(.read_write);
+            pdp_entry_value.or_flag(.user);
+            pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, entry_physical_address);
+            pdp_entry.value = pdp_entry_value;
+        }
+    }
+
+    var pt: *volatile PTable = undefined;
+    {
+        var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
+        var pd_entry_value = pd_entry.value;
+
+        if (pd_entry_value.contains(.present)) {
+            const entry_physical_address = get_address_from_entry_bits(pd_entry_value.bits);
+            const entry_virtual_address = if (is_bootstraping) entry_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else entry_physical_address.to_higher_half_virtual_address();
+            pt = entry_virtual_address.access(@TypeOf(pt));
+        } else {
+            defer allocation_count += 1;
+
+            const page_count = @divExact(@sizeOf(PDTable), common.page_size);
+            const entry_physical_address = kernel.physical_address_space.allocate(page_count) orelse @panic("unable to alloc pt");
+            const entry_virtual_address = if (is_bootstraping) entry_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else entry_physical_address.to_higher_half_virtual_address();
+            log.debug("Allocating PT: (0x{x}, 0x{x})", .{ entry_physical_address.value, entry_virtual_address.value });
+
+            if (is_bootstraping) {
+                check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
+                log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
+                bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
+            }
+
+            pt = entry_virtual_address.access(@TypeOf(pt));
+            pt.* = std.zeroes(PTable);
+            pd_entry_value.or_flag(.present);
+            pd_entry_value.or_flag(.read_write);
+            pd_entry_value.or_flag(.user);
+            pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, entry_physical_address);
+            pd_entry.value = pd_entry_value;
+        }
+    }
+
+    const pte_ptr = &pt[indices[@enumToInt(PageIndex.PT)]];
+    if (pte_ptr.value.contains(.present)) @panic("here");
+    if (pte_ptr.value.contains(.present)) return MapError.already_present;
+
+    pte_ptr.* = blk: {
+        var pte = PTE{
+            .value = PTE.Flags.from_bits(flags.bits),
+        };
+
+        pte.value.or_flag(.present);
+        pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);
+
+        break :blk pte;
+    };
+}
+
 pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, higher_half_direct_map: u64) void {
     const page_count = @divExact(@sizeOf(PML4Table), common.page_size);
     const cr3_physical_address = physical_address_space.allocate(page_count) orelse @panic("wtf");
@@ -87,120 +223,6 @@ inline fn fill_pml4e(pml4e: *volatile PML4E, pdp_physical_address: PhysicalAddre
     pml4_entry.value.or_flag(.user);
     pml4_entry.value.bits = set_entry_in_address_bits(pml4_entry.value.bits, pdp_physical_address);
     pml4e.value = pml4_entry.value;
-}
-
-pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags, comptime is_bootstraping: bool, higher_half_direct_map: u64) MapError!void {
-    var allocation_count: u64 = 0;
-
-    if (time_map) {
-        map_timer_register.register_start();
-    }
-
-    defer {
-        if (time_map) {
-            if (allocation_count == 0) {
-                map_timer_register.register_end();
-            }
-        }
-    }
-
-    if (safe_map) {
-        std.assert((PhysicalAddress{ .value = virtual_address_space.arch.cr3 }).is_valid());
-        std.assert(std.is_aligned(virtual_address.value, common.page_size));
-        std.assert(std.is_aligned(physical_address.value, common.page_size));
-    }
-
-    const indices = compute_indices(virtual_address);
-
-    var pdp: *volatile PDPTable = undefined;
-    {
-        const pml4_physical_address = get_pml4_physical_address(virtual_address_space);
-        const pml4_virtual_address = if (is_bootstraping) pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else pml4_physical_address.to_higher_half_virtual_address();
-        if (is_bootstraping) {
-            check_mapped_address_bootstraping(pml4_virtual_address, pml4_physical_address);
-        }
-
-        var pml4 = pml4_virtual_address.access(*PML4Table);
-        var pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
-        var pml4_entry_value = pml4_entry.value;
-
-        if (pml4_entry_value.contains(.present)) {
-            pdp = get_address_from_entry_bits(pml4_entry_value.bits).to_higher_half_virtual_address().access(@TypeOf(pdp));
-        } else {
-            defer allocation_count += 1;
-            @panic("todo fix this");
-
-            //const pdp_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PDPTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch @panic("unable to alloc pdp");
-            //if (!kernel.memory_initialized) {
-            //@panic("wtf");
-            //}
-            //fill_pml4e(pml4_entry, pdp_allocation_result.physical_address, pdp_allocation_result.virtual_address);
-        }
-    }
-
-    var pd: *volatile PDTable = undefined;
-    {
-        var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
-        var pdp_entry_value = pdp_entry.value;
-
-        if (pdp_entry_value.contains(.present)) {
-            pd = get_address_from_entry_bits(pdp_entry_value.bits).to_higher_half_virtual_address().access(@TypeOf(pd));
-        } else {
-            defer allocation_count += 1;
-
-            const pd_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PDTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch @panic("unable to alloc pdp");
-            if (!kernel.memory_initialized) {
-                @panic("wtf");
-            }
-            //const pd_allocation = kernel.physical_address_space.allocate(@divExact(@sizeOf(PDTable), common.page_size)) orelse @panic("unable to alloc pd");
-            pd = pd_allocation_result.virtual_address.access(@TypeOf(pd));
-            pd.* = std.zeroes(PDTable);
-            pdp_entry_value.or_flag(.present);
-            pdp_entry_value.or_flag(.read_write);
-            pdp_entry_value.or_flag(.user);
-            pdp_entry_value.bits = set_entry_in_address_bits(pdp_entry_value.bits, pd_allocation_result.physical_address);
-            pdp_entry.value = pdp_entry_value;
-        }
-    }
-
-    var pt: *volatile PTable = undefined;
-    {
-        var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
-        var pd_entry_value = pd_entry.value;
-
-        if (pd_entry_value.contains(.present)) {
-            pt = get_address_from_entry_bits(pd_entry_value.bits).to_higher_half_virtual_address().access(@TypeOf(pt));
-        } else {
-            defer allocation_count += 1;
-
-            const pt_allocation_result = virtual_address_space.allocate_extended(@sizeOf(PTable), null, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch @panic("unable to alloc pdp");
-            if (!kernel.memory_initialized) {
-                @panic("wtf");
-            }
-            pt = pt_allocation_result.virtual_address.access(@TypeOf(pt));
-            pt.* = std.zeroes(PTable);
-            pd_entry_value.or_flag(.present);
-            pd_entry_value.or_flag(.read_write);
-            pd_entry_value.or_flag(.user);
-            pd_entry_value.bits = set_entry_in_address_bits(pd_entry_value.bits, pt_allocation_result.physical_address);
-            pd_entry.value = pd_entry_value;
-        }
-    }
-
-    const pte_ptr = &pt[indices[@enumToInt(PageIndex.PT)]];
-    if (pte_ptr.value.contains(.present)) @panic("here");
-    if (pte_ptr.value.contains(.present)) return MapError.already_present;
-
-    pte_ptr.* = blk: {
-        var pte = PTE{
-            .value = PTE.Flags.from_bits(flags.bits),
-        };
-
-        pte.value.or_flag(.present);
-        pte.value.bits = set_entry_in_address_bits(pte.value.bits, physical_address);
-
-        break :blk pte;
-    };
 }
 
 pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
