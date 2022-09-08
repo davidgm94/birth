@@ -109,6 +109,12 @@ pub const AlreadyLocked = enum {
 const debug_with_translate_address = false;
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags, comptime already_locked: AlreadyLocked, comptime is_bootstrapping: bool, higher_half_direct_map: u64) MapError!void {
+    if (base_virtual_address.value <= 0xffff80007ffe2000 and base_virtual_address.offset(page_count * arch.page_size).value > 0xffff80007ffe2000) {
+        var i: u64 = 0;
+        while (i < 10) : (i += 1) {
+            log.debug("heeeeeeeeeeeeeeeeeeeeeeeeeeeeeeereeeeeeeeeeeeee", .{});
+        }
+    }
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
@@ -309,3 +315,14 @@ pub const Region = struct {
         }
     }
 };
+
+pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, page_count: u64, flags: Flags) void {
+    std.assert(virtual_address_space == &kernel.virtual_address_space);
+    // Fake a free region
+    virtual_address_space.free_regions.append(virtual_address_space.heap.allocator, VirtualAddressSpace.Region{
+        .address = virtual_address,
+        .page_count = page_count,
+        .flags = flags,
+    }) catch unreachable;
+    kernel.virtual_address_space.map(physical_address, virtual_address, page_count, flags) catch @panic("Unable to map reserved region");
+}

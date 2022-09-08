@@ -146,8 +146,11 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
     }
 
     const pte_ptr = &pt[indices[@enumToInt(PageIndex.PT)]];
-    if (pte_ptr.value.contains(.present)) @panic("here");
-    if (pte_ptr.value.contains(.present)) return MapError.already_present;
+    if (pte_ptr.value.contains(.present)) {
+        const already_mapped_physical_address = pte_ptr.value.bits & address_mask;
+        log.err("Page 0x{x} was already mapped to 0x{x}", .{ virtual_address.value, already_mapped_physical_address });
+        return MapError.already_present;
+    }
 
     pte_ptr.* = blk: {
         var pte = PTE{

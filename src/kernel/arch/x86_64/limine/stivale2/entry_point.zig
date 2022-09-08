@@ -661,13 +661,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
     entry_point_timer.end_and_log();
     cpu.ready = true;
-    while (true) {
-        asm volatile (
-            \\cli
-            \\hlt
-        );
-    }
-    //cpu.make_thread_idle();
+    cpu.make_thread_idle();
 }
 
 /// Define root.log_level to override the default

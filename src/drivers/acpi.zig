@@ -28,41 +28,36 @@ comptime {
     std.assert(std.cpu.arch == .x86_64);
 }
 
+fn map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress) VirtualAddress {
+    const aligned_physical_page = physical_address.aligned_backward(page_size);
+    const aligned_virtual_page = aligned_physical_page.to_higher_half_virtual_address();
+    virtual_address_space.map_reserved_region(aligned_physical_page, aligned_virtual_page, 1, VirtualAddressSpace.Flags.empty());
+    const virtual_address = physical_address.to_higher_half_virtual_address();
+    return virtual_address;
+}
+
 /// ACPI initialization. We should have a page mapper ready before executing this function
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime driver_tree: ?[]const Drivers.Tree) !void {
     _ = device_manager;
     _ = driver_tree;
-    const rsdp_physical_address = PhysicalAddress.new(x86_64.rsdp_physical_address);
-    log.debug("RSDP: 0x{x}", .{rsdp_physical_address.value});
-    const rsdp_physical_page = rsdp_physical_address.aligned_backward(page_size);
-    virtual_address_space.map(rsdp_physical_page, rsdp_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
-    const rsdp_virtual_address = rsdp_physical_address.to_higher_half_virtual_address();
-    const rsdp1 = rsdp_virtual_address.access(*align(1) RSDP1);
+
+    const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(x86_64.rsdp_physical_address)).access(*align(1) RSDP1);
 
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
-        const rsdt_physical_address = PhysicalAddress.new(rsdp1.RSDT_address);
-        const rsdt_virtual_address = rsdt_physical_address.to_higher_half_virtual_address();
-        const rsdt_physical_page = rsdt_physical_address.aligned_backward(page_size);
-        virtual_address_space.map(rsdt_physical_page, rsdt_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
-        log.debug("Mapped RSDT: 0x{x}", .{rsdt_physical_page.to_higher_half_virtual_address().value});
-        const rsdt = rsdt_virtual_address.access(*align(1) Header);
+        const rsdt = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(rsdp1.RSDT_address)).access(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
         const rsdt_table_count = (rsdt.length - @sizeOf(Header)) / @sizeOf(u32);
         log.debug("RSDT table count: {}", .{rsdt_table_count});
         const tables = @intToPtr([*]align(1) u32, @ptrToInt(rsdt) + @sizeOf(Header))[0..rsdt_table_count];
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
-            const table_physical_address = PhysicalAddress.new(table_address);
-            const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
-            const table_physical_page = table_physical_address.aligned_backward(page_size);
-            virtual_address_space.map(table_physical_page, table_physical_page.to_higher_half_virtual_address(), 1, VirtualAddressSpace.Flags.empty()) catch unreachable;
-            const header = table_virtual_address.access(*align(1) Header);
+            const table_header = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(table_address)).access(*align(1) Header);
 
-            switch (header.signature) {
+            switch (table_header.signature) {
                 .APIC => {
-                    const madt = @ptrCast(*align(1) MADT, header);
+                    const madt = @ptrCast(*align(1) MADT, table_header);
                     log.debug("MADT: {}", .{madt});
                     log.debug("LAPIC address: 0x{x}", .{madt.LAPIC_address});
 
@@ -125,7 +120,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                     }
                 },
                 else => {
-                    log.debug("Ignored table: {s}", .{@tagName(header.signature)});
+                    log.debug("Ignored table: {s}", .{@tagName(table_header.signature)});
                 },
             }
         }

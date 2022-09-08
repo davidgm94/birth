@@ -99,14 +99,9 @@ pub fn map_lapic() void {
     const apic_base = registers.get_apic_base();
     const lapic_physical_address = PhysicalAddress.new(apic_base);
     const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
-    const lapic_region = VirtualAddressSpace.Region{
-        .address = lapic_virtual_address,
-        .page_count = 1,
-        .flags = .{ .write = true, .cache_disable = true },
-    };
-    // Fake a free region
-    kernel.virtual_address_space.free_regions.append(kernel.virtual_address_space.heap.allocator, lapic_region) catch unreachable;
-    kernel.virtual_address_space.map(lapic_physical_address, lapic_region.address, lapic_region.page_count, lapic_region.flags) catch @panic("Unable to map LAPIC address");
+    const lapic_page_count = 1;
+    const lapic_flags = VirtualAddressSpace.Flags{ .write = true, .cache_disable = true };
+    kernel.virtual_address_space.map_reserved_region(lapic_physical_address, lapic_virtual_address, lapic_page_count, lapic_flags);
 }
 
 pub fn init_timer(cpu: *CPU) void {
