@@ -410,9 +410,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         kernel.memory_initialized = true;
 
         {
+            const region_count = kernel.physical_address_space.usable.len * 2 + kernel.physical_address_space.framebuffer.len + kernel.physical_address_space.kernel_and_modules.len + kernel.physical_address_space.reserved.len;
             // Use the bootstrap allocator since we don't want any allocation happening here
-            const usable_regions = kernel.bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, kernel.physical_address_space.usable.len * 2) catch @panic("Wtc");
-            var usable_i: u64 = 0;
+            const regions = kernel.bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, region_count) catch @panic("Wtc");
+            var region_i: u64 = 0;
             for (kernel.physical_address_space.usable) |*map_entry| {
                 // Track all of it as linearly mapped for now
                 const address = map_entry.descriptor.address;
@@ -421,8 +422,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const free_page_count = total_page_count - allocated_page_count;
 
                 if (allocated_page_count != 0) {
-                    var region = &usable_regions[usable_i];
-                    usable_i += 1;
+                    var region = &regions[region_i];
+                    region_i += 1;
 
                     region.* = VirtualAddressSpace.Region{
                         .address = address.to_higher_half_virtual_address(),
@@ -432,22 +433,26 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                         },
                     };
 
+                    std.log.scoped(.Track).debug("Tracked used region: (0x{x}, {})", .{ region.address.value, region.page_count });
+
                     if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
                         @panic("wtf");
                     }
                 }
 
                 if (free_page_count != 0) {
-                    var region = &usable_regions[usable_i];
-                    usable_i += 1;
+                    var region = &regions[region_i];
+                    region_i += 1;
 
                     region.* = VirtualAddressSpace.Region{
-                        .address = address.to_higher_half_virtual_address(),
+                        .address = address.to_higher_half_virtual_address().offset(allocated_page_count * x86_64.page_size),
                         .page_count = free_page_count,
                         .flags = VirtualAddressSpace.Flags{
                             .write = true,
                         },
                     };
+
+                    std.log.scoped(.Track).debug("Tracked free region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
                     if (!kernel.virtual_address_space.free_regions_by_address.insert(&region.by_address, region, region.address.value, .panic)) {
                         @panic("wtf");
@@ -456,6 +461,84 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     if (!kernel.virtual_address_space.free_regions_by_size.insert(&region.by_size, region, region.page_count, .allow)) {
                         @panic("wtf");
                     }
+                }
+            }
+
+            for (kernel.physical_address_space.framebuffer) |framebuffer_physical_region| {
+                std.log.scoped(.Track).debug("Framebuffer physical region: (0x{x}, {})", .{ framebuffer_physical_region.address.value, framebuffer_physical_region.size });
+                const physical_address = framebuffer_physical_region.address;
+                const virtual_address = physical_address.to_higher_half_virtual_address();
+                const page_count = @divExact(framebuffer_physical_region.size, x86_64.page_size);
+
+                const region = &regions[region_i];
+                region_i += 1;
+
+                region.* = VirtualAddressSpace.Region{
+                    .address = virtual_address,
+                    .page_count = page_count,
+                    .flags = VirtualAddressSpace.Flags{
+                        .write = true,
+                    },
+                };
+
+                std.log.scoped(.Track).debug("Tracked framebuffer region: (0x{x}, {})", .{ region.address.value, region.page_count });
+
+                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
+                    @panic("wtf");
+                }
+            }
+
+            for (kernel.physical_address_space.kernel_and_modules) |kernel_and_modules_physical_region| {
+                std.log.scoped(.Track).debug("Kernel and modules physical region: (0x{x}, {})", .{ kernel_and_modules_physical_region.address.value, kernel_and_modules_physical_region.size });
+                const physical_address = kernel_and_modules_physical_region.address;
+                const virtual_address = physical_address.to_higher_half_virtual_address();
+                const page_count = @divExact(kernel_and_modules_physical_region.size, x86_64.page_size);
+
+                const region = &regions[region_i];
+                region_i += 1;
+
+                region.* = VirtualAddressSpace.Region{
+                    .address = virtual_address,
+                    .page_count = page_count,
+                    // TODO: rewrite flags
+                    .flags = VirtualAddressSpace.Flags{},
+                };
+
+                std.log.scoped(.Track).debug("Tracked kernel and modules region: (0x{x}, {})", .{ region.address.value, region.page_count });
+
+                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
+                    @panic("wtf");
+                }
+            }
+
+            // Lock down reserved region identity-mapped virtual addresses just in case
+            for (kernel.physical_address_space.reserved) |reserved_physical_region| {
+                std.log.scoped(.Track).debug("Reserved physical region: (0x{x}, {})", .{ reserved_physical_region.address.value, reserved_physical_region.size });
+
+                const physical_address = reserved_physical_region.address;
+                const virtual_address = VirtualAddress.new(physical_address.value);
+
+                if (kernel.virtual_address_space.translate_address(virtual_address)) |mapped_physical_address| {
+                    std.log.scoped(.Track).debug("Reserved identity virtual address 0x{x} is mapped to 0x{x}", .{ virtual_address.value, mapped_physical_address.value });
+                    @panic("WTF");
+                }
+
+                const page_count = std.div_ceil(u64, reserved_physical_region.size, x86_64.page_size) catch unreachable;
+
+                const region = &regions[region_i];
+                region_i += 1;
+
+                region.* = VirtualAddressSpace.Region{
+                    .address = virtual_address,
+                    .page_count = page_count,
+                    // TODO: rewrite flags
+                    .flags = VirtualAddressSpace.Flags{},
+                };
+
+                std.log.scoped(.Track).debug("Tracked reserved region: (0x{x}, {})", .{ region.address.value, region.page_count });
+
+                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
+                    @panic("wtf");
                 }
             }
 

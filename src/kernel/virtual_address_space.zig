@@ -205,4 +205,23 @@ pub const Region = struct {
     flags: Flags,
     by_address: AVL.Tree(Region).Item = .{},
     by_size: AVL.Tree(Region).Item = .{},
+
+    pub fn is_valid_new_region(region: *Region, virtual_address_space: *VirtualAddressSpace) bool {
+        const region_base = region.address.value;
+        const region_top = region.address.offset(arch.page_size * region.page_count).value;
+
+        for (virtual_address_space.used_regions) |used_region| {
+            const used_base = used_region.address.value;
+            const used_top = used_region.address.offset(arch.page_size * region.page_count).value;
+            if (used_base <= region_base) {
+                if (used_top >= region_top) {
+                    return false;
+                }
+            } else {
+                if (used_top 
+            }
+        }
+
+        return true;
+    }
 };
