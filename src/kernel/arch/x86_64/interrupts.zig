@@ -426,7 +426,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                         const error_code_int = @truncate(u16, context.error_code);
                         const error_code = @bitCast(PageFaultErrorCode, error_code_int);
                         const page_fault_address = registers.cr2.read();
-                        crash.panic_extended("Unresolvable page fault in the kernel. Virtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
+                        crash.panic_extended("Unresolvable page fault in the kernel.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
                     },
                     else => panic("{s}", .{@tagName(exception)}),
                 }

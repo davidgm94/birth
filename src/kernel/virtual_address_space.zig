@@ -39,8 +39,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock{},
     };
-    if (true) @panic("fix this user space initialization");
-    VAS.new(virtual_address_space, physical_address_space, 0);
+    VAS.new(virtual_address_space, physical_address_space, kernel.higher_half_direct_map.value);
 
     VAS.map_kernel_address_space_higher_half(virtual_address_space, kernel_address_space);
 }

@@ -333,64 +333,63 @@ pub const Drive = struct {
         _ = sector_count;
         _ = sector_high;
         _ = sector_low;
-        if (true) @panic("fix this ahci access");
 
-        //const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).access_higher_half(*volatile HBACommandHeader);
-        //command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
-        //command_header.f.operation = disk_work.operation;
-        //// TODO: why 1
-        //command_header.prdt_length = 1;
+        const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).to_higher_half_virtual_address().access(*volatile HBACommandHeader);
+        command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
+        command_header.f.operation = disk_work.operation;
+        // TODO: why 1
+        command_header.prdt_length = 1;
 
-        //const command_table = PhysicalAddress.new(command_header.command_table_base_address_low | (@as(u64, command_header.command_table_base_address_high) << 32)).access_higher_half(*volatile HBACommandTable);
-        //command_table.* = std.zeroes(HBACommandTable);
-        //const entries = command_table.get_entries(command_header.prdt_length);
-        //std.zero_slice(HBAPRDTEntry, entries);
+        const command_table = PhysicalAddress.new(command_header.command_table_base_address_low | (@as(u64, command_header.command_table_base_address_high) << 32)).to_higher_half_virtual_address().access(*volatile HBACommandTable);
+        command_table.* = std.zeroes(HBACommandTable);
+        const entries = command_table.get_entries(command_header.prdt_length);
+        std.zero_slice(HBAPRDTEntry, entries);
 
-        //const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
-        //const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.address)) orelse @panic("wtF");
-        //const buffer_physical_address = buffer_base_physical_address.offset(buffer.completed_size);
+        const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
+        const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.address)) orelse @panic("wtF");
+        const buffer_physical_address = buffer_base_physical_address.offset(buffer.completed_size);
 
-        //// TODO: stop hardcoding this?
-        //const entry = &entries[0];
-        //entry.data_base_address_low = @truncate(u32, buffer_physical_address.value);
-        //entry.data_base_address_high = @truncate(u32, buffer_physical_address.value >> 32);
-        //entry.byte_count = @intCast(u22, (disk_work.sector_count << 9) - 1);
-        //entry.interrupt_on_completion = true;
+        // TODO: stop hardcoding this?
+        const entry = &entries[0];
+        entry.data_base_address_low = @truncate(u32, buffer_physical_address.value);
+        entry.data_base_address_high = @truncate(u32, buffer_physical_address.value >> 32);
+        entry.byte_count = @intCast(u22, (disk_work.sector_count << 9) - 1);
+        entry.interrupt_on_completion = true;
 
-        //const command_fis = @ptrCast(*FISRegisterHardwareToDevice, &command_table.command_fis);
-        //command_fis.f.fis_type = .reg_h2d;
-        //command_fis.f.command_control = true;
-        //command_fis.command = .read_dma_ex;
+        const command_fis = @ptrCast(*FISRegisterHardwareToDevice, &command_table.command_fis);
+        command_fis.f.fis_type = .reg_h2d;
+        command_fis.f.command_control = true;
+        command_fis.command = .read_dma_ex;
 
-        //command_fis.lba0 = @truncate(u8, sector_low);
-        //command_fis.lba1 = @truncate(u8, sector_low >> 8);
-        //command_fis.lba2 = @truncate(u8, sector_low >> 16);
-        //command_fis.lba3 = @truncate(u8, sector_low >> 24);
-        //command_fis.lba4 = @truncate(u8, sector_high);
-        //command_fis.lba5 = @truncate(u8, sector_high >> 8);
+        command_fis.lba0 = @truncate(u8, sector_low);
+        command_fis.lba1 = @truncate(u8, sector_low >> 8);
+        command_fis.lba2 = @truncate(u8, sector_low >> 16);
+        command_fis.lba3 = @truncate(u8, sector_low >> 24);
+        command_fis.lba4 = @truncate(u8, sector_high);
+        command_fis.lba5 = @truncate(u8, sector_high >> 8);
 
-        //command_fis.device_register = 1 << 6; // TODO: LBA mode
+        command_fis.device_register = 1 << 6; // TODO: LBA mode
 
-        //command_fis.count_low = @truncate(u8, sector_count);
-        //command_fis.count_high = @truncate(u8, sector_count >> 8);
+        command_fis.count_low = @truncate(u8, sector_count);
+        command_fis.count_high = @truncate(u8, sector_count >> 8);
 
-        //// TODO: improve
-        //var spin: u64 = 0;
+        // TODO: improve
+        var spin: u64 = 0;
 
-        //while (drive.hba_port.task_file_data & (ata_dev_busy | ata_dev_drq) != 0 and spin < 1_000_000) : (spin += 1) {}
+        while (drive.hba_port.task_file_data & (ata_dev_busy | ata_dev_drq) != 0 and spin < 1_000_000) : (spin += 1) {}
 
-        //if (spin == 1_000_000) {
-        //@panic("Spin hit");
-        //}
+        if (spin == 1_000_000) {
+            @panic("Spin hit");
+        }
 
-        //drive.hba_port.command_issue = 1;
+        drive.hba_port.command_issue = 1;
 
-        //while (true) {
-        //if (drive.hba_port.command_issue == 0) break;
-        //if (drive.hba_port.interrupt_status & hba_pxis_tfes != 0) @panic("interrupt status");
-        //}
+        while (true) {
+            if (drive.hba_port.command_issue == 0) break;
+            if (drive.hba_port.interrupt_status & hba_pxis_tfes != 0) @panic("interrupt status");
+        }
 
-        //buffer.completed_size += requested_size;
+        buffer.completed_size += requested_size;
 
         return disk_work.sector_count;
     }
