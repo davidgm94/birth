@@ -23,9 +23,8 @@ arch: VAS.Specific,
 privilege_level: PrivilegeLevel,
 heap: Heap,
 lock: Spinlock,
-free_regions_by_address: AVL.Tree(Region) = .{},
-free_regions_by_size: AVL.Tree(Region) = .{},
-used_regions: AVL.Tree(Region) = .{},
+free_regions: std.ArrayList(Region) = .{},
+used_regions: std.ArrayList(Region) = .{},
 
 pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     VAS.from_current(virtual_address_space);
@@ -124,6 +123,42 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     var physical_address = base_physical_address;
     var virtual_address = base_virtual_address;
 
+    if (!is_bootstrapping) blk: {
+        const region = Region{
+            .address = virtual_address,
+            .page_count = page_count,
+            .flags = flags,
+        };
+
+        var recording_virtual_address_space = if (base_virtual_address.value >= kernel.higher_half_direct_map.value) &kernel.virtual_address_space else virtual_address_space;
+
+        for (recording_virtual_address_space.free_regions.items) |*free_region, free_region_i| {
+            if (free_region.contains(region)) {
+                log.debug("Contained", .{});
+                if (region.address.value == free_region.address.value) {
+                    std.assert(free_region.page_count >= region.page_count);
+                    if (free_region.page_count > region.page_count) {
+                        free_region.address.value += region.page_count * arch.page_size;
+                        free_region.page_count -= region.page_count;
+                    } else if (free_region.page_count == region.page_count) {
+                        log.debug("deleting by swap remove", .{});
+                        _ = recording_virtual_address_space.free_regions.swapRemove(free_region_i);
+                    } else {
+                        @panic("Container region is smaller than contained region");
+                    }
+
+                    recording_virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region) catch unreachable;
+
+                    break :blk;
+                } else {
+                    @panic("Wtf");
+                }
+            }
+        }
+
+        @panic("wtf no free space");
+    }
+
     var page_i: u64 = 0;
     while (page_i < page_count) : (page_i += 1) {
         defer physical_address.value += arch.page_size;
@@ -137,21 +172,9 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
         }
     }
 
-    if (kernel.memory_initialized) {
-        virtual_address_space.track(virtual_address, physical_address, page_count);
-    }
-}
-
-pub fn track_used_region(virtual_address_space: *VirtualAddressSpace, region: *Region) void {
-    virtual_address_space.used_regions.insert(&region.by_address, region, region.address, .panic);
-}
-
-pub fn track(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, physical_address: PhysicalAddress, page_count: u64) void {
-    _ = virtual_address_space;
-    _ = virtual_address;
-    _ = physical_address;
-    _ = page_count;
-    @panic("TODO");
+    //if (kernel.memory_initialized) {
+    //virtual_address_space.track(virtual_address, physical_address, page_count);
+    //}
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
@@ -199,29 +222,90 @@ pub const Flags = packed struct {
     }
 };
 
+pub fn add_used_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
+    if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {
+        try virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region);
+    } else {
+        @panic("Invalid region");
+    }
+}
+
+pub fn add_free_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
+    if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {
+        try virtual_address_space.free_regions.append(kernel.virtual_address_space.heap.allocator, region);
+    } else {
+        @panic("Invalid region");
+    }
+}
+
 pub const Region = struct {
     address: VirtualAddress,
     page_count: u64,
     flags: Flags,
-    by_address: AVL.Tree(Region).Item = .{},
-    by_size: AVL.Tree(Region).Item = .{},
 
-    pub fn is_valid_new_region(region: *Region, virtual_address_space: *VirtualAddressSpace) bool {
+    pub fn is_valid_new_region_at_bootstrapping(region: Region, virtual_address_space: *VirtualAddressSpace) bool {
         const region_base = region.address.value;
         const region_top = region.address.offset(arch.page_size * region.page_count).value;
 
-        for (virtual_address_space.used_regions) |used_region| {
-            const used_base = used_region.address.value;
-            const used_top = used_region.address.offset(arch.page_size * region.page_count).value;
-            if (used_base <= region_base) {
-                if (used_top >= region_top) {
-                    return false;
-                }
-            } else {
-                if (used_top 
+        for (virtual_address_space.used_regions.items) |used_region| {
+            if (used_region.overlap(region_base, region_top)) {
+                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Used: (0x{x}, 0x{x})", .{ region_base, region_top, used_region.address.value, used_region.address.offset(arch.page_size * used_region.page_count).value });
+                return false;
+            }
+        }
+
+        for (virtual_address_space.free_regions.items) |free_region| {
+            if (free_region.overlap(region_base, region_top)) {
+                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Free: (0x{x}, 0x{x})", .{ region_base, region_top, free_region.address.value, free_region.address.offset(arch.page_size * free_region.page_count).value });
+                return false;
             }
         }
 
         return true;
+    }
+
+    inline fn overlap(region: Region, region_base: u64, region_top: u64) bool {
+        const other_base = region.address.value;
+        const other_top = region.address.offset(arch.page_size * region.page_count).value;
+
+        if (region_base <= other_base and region_top >= other_top) {
+            log.debug("Reason 1", .{});
+            return true;
+        } else if (other_base <= region_base and other_top >= region_top) {
+            log.debug("Reason 2", .{});
+            return true;
+        } else if (region_base <= other_base) {
+            if (region_top > other_base) {
+                log.debug("Reason 3", .{});
+                return true;
+            }
+        } else if (other_base <= region_base) {
+            if (other_top > region_base) {
+                log.debug("Reason 4", .{});
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    inline fn contains(container: Region, contained: Region) bool {
+        log.debug("(0x{x}, 0x{x}) contains (0x{x}, 0x{x})?", .{ container.address.value, container.address.offset(arch.page_size * container.page_count).value, contained.address.value, contained.address.offset(arch.page_size * contained.page_count).value });
+        if (container.address.offset(container.page_count * arch.page_size).value <= contained.address.value) {
+            log.debug("contain1", .{});
+            return false;
+        }
+        if (contained.address.offset(contained.page_count * arch.page_size).value <= container.address.value) {
+            log.debug("contain2", .{});
+            return false;
+        }
+        if (container.address.value < contained.address.value) {
+            @panic("foo1");
+        } else if (container.address.value > contained.address.value) {
+            @panic("foo2");
+        } else {
+            if (container.page_count < contained.page_count) @panic("Region overlap but it is too big");
+            return true;
+        }
     }
 };

@@ -410,10 +410,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         kernel.memory_initialized = true;
 
         {
-            const region_count = kernel.physical_address_space.usable.len * 2 + kernel.physical_address_space.framebuffer.len + kernel.physical_address_space.kernel_and_modules.len + kernel.physical_address_space.reserved.len;
             // Use the bootstrap allocator since we don't want any allocation happening here
-            const regions = kernel.bootstrap_allocator.allocator().alloc(VirtualAddressSpace.Region, region_count) catch @panic("Wtc");
-            var region_i: u64 = 0;
+            kernel.virtual_address_space.used_regions.ensureTotalCapacity(kernel.bootstrap_allocator.allocator(), 512) catch unreachable;
+            kernel.virtual_address_space.free_regions.ensureTotalCapacity(kernel.bootstrap_allocator.allocator(), 512) catch unreachable;
+
             for (kernel.physical_address_space.usable) |*map_entry| {
                 // Track all of it as linearly mapped for now
                 const address = map_entry.descriptor.address;
@@ -422,10 +422,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const free_page_count = total_page_count - allocated_page_count;
 
                 if (allocated_page_count != 0) {
-                    var region = &regions[region_i];
-                    region_i += 1;
-
-                    region.* = VirtualAddressSpace.Region{
+                    const region = VirtualAddressSpace.Region{
                         .address = address.to_higher_half_virtual_address(),
                         .page_count = allocated_page_count,
                         .flags = VirtualAddressSpace.Flags{
@@ -435,16 +432,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                     std.log.scoped(.Track).debug("Tracked used region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
-                    if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
-                        @panic("wtf");
-                    }
+                    kernel.virtual_address_space.add_used_region(region) catch unreachable;
                 }
 
                 if (free_page_count != 0) {
-                    var region = &regions[region_i];
-                    region_i += 1;
-
-                    region.* = VirtualAddressSpace.Region{
+                    const region = VirtualAddressSpace.Region{
                         .address = address.to_higher_half_virtual_address().offset(allocated_page_count * x86_64.page_size),
                         .page_count = free_page_count,
                         .flags = VirtualAddressSpace.Flags{
@@ -454,13 +446,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                     std.log.scoped(.Track).debug("Tracked free region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
-                    if (!kernel.virtual_address_space.free_regions_by_address.insert(&region.by_address, region, region.address.value, .panic)) {
-                        @panic("wtf");
-                    }
-
-                    if (!kernel.virtual_address_space.free_regions_by_size.insert(&region.by_size, region, region.page_count, .allow)) {
-                        @panic("wtf");
-                    }
+                    kernel.virtual_address_space.add_free_region(region) catch unreachable;
                 }
             }
 
@@ -470,10 +456,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const virtual_address = physical_address.to_higher_half_virtual_address();
                 const page_count = @divExact(framebuffer_physical_region.size, x86_64.page_size);
 
-                const region = &regions[region_i];
-                region_i += 1;
-
-                region.* = VirtualAddressSpace.Region{
+                const region = VirtualAddressSpace.Region{
                     .address = virtual_address,
                     .page_count = page_count,
                     .flags = VirtualAddressSpace.Flags{
@@ -483,9 +466,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                 std.log.scoped(.Track).debug("Tracked framebuffer region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
-                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
-                    @panic("wtf");
-                }
+                kernel.virtual_address_space.add_used_region(region) catch unreachable;
             }
 
             for (kernel.physical_address_space.kernel_and_modules) |kernel_and_modules_physical_region| {
@@ -494,10 +475,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const virtual_address = physical_address.to_higher_half_virtual_address();
                 const page_count = @divExact(kernel_and_modules_physical_region.size, x86_64.page_size);
 
-                const region = &regions[region_i];
-                region_i += 1;
-
-                region.* = VirtualAddressSpace.Region{
+                const region = VirtualAddressSpace.Region{
                     .address = virtual_address,
                     .page_count = page_count,
                     // TODO: rewrite flags
@@ -506,9 +484,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                 std.log.scoped(.Track).debug("Tracked kernel and modules region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
-                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
-                    @panic("wtf");
-                }
+                kernel.virtual_address_space.add_used_region(region) catch unreachable;
             }
 
             // Lock down reserved region identity-mapped virtual addresses just in case
@@ -525,10 +501,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                 const page_count = std.div_ceil(u64, reserved_physical_region.size, x86_64.page_size) catch unreachable;
 
-                const region = &regions[region_i];
-                region_i += 1;
-
-                region.* = VirtualAddressSpace.Region{
+                const region = VirtualAddressSpace.Region{
                     .address = virtual_address,
                     .page_count = page_count,
                     // TODO: rewrite flags
@@ -537,19 +510,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                 std.log.scoped(.Track).debug("Tracked reserved region: (0x{x}, {})", .{ region.address.value, region.page_count });
 
-                if (!kernel.virtual_address_space.used_regions.insert(&region.by_address, region, region.address.value, .panic)) {
-                    @panic("wtf");
-                }
+                kernel.virtual_address_space.add_used_region(region) catch unreachable;
             }
-
-            //for (kernel.physical_address_space.reclaimable) |*map_entry| {
-            //}
-            //for (kernel.physical_address_space.framebuffer) |*region| {
-            //}
-            //for (kernel.physical_address_space.kernel_and_modules) |*region| {
-            //}
-            //for (kernel.physical_address_space.reserved) |*region| {
-            //}
         }
 
         // TODO: Handle virtual memory management later on
@@ -650,7 +612,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[0]);
         TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
         // Map LAPIC address on just one CPU (since it's global)
-        CPU.map_lapic(&kernel.virtual_address_space);
+        CPU.map_lapic();
 
         // TODO: ignore BSP cpu when AP initialization?
         for (threads) |*thread, thread_i| {

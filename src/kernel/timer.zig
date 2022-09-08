@@ -99,11 +99,19 @@ pub const Register = struct {
             sum += timestamp;
         }
 
+        var result: u64 = 0;
+        var remainder: u64 = 0;
+
+        if (sum != 0) {
+            result = sum / register.count;
+            remainder = sum % register.count;
+        }
+
         return IntegerMean{
             .sum = sum,
             .count = register.count,
-            .result = sum / register.count,
-            .remainder = sum % register.count,
+            .result = result,
+            .remainder = remainder,
         };
     }
 

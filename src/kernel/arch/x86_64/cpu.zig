@@ -6,6 +6,7 @@ const GDT = @import("gdt.zig");
 const IDT = @import("idt.zig");
 const interrupts = @import("interrupts.zig");
 const io = @import("io.zig");
+const kernel = @import("../../kernel.zig");
 const LAPIC = @import("lapic.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const PIC = @import("pic.zig");
@@ -91,14 +92,21 @@ pub fn init_interrupts(cpu: *CPU) void {
 
 var map_lapic_address_times_called: u8 = 0;
 /// This function is only meant to be called once
-pub fn map_lapic(virtual_address_space: *VirtualAddressSpace) void {
+pub fn map_lapic() void {
     if (@ptrCast(*volatile u8, &map_lapic_address_times_called).* != 0) @panic("Trying to map LAPIC address more than once");
     defer _ = @atomicRmw(u8, &map_lapic_address_times_called, .Add, 1, .SeqCst);
 
     const apic_base = registers.get_apic_base();
     const lapic_physical_address = PhysicalAddress.new(apic_base);
     const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
-    virtual_address_space.map(lapic_physical_address, lapic_virtual_address, 1, .{ .write = true, .cache_disable = true }) catch @panic("Unable to map LAPIC address");
+    const lapic_region = VirtualAddressSpace.Region{
+        .address = lapic_virtual_address,
+        .page_count = 1,
+        .flags = .{ .write = true, .cache_disable = true },
+    };
+    // Fake a free region
+    kernel.virtual_address_space.free_regions.append(kernel.virtual_address_space.heap.allocator, lapic_region) catch unreachable;
+    kernel.virtual_address_space.map(lapic_physical_address, lapic_region.address, lapic_region.page_count, lapic_region.flags) catch @panic("Unable to map LAPIC address");
 }
 
 pub fn init_timer(cpu: *CPU) void {
