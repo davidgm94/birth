@@ -264,7 +264,7 @@ pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddre
     kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, 1, .{ .write = true, .user = true }) catch unreachable;
     const pml4 = cr3_kernel_virtual_address.access(*PML4Table);
     std.zero_slice(PML4E, pml4[0..0x100]);
-    if (true) @panic("fix this");
+    if (true) @panic("fix this map kernel address space higher half");
     //std.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
     log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }

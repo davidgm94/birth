@@ -28,12 +28,17 @@ comptime {
     std.assert(std.cpu.arch == .x86_64);
 }
 
-fn map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress) VirtualAddress {
+inline fn map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, comptime maybe_flags: ?VirtualAddressSpace.Flags) VirtualAddress {
     const aligned_physical_page = physical_address.aligned_backward(page_size);
     const aligned_virtual_page = aligned_physical_page.to_higher_half_virtual_address();
-    virtual_address_space.map_reserved_region(aligned_physical_page, aligned_virtual_page, 1, VirtualAddressSpace.Flags.empty());
+    virtual_address_space.map_reserved_region(aligned_physical_page, aligned_virtual_page, 1, if (maybe_flags) |flags| flags else VirtualAddressSpace.Flags.empty());
     const virtual_address = physical_address.to_higher_half_virtual_address();
     return virtual_address;
+}
+
+fn is_in_page_range(a: u64, b: u64) bool {
+    const difference = if (a > b) a - b else b - a;
+    return difference < page_size;
 }
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
@@ -41,19 +46,21 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     _ = device_manager;
     _ = driver_tree;
 
-    const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(x86_64.rsdp_physical_address)).access(*align(1) RSDP1);
+    const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(x86_64.rsdp_physical_address), null).access(*align(1) RSDP1);
 
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
         log.debug("RSDT: 0x{x}", .{rsdp1.RSDT_address});
-        const rsdt = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(rsdp1.RSDT_address)).access(*align(1) Header);
+        const rsdt = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(rsdp1.RSDT_address), null).access(*align(1) Header);
         log.debug("RSDT length: {}", .{rsdt.length});
         const rsdt_table_count = (rsdt.length - @sizeOf(Header)) / @sizeOf(u32);
         log.debug("RSDT table count: {}", .{rsdt_table_count});
         const tables = @intToPtr([*]align(1) u32, @ptrToInt(rsdt) + @sizeOf(Header))[0..rsdt_table_count];
+        var last_physical: u64 = rsdp1.RSDT_address;
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
-            const table_header = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(table_address)).access(*align(1) Header);
+            const table_header = if (is_in_page_range(last_physical, table_address)) PhysicalAddress.new(table_address).to_higher_half_virtual_address().access(*align(1) Header) else map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(table_address), null).access(*align(1) Header);
+            last_physical = table_address;
 
             switch (table_header.signature) {
                 .APIC => {
@@ -96,7 +103,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                                 std.assert(@sizeOf(MADT.IO_APIC) == entry_length);
                                 interrupts.ioapic.gsi = ioapic.global_system_interrupt_base;
                                 interrupts.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
-                                virtual_address_space.map(interrupts.ioapic.address, interrupts.ioapic.address.to_higher_half_virtual_address(), 1, .{ .write = true, .cache_disable = true }) catch unreachable;
+                                _ = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, interrupts.ioapic.address, .{ .write = true, .cache_disable = true });
                                 interrupts.ioapic.id = ioapic.IO_APIC_ID;
                             },
                             .ISO => {

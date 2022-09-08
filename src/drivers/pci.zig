@@ -383,7 +383,8 @@ pub const Device = struct {
         device.bar_physical_addresses[bar_i] = physical_address;
         device.bar_sizes[bar_i] = size;
         const virtual_address = physical_address.to_higher_half_virtual_address();
-        try virtual_address_space.map(physical_address, virtual_address, @divExact(size, arch.page_size), .{ .write = true, .cache_disable = true });
+        const page_count = @divExact(size, arch.page_size);
+        virtual_address_space.map_reserved_region(physical_address, virtual_address, page_count, .{ .write = true, .cache_disable = true });
 
         return virtual_address;
     }

@@ -333,7 +333,7 @@ pub const Drive = struct {
         _ = sector_count;
         _ = sector_high;
         _ = sector_low;
-        if (true) @panic("fix this");
+        if (true) @panic("fix this ahci access");
 
         //const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).access_higher_half(*volatile HBACommandHeader);
         //command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
