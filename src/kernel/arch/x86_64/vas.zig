@@ -123,11 +123,18 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                 }
 
                 if (!mapped) {
-                    @panic("fix this");
+                    if (kernel.bootstrap_virtual_address_space.lock.status != 0) {
+                        kernel.bootstrap_virtual_address_space.map_extended(entry_physical_address, entry_virtual_address, page_count, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch unreachable;
+                    } else {
+                        kernel.bootstrap_virtual_address_space.map_extended(entry_physical_address, entry_virtual_address, page_count, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.no, is_bootstraping, higher_half_direct_map) catch unreachable;
+                    }
                 }
+
                 check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
                 log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
                 bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
+            } else {
+                @panic("todo");
             }
 
             pd = entry_virtual_address.access(@TypeOf(pd));
@@ -240,7 +247,7 @@ pub fn log_map_timer_register() void {
 
 fn check_mapped_address_bootstraping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) void {
     log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Panicking if not", .{ virtual_address.value, physical_address.value });
-    if (kernel.bootstrap_virtual_address_space.translate_address(virtual_address)) |mapped_address| {
+    if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, false)) |mapped_address| {
         if (mapped_address.value == physical_address.value) {
             return;
         }
@@ -251,7 +258,7 @@ fn check_mapped_address_bootstraping(virtual_address: VirtualAddress, physical_a
 
 fn get_mapped_address_bootstrapping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) ?PhysicalAddress {
     log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Not panicking", .{ virtual_address.value, physical_address.value });
-    if (kernel.bootstrap_virtual_address_space.translate_address(virtual_address)) |mapped_address| {
+    if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, false)) |mapped_address| {
         return mapped_address;
     }
 

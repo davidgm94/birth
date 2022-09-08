@@ -114,6 +114,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
             log.debug("heeeeeeeeeeeeeeeeeeeeeeeeeeeeeeereeeeeeeeeeeeee", .{});
         }
     }
+
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
@@ -186,7 +187,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_ad
     return translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no, false);
 }
 
-fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked, comptime is_bootstrapping: bool) ?PhysicalAddress {
+pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked, comptime is_bootstrapping: bool) ?PhysicalAddress {
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
