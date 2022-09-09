@@ -26,7 +26,7 @@ pub fn build(b: *Build.Builder) void {
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
                     .qemu = .{
-                        .vga = .std,
+                        .vga = null,
                         .smp = null,
                         .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,
@@ -219,7 +219,11 @@ const Kernel = struct {
                     kernel.run_argument_list.append("-vga") catch unreachable;
                     kernel.run_argument_list.append(@tagName(vga_option)) catch unreachable;
                 } else {
-                    kernel.run_argument_list.append("-nographic") catch unreachable;
+                    kernel.run_argument_list.append("-vga") catch unreachable;
+                    kernel.run_argument_list.append("none") catch unreachable;
+                    kernel.run_argument_list.append("-display") catch unreachable;
+                    kernel.run_argument_list.append("none") catch unreachable;
+                    //kernel.run_argument_list.append("-nographic") catch unreachable;
                 }
 
                 if (kernel.options.arch == .x86_64) {

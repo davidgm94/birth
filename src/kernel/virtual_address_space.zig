@@ -75,7 +75,9 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
             if (flags.user) {
                 break :blk VirtualAddress.new(physical_address.value);
             } else {
-                break :blk if (is_bootstrapping) physical_address.to_virtual_address_with_offset(kernel_higher_half_map) else physical_address.to_higher_half_virtual_address();
+                break :blk if (is_bootstrapping) @panic("can't allocate while bootstrapping")
+                //physical_address.to_virtual_address_with_offset(kernel_higher_half_map)
+                else physical_address.to_higher_half_virtual_address();
             }
         }
     };
