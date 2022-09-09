@@ -123,6 +123,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     const virtual_address_offset = 0;
                     block.setup_bitset(virtual_address_offset);
 
+                    std.log.scoped(.Physical).debug("Usable physical region: (0x{x}, 0x{x})", .{ block.descriptor.address.value, block.descriptor.address.offset(block.descriptor.size).value });
+
                     break :host_entry_blk block;
                 }
             }
@@ -146,6 +148,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .allocated_size = 0,
                     .type = .usable,
                 };
+
+                std.log.scoped(.Physical).debug("Usable physical region: (0x{x}, 0x{x})", .{ result_entry.descriptor.address.value, result_entry.descriptor.address.offset(result_entry.descriptor.size).value });
 
                 const virtual_address_offset = 0;
                 const bitset = result_entry.get_bitset_extended(virtual_address_offset);
@@ -171,6 +175,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .type = .reclaimable,
                 };
 
+                std.log.scoped(.Physical).debug("Framebuffer physical region: (0x{x}, 0x{x})", .{ result_entry.descriptor.address.value, result_entry.descriptor.address.offset(result_entry.descriptor.size).value });
+
                 // Don't use the bitset here because it would imply using memory that may not be usable at the moment of writing the bitset to this region
             }
         }
@@ -186,6 +192,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .address = PhysicalAddress.new(entry.address),
                     .size = entry.size,
                 };
+
+                std.log.scoped(.Physical).debug("Framebuffer physical region: (0x{x}, 0x{x})", .{ result_entry.address.value, result_entry.address.offset(result_entry.size).value });
 
                 // Don't use the bitset here because it would imply using memory that may not be usable at the moment of writing the bitset to this region
             }
@@ -207,6 +215,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .size = entry.size,
                 };
 
+                std.log.scoped(.Physical).debug("Kernel physical region: (0x{x}, 0x{x})", .{ result_entry.address.value, result_entry.address.offset(result_entry.size).value });
+
                 // Don't use the bitset here because it would imply using memory that may not be usable at the moment of writing the bitset to this region
             }
         }
@@ -227,6 +237,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                     .address = PhysicalAddress.new(entry.address),
                     .size = entry.size,
                 };
+                std.log.scoped(.Physical).debug("Reserved physical region: (0x{x}, 0x{x})", .{ result_entry.address.value, result_entry.address.offset(result_entry.size).value });
 
                 // Don't use the bitset here because it would imply using memory that may not be usable at the moment of writing the bitset to this region
             }
@@ -258,11 +269,14 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
         // Map the kernel and do some tests
         {
+            std.log.scoped(.MyMap).debug("Starting mapping kernel executable", .{});
+
             var map_timer = Timer.Scoped(.KernelMap).start();
             defer map_timer.end_and_log();
 
             // TODO: better flags
             for (stivale_pmrs) |pmr| {
+                defer std.log.scoped(.MyMap).debug("Mapped section", .{});
                 const section_virtual_address = VirtualAddress.new(pmr.address);
                 const section_page_count = @divExact(pmr.size, x86_64.page_size);
                 const section_physical_address = kernel.bootstrap_virtual_address_space.translate_address(section_virtual_address) orelse @panic("address not translated");
@@ -275,6 +289,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
         var mapping_pages_mapped = x86_64.VAS.bootstrapping_physical_addresses.items.len;
         {
+            std.log.scoped(.MyMap).debug("Starting mapping usable regions", .{});
+
             var map_timer = Timer.Scoped(.UsableMap).start();
             defer map_timer.end_and_log();
             // TODO: better flags
