@@ -54,7 +54,18 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
         const pml4_physical_address = get_pml4_physical_address(virtual_address_space);
         const pml4_virtual_address = if (is_bootstraping) pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else pml4_physical_address.to_higher_half_virtual_address();
         if (is_bootstraping) {
-            check_mapped_address_bootstraping(pml4_virtual_address, pml4_physical_address);
+            if (get_mapped_address_bootstrapping(pml4_virtual_address, pml4_physical_address)) |mapped_address| {
+                if (mapped_address.value != pml4_physical_address.value) {
+                    @panic("wtf");
+                }
+            } else {
+                const page_count = @divExact(@sizeOf(PML4Table), page_size);
+                if (kernel.bootstrap_virtual_address_space.lock.status != 0) {
+                    kernel.bootstrap_virtual_address_space.map_extended(pml4_physical_address, pml4_virtual_address, page_count, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.yes, is_bootstraping, higher_half_direct_map) catch unreachable;
+                } else {
+                    kernel.bootstrap_virtual_address_space.map_extended(pml4_physical_address, pml4_virtual_address, page_count, .{ .write = true }, VirtualAddressSpace.AlreadyLocked.no, is_bootstraping, higher_half_direct_map) catch unreachable;
+                }
+            }
         }
 
         var pml4 = pml4_virtual_address.access(*PML4Table);
@@ -248,12 +259,12 @@ pub fn log_map_timer_register() void {
 fn check_mapped_address_bootstraping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) void {
     log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Panicking if not", .{ virtual_address.value, physical_address.value });
     if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, false)) |mapped_address| {
-        if (mapped_address.value == physical_address.value) {
-            return;
+        if (mapped_address.value != physical_address.value) {
+            crash.panic("VA 0x{x} is already mapped to PA 0x{x}", .{ virtual_address.value, physical_address.value });
         }
+    } else {
+        crash.panic("VA 0x{x} is not mapped to any address", .{virtual_address.value});
     }
-
-    crash.panic("VA 0x{x} is mapped to PA 0x{x}", .{ virtual_address.value, physical_address.value });
 }
 
 fn get_mapped_address_bootstrapping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) ?PhysicalAddress {
