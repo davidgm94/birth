@@ -459,11 +459,9 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress)
 }
 
 inline fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
-    if (safe_map) {
-        std.assert(common.max_physical_address_bit == 40);
-    }
     const address = entry_bits & address_mask;
     if (safe_map) {
+        std.assert(common.max_physical_address_bit == 40);
         std.assert(std.is_aligned(address, common.page_size));
     }
 
