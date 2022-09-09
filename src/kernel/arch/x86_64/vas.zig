@@ -20,6 +20,10 @@ const page_size = common.page_size;
 
 pub const Specific = struct {
     cr3: u64 = 0,
+
+    pub fn format(specific: Specific, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try std.internal_format(writer, "0x{x}", .{specific.cr3});
+    }
 };
 
 const Indices = [std.enum_count(PageIndex)]u16;
@@ -251,12 +255,22 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         .cr3 = cr3_physical_address.value,
     };
 
-    const pml4_physical_address = get_pml4_physical_address(virtual_address_space);
-    if (virtual_address_space.privilege_level == .kernel) {
-        std.assert(higher_half_direct_map != 0);
+    const is_kernel_address_space = virtual_address_space == &kernel.virtual_address_space;
+    std.assert((virtual_address_space.privilege_level == .kernel) == is_kernel_address_space);
+    _ = higher_half_direct_map;
 
-        check_mapped_address_bootstraping(pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map), pml4_physical_address);
+    if (is_kernel_address_space) {
+        check_mapped_address_bootstraping(cr3_physical_address.to_identity_mapped_virtual_address(), cr3_physical_address);
+        @panic("TODO: implement kernel virtual address space");
+    } else {
+        @panic("TODO: implement user address spaces");
     }
+
+    //if (virtual_address_space.privilege_level == .kernel) {
+    //std.assert(higher_half_direct_map != 0);
+
+    //check_mapped_address_bootstraping(pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map), pml4_physical_address);
+    //}
 
     // INFO: this higher half direct map is assumed to be non-zero
     //std.assert(higher_half_direct_map != 0);
@@ -289,8 +303,9 @@ pub fn log_map_timer_register() void {
 }
 
 fn check_mapped_address_bootstraping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) void {
+    std.assert(kernel.bootstrap_virtual_address_space.valid);
     //log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Panicking if not", .{ virtual_address.value, physical_address.value });
-    if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, false)) |mapped_address| {
+    if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, true)) |mapped_address| {
         if (mapped_address.value != physical_address.value) {
             crash.panic("VA 0x{x} is already mapped to PA 0x{x}", .{ virtual_address.value, physical_address.value });
         }
@@ -329,6 +344,7 @@ pub inline fn from_current(virtual_address_space: *VirtualAddressSpace) void {
         .privilege_level = .kernel,
         .heap = .{},
         .lock = .{},
+        .valid = true,
     };
 }
 
@@ -351,22 +367,24 @@ pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddre
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress, comptime is_bootstraping: bool) ?PhysicalAddress {
     std.assert(asked_virtual_address.is_valid());
     const virtual_address = asked_virtual_address.aligned_backward(common.page_size);
-
     const indices = compute_indices(virtual_address);
 
-    const is_bootstrapping_address_space = virtual_address_space == kernel.bootstrap_virtual_address_space;
+    const is_bootstrapping_address_space = is_bootstraping and virtual_address_space == kernel.bootstrap_virtual_address_space;
+    const virtual_address_offset: u64 = if (is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value;
+    std.assert((kernel.higher_half_direct_map.value == 0) == is_bootstraping);
 
     var pdp: *volatile PDPTable = undefined;
     {
-        //log.debug("CR3: 0x{x}", .{address_space.cr3});
-        var pml4 = get_pml4_physical_address(virtual_address_space).to_virtual_address_with_offset(if (is_bootstraping and is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value).access(*PML4Table);
+        var pml4 = get_pml4_physical_address(virtual_address_space).to_virtual_address_with_offset(virtual_address_offset).access(*PML4Table);
         const pml4_entry = &pml4[indices[@enumToInt(PageIndex.PML4)]];
         var pml4_entry_value = pml4_entry.value;
 
-        if (!pml4_entry_value.contains(.present)) return null;
-        //log.debug("PML4 present", .{});
+        if (!pml4_entry_value.contains(.present)) {
+            log.err("PML4 entry present for {} when translating virtual address {}", .{ virtual_address_space, asked_virtual_address });
+            return null;
+        }
 
-        pdp = get_address_from_entry_bits(pml4_entry_value.bits).to_virtual_address_with_offset(if (is_bootstraping and is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value).access(@TypeOf(pdp));
+        pdp = get_address_from_entry_bits(pml4_entry_value.bits).to_virtual_address_with_offset(virtual_address_offset).access(@TypeOf(pdp));
     }
 
     var pd: *volatile PDTable = undefined;
@@ -374,10 +392,12 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         var pdp_entry = &pdp[indices[@enumToInt(PageIndex.PDP)]];
         var pdp_entry_value = pdp_entry.value;
 
-        if (!pdp_entry_value.contains(.present)) return null;
-        //log.debug("PDP present", .{});
+        if (!pdp_entry_value.contains(.present)) {
+            log.err("PDP entry present for {} when translating virtual address {}", .{ virtual_address_space, asked_virtual_address });
+            return null;
+        }
 
-        pd = get_address_from_entry_bits(pdp_entry_value.bits).to_virtual_address_with_offset(if (is_bootstraping and is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value).access(@TypeOf(pd));
+        pd = get_address_from_entry_bits(pdp_entry_value.bits).to_virtual_address_with_offset(virtual_address_offset).access(@TypeOf(pd));
     }
 
     var pt: *volatile PTable = undefined;
@@ -385,10 +405,12 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         var pd_entry = &pd[indices[@enumToInt(PageIndex.PD)]];
         var pd_entry_value = pd_entry.value;
 
-        if (!pd_entry_value.contains(.present)) return null;
-        //log.debug("PD present", .{});
+        if (!pd_entry_value.contains(.present)) {
+            log.err("PDP entry present for {} when translating virtual address {}", .{ virtual_address_space, asked_virtual_address });
+            return null;
+        }
 
-        pt = get_address_from_entry_bits(pd_entry_value.bits).to_virtual_address_with_offset(if (is_bootstraping and is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value).access(@TypeOf(pt));
+        pt = get_address_from_entry_bits(pd_entry_value.bits).to_virtual_address_with_offset(virtual_address_offset).access(@TypeOf(pt));
     }
 
     const pte = pt[indices[@enumToInt(PageIndex.PT)]];

@@ -25,6 +25,7 @@ heap: Heap,
 lock: Spinlock,
 free_regions: std.ArrayList(Region) = .{},
 used_regions: std.ArrayList(Region) = .{},
+valid: bool,
 
 pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     VAS.from_current(virtual_address_space);
@@ -38,6 +39,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock{},
+        .valid = false,
     };
     VAS.new(virtual_address_space, physical_address_space, kernel.higher_half_direct_map.value);
 
@@ -327,4 +329,8 @@ pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical
         .flags = flags,
     }) catch unreachable;
     kernel.virtual_address_space.map(physical_address, virtual_address, page_count, flags) catch @panic("Unable to map reserved region");
+}
+
+pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try std.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
 }

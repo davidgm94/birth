@@ -260,6 +260,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             .privilege_level = .kernel,
             .heap = Heap.new(&kernel.virtual_address_space),
             .lock = Spinlock{},
+            .valid = false,
         };
         VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
 

@@ -57,9 +57,15 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
     return PhysicalAddress.new(physical_address.value + asked_offset);
 }
 
+pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
+    log.warn("Warning: using unsafe method to_identity_mapped_virtual_address", .{});
+    return VirtualAddress.new(physical_address.value);
+}
+
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
     if (higher_half == 0) @panic("wtf");
+    log.warn("Warning: using unsafe method to_higher_half_virtual_address", .{});
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;
 }
@@ -82,4 +88,8 @@ pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) vo
 
 pub inline fn align_backward(virtual_address: *VirtualAddress, alignment: u64) void {
     virtual_address.* = virtual_address.aligned_backward(alignment);
+}
+
+pub fn format(physical_address: PhysicalAddress, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try std.internal_format(writer, "0x{x}", .{physical_address.value});
 }

@@ -46,3 +46,7 @@ pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) vo
 pub inline fn align_backward(virtual_address: *VirtualAddress, alignment: u64) void {
     virtual_address.* = virtual_address.aligned_backward(alignment);
 }
+
+pub fn format(virtual_address: VirtualAddress, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try std.internal_format(writer, "0x{x}", .{virtual_address.value});
+}

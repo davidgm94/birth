@@ -26,7 +26,7 @@ pub fn build(b: *Build.Builder) void {
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
                     .qemu = .{
-                        .vga = null,
+                        .vga = .std,
                         .smp = null,
                         .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
                         .run_for_debug = true,

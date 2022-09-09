@@ -1,6 +1,6 @@
 const Spinlock = @This();
 
-const std = @import("../../../common/std.zig");
+const std = @import("../common/std.zig");
 
 const interrupts = @import("arch/interrupts.zig");
 const TLS = @import("arch/tls.zig");
@@ -48,4 +48,8 @@ inline fn assert_lock_status(spinlock: *volatile Spinlock, expected_status: u8) 
 
 pub fn assert_locked(spinlock: *volatile Spinlock) void {
     if (spinlock.status != ~@as(@TypeOf(spinlock.status), 0)) @panic("Spinlock not locked when must be");
+}
+
+pub fn format(spinlock: *const Spinlock, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try std.internal_format(writer, "{s}", .{if (spinlock.status == 0xff) "locked" else if (spinlock.status == 0) "unlocked" else "invalid"});
 }

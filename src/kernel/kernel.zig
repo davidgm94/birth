@@ -31,6 +31,7 @@ pub var virtual_address_space = VirtualAddressSpace{
     .privilege_level = .kernel,
     .heap = .{},
     .lock = .{},
+    .valid = false,
 };
 
 pub var memory_initialized = false;
