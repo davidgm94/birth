@@ -60,7 +60,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
         const pml4_physical_address = get_pml4_physical_address(virtual_address_space);
         const pml4_virtual_address = if (is_bootstraping and is_bootstrapping_address_space) pml4_physical_address.to_virtual_address_with_offset(0) else if (is_bootstraping) pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map) else pml4_physical_address.to_higher_half_virtual_address();
         if (is_bootstraping and !is_bootstrapping_address_space) {
-            if (get_mapped_address_bootstrapping(pml4_virtual_address, pml4_physical_address)) |mapped_address| {
+            if (get_mapped_address_bootstrapping(pml4_virtual_address, pml4_physical_address, .not_panic)) |mapped_address| {
                 if (mapped_address.value != pml4_physical_address.value) {
                     @panic("wtf");
                 }
@@ -92,7 +92,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
             if (is_bootstraping and !is_bootstrapping_address_space) {
                 var mapped = false;
-                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address)) |mapped_address| {
+                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .not_panic)) |mapped_address| {
                     if (mapped_address.value == entry_physical_address.value) mapped = true else {
                         var was_identity_mapped = false;
                         if (kernel.bootstrap_virtual_address_space.translate_address(VirtualAddress.new(entry_physical_address.value))) |identity_mapped_address| {
@@ -115,7 +115,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                     }
                 }
 
-                check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
+                _ = get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .panic);
                 //log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
                 bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
             } else {
@@ -152,7 +152,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
             if (is_bootstraping and !is_bootstrapping_address_space) {
                 var mapped = false;
-                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address)) |mapped_address| {
+                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .not_panic)) |mapped_address| {
                     if (mapped_address.value == entry_physical_address.value) mapped = true else @panic("WTF");
                 }
 
@@ -164,7 +164,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                     }
                 }
 
-                check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
+                _ = get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .panic);
                 //log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
                 bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
             } else {
@@ -200,7 +200,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
             if (is_bootstraping and !is_bootstrapping_address_space) {
                 var mapped = false;
-                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address)) |mapped_address| {
+                if (get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .not_panic)) |mapped_address| {
                     if (mapped_address.value == entry_physical_address.value) mapped = true else @panic("WTF");
                 }
 
@@ -212,7 +212,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                     }
                 }
 
-                check_mapped_address_bootstraping(entry_virtual_address, entry_physical_address);
+                _ = get_mapped_address_bootstrapping(entry_virtual_address, entry_physical_address, .panic);
                 //log.debug("#{} Adding 0x{x}", .{ bootstrapping_physical_addresses.items.len, entry_physical_address.value });
                 bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch unreachable;
             } else {
@@ -260,36 +260,13 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
     _ = higher_half_direct_map;
 
     if (is_kernel_address_space) {
-        check_mapped_address_bootstraping(cr3_physical_address.to_identity_mapped_virtual_address(), cr3_physical_address);
-        @panic("TODO: implement kernel virtual address space");
+        const cr3_virtual_address = cr3_physical_address.to_identity_mapped_virtual_address();
+        _ = get_mapped_address_bootstrapping(cr3_virtual_address, cr3_physical_address, .panic);
+        const pml4 = cr3_virtual_address.access(*PML4Table);
+        std.zero_slice(PML4E, pml4);
     } else {
         @panic("TODO: implement user address spaces");
     }
-
-    //if (virtual_address_space.privilege_level == .kernel) {
-    //std.assert(higher_half_direct_map != 0);
-
-    //check_mapped_address_bootstraping(pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map), pml4_physical_address);
-    //}
-
-    // INFO: this higher half direct map is assumed to be non-zero
-    //std.assert(higher_half_direct_map != 0);
-    //const pml4_virtual_address = pml4_physical_address.to_virtual_address_with_offset(higher_half_direct_map);
-    //if (virtual_address_space != &kernel.virtual_address_space) {
-    //kernel.virtual_address_space.map_reserved_region(pml4_physical_address, pml4_virtual_address, 1,
-    //}
-    //std.zero(pml4_virtual_address.access([*]u8)[0..(@sizeOf(PML4Table) / 2)]);
-
-    //if (virtual_address_space.privilege_level == .kernel) {
-    //std.assert(!kernel.memory_initialized);
-    //// TODO: don't hardcode
-    //const higher_half_pml4_table = pml4_virtual_address.access([*]volatile PML4E)[0x100..0x200];
-
-    //const physical_address = physical_address_space.allocate(higher_half_pml4_table.len) orelse @panic("physical");
-    //for (higher_half_pml4_table) |*element| {
-    //fill_pml4e(element, physical_address, true, higher_half_direct_map);
-    //}
-    //}
 }
 
 const safe_map = true;
@@ -302,23 +279,24 @@ pub fn log_map_timer_register() void {
     log.debug("Mean: {}", .{map_timer_register.get_integer_mean()});
 }
 
-fn check_mapped_address_bootstraping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) void {
+const PanicPolicy = enum {
+    panic,
+    not_panic,
+};
+
+fn get_mapped_address_bootstrapping(virtual_address: VirtualAddress, physical_address: PhysicalAddress, comptime panic_policy: PanicPolicy) ?PhysicalAddress {
     std.assert(kernel.bootstrap_virtual_address_space.valid);
     //log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Panicking if not", .{ virtual_address.value, physical_address.value });
     if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, true)) |mapped_address| {
         if (mapped_address.value != physical_address.value) {
-            crash.panic("VA 0x{x} is already mapped to PA 0x{x}", .{ virtual_address.value, physical_address.value });
+            log.err("VA 0x{x} is already mapped to PA 0x{x}", .{ virtual_address.value, physical_address.value });
+            if (panic_policy == .panic) @panic("WTF");
+        } else {
+            return mapped_address;
         }
     } else {
-        crash.panic("VA 0x{x} is not mapped to any address", .{virtual_address.value});
-    }
-}
-
-fn get_mapped_address_bootstrapping(virtual_address: VirtualAddress, physical_address: PhysicalAddress) ?PhysicalAddress {
-    _ = physical_address;
-    //log.debug("[Boostrapping] Checking if VA 0x{x} is mapped to PA: 0x{x}. Not panicking", .{ virtual_address.value, physical_address.value });
-    if (kernel.bootstrap_virtual_address_space.translate_address_extended(virtual_address, if (kernel.bootstrap_virtual_address_space.lock.status != 0) .yes else .no, false)) |mapped_address| {
-        return mapped_address;
+        log.err("VA 0x{x} is not mapped to any address", .{virtual_address.value});
+        if (panic_policy == .panic) @panic("WTF");
     }
 
     return null;
@@ -466,14 +444,17 @@ pub const MemoryFlags = Bitflag(true, u64, enum(u6) {
 });
 
 const address_mask: u64 = 0x0000_00ff_ffff_f000;
+
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
     if (safe_map) {
         std.assert(x86_64.max_physical_address_bit == 40);
         std.assert(std.is_aligned(new_address.value, common.page_size));
     }
+
     const address_masked = new_address.value & address_mask;
     const old_entry_value_masked = old_entry_value & ~address_masked;
     const result = address_masked | old_entry_value_masked;
+
     return result;
 }
 

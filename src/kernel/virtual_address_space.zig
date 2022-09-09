@@ -188,6 +188,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
+    if (kernel.bootstrap_virtual_address_space.valid) @panic("Called translate address when bootstrapping");
     return translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no, false);
 }
 
