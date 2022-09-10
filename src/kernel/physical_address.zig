@@ -58,14 +58,14 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
 }
 
 pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    log.warn("Warning: using unsafe method to_identity_mapped_virtual_address", .{});
+    log.warn("Warning: to_identity_mapped_virtual_address", .{});
     return VirtualAddress.new(physical_address.value);
 }
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
     if (higher_half == 0) @panic("wtf");
-    log.warn("Warning: using unsafe method to_higher_half_virtual_address", .{});
+    log.warn("Warning: to_higher_half_virtual_address", .{});
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;
 }

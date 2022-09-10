@@ -17,31 +17,20 @@ const x86_64 = @import("../../../common.zig");
 const default_logger = @import("../../../../log.zig");
 const stivale_log = std.log.scoped(.Stivale);
 
-//const std = @import("../../../../../common/std.zig");
-
 const common = @import("../../../../common.zig");
 const Context = @import("../../context.zig");
-//const context_switch = @import("../../context_switch.zig");
 const CPU = @import("../../cpu.zig");
-//const crash = @import("../../../../crash.zig");
-//const kernel = @import("../../../../kernel.zig");
 const stivale = @import("header.zig");
-//const x86_64 = @import("../../common.zig");
 const VirtualAddress = @import("../../../../virtual_address.zig");
-//const VirtualAddressSpace = @import("../../../../virtual_address_space.zig");
 const VirtualMemoryRegion = @import("../../../../virtual_memory_region.zig");
-//const PhysicalAddress = @import("../../../../physical_address.zig");
 const PhysicalAddressSpace = @import("../../../../physical_address_space.zig");
 const PhysicalMemoryRegion = @import("../../../../physical_memory_region.zig");
 const Scheduler = @import("../../../../scheduler.zig");
-//const SegmentedList = @import("../../../../../common/list.zig").SegmentedList;
 const Thread = @import("../../../../thread.zig");
-//const TLS = @import("../../tls.zig");
 
 const FileInMemory = common.FileInMemory;
 const Framebuffer = common.Framebuffer;
 const page_size = x86_64.page_size;
-//const log = std.log.scoped(.stivale);
 const Struct = stivale.Struct;
 const TODO = crash.TODO;
 const Allocator = std.Allocator;
@@ -255,6 +244,13 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         // Kernel address space initialization
         kernel.bootstrap_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
         VirtualAddressSpace.from_current(kernel.bootstrap_virtual_address_space);
+        // Get protected memory regions from the bootloader
+        const stivale_pmrs_struct = find(Struct.PMRs, stivale2_struct) orelse @panic("Unable to find Stivale PMRs");
+        const stivale_pmrs = stivale_pmrs_struct.pmrs()[0..stivale_pmrs_struct.entry_count];
+        for (stivale_pmrs) |pmr| {
+            std.log.scoped(.MyMap).debug("Kernel section (0x{x}, 0x{x})", .{ pmr.address, pmr.address + pmr.size });
+        }
+
         kernel.virtual_address_space = VirtualAddressSpace{
             .arch = .{},
             .privilege_level = .kernel,
@@ -263,10 +259,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             .valid = false,
         };
         VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
-
-        // Get protected memory regions from the bootloader
-        const stivale_pmrs_struct = find(Struct.PMRs, stivale2_struct) orelse @panic("Unable to find Stivale PMRs");
-        const stivale_pmrs = stivale_pmrs_struct.pmrs()[0..stivale_pmrs_struct.entry_count];
 
         // Map the kernel and do some tests
         {
@@ -675,8 +667,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         .address = @ptrToInt(&main),
     });
 
-    VAS.log_map_timer_register();
-
     entry_point_timer.end_and_log();
     cpu.ready = true;
     cpu.make_thread_idle();
@@ -709,12 +699,6 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
 pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
     crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
 }
-
-const BootloaderInformation = struct {
-    kernel_sections_in_memory: []VirtualMemoryRegion,
-    kernel_file: FileInMemory,
-    framebuffer: Framebuffer,
-};
 
 pub const BootstrapContext = struct {
     cpu: CPU,

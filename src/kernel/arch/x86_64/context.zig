@@ -34,7 +34,7 @@ interrupt_number: u64,
 error_code: u64,
 rip: u64,
 cs: u64,
-rflags: u64,
+rflags: RFLAGS,
 rsp: u64,
 ss: u64,
 
@@ -58,7 +58,7 @@ pub fn new(thread: *Thread, entry_point: u64) *Context {
         },
     }
 
-    arch_context.rflags = RFLAGS.Flags.from_flag(.IF).bits;
+    arch_context.rflags = RFLAGS{ .IF = true };
     arch_context.rip = entry_point;
     arch_context.rsp = user_stack;
     arch_context.rbp = 0;
@@ -93,7 +93,15 @@ pub fn from_thread(thread: *Thread) *Context {
 pub fn format(context: *const Context, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
     try std.internal_format(writer, "Context address: 0x{x}", .{@ptrToInt(context)});
     inline for (std.fields(Context)) |field| {
-        try std.internal_format(writer, "\t{s}: 0x{x}\n", .{ field.name, @field(context, field.name) });
+        const name = field.name;
+        const value = @field(context, field.name);
+        const args = .{ name, value };
+
+        switch (field.field_type) {
+            u64 => try std.internal_format(writer, "\t{s}: 0x{x}\n", args),
+            RFLAGS => try std.internal_format(writer, "\t{s}: {}\n", args),
+            else => @compileError("Type not supported"),
+        }
     }
 }
 

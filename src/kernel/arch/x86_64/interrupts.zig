@@ -47,11 +47,11 @@ pub inline fn disable_all() void {
 
 pub inline fn are_enabled() bool {
     if (use_cr8) {
-        const if_set = RFLAGS.read().contains(.IF);
+        const if_set = RFLAGS.read().IF;
         const cr8_value = cr8.read();
         return if_set and cr8_value == 0;
     } else {
-        const if_set = RFLAGS.read().contains(.IF);
+        const if_set = RFLAGS.read().IF;
         return if_set;
     }
 }

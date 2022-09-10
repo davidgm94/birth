@@ -1,6 +1,8 @@
 const std = @import("../../../common/std.zig");
+const x86_64 = @import("common.zig");
 
 const Bitflag = @import("../../../common/bitflag.zig").Bitflag;
+const PhysicalAddress = @import("../../physical_address.zig");
 
 const SimpleRegister = enum {
     rax,
@@ -73,7 +75,56 @@ pub const cr0 = ComplexR64(.cr0, CR0Flags);
 /// Contains the page-fault linear address (the linear address that caused a page fault).
 pub const cr2 = SimpleR64(.cr2);
 
-pub const cr3 = ComplexR64(.cr3, CR3Flags);
+/// WARNING: this data structure is only set to be used for 40-bit max physical address bit
+pub const cr3 = packed struct(u64) {
+    reserved0: u3,
+    /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
+    /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
+    /// is not used if paging is disabled, with PAE paging, or with 4-level paging or 5-level paging if CR4.PCIDE=1.
+    PWT: bool,
+
+    /// Page-level Cache Disable (bit 4 of CR3) — Controls the memory type used to access the first paging
+    /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
+    /// is not used if paging is disabled, with PAE paging, or with 4-level paging1 or 5-level paging if CR4.PCIDE=1.
+    PCD: bool,
+    reserved1: u7,
+    address: u28,
+    reserved2: u24,
+
+    comptime {
+        std.assert(@sizeOf(cr3) == @sizeOf(u64));
+        std.assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
+    }
+
+    pub inline fn read() cr3 {
+        std.assert(x86_64.max_physical_address_bit == 40);
+        return asm volatile ("mov %%cr3, %[result]"
+            : [result] "=r" (-> cr3),
+        );
+    }
+
+    pub inline fn write(value: cr3) void {
+        std.assert(x86_64.max_physical_address_bit == 40);
+        asm volatile ("mov %[in], %%cr3"
+            :
+            : [in] "r" (value),
+        );
+    }
+
+    pub inline fn equal(self: cr3, other: cr3) u64 {
+        std.assert(x86_64.max_physical_address_bit == 40);
+
+        const self_int = @bitCast(u64, self);
+        const other_int = @bitCast(u64, other);
+        return self_int == other_int;
+    }
+
+    pub inline fn get_address(self: cr3) PhysicalAddress {
+        std.assert(x86_64.max_physical_address_bit == 40);
+
+        return PhysicalAddress.new(@bitCast(u64, self) & 0x0000_00ff_ffff_f000);
+    }
+};
 /// Contains a group of flags that enable several architectural extensions, and indicate operating system or
 /// executive support for specific processor capabilities. Bits CR4[63:32] can only be used for IA-32e mode only
 /// features that are enabled after entering 64-bit mode. Bits CR4[63:32] do not have any effect outside of IA-32e
@@ -86,38 +137,77 @@ pub const cr4 = ComplexR64(.cr4, CR4Flags);
 /// compatibility mode.
 pub const cr8 = SimpleR64(.cr8);
 
-pub const RFLAGS = struct {
-    pub const Flags = Bitflag(false, u64, enum(u6) {
-        CF = 0,
-        PF = 2,
-        AF = 4,
-        ZF = 6,
-        SF = 7,
-        TF = 8,
-        IF = 9,
-        DF = 10,
-        OF = 11,
-        IOPL0 = 12,
-        IOPL1 = 13,
-        NT = 14,
-        RF = 16,
-        VM = 17,
-        AC = 18,
-        VIF = 19,
-        VIP = 20,
-        ID = 21,
-    });
+pub const RFLAGS = packed struct(u64) {
+    CF: bool = false,
+    reserved0: bool = false,
+    PF: bool = false,
+    reserved1: bool = false,
+    AF: bool = false,
+    reserved2: bool = false,
+    ZF: bool = false,
+    SF: bool = false,
+    TF: bool = false,
+    IF: bool = false,
+    DF: bool = false,
+    OF: bool = false,
+    IOPL: u2 = 0,
+    NT: bool = false,
+    reserved3: bool = false,
+    RF: bool = false,
+    VM: bool = false,
+    AC: bool = false,
+    VIF: bool = false,
+    VIP: bool = false,
+    ID: bool = false,
+    reserved4: u10 = 0,
+    reserved5: u32 = 0,
 
-    pub inline fn read() Flags {
-        return Flags{
-            .bits = asm volatile (
-                \\pushfq
-                \\pop %[flags]
-                : [flags] "=r" (-> u64),
-            ),
-        };
+    comptime {
+        std.assert(@sizeOf(RFLAGS) == @sizeOf(u64));
+        std.assert(@bitSizeOf(RFLAGS) == @bitSizeOf(u64));
+    }
+
+    pub inline fn read() RFLAGS {
+        return asm volatile (
+            \\pushfq
+            \\pop %[flags]
+            : [flags] "=r" (-> RFLAGS),
+        );
     }
 };
+
+//pub const RFLAGS = struct {
+//pub const Flags = Bitflag(false, u64, enum(u6) {
+//CF = 0,
+//PF = 2,
+//AF = 4,
+//ZF = 6,
+//SF = 7,
+//TF = 8,
+//IF = 9,
+//DF = 10,
+//OF = 11,
+//IOPL0 = 12,
+//IOPL1 = 13,
+//NT = 14,
+//RF = 16,
+//VM = 17,
+//AC = 18,
+//VIF = 19,
+//VIP = 20,
+//ID = 21,
+//});
+
+//pub inline fn read() Flags {
+//return Flags{
+//.bits = asm volatile (
+//\\pushfq
+//\\pop %[flags]
+//: [flags] "=r" (-> u64),
+//),
+//};
+//}
+//};
 
 //pub const PAT = SimpleMSR(0x277);
 pub const IA32_STAR = SimpleMSR(0xC0000081);
