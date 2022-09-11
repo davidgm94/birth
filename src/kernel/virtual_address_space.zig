@@ -53,7 +53,7 @@ pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
     std.assert(kernel.memory_initialized);
-    const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no, false, 0);
+    const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no);
     return result.virtual_address;
 }
 
@@ -62,7 +62,7 @@ const Result = struct {
     virtual_address: VirtualAddress,
 };
 
-pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked, comptime is_bootstrapping: bool, kernel_higher_half_map: u64) !Result {
+pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
     if (already_locked == .no) virtual_address_space.lock.acquire();
     defer if (already_locked == .no) virtual_address_space.lock.release();
 
@@ -77,17 +77,17 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
             if (flags.user) {
                 break :blk VirtualAddress.new(physical_address.value);
             } else {
-                break :blk if (is_bootstrapping) @panic("can't allocate while bootstrapping")
-                //physical_address.to_virtual_address_with_offset(kernel_higher_half_map)
-                else physical_address.to_higher_half_virtual_address();
+                @panic("todo fix this if_bootstraping");
+                //break :blk if (is_bootstrapping) @panic("can't allocate while bootstrapping")
+                //else physical_address.to_higher_half_virtual_address();
             }
         }
     };
 
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
-    if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, false).mapped);
+    if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
 
-    try virtual_address_space.map_extended(physical_address, virtual_address, page_count, flags, AlreadyLocked.yes, is_bootstrapping, kernel_higher_half_map);
+    try virtual_address_space.map_extended(physical_address, virtual_address, page_count, flags, AlreadyLocked.yes);
 
     return Result{
         .physical_address = physical_address,
@@ -101,7 +101,7 @@ pub const MapError = error{
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags) MapError!void {
     std.assert(kernel.memory_initialized);
-    try map_extended(virtual_address_space, base_physical_address, base_virtual_address, page_count, flags, AlreadyLocked.no, false, 0);
+    try map_extended(virtual_address_space, base_physical_address, base_virtual_address, page_count, flags, AlreadyLocked.no);
 }
 
 pub const AlreadyLocked = enum {
@@ -111,78 +111,84 @@ pub const AlreadyLocked = enum {
 
 const debug_with_translate_address = false;
 
-pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags, comptime already_locked: AlreadyLocked, comptime is_bootstrapping: bool, higher_half_direct_map: u64) MapError!void {
-    if (already_locked == .yes) {
-        std.assert(virtual_address_space.lock.status != 0);
-    } else {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
-
-    var physical_address = base_physical_address;
-    var virtual_address = base_virtual_address;
-
-    if (!is_bootstrapping) blk: {
-        const region = Region{
-            .address = virtual_address,
-            .page_count = page_count,
-            .flags = flags,
-        };
-
-        var recording_virtual_address_space = if (base_virtual_address.value >= kernel.higher_half_direct_map.value) &kernel.virtual_address_space else virtual_address_space;
-
-        for (recording_virtual_address_space.free_regions.items) |*free_region, free_region_i| {
-            if (free_region.contains(region)) {
-                log.debug("Contained", .{});
-                if (region.address.value == free_region.address.value) {
-                    std.assert(free_region.page_count >= region.page_count);
-                    if (free_region.page_count > region.page_count) {
-                        free_region.address.value += region.page_count * arch.page_size;
-                        free_region.page_count -= region.page_count;
-                    } else if (free_region.page_count == region.page_count) {
-                        log.debug("deleting by swap remove", .{});
-                        _ = recording_virtual_address_space.free_regions.swapRemove(free_region_i);
-                    } else {
-                        @panic("Container region is smaller than contained region");
-                    }
-
-                    recording_virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region) catch unreachable;
-
-                    break :blk;
-                } else {
-                    @panic("Wtf");
-                }
-            }
-        }
-
-        @panic("wtf no free space");
-    }
-
-    var page_i: u64 = 0;
-    while (page_i < page_count) : (page_i += 1) {
-        defer physical_address.value += arch.page_size;
-        defer virtual_address.value += arch.page_size;
-
-        try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific(), is_bootstrapping);
-        if (debug_with_translate_address) {
-            const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, is_bootstrapping, higher_half_direct_map) orelse @panic("address not present");
-            std.assert(new_physical_address.is_valid());
-            std.assert(new_physical_address.is_equal(physical_address));
-        }
-    }
-
-    //if (kernel.memory_initialized) {
-    //virtual_address_space.track(virtual_address, physical_address, page_count);
+pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
+    _ = virtual_address_space;
+    _ = base_physical_address;
+    _ = base_virtual_address;
+    _ = page_count;
+    _ = flags;
+    _ = already_locked;
+    @panic("todo map extended");
+    //if (already_locked == .yes) {
+    //std.assert(virtual_address_space.lock.status != 0);
+    //} else {
+    //virtual_address_space.lock.acquire();
     //}
+    //defer {
+    //if (already_locked == .no) {
+    //virtual_address_space.lock.release();
+    //}
+    //}
+
+    //var physical_address = base_physical_address;
+    //var virtual_address = base_virtual_address;
+
+    //if (!is_bootstrapping) blk: {
+    //const region = Region{
+    //.address = virtual_address,
+    //.page_count = page_count,
+    //.flags = flags,
+    //};
+
+    //var recording_virtual_address_space = if (base_virtual_address.value >= kernel.higher_half_direct_map.value) &kernel.virtual_address_space else virtual_address_space;
+
+    //for (recording_virtual_address_space.free_regions.items) |*free_region, free_region_i| {
+    //if (free_region.contains(region)) {
+    //log.debug("Contained", .{});
+    //if (region.address.value == free_region.address.value) {
+    //std.assert(free_region.page_count >= region.page_count);
+    //if (free_region.page_count > region.page_count) {
+    //free_region.address.value += region.page_count * arch.page_size;
+    //free_region.page_count -= region.page_count;
+    //} else if (free_region.page_count == region.page_count) {
+    //log.debug("deleting by swap remove", .{});
+    //_ = recording_virtual_address_space.free_regions.swapRemove(free_region_i);
+    //} else {
+    //@panic("Container region is smaller than contained region");
+    //}
+
+    //recording_virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region) catch unreachable;
+
+    //break :blk;
+    //} else {
+    //@panic("Wtf");
+    //}
+    //}
+    //}
+
+    //@panic("wtf no free space");
+    //}
+
+    //var page_i: u64 = 0;
+    //while (page_i < page_count) : (page_i += 1) {
+    //defer physical_address.value += arch.page_size;
+    //defer virtual_address.value += arch.page_size;
+
+    //try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific(), is_bootstrapping);
+    //if (debug_with_translate_address) {
+    //const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, is_bootstrapping, higher_half_direct_map) orelse @panic("address not present");
+    //std.assert(new_physical_address.is_valid());
+    //std.assert(new_physical_address.is_equal(physical_address));
+    //}
+    //}
+
+    ////if (kernel.memory_initialized) {
+    ////virtual_address_space.track(virtual_address, physical_address, page_count);
+    ////}
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
-    if (kernel.bootstrap_virtual_address_space.valid) @panic("Called translate address when bootstrapping");
-    const result = translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no, false);
+    const result = translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no);
     if (result.mapped) {
         return result.physical_address;
     } else {
@@ -200,7 +206,7 @@ pub const TranslationResult = struct {
     }
 };
 
-pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked, comptime is_bootstrapping: bool) TranslationResult {
+pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
@@ -212,7 +218,7 @@ pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, v
         }
     }
 
-    const result = VAS.translate_address(virtual_address_space, virtual_address, is_bootstrapping);
+    const result = VAS.translate_address(virtual_address_space, virtual_address);
     return result;
 }
 

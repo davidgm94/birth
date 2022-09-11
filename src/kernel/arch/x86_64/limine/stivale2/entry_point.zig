@@ -58,14 +58,14 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     // In here all the memory but the kernel is identity-mapped, so we can get away with this
     var stivale2_struct = @intToPtr(*Struct, stivale2_struct_physical_address.value);
     // This is just a cached version, not the global one (which is set after kernel address space initialization)
-    const higher_half_direct_map = blk: {
+    kernel.higher_half_direct_map = blk: {
         const hhdm_struct = find(Struct.HHDM, stivale2_struct) orelse @panic("Unable to find higher half direct map struct");
         stivale_log.debug("HHDM: 0x{x}", .{hhdm_struct.addr});
         if (hhdm_struct.addr == 0) {
             @panic("Received 0 as the higher half address");
         }
 
-        break :blk hhdm_struct.addr;
+        break :blk VirtualAddress.new(hhdm_struct.addr);
     };
 
     x86_64.rsdp_physical_address = blk: {
@@ -88,7 +88,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         const host_entry = host_entry_blk: {
             for (memory_map_entries) |*entry| {
                 if (entry.type == .usable) {
-                    const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size, 0);
+                    const bitset = PhysicalAddressSpace.MapEntry.get_bitset_from_address_and_size(PhysicalAddress.new(entry.address), entry.size);
                     const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                     // INFO: this is separated since the bitset needs to be in a different page than the memory map
                     const bitset_page_count = std.div_ceil(u64, bitset_size, page_size) catch unreachable;
@@ -109,8 +109,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                         .type = .usable,
                     };
 
-                    const virtual_address_offset = 0;
-                    block.setup_bitset(virtual_address_offset);
+                    block.setup_bitset();
 
                     std.log.scoped(.Physical).debug("Usable physical region: (0x{x}, 0x{x})", .{ block.descriptor.address.value, block.descriptor.address.offset(block.descriptor.size).value });
 
@@ -140,11 +139,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
 
                 std.log.scoped(.Physical).debug("Usable physical region: (0x{x}, 0x{x})", .{ result_entry.descriptor.address.value, result_entry.descriptor.address.offset(result_entry.descriptor.size).value });
 
-                const virtual_address_offset = 0;
-                const bitset = result_entry.get_bitset_extended(virtual_address_offset);
+                const bitset = result_entry.get_bitset_extended();
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 result_entry.allocated_size = std.align_forward(bitset_size, page_size);
-                result_entry.setup_bitset(virtual_address_offset);
+                result_entry.setup_bitset();
             }
         }
 
@@ -274,15 +272,13 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const section_virtual_address = VirtualAddress.new(pmr.address);
                 const section_page_count = @divExact(pmr.size, x86_64.page_size);
 
-                const translation_result = kernel.bootstrap_virtual_address_space.translate_address_extended(section_virtual_address, .no, true);
-                if (!translation_result.mapped) {
-                    @panic("Section not mapped");
-                }
-                const section_physical_address = translation_result.physical_address;
-                kernel.virtual_address_space.map_extended(section_physical_address, section_virtual_address, section_page_count, .{
+                const section_physical_address = kernel.bootstrap_virtual_address_space.translate_address(section_virtual_address) orelse @panic("Section not mapped");
+                std.log.scoped(.Section).debug("Section PA: {}. VA: {}", .{ section_physical_address, section_virtual_address });
+
+                VAS.bootstrap_map(section_physical_address, section_virtual_address, section_page_count, .{
                     .execute = pmr.permissions & Struct.PMRs.PMR.executable != 0,
                     .write = true, //const writable = permissions & Stivale2.Struct.PMRs.PMR.writable != 0;
-                }, .no, true, higher_half_direct_map) catch unreachable;
+                });
             }
         }
 
@@ -297,13 +293,13 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
                 const physical_address = region.descriptor.address;
-                const virtual_address = region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map);
+                const virtual_address = region.descriptor.address.to_higher_half_virtual_address();
                 const page_count = @divExact(region.allocated_size, x86_64.page_size);
                 std.log.scoped(.Mappppp).debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.offset(region.allocated_size).value, virtual_address.value, virtual_address.offset(region.allocated_size).value });
-                kernel.virtual_address_space.map_extended(physical_address, virtual_address, page_count, .{
+                VAS.bootstrap_map(physical_address, virtual_address, page_count, .{
                     .write = true,
                     .user = true,
-                }, .no, true, higher_half_direct_map) catch unreachable;
+                });
             }
         }
 
@@ -315,10 +311,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
                 std.assert(std.is_aligned(region.descriptor.size, x86_64.page_size));
-                kernel.virtual_address_space.map_extended(region.descriptor.address, region.descriptor.address.to_virtual_address_with_offset(higher_half_direct_map), region.descriptor.size / x86_64.page_size, .{
+                VAS.bootstrap_map(region.descriptor.address, region.descriptor.address.to_higher_half_virtual_address(), region.descriptor.size / x86_64.page_size, .{
                     .write = true,
                     .user = true,
-                }, .no, true, higher_half_direct_map) catch unreachable;
+                });
             }
         }
 
@@ -330,10 +326,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 // This needs an specific offset since the kernel value "higher_half_direct_map" is not set yet. The to_higher_half_virtual_address() function depends on this value being set.
                 // Therefore a manual set here is preferred as a tradeoff with a better runtime later when often calling the aforementioned function
                 std.assert(std.is_aligned(region.size, x86_64.page_size));
-                kernel.virtual_address_space.map_extended(region.address, region.address.to_virtual_address_with_offset(higher_half_direct_map), region.size / x86_64.page_size, .{
+                VAS.bootstrap_map(region.address, region.address.to_higher_half_virtual_address(), region.size / x86_64.page_size, .{
                     .write = true,
                     .user = true,
-                }, .no, true, higher_half_direct_map) catch unreachable;
+                });
             }
         }
 
@@ -341,13 +337,12 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         while (mapping_pages_mapped < x86_64.VAS.bootstrapping_physical_addresses.items.len) : (mapping_pages_mapped += 1) {
             const physical_address = x86_64.VAS.bootstrapping_physical_addresses.items[mapping_pages_mapped];
             std.log.scoped(.MappingPage).debug("Mapping 0x{x}", .{physical_address.value});
-            const virtual_address = physical_address.to_virtual_address_with_offset(higher_half_direct_map);
-            kernel.virtual_address_space.map_extended(physical_address, virtual_address, 1, .{ .write = true }, .no, true, higher_half_direct_map) catch unreachable;
+            const virtual_address = physical_address.to_higher_half_virtual_address();
+            VAS.bootstrap_map(physical_address, virtual_address, 1, .{ .write = true });
         }
 
         kernel.virtual_address_space.make_current();
         kernel.virtual_address_space.copy_to_new(&kernel.virtual_address_space);
-        kernel.higher_half_direct_map = VirtualAddress.new(higher_half_direct_map);
 
         // Update identity-mapped pointers to higher-half ones
         {
@@ -356,8 +351,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             _ = ptr;
             const ptrtoint = @ptrToInt(ptr);
             _ = ptrtoint;
-            const final_address = ptrtoint + higher_half_direct_map;
-            ptr = @intToPtr([*]PhysicalAddressSpace.MapEntry, final_address);
+            const final_address = kernel.higher_half_direct_map.offset(ptrtoint);
+            ptr = final_address.access([*]PhysicalAddressSpace.MapEntry);
             kernel.physical_address_space.usable = ptr[0..len];
         }
         {
@@ -366,32 +361,32 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             const ptrtoint = @ptrToInt(ptr);
             _ = ptr;
             _ = len;
-            const final_address = ptrtoint + higher_half_direct_map;
-            ptr = @intToPtr([*]PhysicalAddressSpace.MapEntry, final_address);
+            const final_address = kernel.higher_half_direct_map.offset(ptrtoint);
+            ptr = final_address.access([*]PhysicalAddressSpace.MapEntry);
             kernel.physical_address_space.reclaimable = ptr[0..len];
         }
         {
             var ptr = kernel.physical_address_space.framebuffer.ptr;
             const len = kernel.physical_address_space.framebuffer.len;
             const ptrtoint = @ptrToInt(ptr);
-            const final_address = ptrtoint + higher_half_direct_map;
-            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            const final_address = kernel.higher_half_direct_map.offset(ptrtoint);
+            ptr = final_address.access([*]PhysicalMemoryRegion);
             kernel.physical_address_space.framebuffer = ptr[0..len];
         }
         {
             var ptr = kernel.physical_address_space.reserved.ptr;
             const len = kernel.physical_address_space.reserved.len;
             const ptrtoint = @ptrToInt(ptr);
-            const final_address = ptrtoint + higher_half_direct_map;
-            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            const final_address = kernel.higher_half_direct_map.offset(ptrtoint);
+            ptr = final_address.access([*]PhysicalMemoryRegion);
             kernel.physical_address_space.reserved = ptr[0..len];
         }
         {
             var ptr = kernel.physical_address_space.kernel_and_modules.ptr;
             const len = kernel.physical_address_space.kernel_and_modules.len;
             const ptrtoint = @ptrToInt(ptr);
-            const final_address = ptrtoint + higher_half_direct_map;
-            ptr = @intToPtr([*]PhysicalMemoryRegion, final_address);
+            const final_address = kernel.higher_half_direct_map.offset(ptrtoint);
+            ptr = final_address.access([*]PhysicalMemoryRegion);
             kernel.physical_address_space.kernel_and_modules = ptr[0..len];
         }
 
@@ -402,10 +397,10 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             defer reclaimable_consuming_timer.end_and_log();
 
             for (kernel.physical_address_space.reclaimable) |*region| {
-                const bitset = region.get_bitset_extended(higher_half_direct_map);
+                const bitset = region.get_bitset_extended();
                 const bitset_size = bitset.len * @sizeOf(PhysicalAddressSpace.MapEntry.BitsetBaseType);
                 region.allocated_size = std.align_forward(bitset_size, page_size);
-                region.setup_bitset(higher_half_direct_map);
+                region.setup_bitset();
             }
 
             const old_reclaimable = kernel.physical_address_space.reclaimable.len;

@@ -255,9 +255,12 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
     }
 }
 
-pub fn bootstrap_map(physical_address: PhysicalAddress, page_count: u64) void {
+pub fn bootstrap_map(physical_address: PhysicalAddress, virtual_address: VirtualAddress, page_count: u64, general_flags: VirtualAddressSpace.Flags) void {
+    const flags = general_flags.to_arch_specific();
     _ = physical_address;
+    _ = virtual_address;
     _ = page_count;
+    _ = flags;
     @panic("todo bootstrap map");
 }
 
@@ -312,7 +315,7 @@ pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddre
     //log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }
 
-pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress, comptime is_bootstraping: bool) TranslationResult {
+pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) TranslationResult {
     std.assert(asked_virtual_address.is_valid());
     if (!std.is_aligned(asked_virtual_address.value, x86_64.page_size)) {
         log.err("Virtual address {} not aligned", .{asked_virtual_address});
@@ -323,9 +326,8 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const indices = compute_indices(virtual_address);
     _ = indices;
 
-    const is_bootstrapping_address_space = is_bootstraping and virtual_address_space == kernel.bootstrap_virtual_address_space;
+    const is_bootstrapping_address_space = virtual_address_space == kernel.bootstrap_virtual_address_space;
     const virtual_address_offset: u64 = if (is_bootstrapping_address_space) 0 else kernel.higher_half_direct_map.value;
-    std.assert((kernel.higher_half_direct_map.value == 0) == is_bootstraping);
     std.assert(is_bootstrapping_address_space);
 
     const pml4_table = blk: {
