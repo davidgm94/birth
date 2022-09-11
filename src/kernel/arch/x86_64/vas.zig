@@ -31,7 +31,7 @@ const Indices = [std.enum_count(PageIndex)]u16;
 
 pub var bootstrapping_physical_addresses: std.ArrayList(PhysicalAddress) = undefined;
 
-pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags, comptime is_bootstraping: bool, higher_half_direct_map: u64) MapError!void {
+pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags, comptime is_bootstraping: bool) MapError!void {
     var allocation_count: u64 = 0;
 
     if (true) @panic("TODO vas map");
@@ -210,10 +210,9 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
     //};
 }
 
-pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, higher_half_direct_map: u64) void {
+pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) void {
     const is_kernel_address_space = virtual_address_space == &kernel.virtual_address_space;
     std.assert((virtual_address_space.privilege_level == .kernel) == is_kernel_address_space);
-    _ = higher_half_direct_map;
 
     if (is_kernel_address_space) {
         const half_entry_count = 0x100;
@@ -230,20 +229,18 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
             }
         }
 
-        @panic("TODO VAS new");
+        const pml4_physical_address = allocation_chunk_physical_address;
+        virtual_address_space.arch = Specific{
+            .cr3 = cr3.from_address(pml4_physical_address),
+        };
 
-        //virtual_address_space.arch = Specific{
-        //.cr3 = allocation_chunk_physical_address,
-        //};
-
-        //const cr3_virtual_address = virtual_address_space.arch.to_identity_mapped_virtual_address();
-        //const pml4 = cr3_virtual_address.access(*PML4Table);
-        //const lower_half_pml4 = pml4[0 .. pml4.len / 2];
-        //const higher_half_pml4 = pml4[0 .. pml4.len / 2];
-        //std.assert(lower_half_pml4.len == 0x100);
-        //std.assert(higher_half_pml4.len == 0x100);
-        //std.zero_slice(PML4E, lower_half_pml4);
-        //_ = higher_half_pml4;
+        const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
+        const pml4 = pml4_virtual_address.access(*PML4Table);
+        const lower_half_pml4 = pml4[0 .. pml4.len / 2];
+        const higher_half_pml4 = pml4[0 .. pml4.len / 2];
+        std.assert(lower_half_pml4.len == half_entry_count);
+        std.assert(higher_half_pml4.len == half_entry_count);
+        std.zero_slice(PML4E, lower_half_pml4);
     } else {
         @panic("TODO: implement user address spaces");
     }

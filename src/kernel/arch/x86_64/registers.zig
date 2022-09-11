@@ -77,23 +77,30 @@ pub const cr2 = SimpleR64(.cr2);
 
 /// WARNING: this data structure is only set to be used for 40-bit max physical address bit
 pub const cr3 = packed struct(u64) {
-    reserved0: u3,
+    reserved0: u3 = 0,
     /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
     /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
     /// is not used if paging is disabled, with PAE paging, or with 4-level paging or 5-level paging if CR4.PCIDE=1.
-    PWT: bool,
+    PWT: bool = false,
 
     /// Page-level Cache Disable (bit 4 of CR3) — Controls the memory type used to access the first paging
     /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
     /// is not used if paging is disabled, with PAE paging, or with 4-level paging1 or 5-level paging if CR4.PCIDE=1.
-    PCD: bool,
-    reserved1: u7,
-    address: u28,
-    reserved2: u24,
+    PCD: bool = false,
+    reserved1: u7 = 0,
+    address: u28 = 0,
+    reserved2: u24 = 0,
 
     comptime {
         std.assert(@sizeOf(cr3) == @sizeOf(u64));
         std.assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
+    }
+
+    pub fn from_address(physical_address: PhysicalAddress) cr3 {
+        std.assert(x86_64.max_physical_address_bit == 40);
+        return .{
+            .address = @intCast(u28, physical_address.value >> x86_64.page_shifter),
+        };
     }
 
     pub inline fn read() cr3 {
