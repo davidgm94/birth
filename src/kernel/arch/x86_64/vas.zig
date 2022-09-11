@@ -458,9 +458,6 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const indices = compute_indices(virtual_address);
     _ = indices;
 
-    const is_bootstrapping_address_space = virtual_address_space == kernel.bootstrap_virtual_address_space;
-    std.assert(is_bootstrapping_address_space);
-
     const pml4_table = blk: {
         const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
         const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
@@ -555,6 +552,18 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
 }
 
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
+    if (safe_map) {
+        if (virtual_address_space == &kernel.virtual_address_space) {
+            const instruction_pointer = VirtualAddress.new(@returnAddress()).aligned_backward(page_size);
+            const frame_pointer = VirtualAddress.new(@frameAddress()).aligned_backward(page_size);
+            const global_ptr_va = VirtualAddress.new(@ptrToInt(&bootstrapping_physical_addresses)).aligned_backward(page_size);
+
+            std.assert(virtual_address_space.translate_address(instruction_pointer) != null);
+            std.assert(virtual_address_space.translate_address(frame_pointer) != null);
+            std.assert(virtual_address_space.translate_address(global_ptr_va) != null);
+        }
+    }
+
     log.debug("Writing CR3: 0x{x}", .{@bitCast(u64, virtual_address_space.arch.cr3)});
     virtual_address_space.arch.cr3.write();
 }
