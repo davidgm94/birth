@@ -122,7 +122,7 @@ pub const cr3 = packed struct(u64) {
     pub inline fn get_address(self: cr3) PhysicalAddress {
         std.assert(x86_64.max_physical_address_bit == 40);
 
-        return PhysicalAddress.new(@bitCast(u64, self) & 0x0000_00ff_ffff_f000);
+        return PhysicalAddress.new(@as(u64, self.address) << x86_64.page_shifter);
     }
 };
 /// Contains a group of flags that enable several architectural extensions, and indicate operating system or

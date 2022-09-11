@@ -85,7 +85,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     };
 
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
-    if (flags.user) std.assert(virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, false) == null);
+    if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, false).mapped);
 
     try virtual_address_space.map_extended(physical_address, virtual_address, page_count, flags, AlreadyLocked.yes, is_bootstrapping, kernel_higher_half_map);
 
@@ -189,10 +189,25 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
     if (kernel.bootstrap_virtual_address_space.valid) @panic("Called translate address when bootstrapping");
-    return translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no, false);
+    const result = translate_address_extended(virtual_address_space, virtual_address, AlreadyLocked.no, false);
+    if (result.mapped) {
+        return result.physical_address;
+    } else {
+        return null;
+    }
 }
 
-pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked, comptime is_bootstrapping: bool) ?PhysicalAddress {
+pub const TranslationResult = struct {
+    physical_address: PhysicalAddress,
+    page_size: u32,
+    mapped: bool,
+
+    comptime {
+        std.assert(@sizeOf(TranslationResult) <= 2 * @sizeOf(u64));
+    }
+};
+
+pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked, comptime is_bootstrapping: bool) TranslationResult {
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {

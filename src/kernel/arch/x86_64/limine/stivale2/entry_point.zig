@@ -273,7 +273,11 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 const section_virtual_address = VirtualAddress.new(pmr.address);
                 const section_page_count = @divExact(pmr.size, x86_64.page_size);
 
-                const section_physical_address = kernel.bootstrap_virtual_address_space.translate_address_extended(section_virtual_address, .no, true) orelse @panic("address not translated");
+                const translation_result = kernel.bootstrap_virtual_address_space.translate_address_extended(section_virtual_address, .no, true);
+                if (!translation_result.mapped) {
+                    @panic("Section not mapped");
+                }
+                const section_physical_address = translation_result.physical_address;
                 kernel.virtual_address_space.map_extended(section_physical_address, section_virtual_address, section_page_count, .{
                     .execute = pmr.permissions & Struct.PMRs.PMR.executable != 0,
                     .write = true, //const writable = permissions & Stivale2.Struct.PMRs.PMR.writable != 0;
