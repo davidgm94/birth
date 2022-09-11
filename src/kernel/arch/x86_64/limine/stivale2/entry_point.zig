@@ -258,6 +258,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         };
 
         VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space);
+        std.log.scoped(.CR3).debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
 
         // Map the kernel and do some tests
         {
@@ -298,7 +299,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 std.log.scoped(.Mappppp).debug("Mapping (0x{x}, 0x{x}) to (0x{x}, 0x{x})", .{ physical_address.value, physical_address.offset(region.allocated_size).value, virtual_address.value, virtual_address.offset(region.allocated_size).value });
                 VAS.bootstrap_map(physical_address, virtual_address, page_count, .{
                     .write = true,
-                    .user = true,
                 });
             }
         }
@@ -313,7 +313,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 std.assert(std.is_aligned(region.descriptor.size, x86_64.page_size));
                 VAS.bootstrap_map(region.descriptor.address, region.descriptor.address.to_higher_half_virtual_address(), region.descriptor.size / x86_64.page_size, .{
                     .write = true,
-                    .user = true,
                 });
             }
         }
@@ -328,7 +327,6 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
                 std.assert(std.is_aligned(region.size, x86_64.page_size));
                 VAS.bootstrap_map(region.address, region.address.to_higher_half_virtual_address(), region.size / x86_64.page_size, .{
                     .write = true,
-                    .user = true,
                 });
             }
         }
@@ -336,6 +334,7 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         // Make sure we have mapped all the needed pages. This assumes some pages were needed in order to allocate
         // page tables when mapping
         std.assert(mapping_pages_mapped != x86_64.VAS.bootstrapping_physical_addresses.items.len);
+        // Make sure the read is volatile
         while (mapping_pages_mapped < x86_64.VAS.bootstrapping_physical_addresses.items.len) : (mapping_pages_mapped += 1) {
             const physical_address = x86_64.VAS.bootstrapping_physical_addresses.items[mapping_pages_mapped];
             std.log.scoped(.MappingPage).debug("Mapping 0x{x}", .{physical_address.value});

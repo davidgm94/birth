@@ -216,18 +216,16 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         const half_entry_count = 0x100;
         const pml4_table_page_count = comptime @divExact(@sizeOf(PML4Table), common.page_size);
         const pdp_table_page_count = comptime @divExact(@sizeOf(PDPTable), common.page_size);
-        const page_count = pml4_table_page_count + (pdp_table_page_count * half_entry_count);
-        const allocation_chunk_physical_address = physical_address_space.allocate(page_count) orelse @panic("wtf");
+        const pml4_physical_address = physical_address_space.allocate(pml4_table_page_count) orelse @panic("wtf");
+        const pdp_physical_address = physical_address_space.allocate(pdp_table_page_count) orelse @panic("wtf");
 
         if (safe_map) {
-            var physical_address = allocation_chunk_physical_address;
-            const top_physical_address = physical_address.offset(page_count * page_size);
+            const top_physical_address = pdp_physical_address.offset(pdp_table_page_count * page_size);
             if (top_physical_address.value >= 4 * 1024 * 1024 * 1024) {
                 @panic("wtf");
             }
         }
 
-        const pml4_physical_address = allocation_chunk_physical_address;
         virtual_address_space.arch = Specific{
             .cr3 = cr3.from_address(pml4_physical_address),
         };
@@ -240,7 +238,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         std.assert(higher_half_pml4.len == half_entry_count);
         std.zero_slice(PML4Entry, lower_half_pml4);
 
-        var pdp_table_physical_address = allocation_chunk_physical_address.offset(@sizeOf(PML4Table));
+        var pdp_table_physical_address = pdp_physical_address;
         for (higher_half_pml4) |*pml4_entry| {
             defer pdp_table_physical_address.value += @sizeOf(PDPTable);
             pml4_entry.* = PML4Entry{
@@ -292,6 +290,7 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
                     const entry_page_count = @divExact(@sizeOf(PDPTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
                     const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
+                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
                     const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
 
                     const allocated_entry_pointer = entry_virtual_address.access(*PDPTable);
@@ -327,6 +326,7 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
                     const entry_page_count = @divExact(@sizeOf(PDTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
                     const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
+                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
                     const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
 
                     const allocated_entry_pointer = entry_virtual_address.access(*PDTable);
@@ -362,6 +362,7 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
                     const entry_page_count = @divExact(@sizeOf(PDTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
                     const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
+                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
                     const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
 
                     const allocated_entry_pointer = entry_virtual_address.access(*PTable);
@@ -554,9 +555,8 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
 }
 
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
-    if (true) @panic("wtf");
+    log.debug("Writing CR3: 0x{x}", .{@bitCast(u64, virtual_address_space.arch.cr3)});
     virtual_address_space.arch.cr3.write();
-    //cr3.write_raw(virtual_address_space.arch.cr3);
 }
 
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {
