@@ -57,21 +57,20 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
     return PhysicalAddress.new(physical_address.value + asked_offset);
 }
 
-pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    log.warn("Warning: to_identity_mapped_virtual_address", .{});
-    return VirtualAddress.new(physical_address.value);
-}
+//pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
+//log.warn("Warning: to_identity_mapped_virtual_address", .{});
+//return VirtualAddress.new(physical_address.value);
+//}
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
-    log.warn("Warning: to_higher_half_virtual_address", .{});
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;
 }
 
-pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, asked_offset: u64) VirtualAddress {
-    return VirtualAddress.new(physical_address.value + asked_offset);
-}
+//pub inline fn to_virtual_address_with_offset(physical_address: PhysicalAddress, asked_offset: u64) VirtualAddress {
+//return VirtualAddress.new(physical_address.value + asked_offset);
+//}
 
 pub inline fn aligned_forward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {
     return PhysicalAddress{ .value = std.align_forward(virtual_address.value, alignment) };

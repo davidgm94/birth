@@ -333,7 +333,9 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             }
         }
 
-        // Make sure we have mapped all the needed pages
+        // Make sure we have mapped all the needed pages. This assumes some pages were needed in order to allocate
+        // page tables when mapping
+        std.assert(mapping_pages_mapped != x86_64.VAS.bootstrapping_physical_addresses.items.len);
         while (mapping_pages_mapped < x86_64.VAS.bootstrapping_physical_addresses.items.len) : (mapping_pages_mapped += 1) {
             const physical_address = x86_64.VAS.bootstrapping_physical_addresses.items[mapping_pages_mapped];
             std.log.scoped(.MappingPage).debug("Mapping 0x{x}", .{physical_address.value});
