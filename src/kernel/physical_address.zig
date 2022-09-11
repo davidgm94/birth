@@ -64,7 +64,6 @@ pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddre
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const higher_half = kernel.higher_half_direct_map.value;
-    if (higher_half == 0) @panic("wtf");
     log.warn("Warning: to_higher_half_virtual_address", .{});
     const address = VirtualAddress.new(physical_address.value + higher_half);
     return address;

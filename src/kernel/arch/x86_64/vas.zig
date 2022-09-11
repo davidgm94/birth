@@ -44,7 +44,6 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
     }
 
     _ = allocation_count;
-    _ = higher_half_direct_map;
     _ = is_bootstraping;
     _ = flags;
     _ = virtual_address;
@@ -240,10 +239,26 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         const higher_half_pml4 = pml4[0 .. pml4.len / 2];
         std.assert(lower_half_pml4.len == half_entry_count);
         std.assert(higher_half_pml4.len == half_entry_count);
-        std.zero_slice(PML4E, lower_half_pml4);
+        std.zero_slice(PML4Entry, lower_half_pml4);
+
+        var pdp_table_physical_address = allocation_chunk_physical_address.offset(@sizeOf(PML4Table));
+        for (higher_half_pml4) |*pml4_entry| {
+            defer pdp_table_physical_address.value += @sizeOf(PDPTable);
+            pml4_entry.* = PML4Entry{
+                .present = true,
+                .read_write = true,
+                .address = pack_address(pdp_table_physical_address),
+            };
+        }
     } else {
         @panic("TODO: implement user address spaces");
     }
+}
+
+pub fn bootstrap_map(physical_address: PhysicalAddress, page_count: u64) void {
+    _ = physical_address;
+    _ = page_count;
+    @panic("todo bootstrap map");
 }
 
 const safe_map = true;
@@ -330,7 +345,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
             return std.zeroes(TranslationResult);
         }
 
-        const pdp_table_virtual_address = obtain_address(pml4_entry).to_virtual_address_with_offset(virtual_address_offset);
+        const pdp_table_virtual_address = unpack_address(pml4_entry).to_virtual_address_with_offset(virtual_address_offset);
         if (safe_map) std.assert(pdp_table_virtual_address.is_valid());
         break :blk pdp_table_virtual_address.access(*volatile PDPTable);
     };
@@ -342,7 +357,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
             return std.zeroes(TranslationResult);
         }
 
-        const physical_address = obtain_address(pdp_entry);
+        const physical_address = unpack_address(pdp_entry);
         // The address is mapped with a 1 GB page
         if (pdp_entry.page_size) {
             return TranslationResult{
@@ -364,7 +379,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
             return std.zeroes(TranslationResult);
         }
 
-        const physical_address = obtain_address(pd_entry);
+        const physical_address = unpack_address(pd_entry);
         // The address is mapped with a 2MB page
         if (pd_entry.page_size) {
             return TranslationResult{
@@ -383,7 +398,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         return std.zeroes(TranslationResult);
     }
 
-    const physical_address = obtain_address(p_entry);
+    const physical_address = unpack_address(p_entry);
     return TranslationResult{
         .physical_address = physical_address,
         .page_size = 0x1000,
@@ -467,22 +482,26 @@ const PageIndex = enum(u3) {
     PT = 3,
 };
 
-fn obtain_address(entry: anytype) PhysicalAddress {
+fn unpack_address(entry: anytype) PhysicalAddress {
     return PhysicalAddress.new(@as(u64, entry.address) << x86_64.page_shifter);
 }
 
-const PML4E = packed struct(u64) {
-    present: bool,
-    read_write: bool,
-    user: bool,
-    page_level_write_through: bool,
-    page_level_cache_disable: bool,
-    accessed: bool,
-    reserved0: u5,
-    hlat_restart: bool,
+inline fn pack_address(physical_address: PhysicalAddress) u28 {
+    return @intCast(u28, physical_address.value >> x86_64.page_shifter);
+}
+
+const PML4Entry = packed struct(u64) {
+    present: bool = false,
+    read_write: bool = false,
+    user: bool = false,
+    page_level_write_through: bool = false,
+    page_level_cache_disable: bool = false,
+    accessed: bool = false,
+    reserved0: u5 = 0,
+    hlat_restart: bool = false,
     address: u28,
-    reserved1: u23,
-    execute_disable: bool,
+    reserved1: u23 = 0,
+    execute_disable: bool = false,
 
     comptime {
         std.assert(@sizeOf(@This()) == @sizeOf(u64));
@@ -490,28 +509,7 @@ const PML4E = packed struct(u64) {
     }
 };
 
-const PDPTE = packed struct(u64) {
-    present: bool,
-    read_write: bool,
-    user: bool,
-    page_level_write_through: bool,
-    page_level_cache_disable: bool,
-    accessed: bool,
-    reserved0: u1,
-    page_size: bool,
-    reserved1: u3,
-    hlat_restart: bool,
-    address: u28,
-    reserved2: u23,
-    execute_disable: bool,
-
-    comptime {
-        std.assert(@sizeOf(@This()) == @sizeOf(u64));
-        std.assert(@bitSizeOf(@This()) == @bitSizeOf(u64));
-    }
-};
-
-const PDE = packed struct(u64) {
+const PDPEntry = packed struct(u64) {
     present: bool,
     read_write: bool,
     user: bool,
@@ -532,7 +530,28 @@ const PDE = packed struct(u64) {
     }
 };
 
-const PTE = packed struct(u64) {
+const PDEntry = packed struct(u64) {
+    present: bool,
+    read_write: bool,
+    user: bool,
+    page_level_write_through: bool,
+    page_level_cache_disable: bool,
+    accessed: bool,
+    reserved0: u1,
+    page_size: bool,
+    reserved1: u3,
+    hlat_restart: bool,
+    address: u28,
+    reserved2: u23,
+    execute_disable: bool,
+
+    comptime {
+        std.assert(@sizeOf(@This()) == @sizeOf(u64));
+        std.assert(@bitSizeOf(@This()) == @bitSizeOf(u64));
+    }
+};
+
+const PTEntry = packed struct(u64) {
     present: bool,
     read_write: bool,
     user: bool,
@@ -554,7 +573,7 @@ const PTE = packed struct(u64) {
     }
 };
 
-const PML4Table = [512]PML4E;
-const PDPTable = [512]PDPTE;
-const PDTable = [512]PDE;
-const PTable = [512]PTE;
+const PML4Table = [512]PML4Entry;
+const PDPTable = [512]PDPEntry;
+const PDTable = [512]PDEntry;
+const PTable = [512]PTEntry;

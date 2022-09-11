@@ -41,7 +41,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .lock = Spinlock{},
         .valid = false,
     };
-    VAS.new(virtual_address_space, physical_address_space, kernel.higher_half_direct_map.value);
+    VAS.new(virtual_address_space, physical_address_space);
 
     VAS.map_kernel_address_space_higher_half(virtual_address_space, kernel_address_space);
 }
@@ -112,13 +112,6 @@ pub const AlreadyLocked = enum {
 const debug_with_translate_address = false;
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags, comptime already_locked: AlreadyLocked, comptime is_bootstrapping: bool, higher_half_direct_map: u64) MapError!void {
-    if (base_virtual_address.value <= 0xffff80007ffe2000 and base_virtual_address.offset(page_count * arch.page_size).value > 0xffff80007ffe2000) {
-        var i: u64 = 0;
-        while (i < 10) : (i += 1) {
-            log.debug("heeeeeeeeeeeeeeeeeeeeeeeeeeeeeeereeeeeeeeeeeeee", .{});
-        }
-    }
-
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
@@ -174,7 +167,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
         defer physical_address.value += arch.page_size;
         defer virtual_address.value += arch.page_size;
 
-        try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific(), is_bootstrapping, higher_half_direct_map);
+        try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific(), is_bootstrapping);
         if (debug_with_translate_address) {
             const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, is_bootstrapping, higher_half_direct_map) orelse @panic("address not present");
             std.assert(new_physical_address.is_valid());

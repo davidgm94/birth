@@ -258,7 +258,8 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
             .lock = Spinlock{},
             .valid = false,
         };
-        VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space, higher_half_direct_map);
+
+        VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space);
 
         // Map the kernel and do some tests
         {
