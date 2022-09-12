@@ -18,7 +18,7 @@ pub fn build(b: *Build.Builder) void {
     kernel.* = Kernel {
         .builder = b,
         .options = .{
-            .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .stivale2 }),
+            .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .limine }),
             .run = .{
                 .disks = &.{
                     .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf", "FiraSans-Regular.otf", } },
@@ -387,7 +387,6 @@ const Kernel = struct {
                 const build_installer_path = "src/build/arch/x86_64/limine/";
                 const installer = @import("src/build/arch/x86_64/limine/installer.zig");
                 const base_path = "src/kernel/arch/x86_64/limine/";
-                const to_install_path = build_installer_path ++ "to_install/";
                 const image_path = "zig-cache/universal.iso";
 
                 fn new(kernel: *Kernel) Build.Step {
@@ -404,6 +403,8 @@ const Kernel = struct {
                     cwd.deleteFile(image_path) catch {};
                     const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
                     const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+                    const to_install_path = kernel.builder.fmt(base_path ++ "{s}/to_install", .{@tagName(kernel.options.arch.x86_64.bootloader.limine.protocol)});
+
                     const limine_dir = try cwd.openDir(to_install_path, .{});
 
                     const limine_efi_bin_file = "limine-cd-efi.bin";
