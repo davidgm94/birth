@@ -12,12 +12,39 @@ const Context = @import("../../context.zig");
 const CPU = @import("../../cpu.zig");
 const VirtualAddress = @import("../../../../virtual_address.zig");
 const VirtualMemoryRegion = @import("../../../../virtual_memory_region.zig");
+const PhysicalAddress = @import("../../../../physical_address.zig");
 const PhysicalAddressSpace = @import("../../../../physical_address_space.zig");
 const PhysicalMemoryRegion = @import("../../../../physical_memory_region.zig");
 const Scheduler = @import("../../../../scheduler.zig");
 const Thread = @import("../../../../thread.zig");
 
 const logger = std.log.scoped(.Limine);
+
+const PhysicalAllocator = struct {
+    zero_free_list: List = .{},
+    free_list: List = .{},
+};
+
+const List = struct {
+    first: ?*FreePhysicalRegion = null,
+    last: ?*FreePhysicalRegion = null,
+    count: u64 = 0,
+};
+
+const Descriptor = struct {
+    address: PhysicalAddress,
+    size: u64,
+};
+
+const Flags = packed struct(u64) {
+    zeroed: bool = false,
+};
+
+const FreePhysicalRegion = struct {
+    descriptor: Descriptor,
+    previous: ?*FreePhysicalRegion = null,
+    next: ?*FreePhysicalRegion = null,
+};
 
 pub export fn kernel_entry_point() noreturn {
     CPU.early_bsp_bootstrap();
@@ -37,6 +64,50 @@ pub export fn kernel_entry_point() noreturn {
         break :blk response.address;
     };
     logger.debug("RSDP: 0x{x}", .{x86_64.rsdp_physical_address});
+
+    {
+        const response = bootloader_memory_map.response orelse @panic("Memory map response not present");
+        const entry_count = response.entry_count;
+        const ptr_to_entry_ptr = response.entries orelse @panic("Pointer to memory map entry pointer is null");
+        const entry_ptr = ptr_to_entry_ptr.*;
+        const entries = entry_ptr[0..entry_count];
+        var usable_entry_count: u64 = 0;
+        for (entries) |entry| {
+            usable_entry_count += @boolToInt(entry.type == .usable);
+        }
+
+        logger.debug("Usable entry count: {}", .{usable_entry_count});
+        const usable_free_regions = kernel.bootstrap_allocator.allocator().alloc(FreePhysicalRegion, usable_entry_count) catch @panic("Unable to allocate usable free regions");
+        var maybe_last: ?*FreePhysicalRegion = null;
+        var usable_i: u64 = 0;
+
+        for (entries) |entry| {
+            if (entry.type == .usable) {
+                const region = &usable_free_regions[usable_i];
+                defer {
+                    usable_i += 1;
+                    if (maybe_last) |last| last.next = region;
+                    maybe_last = region;
+                }
+                region.* = FreePhysicalRegion{
+                    .descriptor = Descriptor{
+                        .address = PhysicalAddress.new(entry.address),
+                        .size = entry.size,
+                    },
+                    .previous = maybe_last,
+                };
+            }
+        }
+
+        var physical_allocator = PhysicalAllocator{
+            .zero_free_list = List{
+                .first = &usable_free_regions[0],
+                .last = maybe_last,
+                .count = usable_entry_count,
+            },
+        };
+        _ = physical_allocator;
+    }
 
     while (true) {}
 }

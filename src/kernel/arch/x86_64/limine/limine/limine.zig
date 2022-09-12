@@ -203,19 +203,22 @@ pub const SMPInfo = switch (@import("builtin").cpu.arch) {
 
 //define LIMINE_SMP_X2APIC (1 << 0)
 
-// #define LIMINE_MEMMAP_USABLE                 0
-// #define LIMINE_MEMMAP_RESERVED               1
-// #define LIMINE_MEMMAP_ACPI_RECLAIMABLE       2
-// #define LIMINE_MEMMAP_ACPI_NVS               3
-// #define LIMINE_MEMMAP_BAD_MEMORY             4
-// #define LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE 5
-// #define LIMINE_MEMMAP_KERNEL_AND_MODULES     6
-// #define LIMINE_MEMMAP_FRAMEBUFFER            7
 pub const MemoryMap = extern struct {
     pub const Entry = extern struct {
         address: u64,
-        length: u64,
-        type: u64,
+        size: u64,
+        type: Type,
+
+        const Type = enum(u64) {
+            usable = 0,
+            reserved = 1,
+            acpi_reclaimable = 2,
+            acpi_nvs = 3,
+            bad_memory = 4,
+            bootloader_reclaimable = 5,
+            kernel_and_modules = 6,
+            framebuffer = 7,
+        };
     };
 
     pub const Request = extern struct {
