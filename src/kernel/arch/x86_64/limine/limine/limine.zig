@@ -15,8 +15,8 @@ pub const File = extern struct {
     revision: u64,
     address: u64,
     size: u64,
-    path: [*c]const u8,
-    command_line: [*c]const u8,
+    path: [*:0]const u8,
+    command_line: [*:0]const u8,
     media_type: MediaType,
     unused: u32,
     tftp_ip: u32,
@@ -38,12 +38,13 @@ pub const BootloaderInfo = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0xf55038d8e2a1202f, 0x279426fcf5f59740),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
+
     pub const Response = extern struct {
         revision: u64,
-        name: [*c]const u8,
-        version: [*c]const u8,
+        name: [*:0]const u8,
+        version: [*:0]const u8,
     };
 };
 
@@ -51,9 +52,10 @@ pub const StackSize = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x224ef0460a8e8926, 0xe1cb0fc25f46ea3d),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
         stack_size: u64,
     };
+
     pub const Response = extern struct {
         revision: u64,
     };
@@ -65,6 +67,7 @@ pub const HHDM = extern struct {
         revision: u64,
         response: ?*const Response = null,
     };
+
     pub const Response = extern struct {
         revision: u64,
         offset: u64,
@@ -91,8 +94,9 @@ pub const Framebuffer = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x9d5827dcd881dd75, 0xa3148604f6fab11b),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
+
     pub const Response = extern struct {
         revision: u64,
         framebuffer_count: u64,
@@ -122,7 +126,7 @@ pub const Terminal = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0xc8ac59310c2b0844, 0xa68d0c7265d38878),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
         callback: ?*const Callback,
     };
 
@@ -133,7 +137,7 @@ pub const Terminal = extern struct {
         write: ?*const Write,
     };
 
-    pub const Write = fn (*Terminal, [*c]const u8, u64) callconv(.C) void;
+    pub const Write = fn (*Terminal, [*:0]const u8, u64) callconv(.C) void;
     pub const Callback = fn (*Terminal, u64, u64, u64, u64) callconv(.C) void;
 };
 
@@ -141,7 +145,7 @@ pub const Paging5Level = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x94469551da9b3192, 0xebe5e86db7382888),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -154,7 +158,7 @@ const SMPInfoGoToAddress = fn (*SMPInfo) callconv(.C) void;
 const SMPInfoRequest = extern struct {
     id: ID = request_id(0x95a67b819a1b857e, 0xa0b61b723b6a73e0),
     revision: u64,
-    response: ?*const SMPInfo.Response,
+    response: ?*const SMPInfo.Response = null,
     flags: u64,
 };
 
@@ -217,7 +221,7 @@ pub const MemoryMap = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x67cf3d9d378a806f, 0xe304acdfc50c3c62),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -233,8 +237,8 @@ pub const EntryPoint = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x13d86c035a1cd3e1, 0x2b0caa89d8f3026a),
         revision: u64,
-        response: ?*const Response,
-        entry: u64,
+        response: ?*const Response = null,
+        entry_point: *const Function,
     };
 
     pub const Response = extern struct {
@@ -246,7 +250,7 @@ pub const KernelFile = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0xad97e90e83f1ed67, 0x31eb5d1c5ff23b69),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -259,7 +263,7 @@ pub const Module = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x3e7e279702be32af, 0xca1c4f3bd1280cee),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -273,7 +277,7 @@ pub const RSDP = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0xc5e77b6b397e7b43, 0x27637845accdcf3c),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -286,7 +290,7 @@ pub const SMBIOS = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x9e9046f11e095391, 0xaa4a520fefbde5ee),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -300,7 +304,7 @@ pub const EFISystemTable = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x5ceba5163eaaf6d6, 0x0a6981610cf65fcc),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -313,7 +317,7 @@ pub const BootTime = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x502746e184c088aa, 0xfbc5ec83e6327893),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -326,7 +330,7 @@ pub const KernelAddress = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0x71ba76863cc55f63, 0xb2644a48c516a487),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
 
     pub const Response = extern struct {
@@ -340,7 +344,7 @@ pub const DTB = extern struct {
     pub const Request = extern struct {
         id: ID = request_id(0xb40ddb48fb54bac7, 0x545081493f81ffb7),
         revision: u64,
-        response: ?*const Response,
+        response: ?*const Response = null,
     };
     pub const Response = extern struct {
         revision: u64,
