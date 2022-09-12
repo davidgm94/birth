@@ -2,6 +2,7 @@ const std = @import("../common/std.zig");
 
 const common = @import("common.zig");
 
+const arch = @import("arch/common.zig");
 const DeviceManager = @import("device_manager.zig");
 const FileInMemory = common.FileInMemory;
 const Framebuffer = common.Framebuffer;
@@ -12,6 +13,9 @@ const PhysicalAddressSpace = @import("physical_address_space.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
 const VirtualMemoryRegion = @import("virtual_memory_region.zig");
+
+const CPU = arch.CPU;
+const Context = arch.Context;
 
 pub var scheduler = Scheduler{
     .lock = Spinlock{},
@@ -51,3 +55,10 @@ pub var higher_half_direct_map = VirtualAddress.invalid();
 
 pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;
+
+pub const BootstrapContext = struct {
+    cpu: CPU,
+    thread: Thread,
+    context: Context,
+};
+pub var bootstrap_context: BootstrapContext = undefined;

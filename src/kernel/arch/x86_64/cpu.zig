@@ -2,6 +2,7 @@ const CPU = @This();
 
 const std = @import("../../../common/std.zig");
 
+const CPUID = @import("../../../common/arch/x86_64/cpuid.zig");
 const GDT = @import("gdt.zig");
 const IDT = @import("idt.zig");
 const interrupts = @import("interrupts.zig");
@@ -33,6 +34,17 @@ idt: IDT,
 idle_thread: *Thread,
 timestamp_ticks_per_ms: u64 = 0,
 ready: bool,
+
+pub fn early_bsp_bootstrap() void {
+    x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
+    // Generate enough bootstraping structures to make some early stuff work
+    kernel.bootstrap_context.cpu.id = 0;
+    TLS.preset_bsp(&kernel.scheduler, &kernel.bootstrap_context.thread, &kernel.bootstrap_context.cpu);
+    kernel.bootstrap_context.thread.context = &kernel.bootstrap_context.context;
+
+    // @ZigBug: @ptrCast here crashes the compiler
+    kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&kernel.bootstrap_context.cpu))[0..1];
+}
 
 pub fn start(cpu: *CPU, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
     cpu.ready = false;

@@ -41,15 +41,12 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
     // Get maximum physical address information
     x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
-    var bootstrap_context = std.zeroes(BootstrapContext);
-    {
-        bootstrap_context.cpu.id = 0;
-        TLS.preset_bsp(&kernel.scheduler, &bootstrap_context.thread, &bootstrap_context.cpu);
-        bootstrap_context.thread.context = &bootstrap_context.context;
+    kernel.bootstrap_context.cpu.id = 0;
+    TLS.preset_bsp(&kernel.scheduler, &kernel.bootstrap_context.thread, &kernel.bootstrap_context.cpu);
+    kernel.bootstrap_context.thread.context = &kernel.bootstrap_context.context;
 
-        // @ZigBug: @ptrCast here crashes the compiler
-        kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&bootstrap_context.cpu))[0..1];
-    }
+    // @ZigBug: @ptrCast here crashes the compiler
+    kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&kernel.bootstrap_context.cpu))[0..1];
 
     stivale_log.debug("Hello kernel!", .{});
     stivale_log.debug("Stivale2 address: 0x{x}", .{stivale2_struct_address});
@@ -603,12 +600,12 @@ pub export fn kernel_entry_point(stivale2_struct_address: u64) callconv(.C) nore
         const smps = smp_struct.smp_info()[0..cpu_count];
         std.assert(smps[0].lapic_id == smp_struct.bsp_lapic_id);
         // @Allocation
-        bootstrap_context.cpu.idle_thread = &foo;
-        bootstrap_context.cpu.idle_thread.context = &foo2;
-        bootstrap_context.cpu.idle_thread.context = &foo2;
-        bootstrap_context.cpu.idle_thread.address_space = &kernel.virtual_address_space;
-        bootstrap_context.thread.context = &foo2;
-        bootstrap_context.thread.address_space = &kernel.virtual_address_space;
+        kernel.bootstrap_context.cpu.idle_thread = &foo;
+        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+        kernel.bootstrap_context.cpu.idle_thread.address_space = &kernel.virtual_address_space;
+        kernel.bootstrap_context.thread.context = &foo2;
+        kernel.bootstrap_context.thread.address_space = &kernel.virtual_address_space;
 
         kernel.scheduler.lock.acquire();
 
