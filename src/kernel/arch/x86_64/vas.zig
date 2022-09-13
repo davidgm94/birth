@@ -214,23 +214,23 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
 
     if (is_kernel_address_space) {
         const half_entry_count = 0x100;
-        const pml4_table_page_count = comptime @divExact(@sizeOf(PML4Table), common.page_size);
-        const pdp_table_page_count = comptime @divExact(@sizeOf(PDPTable), common.page_size);
-        const pml4_physical_address = physical_address_space.allocate(pml4_table_page_count) orelse @panic("wtf");
-        const pdp_physical_address = physical_address_space.allocate(pdp_table_page_count) orelse @panic("wtf");
+        const pml4_table_page_count = comptime @divExact(@sizeOf(PML4Table), page_size);
+        const pdp_table_page_count = comptime @divExact(@sizeOf(PDPTable), page_size);
+        const pml4_physical_region = physical_address_space.allocate_pages(page_size, pml4_table_page_count, .{ .zeroed = true }) orelse @panic("wtf");
+        const pdp_physical_region = physical_address_space.allocate_pages(page_size, pdp_table_page_count, .{ .zeroed = true }) orelse @panic("wtf");
 
         if (safe_map) {
-            const top_physical_address = pdp_physical_address.offset(pdp_table_page_count * page_size);
+            const top_physical_address = pdp_physical_region.address.offset(pdp_table_page_count * page_size);
             if (top_physical_address.value >= 4 * 1024 * 1024 * 1024) {
                 @panic("wtf");
             }
         }
 
         virtual_address_space.arch = Specific{
-            .cr3 = cr3.from_address(pml4_physical_address),
+            .cr3 = cr3.from_address(pml4_physical_region.address),
         };
 
-        const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
+        const pml4_virtual_address = pml4_physical_region.address.to_higher_half_virtual_address();
         const pml4 = pml4_virtual_address.access(*PML4Table);
         const lower_half_pml4 = pml4[0 .. pml4.len / 2];
         const higher_half_pml4 = pml4[0 .. pml4.len / 2];
@@ -238,7 +238,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         std.assert(higher_half_pml4.len == half_entry_count);
         std.zero_slice(PML4Entry, lower_half_pml4);
 
-        var pdp_table_physical_address = pdp_physical_address;
+        var pdp_table_physical_address = pdp_physical_region.address;
         for (higher_half_pml4) |*pml4_entry| {
             defer pdp_table_physical_address.value += @sizeOf(PDPTable);
             pml4_entry.* = PML4Entry{
