@@ -29,8 +29,6 @@ pub const Specific = struct {
 
 const Indices = [std.enum_count(PageIndex)]u16;
 
-pub var bootstrapping_physical_addresses: std.ArrayList(PhysicalAddress) = undefined;
-
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags) MapError!void {
     var allocation_count: u64 = 0;
 
@@ -217,7 +215,13 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
         const pml4_table_page_count = comptime @divExact(@sizeOf(PML4Table), page_size);
         const pdp_table_page_count = comptime @divExact(@sizeOf(PDPTable), page_size);
         const pml4_physical_region = physical_address_space.allocate_pages(page_size, pml4_table_page_count, .{ .zeroed = true }) orelse @panic("wtf");
+        for (pml4_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..pml4_physical_region.size]) |byte| {
+            std.assert(byte == 0);
+        }
         const pdp_physical_region = physical_address_space.allocate_pages(page_size, pdp_table_page_count, .{ .zeroed = true }) orelse @panic("wtf");
+        for (pdp_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..pdp_physical_region.size]) |byte| {
+            std.assert(byte == 0);
+        }
 
         if (safe_map) {
             const top_physical_address = pdp_physical_region.address.offset(pdp_table_page_count * page_size);
@@ -252,17 +256,22 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
     }
 }
 
-pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, page_count: u64, general_flags: VirtualAddressSpace.Flags) void {
-    _ = physical_address;
+pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, page_count: u64, general_flags: VirtualAddressSpace.Flags) void {
     const flags = general_flags.to_arch_specific();
     _ = flags;
 
     std.assert(page_count > 0);
 
     var virtual_address = asked_virtual_address;
+    var physical_address = asked_physical_address;
     const top_virtual_address = asked_virtual_address.offset(page_count * page_size);
 
-    while (virtual_address.value < top_virtual_address.value) : (virtual_address.value += page_size) {
+    while (virtual_address.value < top_virtual_address.value) : ({
+        physical_address.value += page_size;
+        virtual_address.value += page_size;
+    }) {
+        const log_this = false; //0xffff800040000000 - virtual_address.value < 0x10000;
+
         std.assert(virtual_address.is_valid());
         std.assert(std.is_aligned(virtual_address.value, x86_64.page_size));
 
@@ -272,6 +281,9 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
         const pml4_table = blk: {
             const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
             const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
+            if (log_this) {
+                log.debug("PML4: {}", .{pml4_virtual_address});
+            }
             if (safe_map) {
                 std.assert(pml4_virtual_address.is_valid());
             }
@@ -281,30 +293,38 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
 
         const pdp_table = blk: {
             const entry_pointer = &pml4_table[indices[@enumToInt(PageIndex.PML4)]];
+            if (log_this) log.debug("PDP index: {}", .{indices[@enumToInt(PageIndex.PML4)]});
 
             const table_physical_address = physical_address_blk: {
                 const entry_value = entry_pointer.*;
+                if (log_this) log.debug("Entry value: {}", .{entry_value});
                 if (entry_value.present) {
+                    if (log_this) log.debug("Present", .{});
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
+                    if (log_this) log.debug("Not present", .{});
                     const entry_page_count = @divExact(@sizeOf(PDPTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
-                    const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
-                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
-                    const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
-
-                    const allocated_entry_pointer = entry_virtual_address.access(*PDPTable);
-                    allocated_entry_pointer.* = std.zeroes(PDPTable);
+                    const entry_physical_region = kernel.physical_address_space.allocate_pages(page_size, entry_page_count, .{ .zeroed = true }) orelse @panic("WTF");
+                    if (safe_map) {
+                        for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                            std.assert(byte == 0);
+                        }
+                    }
 
                     entry_pointer.* = PML4Entry{
                         .present = true,
                         .read_write = true,
-                        .address = pack_address(entry_physical_address),
+                        .address = pack_address(entry_physical_region.address),
                     };
 
-                    break :physical_address_blk entry_physical_address;
+                    break :physical_address_blk entry_physical_region.address;
                 }
             };
+
+            if (log_this) {
+                log.debug("Table physical address: {}", .{table_physical_address});
+            }
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
             if (safe_map) std.assert(table_virtual_address.is_valid());
@@ -313,34 +333,41 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
 
         const pd_table = blk: {
             const entry_pointer = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+            if (log_this) {
+                log.debug("PD index: {}", .{indices[@enumToInt(PageIndex.PDP)]});
+            }
 
             const table_physical_address = physical_address_blk: {
                 const entry_value = entry_pointer.*;
+                if (log_this) log.debug("Entry value: {}", .{entry_value});
                 if (entry_value.present) {
+                    if (log_this) log.debug("Present", .{});
                     // The address is mapped with a 1GB page
                     if (entry_value.page_size) {
                         @panic("todo pd table page size");
                     }
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
+                    if (log_this) log.debug("Not present", .{});
                     const entry_page_count = @divExact(@sizeOf(PDTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
-                    const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
-                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
-                    const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
-
-                    const allocated_entry_pointer = entry_virtual_address.access(*PDTable);
-                    allocated_entry_pointer.* = std.zeroes(PDTable);
+                    const entry_physical_region = kernel.physical_address_space.allocate_pages(page_size, entry_page_count, .{ .zeroed = true }) orelse @panic("WTF");
+                    if (safe_map) {
+                        for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                            std.assert(byte == 0);
+                        }
+                    }
 
                     entry_pointer.* = PDPEntry{
                         .present = true,
                         .read_write = true,
-                        .address = pack_address(entry_physical_address),
+                        .address = pack_address(entry_physical_region.address),
                     };
 
-                    break :physical_address_blk entry_physical_address;
+                    break :physical_address_blk entry_physical_region.address;
                 }
             };
+            if (log_this) log.debug("Table physical address: {}", .{table_physical_address});
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
             if (safe_map) std.assert(table_virtual_address.is_valid());
@@ -349,50 +376,74 @@ pub fn bootstrap_map(physical_address: PhysicalAddress, asked_virtual_address: V
 
         const p_table = blk: {
             const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
+            if (log_this) log.debug("PT index: {}", .{indices[@enumToInt(PageIndex.PD)]});
 
             const table_physical_address = physical_address_blk: {
                 const entry_value = entry_pointer.*;
+                if (log_this) log.debug("Entry value: {}", .{entry_value});
                 if (entry_value.present) {
+                    if (log_this) log.debug("Present", .{});
                     // The address is mapped with a 2MB page
                     if (entry_value.page_size) {
                         @panic("todo ptable page size");
                     }
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
+                    if (log_this) log.debug("Not present", .{});
                     const entry_page_count = @divExact(@sizeOf(PDTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
-                    const entry_physical_address = kernel.physical_address_space.allocate(entry_page_count) orelse @panic("WTF");
-                    bootstrapping_physical_addresses.append(kernel.bootstrap_allocator.allocator(), entry_physical_address) catch @panic("Unable to allocate bootstrapping_physical_addresses");
-                    const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
+                    const entry_physical_region = kernel.physical_address_space.allocate_pages(page_size, entry_page_count, .{ .zeroed = true }) orelse @panic("WTF");
+                    if (log_this) {
+                        log.debug("Entry physical region: {}", .{entry_physical_region.address});
+                    }
 
-                    const allocated_entry_pointer = entry_virtual_address.access(*PTable);
-                    allocated_entry_pointer.* = std.zeroes(PTable);
+                    if (safe_map) {
+                        for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                            std.assert(byte == 0);
+                        }
+                    }
 
                     entry_pointer.* = PDEntry{
                         .present = true,
                         .read_write = true,
-                        .address = pack_address(entry_physical_address),
+                        .address = pack_address(entry_physical_region.address),
                     };
 
-                    break :physical_address_blk entry_physical_address;
+                    break :physical_address_blk entry_physical_region.address;
                 }
             };
+
+            if (log_this) log.debug("Table physical_address: {}", .{table_physical_address});
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
             if (safe_map) std.assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PTable);
         };
+        if (log_this) {
+            for (p_table) |p_entry| {
+                log.debug("P Entry: 0x{x}", .{@bitCast(u64, p_entry)});
+            }
+        }
 
         const entry_pointer = &p_table[indices[@enumToInt(PageIndex.PT)]];
+        if (log_this) log.debug("P Index: {}", .{indices[@enumToInt(PageIndex.PT)]});
         const entry_value = entry_pointer.*;
+        if (log_this) log.debug("Entry value: {}", .{entry_value});
 
-        if (entry_value.present) @panic("Already present wtf");
+        if (entry_value.present) {
+            crash.panic("Virtual address {} already present in CR3 {}. Translated to {}. Debug: 0x{x}", .{ virtual_address, virtual_address_space.arch.cr3.get_address(), unpack_address(entry_value), @bitCast(u64, entry_value) & 0xffff_ffff_ffff_f000 });
+        }
 
         entry_pointer.* = PTEntry{
             .present = true,
             .read_write = true,
             .address = pack_address(physical_address),
         };
+
+        if (safe_map) {
+            const translated_address = virtual_address_space.translate_address(virtual_address) orelse unreachable;
+            if (translated_address.value != physical_address.value) @panic("WTF seriously");
+        }
     }
 }
 
@@ -471,7 +522,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const pdp_table = blk: {
         const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
         if (!pml4_entry.present) {
-            log.err("Virtual address {} not present: PML4", .{virtual_address});
+            //log.err("Virtual address {} not present: PML4", .{virtual_address});
             return std.zeroes(TranslationResult);
         }
 
@@ -483,7 +534,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const pd_table = blk: {
         const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
         if (!pdp_entry.present) {
-            log.err("Virtual address {} not present: PDP", .{virtual_address});
+            //log.err("Virtual address {} not present: PDP", .{virtual_address});
             return std.zeroes(TranslationResult);
         }
 
@@ -505,7 +556,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const p_table = blk: {
         const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
         if (!pd_entry.present) {
-            log.err("Virtual address {} not present: PD", .{virtual_address});
+            //log.err("Virtual address {} not present: PD", .{virtual_address});
             return std.zeroes(TranslationResult);
         }
 
@@ -554,13 +605,25 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
     if (safe_map) {
         if (virtual_address_space == &kernel.virtual_address_space) {
+            log.debug("About to switch to kernel address space", .{});
             const instruction_pointer = VirtualAddress.new(@returnAddress()).aligned_backward(page_size);
             const frame_pointer = VirtualAddress.new(@frameAddress()).aligned_backward(page_size);
-            const global_ptr_va = VirtualAddress.new(@ptrToInt(&bootstrapping_physical_addresses)).aligned_backward(page_size);
+            const global_ptr_va = VirtualAddress.new(@ptrToInt(&kernel.virtual_address_space)).aligned_backward(page_size);
+            const RBP = registers.rbp.read();
+            log.debug("RBP: 0x{x}", .{RBP});
 
+            const instruction_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(instruction_pointer) orelse unreachable;
+            const frame_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(frame_pointer) orelse unreachable;
+            const global_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(global_ptr_va) orelse unreachable;
+
+            log.debug("Checking if instruction pointer is mapped to {}...", .{instruction_pointer_physical_address});
             std.assert(virtual_address_space.translate_address(instruction_pointer) != null);
+            log.debug("Checking if frame pointer is mapped to {}...", .{frame_pointer_physical_address});
             std.assert(virtual_address_space.translate_address(frame_pointer) != null);
+            log.debug("Checking if a global variable is mapped to {}...", .{global_pointer_physical_address});
             std.assert(virtual_address_space.translate_address(global_ptr_va) != null);
+
+            std.assert(virtual_address_space.translate_address(virtual_address_space.arch.cr3.get_address().to_higher_half_virtual_address()) != null);
         }
     }
 

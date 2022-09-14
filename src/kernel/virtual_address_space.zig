@@ -265,23 +265,23 @@ pub fn add_free_region(virtual_address_space: *VirtualAddressSpace, region: Regi
 
 pub const Region = struct {
     address: VirtualAddress,
-    page_count: u64,
+    size: u64,
     flags: Flags,
 
     pub fn is_valid_new_region_at_bootstrapping(region: Region, virtual_address_space: *VirtualAddressSpace) bool {
         const region_base = region.address.value;
-        const region_top = region.address.offset(arch.page_size * region.page_count).value;
+        const region_top = region.address.offset(region.size).value;
 
         for (virtual_address_space.used_regions.items) |used_region| {
             if (used_region.overlap(region_base, region_top)) {
-                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Used: (0x{x}, 0x{x})", .{ region_base, region_top, used_region.address.value, used_region.address.offset(arch.page_size * used_region.page_count).value });
+                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Used: (0x{x}, 0x{x})", .{ region_base, region_top, used_region.address.value, used_region.address.offset(used_region.size).value });
                 return false;
             }
         }
 
         for (virtual_address_space.free_regions.items) |free_region| {
             if (free_region.overlap(region_base, region_top)) {
-                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Free: (0x{x}, 0x{x})", .{ region_base, region_top, free_region.address.value, free_region.address.offset(arch.page_size * free_region.page_count).value });
+                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Free: (0x{x}, 0x{x})", .{ region_base, region_top, free_region.address.value, free_region.address.offset(free_region.size).value });
                 return false;
             }
         }
@@ -291,7 +291,7 @@ pub const Region = struct {
 
     inline fn overlap(region: Region, region_base: u64, region_top: u64) bool {
         const other_base = region.address.value;
-        const other_top = region.address.offset(arch.page_size * region.page_count).value;
+        const other_top = region.address.offset(region.size).value;
 
         if (region_base <= other_base and region_top >= other_top) {
             log.debug("Reason 1", .{});

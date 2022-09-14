@@ -20,29 +20,39 @@ pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime pa
     physical_address_space.lock.acquire();
     defer physical_address_space.lock.release();
 
-    var node_ptr = if (flags.zeroed) physical_address_space.zero_free_list.first else physical_address_space.free_list.first;
+    var list = if (flags.zeroed) &physical_address_space.zero_free_list else &physical_address_space.free_list;
+    var node_ptr = list.first;
     const size = page_size * page_count;
 
-    while (node_ptr) |node| : (node_ptr = node.next) {
-        if (node.descriptor.size > size) {
-            const allocated_region = PhysicalMemoryRegion{
-                .address = node.descriptor.address,
-                .size = size,
-            };
-            node.descriptor.address.value += size;
-            node.descriptor.size -= size;
+    const allocated_region = blk: {
+        while (node_ptr) |node| : (node_ptr = node.next) {
+            if (node.descriptor.size > size) {
+                const allocated_region = PhysicalMemoryRegion{
+                    .address = node.descriptor.address,
+                    .size = size,
+                };
+                node.descriptor.address.value += size;
+                node.descriptor.size -= size;
 
-            return allocated_region;
-        } else if (node.descriptor.size == size) {
-            const allocated_region = node.descriptor;
-            if (node.previous) |previous| previous.next = node.next;
-            if (node.next) |next| next.previous = node.previous;
+                break :blk allocated_region;
+            } else if (node.descriptor.size == size) {
+                const allocated_region = node.descriptor;
+                if (node.previous) |previous| previous.next = node.next;
+                if (node.next) |next| next.previous = node.previous;
+                if (node_ptr == list.first) list.first = node.next;
+                if (node_ptr == list.last) list.last = node.previous;
 
-            return allocated_region;
+                break :blk allocated_region;
+            }
         }
+
+        return null;
+    };
+    if (kernel.bootstrap_virtual_address_space.valid) {
+        std.zero(allocated_region.address.to_higher_half_virtual_address().access([*]u8)[0..allocated_region.size]);
     }
 
-    return null;
+    return allocated_region;
 }
 
 pub fn free_pages(physical_address_space: *PhysicalAddressSpace, comptime page_size: u64, page_count: u64, flags: Flags) void {

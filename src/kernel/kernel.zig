@@ -9,6 +9,7 @@ const Framebuffer = common.Framebuffer;
 const Scheduler = @import("scheduler.zig");
 const Spinlock = @import("spinlock.zig");
 const Thread = @import("thread.zig");
+const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const PhysicalAddressSpace = @import("physical_address_space.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
