@@ -8,8 +8,8 @@ pub const FileInMemory = struct {
 
 pub const Framebuffer = struct {
     virtual_address: VirtualAddress,
-    width: u16,
-    height: u16,
+    width: u64,
+    height: u64,
     bytes_per_pixel: u8,
     red_mask: ColorMask,
     blue_mask: ColorMask,

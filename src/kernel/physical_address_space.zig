@@ -66,6 +66,16 @@ pub fn free_pages(physical_address_space: *PhysicalAddressSpace, comptime page_s
     @panic("todo free pages");
 }
 
+pub fn log_free_memory(physical_address_space: *PhysicalAddressSpace) void {
+    var node_ptr = physical_address_space.zero_free_list.first;
+    var size: u64 = 0;
+    while (node_ptr) |node| : (node_ptr = node.next) {
+        size += node.descriptor.size;
+    }
+
+    log.debug("Free memory: {} bytes", .{size});
+}
+
 const List = struct {
     first: ?*FreePhysicalRegion = null,
     last: ?*FreePhysicalRegion = null,

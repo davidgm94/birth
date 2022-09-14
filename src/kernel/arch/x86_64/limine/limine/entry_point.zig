@@ -1,5 +1,6 @@
 const std = @import("../../../../../common/std.zig");
 
+const common = @import("../../../../common.zig");
 const CPUID = @import("../../../../../common/arch/x86_64/cpuid.zig");
 const crash = @import("../../../../crash.zig");
 const default_logger = @import("../../../../log.zig");
@@ -22,6 +23,7 @@ const VirtualAddress = @import("../../../../virtual_address.zig");
 const VirtualMemoryRegion = @import("../../../../virtual_memory_region.zig");
 const VirtualAddressSpace = @import("../../../../virtual_address_space.zig");
 
+const Framebuffer = common.Framebuffer;
 const logger = std.log.scoped(.Limine);
 
 pub export fn kernel_entry_point() noreturn {
@@ -184,19 +186,20 @@ pub export fn kernel_entry_point() noreturn {
                         }
                     },
                     .reserved => {
+                        // TODO:
                         // TODO: check if we should the same as above or not. For now, repeat it
-                        _ = @divExact(entry.size, x86_64.page_size);
-                        const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
+                        //_ = @divExact(entry.size, x86_64.page_size);
+                        //const entry_virtual_address = entry_physical_address.to_higher_half_virtual_address();
 
-                        const region = VirtualAddressSpace.Region{
-                            .address = entry_virtual_address,
-                            .size = entry.size,
-                            .flags = VirtualAddressSpace.Flags{
-                                .write = true,
-                            },
-                        };
+                        //const region = VirtualAddressSpace.Region{
+                        //.address = entry_virtual_address,
+                        //.size = entry.size,
+                        //.flags = VirtualAddressSpace.Flags{
+                        //.write = true,
+                        //},
+                        //};
 
-                        kernel.virtual_address_space.add_used_region(region) catch unreachable;
+                        //kernel.virtual_address_space.add_used_region(region) catch unreachable;
                     },
                     else => crash.panic("ni: {}", .{entry.type}),
                 }
@@ -205,6 +208,63 @@ pub export fn kernel_entry_point() noreturn {
 
         //// TODO: Handle virtual memory management later on
         logger.debug("Paging initialized", .{});
+    }
+
+    kernel.physical_address_space.log_free_memory();
+
+    {
+        const response = bootloader_framebuffer.response orelse @panic("Framebuffer response not found");
+        if (response.framebuffer_count == 0) @panic("No framebuffer found");
+        const ptr_framebuffer_ptr = response.framebuffers orelse @panic("Framebuffer response has an invalid pointer");
+        const framebuffer_ptr = ptr_framebuffer_ptr.*;
+        const framebuffers = framebuffer_ptr[0..response.framebuffer_count];
+        std.assert(framebuffers.len == 1);
+        const framebuffer = framebuffers[0];
+        std.assert(framebuffer.pitch % framebuffer.width == 0);
+        std.assert(framebuffer.bpp % @bitSizeOf(u8) == 0);
+        const bytes_per_pixel = @intCast(u8, framebuffer.bpp / @bitSizeOf(u8));
+        std.assert(framebuffer.pitch / framebuffer.width == bytes_per_pixel);
+
+        // TODO: Make sure this correspnds with the framebuffer region
+        //const mapped_address = kernel.bootstrap_virtual_address_space.translate_address(VirtualAddress.new(framebuffer.address)) orelse unreachable;
+        //logger.debug("Mapped address: {}", .{mapped_address});
+
+        // For now ignore virtual address since we are using our own mapping
+        //
+        // TODO: make sure there is just an entry here
+        const framebuffer_virtual_address = blk: {
+            for (memory_map_entries) |entry| {
+                if (entry.type == .framebuffer) {
+                    break :blk PhysicalAddress.new(entry.address).to_higher_half_virtual_address();
+                }
+            }
+
+            unreachable;
+        };
+
+        kernel.bootloader_framebuffer = Framebuffer{
+            .virtual_address = framebuffer_virtual_address,
+            .width = framebuffer.width,
+            .height = framebuffer.height,
+            .bytes_per_pixel = bytes_per_pixel,
+            .red_mask = .{ .size = framebuffer.red_mask_size, .shift = framebuffer.red_mask_shift },
+            .blue_mask = .{ .size = framebuffer.blue_mask_size, .shift = framebuffer.blue_mask_shift },
+            .green_mask = .{ .size = framebuffer.green_mask_size, .shift = framebuffer.green_mask_shift },
+        };
+        logger.debug("Processed framebuffer", .{});
+    }
+
+    {
+        const response = bootloader_smp.response orelse @panic("SMP response not found");
+        const cpu_count = response.cpu_count;
+        if (cpu_count == 0) @panic("SMP response has no CPU information");
+        const ptr_cpu_ptr = response.cpus orelse @panic("SMP response has an invalid pointer to CPU data structures");
+        const cpu_ptr = ptr_cpu_ptr.*;
+        const cpus = cpu_ptr[0..cpu_count];
+
+        for (cpus) |cpu| {
+            logger.debug("CPU {}", .{cpu});
+        }
     }
 
     logger.debug("Congrats! Reached to the end", .{});
