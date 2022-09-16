@@ -1,7 +1,6 @@
 const std = @import("../../../common/std.zig");
 const x86_64 = @import("common.zig");
 
-const Bitflag = @import("../../../common/bitflag.zig").Bitflag;
 const PhysicalAddress = @import("../../physical_address.zig");
 
 const SimpleRegister = enum {
@@ -223,28 +222,65 @@ pub const IA32_FMASK = SimpleMSR(0xC0000084);
 pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
 pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
 pub const IA32_KERNEL_GS_BASE = SimpleMSR(0xC0000102);
-pub const IA32_EFER = ComplexMSR(0xC0000080, enum(u6) {
-    /// Syscall Enable - syscall, sysret
-    SCE = 0,
-    /// Long Mode Enable
-    LME = 8,
-    /// Long Mode Active
-    LMA = 10,
-    /// Enables page access restriction by preventing instruction fetches from PAE pages with the XD bit set
-    NXE = 11,
-    SVME = 12,
-    LMSLE = 13,
-    FFXSR = 14,
-    TCE = 15,
-});
 
-pub const IA32_APIC_BASE = ComplexMSR(0x0000001B, enum(u6) {
-    bsp = 8,
-    global_enable = 11,
-});
+pub const IA32_EFER = packed struct(u64) {
+    /// Syscall Enable - syscall, sysret
+    SCE: bool = false,
+    reserved0: u7 = 0,
+    /// Long Mode Enable
+    LME: bool = false,
+    reserved1: bool = false,
+    /// Long Mode Active
+    LMA: bool = false,
+    /// Enables page access restriction by preventing instruction fetches from PAE pages with the XD bit set
+    NXE: bool = false,
+    SVME: bool = false,
+    LMSLE: bool = false,
+    FFXSR: bool = false,
+    TCE: bool = false,
+    reserved2: u48 = 0,
+
+    comptime {
+        std.assert(@sizeOf(u64) == @sizeOf(IA32_EFER));
+    }
+
+    pub const MSR = SimpleMSR(0xC0000080);
+
+    pub fn read() IA32_EFER {
+        const result = MSR.read();
+        const typed_result = @bitCast(IA32_EFER, result);
+        return typed_result;
+    }
+
+    pub fn write(typed_value: IA32_EFER) void {
+        const value = @bitCast(u64, typed_value);
+        MSR.write(value);
+    }
+};
+
+pub const IA32_APIC_BASE = packed struct {
+    reserved0: u8 = 0,
+    bsp: bool = false,
+    reserved1: u2 = 0,
+    global_enable: bool = false,
+    reserved2: u52 = 0,
+
+    pub const MSR = SimpleMSR(0x0000001B);
+
+    pub fn read() IA32_APIC_BASE {
+        const result = MSR.read();
+        const typed_result = @bitCast(IA32_APIC_BASE, result);
+        return typed_result;
+    }
+
+    pub fn write(typed_value: IA32_APIC_BASE) void {
+        const value = @bitCast(u64, typed_value);
+        MSR.write(value);
+    }
+};
 
 pub fn get_apic_base() u32 {
-    return @truncate(u32, IA32_APIC_BASE.read().bits & 0xfffff000);
+    return @truncate(u32, @bitCast(u64, IA32_APIC_BASE.read()) & 0xfffff000);
 }
 
 pub fn SimpleR64(comptime Register: SimpleRegister) type {
@@ -850,38 +886,6 @@ pub fn SimpleMSR(comptime msr: u32) type {
         }
 
         pub inline fn write(value: u64) void {
-            const low = @truncate(u32, value);
-            const high = @truncate(u32, value >> 32);
-
-            asm volatile ("wrmsr"
-                :
-                : [_] "{eax}" (low),
-                  [_] "{edx}" (high),
-                  [_] "{ecx}" (msr),
-            );
-        }
-    };
-}
-
-pub fn ComplexMSR(comptime msr: u32, comptime _BitEnum: type) type {
-    return struct {
-        pub const BitEnum = _BitEnum;
-
-        pub const Flags = Bitflag(false, u64, BitEnum);
-        pub inline fn read() Flags {
-            var low: u32 = undefined;
-            var high: u32 = undefined;
-
-            asm volatile ("rdmsr"
-                : [_] "={eax}" (low),
-                  [_] "={edx}" (high),
-                : [_] "{ecx}" (msr),
-            );
-            return Flags.from_bits((@as(u64, high) << 32) | low);
-        }
-
-        pub inline fn write(flags: Flags) void {
-            const value = flags.bits;
             const low = @truncate(u32, value);
             const high = @truncate(u32, value >> 32);
 

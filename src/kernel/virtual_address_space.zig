@@ -4,6 +4,7 @@ const std = @import("../common/std.zig");
 
 const arch = @import("arch/common.zig");
 const AVL = @import("../common/avl.zig");
+const crash = @import("crash.zig");
 const Heap = @import("heap.zig");
 const kernel = @import("kernel.zig");
 const log = std.log.scoped(.VirtualAddressSpace);
@@ -25,7 +26,6 @@ heap: Heap,
 lock: Spinlock,
 free_regions: std.ArrayList(Region) = .{},
 used_regions: std.ArrayList(Region) = .{},
-valid: bool,
 
 pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     VAS.from_current(virtual_address_space);
@@ -39,7 +39,6 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock{},
-        .valid = false,
     };
     VAS.new(virtual_address_space, physical_address_space);
 
@@ -52,7 +51,9 @@ pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
-    std.assert(kernel.memory_initialized);
+    if (kernel.config.safe_slow) {
+        std.assert(kernel.memory_initialized);
+    }
     const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no);
     return result.virtual_address;
 }
@@ -67,6 +68,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     defer if (already_locked == .no) virtual_address_space.lock.release();
 
     const page_count = @divFloor(byte_count, arch.page_size);
+    const page_aligned_size = page_count * arch.page_size;
     const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return std.Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
@@ -77,9 +79,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
             if (flags.user) {
                 break :blk VirtualAddress.new(physical_region.address.value);
             } else {
-                @panic("todo fix this if_bootstraping");
-                //break :blk if (is_bootstrapping) @panic("can't allocate while bootstrapping")
-                //else physical_address.to_higher_half_virtual_address();
+                break :blk physical_region.address.to_higher_half_virtual_address();
             }
         }
     };
@@ -87,7 +87,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
     if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
 
-    try virtual_address_space.map_extended(physical_region.address, virtual_address, page_count, flags, AlreadyLocked.yes);
+    try virtual_address_space.map_extended(physical_region.address, virtual_address, page_aligned_size, flags, AlreadyLocked.yes);
 
     return Result{
         .physical_address = physical_region.address,
@@ -109,8 +109,6 @@ pub const AlreadyLocked = enum {
     yes,
 };
 
-const debug_with_translate_address = false;
-
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
     _ = virtual_address_space;
     _ = base_physical_address;
@@ -118,25 +116,31 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     _ = size;
     _ = flags;
     _ = already_locked;
-    @panic("todo map extended");
-    //if (already_locked == .yes) {
-    //std.assert(virtual_address_space.lock.status != 0);
-    //} else {
-    //virtual_address_space.lock.acquire();
-    //}
-    //defer {
-    //if (already_locked == .no) {
-    //virtual_address_space.lock.release();
-    //}
-    //}
 
-    //var physical_address = base_physical_address;
-    //var virtual_address = base_virtual_address;
+    if (already_locked == .yes) {
+        std.assert(virtual_address_space.lock.status != 0);
+    } else {
+        virtual_address_space.lock.acquire();
+    }
+    defer {
+        if (already_locked == .no) {
+            virtual_address_space.lock.release();
+        }
+    }
 
-    //if (!is_bootstrapping) blk: {
+    if (!std.is_aligned(size, arch.page_size)) {
+        crash.panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
+    }
+
+    if (!kernel.memory_initialized) {
+        @panic("Bootstrap VAS is still valid at the time of using map_extended");
+    }
+
+    // TODO: write good checks here
+    //blk: {
     //const region = Region{
-    //.address = virtual_address,
-    //.page_count = page_count,
+    //.address = base_virtual_address,
+    //.size = size,
     //.flags = flags,
     //};
 
@@ -146,11 +150,11 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     //if (free_region.contains(region)) {
     //log.debug("Contained", .{});
     //if (region.address.value == free_region.address.value) {
-    //std.assert(free_region.page_count >= region.page_count);
-    //if (free_region.page_count > region.page_count) {
-    //free_region.address.value += region.page_count * arch.page_size;
-    //free_region.page_count -= region.page_count;
-    //} else if (free_region.page_count == region.page_count) {
+    //std.assert(free_region.size >= region.size);
+    //if (free_region.size > region.size) {
+    //free_region.address.value += region.size;
+    //free_region.size -= region.size;
+    //} else if (free_region.size == region.size) {
     //log.debug("deleting by swap remove", .{});
     //_ = recording_virtual_address_space.free_regions.swapRemove(free_region_i);
     //} else {
@@ -158,7 +162,6 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     //}
 
     //recording_virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region) catch unreachable;
-
     //break :blk;
     //} else {
     //@panic("Wtf");
@@ -169,22 +172,29 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     //@panic("wtf no free space");
     //}
 
-    //var page_i: u64 = 0;
-    //while (page_i < page_count) : (page_i += 1) {
-    //defer physical_address.value += arch.page_size;
-    //defer virtual_address.value += arch.page_size;
+    var physical_address = base_physical_address;
+    var virtual_address = base_virtual_address;
+    const top_virtual_address = virtual_address.offset(size);
 
-    //try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific(), is_bootstrapping);
-    //if (debug_with_translate_address) {
-    //const new_physical_address = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes, is_bootstrapping, higher_half_direct_map) orelse @panic("address not present");
-    //std.assert(new_physical_address.is_valid());
-    //std.assert(new_physical_address.is_equal(physical_address));
-    //}
-    //}
+    while (virtual_address.value < top_virtual_address.value) : ({
+        physical_address.value += arch.page_size;
+        virtual_address.value += arch.page_size;
+    }) {
+        try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific());
+        if (kernel.config.safe_slow) {
+            const translation_result = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes);
+            if (!translation_result.mapped) {
+                @panic("address not present");
+            }
+            if (!translation_result.physical_address.is_valid()) {
+                @panic("address not valid");
+            }
 
-    ////if (kernel.memory_initialized) {
-    ////virtual_address_space.track(virtual_address, physical_address, page_count);
-    ////}
+            if (!translation_result.physical_address.is_equal(physical_address)) {
+                @panic("address not equal");
+            }
+        }
+    }
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) ?PhysicalAddress {
@@ -270,18 +280,18 @@ pub const Region = struct {
 
     pub fn is_valid_new_region_at_bootstrapping(region: Region, virtual_address_space: *VirtualAddressSpace) bool {
         const region_base = region.address.value;
-        const region_top = region.address.offset(region.size).value;
+        const region_top = region.get_top_address().value;
 
         for (virtual_address_space.used_regions.items) |used_region| {
             if (used_region.overlap(region_base, region_top)) {
-                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Used: (0x{x}, 0x{x})", .{ region_base, region_top, used_region.address.value, used_region.address.offset(used_region.size).value });
+                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Used: (0x{x}, 0x{x})", .{ region_base, region_top, used_region.address.value, used_region.get_top_address().value });
                 return false;
             }
         }
 
         for (virtual_address_space.free_regions.items) |free_region| {
             if (free_region.overlap(region_base, region_top)) {
-                log.err("Overlap detected. Region: (0x{x}, 0x{x}). Free: (0x{x}, 0x{x})", .{ region_base, region_top, free_region.address.value, free_region.address.offset(free_region.size).value });
+                log.err("Overlap detected. Region: ({}, {}). Free: ({}, {})", .{ region_base, region_top, free_region.address.value, free_region.get_top_address() });
                 return false;
             }
         }
@@ -291,7 +301,7 @@ pub const Region = struct {
 
     inline fn overlap(region: Region, region_base: u64, region_top: u64) bool {
         const other_base = region.address.value;
-        const other_top = region.address.offset(region.size).value;
+        const other_top = region.get_top_address().value;
 
         if (region_base <= other_base and region_top >= other_top) {
             log.debug("Reason 1", .{});
@@ -315,12 +325,12 @@ pub const Region = struct {
     }
 
     inline fn contains(container: Region, contained: Region) bool {
-        log.debug("(0x{x}, 0x{x}) contains (0x{x}, 0x{x})?", .{ container.address.value, container.address.offset(arch.page_size * container.page_count).value, contained.address.value, contained.address.offset(arch.page_size * contained.page_count).value });
-        if (container.address.offset(container.page_count * arch.page_size).value <= contained.address.value) {
+        log.debug("(0x{x}, 0x{x}) contains (0x{x}, 0x{x})?", .{ container.address.value, container.get_top_address().value, contained.address.value, contained.get_top_address().value });
+        if (container.get_top_address().value <= contained.address.value) {
             log.debug("contain1", .{});
             return false;
         }
-        if (contained.address.offset(contained.page_count * arch.page_size).value <= container.address.value) {
+        if (contained.get_top_address().value <= container.address.value) {
             log.debug("contain2", .{});
             return false;
         }
@@ -329,9 +339,13 @@ pub const Region = struct {
         } else if (container.address.value > contained.address.value) {
             @panic("foo2");
         } else {
-            if (container.page_count < contained.page_count) @panic("Region overlap but it is too big");
+            if (container.size < contained.size) @panic("Region overlap but it is too big");
             return true;
         }
+    }
+
+    inline fn get_top_address(virtual_memory_region: Region) VirtualAddress {
+        return virtual_memory_region.address.offset(virtual_memory_region.size);
     }
 };
 

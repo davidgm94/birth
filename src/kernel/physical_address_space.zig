@@ -48,8 +48,12 @@ pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime pa
 
         return null;
     };
-    if (kernel.bootstrap_virtual_address_space.valid) {
-        std.zero(allocated_region.address.to_higher_half_virtual_address().access([*]u8)[0..allocated_region.size]);
+
+    // For now, just zero it out.
+    // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys zero flag
+    if (flags.zeroed) {
+        const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
+        std.zero(region_bytes);
     }
 
     return allocated_region;

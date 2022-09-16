@@ -4,7 +4,6 @@ const Controller = @This();
 const std = @import("../common/std.zig");
 
 const arch = @import("../kernel/arch/common.zig");
-const Bitflag = @import("../common/bitflag.zig").Bitflag;
 const crash = @import("../kernel/crash.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
 const Drivers = @import("../drivers/common.zig");

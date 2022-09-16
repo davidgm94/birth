@@ -36,7 +36,6 @@ pub var virtual_address_space = VirtualAddressSpace{
     .privilege_level = .kernel,
     .heap = .{},
     .lock = .{},
-    .valid = false,
 };
 
 pub var memory_initialized = false;
@@ -63,3 +62,7 @@ pub const BootstrapContext = struct {
     context: Context,
 };
 pub var bootstrap_context: BootstrapContext = undefined;
+
+pub const config = struct {
+    safe_slow: bool = true,
+}{};

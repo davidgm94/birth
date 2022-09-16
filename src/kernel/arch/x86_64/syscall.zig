@@ -9,7 +9,7 @@ const Syscall = @import("../../syscall.zig");
 pub fn enable() void {
     // Enable syscall extensions
     var efer = registers.IA32_EFER.read();
-    efer.or_flag(.SCE);
+    efer.SCE = true;
     registers.IA32_EFER.write(efer);
 
     registers.IA32_LSTAR.write(@ptrToInt(&kernel_syscall_entry_point));

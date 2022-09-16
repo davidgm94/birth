@@ -104,7 +104,6 @@ pub export fn kernel_entry_point() noreturn {
             .privilege_level = .kernel,
             .heap = Heap.new(&kernel.virtual_address_space),
             .lock = Spinlock{},
-            .valid = false,
         };
 
         VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space);
@@ -146,7 +145,7 @@ pub export fn kernel_entry_point() noreturn {
 
         {
             kernel.virtual_address_space.make_current();
-            kernel.virtual_address_space.copy_to_new(&kernel.virtual_address_space);
+            //kernel.virtual_address_space.copy_to_new(&kernel.virtual_address_space);
         }
 
         kernel.memory_initialized = true;

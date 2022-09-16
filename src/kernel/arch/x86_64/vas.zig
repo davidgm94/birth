@@ -2,7 +2,6 @@ const std = @import("../../../common/std.zig");
 
 const common = @import("common.zig");
 const crash = @import("../../crash.zig");
-const Bitflag = @import("../../../common/bitflag.zig").Bitflag;
 const kernel = @import("../../kernel.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const PhysicalAddressSpace = @import("../../physical_address_space.zig");
@@ -34,7 +33,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
     if (true) @panic("TODO vas map");
 
-    if (safe_map) {
+    if (kernel.config.safe_slow) {
         @panic("TODO safe map map");
         //std.assert((PhysicalAddress{ .value = virtual_address_space.arch.cr3 }).is_valid());
         //std.assert(std.is_aligned(virtual_address.value, common.page_size));
@@ -223,7 +222,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace, physical_address_space: 
             std.assert(byte == 0);
         }
 
-        if (safe_map) {
+        if (kernel.config.safe_slow) {
             const top_physical_address = pdp_physical_region.address.offset(pdp_table_page_count * page_size);
             if (top_physical_address.value >= 4 * 1024 * 1024 * 1024) {
                 @panic("wtf");
@@ -284,7 +283,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
             if (log_this) {
                 log.debug("PML4: {}", .{pml4_virtual_address});
             }
-            if (safe_map) {
+            if (kernel.config.safe_slow) {
                 std.assert(pml4_virtual_address.is_valid());
             }
 
@@ -306,7 +305,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
                     const entry_page_count = @divExact(@sizeOf(PDPTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
                     const entry_physical_region = kernel.physical_address_space.allocate_pages(page_size, entry_page_count, .{ .zeroed = true }) orelse @panic("WTF");
-                    if (safe_map) {
+                    if (kernel.config.safe_slow) {
                         for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
                             std.assert(byte == 0);
                         }
@@ -327,7 +326,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
             }
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
-            if (safe_map) std.assert(table_virtual_address.is_valid());
+            if (kernel.config.safe_slow) std.assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PDPTable);
         };
 
@@ -352,7 +351,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
                     const entry_page_count = @divExact(@sizeOf(PDTable), page_size);
                     // TODO: track this physical allocation in order to map it later in the kernel address space
                     const entry_physical_region = kernel.physical_address_space.allocate_pages(page_size, entry_page_count, .{ .zeroed = true }) orelse @panic("WTF");
-                    if (safe_map) {
+                    if (kernel.config.safe_slow) {
                         for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
                             std.assert(byte == 0);
                         }
@@ -370,7 +369,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
             if (log_this) log.debug("Table physical address: {}", .{table_physical_address});
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
-            if (safe_map) std.assert(table_virtual_address.is_valid());
+            if (kernel.config.safe_slow) std.assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PDTable);
         };
 
@@ -397,7 +396,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
                         log.debug("Entry physical region: {}", .{entry_physical_region.address});
                     }
 
-                    if (safe_map) {
+                    if (kernel.config.safe_slow) {
                         for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
                             std.assert(byte == 0);
                         }
@@ -416,7 +415,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
             if (log_this) log.debug("Table physical_address: {}", .{table_physical_address});
 
             const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
-            if (safe_map) std.assert(table_virtual_address.is_valid());
+            if (kernel.config.safe_slow) std.assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PTable);
         };
         if (log_this) {
@@ -440,14 +439,13 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
             .address = pack_address(physical_address),
         };
 
-        if (safe_map) {
+        if (kernel.config.safe_slow) {
             const translated_address = virtual_address_space.translate_address(virtual_address) orelse unreachable;
             if (translated_address.value != physical_address.value) @panic("WTF seriously");
         }
     }
 }
 
-const safe_map = false;
 const time_map = false;
 
 const PanicPolicy = enum {
@@ -479,7 +477,6 @@ pub inline fn from_current(virtual_address_space: *VirtualAddressSpace) void {
         .privilege_level = .kernel,
         .heap = .{},
         .lock = .{},
-        .valid = true,
     };
 }
 
@@ -512,7 +509,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
     const pml4_table = blk: {
         const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
         const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
-        if (safe_map) {
+        if (kernel.config.safe_slow) {
             std.assert(pml4_virtual_address.is_valid());
         }
 
@@ -527,7 +524,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         }
 
         const pdp_table_virtual_address = unpack_address(pml4_entry).to_higher_half_virtual_address();
-        if (safe_map) std.assert(pdp_table_virtual_address.is_valid());
+        if (kernel.config.safe_slow) std.assert(pdp_table_virtual_address.is_valid());
         break :blk pdp_table_virtual_address.access(*volatile PDPTable);
     };
 
@@ -549,7 +546,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         }
 
         const pd_table_virtual_address = physical_address.to_higher_half_virtual_address();
-        if (safe_map) std.assert(pd_table_virtual_address.is_valid());
+        if (kernel.config.safe_slow) std.assert(pd_table_virtual_address.is_valid());
         break :blk pd_table_virtual_address.access(*volatile PDTable);
     };
 
@@ -570,7 +567,7 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
             };
         }
         const p_table_virtual_address = physical_address.to_higher_half_virtual_address();
-        if (safe_map) std.assert(p_table_virtual_address.is_valid());
+        if (kernel.config.safe_slow) std.assert(p_table_virtual_address.is_valid());
         break :blk p_table_virtual_address.access(*volatile PDTable);
     };
 
@@ -603,7 +600,7 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
 }
 
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
-    if (safe_map) {
+    if (kernel.config.safe_slow) {
         if (virtual_address_space == &kernel.virtual_address_space) {
             log.debug("About to switch to kernel address space", .{});
             const instruction_pointer = VirtualAddress.new(@returnAddress()).aligned_backward(page_size);
@@ -632,32 +629,38 @@ pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
 }
 
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {
-    var flags = MemoryFlags.empty();
-    if (general_flags.write) flags.or_flag(.read_write);
-    if (general_flags.user) flags.or_flag(.user);
-    if (general_flags.cache_disable) flags.or_flag(.cache_disable);
-    if (general_flags.accessed) flags.or_flag(.accessed);
-    if (!general_flags.execute) flags.or_flag(.execute_disable);
-    return flags;
+    return MemoryFlags{
+        .read_write = general_flags.write,
+        .user = general_flags.user,
+        .cache_disable = general_flags.cache_disable,
+        .accessed = general_flags.accessed,
+        .execute_disable = general_flags.execute,
+    };
 }
 
 // TODO:
-pub const MemoryFlags = Bitflag(true, u64, enum(u6) {
-    read_write = 1,
-    user = 2,
-    write_through = 3,
-    cache_disable = 4,
-    accessed = 5,
-    dirty = 6,
-    pat = 7, // must be 0
-    global = 8,
-    execute_disable = 63,
-});
+pub const MemoryFlags = packed struct(u64) {
+    present: bool = true,
+    read_write: bool = false,
+    user: bool = false,
+    write_through: bool = false,
+    cache_disable: bool = false,
+    accessed: bool = false,
+    dirty: bool = false,
+    pat: bool = false,
+    global: bool = false,
+    reserved: u54 = 0,
+    execute_disable: bool = false,
+
+    comptime {
+        std.assert(@sizeOf(u64) == @sizeOf(MemoryFlags));
+    }
+};
 
 const address_mask: u64 = 0x0000_00ff_ffff_f000;
 
 fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress) u64 {
-    if (safe_map) {
+    if (kernel.config.safe_slow) {
         std.assert(x86_64.max_physical_address_bit == 40);
         std.assert(std.is_aligned(new_address.value, common.page_size));
     }
@@ -671,7 +674,7 @@ fn set_entry_in_address_bits(old_entry_value: u64, new_address: PhysicalAddress)
 
 inline fn get_address_from_entry_bits(entry_bits: u64) PhysicalAddress {
     const address = entry_bits & address_mask;
-    if (safe_map) {
+    if (kernel.config.safe_slow) {
         std.assert(common.max_physical_address_bit == 40);
         std.assert(std.is_aligned(address, common.page_size));
     }
