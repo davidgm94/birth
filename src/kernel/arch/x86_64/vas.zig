@@ -447,7 +447,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
     }
 }
 
-const safe_map = true;
+const safe_map = false;
 const time_map = false;
 
 const PanicPolicy = enum {

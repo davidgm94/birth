@@ -67,7 +67,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     defer if (already_locked == .no) virtual_address_space.lock.release();
 
     const page_count = @divFloor(byte_count, arch.page_size);
-    const physical_address = kernel.physical_address_space.allocate(page_count) orelse return std.Allocator.Error.OutOfMemory;
+    const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return std.Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
@@ -75,7 +75,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
             break :blk specific_address;
         } else {
             if (flags.user) {
-                break :blk VirtualAddress.new(physical_address.value);
+                break :blk VirtualAddress.new(physical_region.address.value);
             } else {
                 @panic("todo fix this if_bootstraping");
                 //break :blk if (is_bootstrapping) @panic("can't allocate while bootstrapping")
@@ -87,10 +87,10 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
     if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
 
-    try virtual_address_space.map_extended(physical_address, virtual_address, page_count, flags, AlreadyLocked.yes);
+    try virtual_address_space.map_extended(physical_region.address, virtual_address, page_count, flags, AlreadyLocked.yes);
 
     return Result{
-        .physical_address = physical_address,
+        .physical_address = physical_region.address,
         .virtual_address = virtual_address,
     };
 }
@@ -99,9 +99,9 @@ pub const MapError = error{
     already_present,
 };
 
-pub fn map(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags) MapError!void {
+pub fn map(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags) MapError!void {
     std.assert(kernel.memory_initialized);
-    try map_extended(virtual_address_space, base_physical_address, base_virtual_address, page_count, flags, AlreadyLocked.no);
+    try map_extended(virtual_address_space, base_physical_address, base_virtual_address, size, flags, AlreadyLocked.no);
 }
 
 pub const AlreadyLocked = enum {
@@ -111,11 +111,11 @@ pub const AlreadyLocked = enum {
 
 const debug_with_translate_address = false;
 
-pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, page_count: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
+pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
     _ = virtual_address_space;
     _ = base_physical_address;
     _ = base_virtual_address;
-    _ = page_count;
+    _ = size;
     _ = flags;
     _ = already_locked;
     @panic("todo map extended");
@@ -335,15 +335,15 @@ pub const Region = struct {
     }
 };
 
-pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, page_count: u64, flags: Flags) void {
+pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, size: u64, flags: Flags) void {
     std.assert(virtual_address_space == &kernel.virtual_address_space);
     // Fake a free region
     virtual_address_space.free_regions.append(virtual_address_space.heap.allocator, VirtualAddressSpace.Region{
         .address = virtual_address,
-        .page_count = page_count,
+        .size = size,
         .flags = flags,
     }) catch unreachable;
-    kernel.virtual_address_space.map(physical_address, virtual_address, page_count, flags) catch @panic("Unable to map reserved region");
+    kernel.virtual_address_space.map(physical_address, virtual_address, size, flags) catch @panic("Unable to map reserved region");
 }
 
 pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {

@@ -265,12 +265,93 @@ pub export fn kernel_entry_point() noreturn {
         for (cpus) |cpu| {
             logger.debug("CPU {}", .{cpu});
         }
+        std.assert(cpus[0].lapic_id == response.bsp_lapic_id);
+        // @Allocation
+        kernel.bootstrap_context.cpu.idle_thread = &foo;
+        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+        kernel.bootstrap_context.cpu.idle_thread.address_space = &kernel.virtual_address_space;
+        kernel.bootstrap_context.thread.context = &foo2;
+        kernel.bootstrap_context.thread.address_space = &kernel.virtual_address_space;
+
+        kernel.scheduler.lock.acquire();
+
+        const threads = kernel.scheduler.thread_buffer.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
+        kernel.scheduler.current_threads = kernel.virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
+        const thread_stack_size = Scheduler.default_kernel_stack_size;
+        const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
+        const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+        kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
+        kernel.scheduler.cpus[0].id = cpus[0].processor_id;
+        // Dummy context
+        TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[0]);
+        TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
+        // Map LAPIC address on just one CPU (since it's global)
+        CPU.map_lapic();
+
+        // TODO: ignore BSP cpu when AP initialization?
+        for (threads) |*thread, thread_i| {
+            kernel.scheduler.current_threads[thread_i] = thread;
+            const cpu = &kernel.scheduler.cpus[thread_i];
+            const smp = &cpus[thread_i];
+
+            const stack_allocation_offset = thread_i * thread_stack_size;
+            const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
+            const thread_stack = Scheduler.ThreadStack{
+                .kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
+                .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
+            };
+
+            const entry_point = &kernel_smp_entry;
+            kernel.scheduler.initialize_thread(thread, thread_i, &kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
+            thread.cpu = cpu;
+            cpu.idle_thread = thread;
+            cpu.id = smp.processor_id;
+            cpu.lapic.id = smp.lapic_id;
+            smp.goto_address = entry_point;
+        }
+
+        // TODO: TSS
+
+        // Update bsp CPU
+        // TODO: maybe this is necessary?
+
+        kernel.scheduler.lock.release();
+
+        logger.debug("Processed SMP info", .{});
     }
 
     logger.debug("Congrats! Reached to the end", .{});
 
     while (true) {}
 }
+
+export fn kernel_smp_entry(smp_info: *Limine.SMPInfo) callconv(.C) noreturn {
+    const cpu_index = smp_info.processor_id;
+    // Current thread is already set in the process_smp function
+    TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[cpu_index]);
+    kernel.virtual_address_space.make_current();
+    const current_thread = TLS.get_current();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
+    logger.debug("CPU started", .{});
+
+    while (!cpu.ready) {
+        cpu.lapic.next_timer(10);
+        asm volatile (
+            \\sti
+            \\pause
+            \\hlt
+        );
+    }
+
+    logger.debug("cpu is now ready", .{});
+    cpu.make_thread_idle();
+}
+
+// TODO: is this necessary?
+var foo: Thread = undefined;
+var foo2: Context = undefined;
 
 export var bootloader_info = Limine.BootloaderInfo.Request{
     .revision = 0,
@@ -284,7 +365,7 @@ export var bootloader_framebuffer = Limine.Framebuffer.Request{
     .revision = 0,
 };
 
-export var bootloader_smp = Limine.SMPInfo.Request{
+export var bootloader_smp = Limine.SMPInfoRequest{
     .revision = 0,
     .flags = 0,
 };

@@ -113,7 +113,7 @@ pub fn map_lapic() void {
     const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
     const lapic_page_count = 1;
     const lapic_flags = VirtualAddressSpace.Flags{ .write = true, .cache_disable = true };
-    kernel.virtual_address_space.map_reserved_region(lapic_physical_address, lapic_virtual_address, lapic_page_count, lapic_flags);
+    kernel.virtual_address_space.map_reserved_region(lapic_physical_address, lapic_virtual_address, lapic_page_count * page_size, lapic_flags);
 }
 
 pub fn init_timer(cpu: *CPU) void {

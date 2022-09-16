@@ -384,7 +384,8 @@ pub const Device = struct {
         device.bar_sizes[bar_i] = size;
         const virtual_address = physical_address.to_higher_half_virtual_address();
         const page_count = @divExact(size, arch.page_size);
-        virtual_address_space.map_reserved_region(physical_address, virtual_address, page_count, .{ .write = true, .cache_disable = true });
+        _ = page_count;
+        virtual_address_space.map_reserved_region(physical_address, virtual_address, size, .{ .write = true, .cache_disable = true });
 
         return virtual_address;
     }

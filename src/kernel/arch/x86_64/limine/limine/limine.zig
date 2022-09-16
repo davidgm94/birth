@@ -155,7 +155,7 @@ pub const Paging5Level = extern struct {
 
 const SMPInfoGoToAddress = fn (*SMPInfo) callconv(.C) noreturn;
 
-const SMPInfoRequest = extern struct {
+pub const SMPInfoRequest = extern struct {
     id: ID = request_id(0x95a67b819a1b857e, 0xa0b61b723b6a73e0),
     revision: u64,
     response: ?*const SMPInfo.Response = null,
@@ -170,14 +170,12 @@ pub const SMPInfo = switch (@import("builtin").cpu.arch) {
         goto_address: ?*const SMPInfoGoToAddress,
         extra_argument: u64,
 
-        pub const Request = SMPInfoRequest;
-
         pub const Response = extern struct {
             revision: u64,
             flags: u32,
             bsp_lapic_id: u32,
             cpu_count: u64,
-            cpus: ?*const [*]const SMPInfo,
+            cpus: ?*const [*]SMPInfo,
         };
     },
     .aarch64 => extern struct {

@@ -26,11 +26,11 @@ pub const KernelManager = struct {
         const completion_queue_buffer_size = std.align_forward(entry_count * @sizeOf(Syscall.Completion), arch.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
 
-        const syscall_buffer_physical_address = kernel.physical_address_space.allocate(@divFloor(total_buffer_size, arch.page_size)) orelse @panic("wtF");
-        const kernel_virtual_buffer = syscall_buffer_physical_address.to_higher_half_virtual_address();
+        const syscall_buffer_physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, @divFloor(total_buffer_size, arch.page_size), .{ .zeroed = true }) orelse @panic("wtF");
+        const kernel_virtual_buffer = syscall_buffer_physical_region.address.to_higher_half_virtual_address();
         // TODO: stop hardcoding
         const user_virtual_buffer = VirtualAddress.new(0x0000_7f00_0000_0000);
-        const submission_physical_address = syscall_buffer_physical_address;
+        const submission_physical_address = syscall_buffer_physical_region.address;
         const completion_physical_address = submission_physical_address.offset(submission_queue_buffer_size);
         virtual_address_space.map(submission_physical_address, kernel_virtual_buffer, 1, .{ .write = false, .user = false }) catch unreachable;
         virtual_address_space.map(completion_physical_address, kernel_virtual_buffer.offset(submission_queue_buffer_size), 1, .{ .write = true, .user = false }) catch unreachable;

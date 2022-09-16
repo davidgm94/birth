@@ -31,7 +31,7 @@ comptime {
 inline fn map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, comptime maybe_flags: ?VirtualAddressSpace.Flags) VirtualAddress {
     const aligned_physical_page = physical_address.aligned_backward(page_size);
     const aligned_virtual_page = aligned_physical_page.to_higher_half_virtual_address();
-    virtual_address_space.map_reserved_region(aligned_physical_page, aligned_virtual_page, 1, if (maybe_flags) |flags| flags else VirtualAddressSpace.Flags.empty());
+    virtual_address_space.map_reserved_region(aligned_physical_page, aligned_virtual_page, page_size, if (maybe_flags) |flags| flags else VirtualAddressSpace.Flags.empty());
     const virtual_address = physical_address.to_higher_half_virtual_address();
     return virtual_address;
 }
