@@ -5,6 +5,7 @@ const CPUID = @import("../../../../../common/arch/x86_64/cpuid.zig");
 const crash = @import("../../../../crash.zig");
 const default_logger = @import("../../../../log.zig");
 const kernel = @import("../../../../kernel.zig");
+const main = @import("../../../../main.zig").main;
 const Limine = @import("limine.zig");
 const TLS = @import("../../tls.zig");
 const x86_64 = @import("../../common.zig");
@@ -41,7 +42,7 @@ pub export fn kernel_entry_point() noreturn {
     x86_64.rsdp_physical_address = blk: {
         const response = bootloader_rsdp.response orelse @panic("RSDP response not present");
         if (response.address == 0) @panic("RSDP address is null");
-        break :blk response.address;
+        break :blk response.address - kernel.higher_half_direct_map.value;
     };
     logger.debug("RSDP: 0x{x}", .{x86_64.rsdp_physical_address});
 
@@ -106,7 +107,7 @@ pub export fn kernel_entry_point() noreturn {
             .lock = Spinlock{},
         };
 
-        VAS.new(&kernel.virtual_address_space, &kernel.physical_address_space);
+        VAS.init_kernel(&kernel.virtual_address_space, &kernel.physical_address_space);
         std.log.scoped(.CR3).debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
 
         // Map the kernel and do some tests
@@ -288,6 +289,7 @@ pub export fn kernel_entry_point() noreturn {
         // Map LAPIC address on just one CPU (since it's global)
         CPU.map_lapic();
 
+        // TODO: figure out stacks
         // TODO: ignore BSP cpu when AP initialization?
         for (threads) |*thread, thread_i| {
             kernel.scheduler.current_threads[thread_i] = thread;
@@ -320,9 +322,17 @@ pub export fn kernel_entry_point() noreturn {
         logger.debug("Processed SMP info", .{});
     }
 
-    logger.debug("Congrats! Reached to the end", .{});
+    const current_thread = TLS.get_current();
+    const cpu = current_thread.cpu orelse @panic("cpu");
+    cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
 
-    while (true) {}
+    _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
+        .address = @ptrToInt(&main),
+    });
+
+    logger.debug("Congrats! Reached to the end", .{});
+    cpu.ready = true;
+    cpu.make_thread_idle();
 }
 
 export fn kernel_smp_entry(smp_info: *Limine.SMPInfo) callconv(.C) noreturn {

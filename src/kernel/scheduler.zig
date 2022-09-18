@@ -112,7 +112,7 @@ pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddr
     std.assert(privilege_level == .user);
     const executable_file = try drive.read_file(kernel_address_space, executable_filename);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
-    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space, physical_address_space, kernel_address_space);
+    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space);
     const elf_result = ELF.load(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
     const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point);
 

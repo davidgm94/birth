@@ -31,7 +31,7 @@ pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     VAS.from_current(virtual_address_space);
 }
 
-pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
+pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace) void {
     // TODO: defer memory free when this produces an error
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
@@ -40,9 +40,8 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .heap = Heap.new(virtual_address_space),
         .lock = Spinlock{},
     };
-    VAS.new(virtual_address_space, physical_address_space);
 
-    VAS.map_kernel_address_space_higher_half(virtual_address_space, kernel_address_space);
+    VAS.init_user(virtual_address_space);
 }
 
 pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
@@ -87,7 +86,10 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
     if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
 
-    try virtual_address_space.map_extended(physical_region.address, virtual_address, page_aligned_size, flags, AlreadyLocked.yes);
+    // Only map in user space
+    if (flags.user) {
+        try virtual_address_space.map_extended(physical_region.address, virtual_address, page_aligned_size, flags, AlreadyLocked.yes);
+    }
 
     return Result{
         .physical_address = physical_region.address,

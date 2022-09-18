@@ -213,12 +213,8 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
 
                     const page_count = @divExact(segment_size, page_size);
-                    const physical = address_spaces.physical.allocate(page_count) orelse @panic("physical");
-                    const physical_region = PhysicalMemoryRegion{
-                        .address = physical,
-                        .size = segment_size,
-                    };
-                    const kernel_segment_virtual_address = physical.to_higher_half_virtual_address();
+                    const physical_region = address_spaces.physical.allocate_pages(page_size, page_count, .{ .zeroed = true }) orelse @panic("physical");
+                    const kernel_segment_virtual_address = physical_region.address.to_higher_half_virtual_address();
                     // Giving executable permissions here to perform the copy
                     std.assert(std.is_aligned(physical_region.size, arch.page_size));
                     address_spaces.kernel.map(physical_region.address, kernel_segment_virtual_address, physical_region.size / arch.page_size, .{ .write = true }) catch unreachable;

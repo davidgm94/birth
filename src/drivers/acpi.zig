@@ -4,6 +4,7 @@ const arch = @import("../kernel/arch/common.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
 const Drivers = @import("common.zig");
 const crash = @import("../kernel/crash.zig");
+const kernel = @import("../kernel/kernel.zig");
 const PhysicalAddress = @import("../kernel/physical_address.zig");
 const interrupts = @import("../kernel/arch/x86_64/interrupts.zig");
 const VirtualAddress = @import("../kernel/virtual_address.zig");
@@ -57,6 +58,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         log.debug("RSDT table count: {}", .{rsdt_table_count});
         const tables = @intToPtr([*]align(1) u32, @ptrToInt(rsdt) + @sizeOf(Header))[0..rsdt_table_count];
         var last_physical: u64 = rsdp1.RSDT_address;
+
         for (tables) |table_address| {
             log.debug("Table address: 0x{x}", .{table_address});
             const table_header = if (is_in_page_range(last_physical, table_address)) PhysicalAddress.new(table_address).to_higher_half_virtual_address().access(*align(1) Header) else map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(table_address), null).access(*align(1) Header);

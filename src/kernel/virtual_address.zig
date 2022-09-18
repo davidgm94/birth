@@ -1,9 +1,12 @@
 const VirtualAddress = @This();
 
 const std = @import("../common/std.zig");
+
 const PhysicalAddress = @import("physical_address.zig");
 
 value: u64,
+
+const kernel_start = @extern(*u8, .{ .name = "kernel_start" });
 
 pub inline fn new(value: u64) VirtualAddress {
     const virtual_address = VirtualAddress{
