@@ -112,13 +112,6 @@ pub const AlreadyLocked = enum {
 };
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
-    _ = virtual_address_space;
-    _ = base_physical_address;
-    _ = base_virtual_address;
-    _ = size;
-    _ = flags;
-    _ = already_locked;
-
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
@@ -137,6 +130,8 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     if (!kernel.memory_initialized) {
         @panic("Bootstrap VAS is still valid at the time of using map_extended");
     }
+
+    log.debug("Mapping ({}, {}) to ({}, {}) - {}", .{ base_physical_address, base_physical_address.offset(size), base_virtual_address, base_virtual_address.offset(size), flags });
 
     // TODO: write good checks here
     //blk: {
@@ -210,12 +205,9 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, virtual_ad
 
 pub const TranslationResult = struct {
     physical_address: PhysicalAddress,
+    flags: Flags,
     page_size: u32,
     mapped: bool,
-
-    comptime {
-        std.assert(@sizeOf(TranslationResult) <= 2 * @sizeOf(u64));
-    }
 };
 
 pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {

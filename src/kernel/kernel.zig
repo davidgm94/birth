@@ -64,5 +64,5 @@ pub const BootstrapContext = struct {
 pub var bootstrap_context: BootstrapContext = undefined;
 
 pub const config = struct {
-    safe_slow: bool = true,
+    safe_slow: bool = false,
 }{};

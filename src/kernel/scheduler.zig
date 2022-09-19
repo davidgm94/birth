@@ -165,7 +165,6 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         },
     };
 
-    log.debug("JBS #{}", .{thread_id});
     scheduler.initialize_thread(thread, thread_id, thread_virtual_address_space, privilege_level, .normal, entry_point, thread_stack);
 
     log.debug("Spawning thread with id #{}", .{thread_id});

@@ -409,18 +409,19 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
             if (usermode) {
-                crash.panic_extended("Panic in user mode", .{}, context.rip, context.rbp);
+                if (context.cs != @offsetOf(GDT.Table, "user_code_64") | 3) crash.panic_extended("User code CS was supposed to be 0x{x}, was 0x{x}", .{ @offsetOf(GDT.Table, "user_code_64"), context.cs }, context.rip, context.rbp);
+                switch (exception) {
+                    .page_fault => {
+                        const error_code_int = @truncate(u16, context.error_code);
+                        const error_code = @bitCast(PageFaultErrorCode, error_code_int);
+                        const page_fault_address = registers.cr2.read();
+                        crash.panic_extended("Unresolvable page fault in userspace.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
+                    },
+                    else => crash.panic_extended("Unhandled exception in user mode: {s}", .{@tagName(exception)}, context.rip, context.rbp),
+                }
             } else {
-                //var stack_iterator = std.StackIterator.init(context.rip, context.rbp);
-                //log.err("Fault stack trace:", .{});
-                //var stack_trace_i: u64 = 0;
-                //while (stack_iterator.next()) |return_address| : (stack_trace_i += 1) {
-                //if (return_address != 0) {
-                //log.err("{}: 0x{x}", .{ stack_trace_i, return_address });
-                //}
-                //}
-
                 if (context.cs != @offsetOf(GDT.Table, "code_64")) @panic("invalid cs");
+
                 switch (exception) {
                     .page_fault => {
                         const error_code_int = @truncate(u16, context.error_code);

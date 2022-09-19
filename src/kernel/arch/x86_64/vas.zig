@@ -35,11 +35,6 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
         std.assert(std.is_aligned(physical_address.value, common.page_size));
     }
 
-    _ = flags;
-    _ = virtual_address;
-    _ = physical_address;
-    _ = virtual_address_space;
-
     const indices = compute_indices(virtual_address);
     const pml4_table = blk: {
         const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
@@ -73,6 +68,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                 entry_pointer.* = PML4Entry{
                     .present = true,
                     .read_write = true,
+                    .user = true,
                     .address = pack_address(entry_physical_region.address),
                 };
 
@@ -108,6 +104,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                 entry_pointer.* = PDPEntry{
                     .present = true,
                     .read_write = true,
+                    .user = true,
                     .address = pack_address(entry_physical_region.address),
                 };
 
@@ -144,6 +141,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
                 entry_pointer.* = PDEntry{
                     .present = true,
                     .read_write = true,
+                    .user = true,
                     .address = pack_address(entry_physical_region.address),
                 };
 
@@ -165,8 +163,12 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
 
     entry_pointer.* = PTEntry{
         .present = true,
-        .read_write = true,
+        .read_write = flags.read_write,
+        .user = flags.user,
+        .page_level_cache_disable = flags.cache_disable,
+        .global = flags.global,
         .address = pack_address(physical_address),
+        .execute_disable = flags.execute_disable,
     };
 
     if (kernel.config.safe_slow) {
@@ -409,6 +411,7 @@ pub fn init_kernel(virtual_address_space: *VirtualAddressSpace, physical_address
         pml4_entry.* = PML4Entry{
             .present = true,
             .read_write = true,
+            .user = true,
             .address = pack_address(pdp_table_physical_address),
         };
     }
@@ -434,8 +437,6 @@ pub fn init_user(virtual_address_space: *VirtualAddressSpace) void {
     }
 
     map_kernel_address_space_higher_half(virtual_address_space, &kernel.virtual_address_space);
-
-    @panic("TODO user  2");
 }
 
 const time_map = false;
@@ -472,18 +473,13 @@ pub inline fn from_current(virtual_address_space: *VirtualAddressSpace) void {
 }
 
 pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
-    _ = virtual_address_space;
-    _ = kernel_address_space;
-    @panic("TODO: map kernel address space higher_half");
-    //const cr3_physical_address = PhysicalAddress.new(virtual_address_space.arch.cr3);
-    //const cr3_kernel_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
-    //// TODO: maybe user flag is not necessary?
-    //kernel_address_space.map(cr3_physical_address, cr3_kernel_virtual_address, 1, .{ .write = true, .user = true }) catch unreachable;
-    //const pml4 = cr3_kernel_virtual_address.access(*PML4Table);
-    //std.zero_slice(PML4E, pml4[0..0x100]);
-    //if (true) @panic("fix this map kernel address space higher half");
-    ////std.copy(PML4E, pml4[0x100..], PhysicalAddress.new(kernel_address_space.arch.cr3).access_higher_half(*PML4Table)[0x100..]);
-    //log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
+    const cr3_physical_address = virtual_address_space.arch.cr3.get_address();
+    const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
+    // TODO: maybe user flag is not necessary?
+    const pml4 = cr3_virtual_address.access(*PML4Table);
+    std.zero_slice(PML4Entry, pml4[0..0x100]);
+    std.copy(PML4Entry, pml4[0x100..], kernel_address_space.arch.cr3.get_address().to_higher_half_virtual_address().access(*PML4Table)[0x100..]);
+    log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
 }
 
 pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virtual_address: VirtualAddress) TranslationResult {
@@ -495,7 +491,6 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
 
     const virtual_address = asked_virtual_address;
     const indices = compute_indices(virtual_address);
-    _ = indices;
 
     const pml4_table = blk: {
         const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
@@ -533,6 +528,12 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
                 .physical_address = physical_address,
                 .page_size = 1024 * 1024 * 1024,
                 .mapped = true,
+                .flags = .{
+                    .write = pdp_entry.read_write,
+                    .user = pdp_entry.user,
+                    .cache_disable = pdp_entry.page_level_cache_disable,
+                    .execute = !pdp_entry.execute_disable,
+                },
             };
         }
 
@@ -555,8 +556,15 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
                 .physical_address = physical_address,
                 .page_size = 2 * 1024 * 1024,
                 .mapped = true,
+                .flags = .{
+                    .write = pd_entry.read_write,
+                    .user = pd_entry.user,
+                    .cache_disable = pd_entry.page_level_cache_disable,
+                    .execute = !pd_entry.execute_disable,
+                },
             };
         }
+
         const p_table_virtual_address = physical_address.to_higher_half_virtual_address();
         if (kernel.config.safe_slow) std.assert(p_table_virtual_address.is_valid());
         break :blk p_table_virtual_address.access(*volatile PDTable);
@@ -572,6 +580,12 @@ pub fn translate_address(virtual_address_space: *VirtualAddressSpace, asked_virt
         .physical_address = physical_address,
         .page_size = 0x1000,
         .mapped = true,
+        .flags = .{
+            .write = p_entry.read_write,
+            .user = p_entry.user,
+            .cache_disable = p_entry.page_level_cache_disable,
+            .execute = !p_entry.execute_disable,
+        },
     };
 }
 
@@ -625,7 +639,7 @@ pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {
         .user = general_flags.user,
         .cache_disable = general_flags.cache_disable,
         .accessed = general_flags.accessed,
-        .execute_disable = general_flags.execute,
+        .execute_disable = !general_flags.execute,
     };
 }
 

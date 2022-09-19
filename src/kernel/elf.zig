@@ -191,14 +191,13 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
             .load => {
                 if (ph.size_in_memory == 0) continue;
 
-                log.debug("Segment virtual address: (0x{x}, 0x{x})", .{ ph.virtual_address, ph.virtual_address + ph.size_in_memory });
-
                 const page_size = arch.page_size;
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
                 const segment_size = std.align_forward(ph.size_in_memory + misalignment, page_size);
 
                 if (!ph.flags.writable) {
+                    log.debug("Segment virtual address: (0x{x}, 0x{x}) - {}", .{ ph.virtual_address, ph.virtual_address + ph.size_in_memory, ph.flags });
                     if (misalignment != 0) {
                         @panic("ELF file with misaligned segments");
                     }
@@ -207,29 +206,26 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                         @panic("ELF file with misaligned offset");
                     }
 
-                    std.assert(ph.flags.readable);
-
-                    std.assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
-                    std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
-
                     const page_count = @divExact(segment_size, page_size);
                     const physical_region = address_spaces.physical.allocate_pages(page_size, page_count, .{ .zeroed = true }) orelse @panic("physical");
-                    const kernel_segment_virtual_address = physical_region.address.to_higher_half_virtual_address();
-                    // Giving executable permissions here to perform the copy
+                    std.assert(ph.flags.readable);
+                    std.assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
+                    std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
                     std.assert(std.is_aligned(physical_region.size, arch.page_size));
-                    address_spaces.kernel.map(physical_region.address, kernel_segment_virtual_address, physical_region.size / arch.page_size, .{ .write = true }) catch unreachable;
-                    // TODO: load segments and then take the right settings from the sections
-                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
-                    address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size / arch.page_size, .{ .execute = ph.flags.executable, .write = !ph.flags.executable, .user = true }) catch unreachable;
                     std.assert(ph.size_in_file <= ph.size_in_memory);
                     std.assert(misalignment == 0);
+
+                    const kernel_segment_virtual_address = physical_region.address.to_higher_half_virtual_address();
+                    // Giving executable permissions here to perform the copy
+                    // TODO: load segments and then take the right settings from the sections
+                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
+                    address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size, .{ .execute = ph.flags.executable, .write = true, .user = true }) catch unreachable;
+                    const translation_result = address_spaces.user.translate_address_extended(base_virtual_address, .no);
+                    log.debug("Translation result: {}", .{translation_result});
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
                     std.assert(dst_slice.len >= src_slice.len);
-
                     std.copy(u8, dst_slice, src_slice);
-                    log.debug("Last byte: 0x{x}", .{dst_slice[dst_slice.len - 1]});
-                    // TODO: unmap
                 } else {
                     TODO();
                 }

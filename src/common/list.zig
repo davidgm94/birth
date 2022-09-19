@@ -120,7 +120,6 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                 while (iterator) |next| {
                     if (next.count < bucket_size) {
                         const index = next.allocate_indices(1);
-                        log.debug("Index: {}", .{index});
                         stable_buffer.element_count += 1;
                         const result = &next.data[index];
                         return result;

@@ -91,7 +91,7 @@ pub fn from_thread(thread: *Thread) *Context {
 }
 
 pub fn format(context: *const Context, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try std.internal_format(writer, "Context address: 0x{x}", .{@ptrToInt(context)});
+    try writer.writeAll("\n");
     inline for (std.fields(Context)) |field| {
         const name = field.name;
         const value = @field(context, field.name);

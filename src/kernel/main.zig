@@ -18,8 +18,6 @@ pub export fn main() callconv(.C) noreturn {
     log.debug("Current thread before yielding: #{}", .{current_thread.id});
     const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
     _ = kernel.scheduler.load_executable(&kernel.virtual_address_space, .user, &kernel.physical_address_space, main_storage, "minimal.elf") catch @panic("wtf");
-    const physical_address_lock = kernel.virtual_address_space.translate_address(.{ .value = 0xffffffff80209038 }) orelse unreachable;
-    log.debug("User lock physical address: 0x{x}", .{physical_address_lock.value});
 
     current_thread = TLS.get_current();
     log.debug("Current thread just before yielding: #{}", .{current_thread.id});
