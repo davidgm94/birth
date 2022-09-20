@@ -22,7 +22,8 @@ pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_add
 
     log.err(format, arguments);
 
-    dump_stack_trace(start_address, frame_pointer);
+    // TODO: this is causing some recursive panics
+    if (enable_stack_trace) dump_stack_trace(start_address, frame_pointer);
 
     while (true) {
         asm volatile (
@@ -33,6 +34,7 @@ pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_add
     }
 }
 
+const enable_stack_trace = false;
 const use_zig_stack_iterator = false;
 
 pub fn dump_stack_trace(start_address: usize, frame_pointer: usize) void {

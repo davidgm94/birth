@@ -82,7 +82,7 @@ pub const Disk = struct {
             .write => {
                 const work_byte_size = disk_work.sector_count * sector_size;
                 const byte_count = work_byte_size;
-                const write_source_buffer = @intToPtr([*]const u8, buffer.address)[0..byte_count];
+                const write_source_buffer = @intToPtr([*]const u8, buffer.virtual_address)[0..byte_count];
                 const disk_slice_start = disk_work.sector_offset * sector_size;
                 log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
                 assert(disk_slice_start == build_disk.buffer.items.len);
@@ -96,7 +96,7 @@ pub const Disk = struct {
                 const previous_len = build_disk.buffer.items.len;
 
                 if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
-                memory_copy(u8, @intToPtr([*]u8, buffer.address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
+                memory_copy(u8, @intToPtr([*]u8, buffer.virtual_address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
                 if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
 
                 return disk_work.sector_count;
