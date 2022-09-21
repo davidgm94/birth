@@ -378,8 +378,9 @@ pub const Drive = struct {
         drive.hba_port.command_issue = 1;
 
         while (true) {
-            if (drive.hba_port.command_issue == 0) break;
-            if (drive.hba_port.interrupt_status & hba_pxis_tfes != 0) @panic("interrupt status");
+            // @ZigBug TODO: without this ptrCast volatile, Zig fails to produce the right code for release modes
+            if (@ptrCast(*volatile u32, &drive.hba_port.command_issue).* == 0) break;
+            if (@ptrCast(*volatile u32, &drive.hba_port.interrupt_status).* & hba_pxis_tfes != 0) @panic("interrupt status");
         }
 
         buffer.completed_size += requested_size;
