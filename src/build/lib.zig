@@ -75,6 +75,8 @@ fn zero_allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAl
 pub const cwd = zig_std.fs.cwd;
 pub const Dir = zig_std.fs.Dir;
 pub const path = zig_std.fs.path;
+pub const basename = zig_std.fs.path.basename;
+pub const dirname = zig_std.fs.path.dirname;
 
 pub const QEMU = @import("../common/qemu/common.zig");
 

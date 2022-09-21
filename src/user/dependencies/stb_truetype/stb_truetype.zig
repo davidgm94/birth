@@ -1,11 +1,5 @@
-const std = @import("../../common/std.zig");
-const libc = @import("../../libc/libc.zig");
+const std = @import("../../../common/std.zig");
 const log = std.log.scoped(.STBTrueType);
-const kernel = @import("../../kernel/kernel.zig");
-
-comptime {
-    std.reference_all_declarations(libc);
-}
 
 const FontInfo = extern struct {
     user_data: ?*anyopaque,
@@ -57,14 +51,16 @@ pub fn initialize(file: []const u8) void {
 }
 
 export fn malloc(size: usize) ?*anyopaque {
-    const result = kernel.virtual_address_space.heap.allocator.allocBytes(0x1000, size, 0, 0) catch return null;
-    log.debug("allocated {} bytes into 0x{x}", .{ size, @ptrToInt(result.ptr) });
-    return result.ptr;
+    _ = size;
+    @panic("todo malloc");
+    //const result = kernel.virtual_address_space.heap.allocator.allocBytes(0x1000, size, 0, 0) catch return null;
+    //log.debug("allocated {} bytes into 0x{x}", .{ size, @ptrToInt(result.ptr) });
+    //return result.ptr;
 }
 
 export fn free(ptr: ?*anyopaque) void {
     _ = ptr;
-    unreachable;
+    @panic("todo free");
 }
 
 export fn puts(message: [*:0]const u8) void {

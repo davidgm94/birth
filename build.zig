@@ -11,6 +11,23 @@ const cache_dir = "zig-cache";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
 
+const UserProgramBuild = struct {
+    path: []const u8,
+    dependencies: ?*UserProgramBuild,
+
+    fn make(source_file: anytype) UserProgramBuild {
+        const path = source_file.path;
+        const dependencies = source_file.dependencies;
+        return UserProgramBuild{
+            .path = path,
+            .dependencies = dependencies,
+        };
+        //var maybe_dependencies = source_file.dependencies;
+        //while (maybe_dependencies) |dependencies| {
+        //}
+    }
+};
+
 pub fn build(b: *Build.Builder) void {
     std.test_comptime_hack();
     const kernel = b.allocator.create(Kernel) catch unreachable;
@@ -21,7 +38,9 @@ pub fn build(b: *Build.Builder) void {
             .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .limine }),
             .run = .{
                 .disks = &.{
-                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{ "minimal" }, .resource_files = &.{ "zap-light16.psf", "FiraSans-Regular.otf", } },
+                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{
+                        UserProgramBuild.make(@import("src/user/programs/minimal/dependencies.zig")),
+                    }, .resource_files = &.{ "zap-light16.psf", "FiraSans-Regular.otf", } },
                 },
                 .memory = .{ .amount = 4, .unit = .G, },
                 .emulator = .{
@@ -119,10 +138,10 @@ const Kernel = struct {
             for (kernel.options.run.disks) |disk| {
                 next_program: for (disk.userspace_programs) |program| {
                     for (unique_programs.items) |unique_program| {
-                        if (std.equal(u8, unique_program, program)) continue :next_program;
+                        if (std.equal(u8, unique_program, program.path)) continue :next_program;
                     }
 
-                    unique_programs.append(program) catch unreachable;
+                    unique_programs.append(program.path) catch unreachable;
                 }
             }
         }
@@ -466,6 +485,7 @@ const Kernel = struct {
                 var build_fs = WriteOnlyRNUFS.new(&build_disk.disk);
                 const rnufs_signature = WriteOnlyRNUFS.get_signature();
                 build_disk.buffer.items.len = WriteOnlyRNUFS.get_superblock_size();
+
                 for (rnufs_signature) |signature_byte, byte_i| {
                     const dst_byte = &build_disk.buffer.items[byte_i];
                     dst_byte.* = signature_byte;
@@ -643,7 +663,7 @@ const Kernel = struct {
             const DiskOptions = struct {
                 interface: DiskDriverType,
                 filesystem: FilesystemDriverType,
-                userspace_programs: []const []const u8,
+                userspace_programs: []const UserProgramBuild,
                 resource_files: []const []const u8,
             };
 
