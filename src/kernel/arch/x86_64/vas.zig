@@ -447,7 +447,6 @@ const PanicPolicy = enum {
 };
 
 pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddressSpace) void {
-    _ = new_address_space;
     const current_cr3 = cr3.read();
     if (@bitCast(u64, current_cr3) != @bitCast(u64, new_address_space.arch.cr3)) {
         new_address_space.arch.cr3.write();
@@ -455,10 +454,9 @@ pub inline fn switch_address_spaces_if_necessary(new_address_space: *VirtualAddr
 }
 
 pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
-    _ = virtual_address_space;
-    return false;
-    //const current = cr3.read_raw();
-    //return current == virtual_address_space.arch.cr3;
+    const vas_cr3 = virtual_address_space.arch.cr3;
+    const current_cr3 = cr3.read();
+    return current_cr3.equal(vas_cr3);
 }
 
 pub inline fn from_current(virtual_address_space: *VirtualAddressSpace) void {

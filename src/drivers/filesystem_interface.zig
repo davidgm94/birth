@@ -1,5 +1,5 @@
 const std = @import("../common/std.zig");
-const Allocator = std.Allocator;
+const Allocator = std.CustomAllocator;
 
 const Drivers = @import("common.zig");
 const DiskInterface = @import("disk_interface.zig");

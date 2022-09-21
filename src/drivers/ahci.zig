@@ -326,14 +326,6 @@ pub const Drive = struct {
         const drive = @ptrCast(*Drive, disk);
         drive.hba_port.interrupt_status = std.max_int(u32);
 
-        _ = disk;
-        _ = buffer;
-        _ = disk_work;
-        _ = extra_context;
-        _ = sector_count;
-        _ = sector_high;
-        _ = sector_low;
-
         const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).to_higher_half_virtual_address().access(*volatile HBACommandHeader);
         command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
         command_header.f.operation = disk_work.operation;

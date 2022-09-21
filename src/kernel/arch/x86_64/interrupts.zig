@@ -582,7 +582,6 @@ fn setup_interrupt_redirection_entry(asked_line: u64) bool {
     // TODO: @Lock
     if (already_setup & (@as(u32, 1) << @intCast(u5, asked_line)) != 0) return true;
     const processor_irq = irq_base + @intCast(u32, asked_line);
-    _ = processor_irq;
 
     var active_low = false;
     var level_triggered = false;

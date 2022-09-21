@@ -62,7 +62,6 @@ pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime pa
 pub fn free_pages(physical_address_space: *PhysicalAddressSpace, comptime page_size: u64, page_count: u64, flags: Flags) void {
     physical_address_space.lock.acquire();
     defer physical_address_space.lock.release();
-    _ = physical_address_space;
     _ = page_size;
     _ = page_count;
     _ = flags;

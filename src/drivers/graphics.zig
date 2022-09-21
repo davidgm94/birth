@@ -118,7 +118,6 @@ pub const FontFileFormat = enum {
 
 pub fn load_font(driver: *Driver, file: []const u8, file_format: FontFileFormat) void {
     _ = driver;
-    _ = file;
     _ = file_format;
     log.debug("Font file len: {}", .{file.len});
     STBTrueType.initialize(file);

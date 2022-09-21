@@ -5,7 +5,7 @@ const std = @import("std.zig");
 
 const FilesystemInterface = @import("../drivers/filesystem_interface.zig");
 
-const Allocator = std.Allocator;
+const Allocator = std.CustomAllocator;
 const log = std.log.scoped(.RNUFS);
 
 pub const Superblock = struct {
@@ -45,7 +45,7 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
             @panic("lol");
         };
 
-        log.debug("Search buffer address: 0x{x}", .{search_buffer.address});
+        log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
 
         while (true) {
             log.debug("FS driver asking read at sector {}", .{sector});
@@ -58,9 +58,9 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
             //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
             //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
             //}
-            log.debug("Search buffer address: 0x{x}", .{search_buffer.address});
+            log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
             //log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)}); TODO: this crashes stage2 https://github.com/ziglang/zig/issues/12488
-            var node = @intToPtr(*RNUFS.Node, search_buffer.address);
+            var node = @intToPtr(*RNUFS.Node, search_buffer.virtual_address);
             log.debug("Node type: {}", .{node.type});
             if (node.type == .empty) break;
             const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
@@ -81,7 +81,7 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
     };
 
     // Copy file metadata
-    var node = @intToPtr(*RNUFS.Node, write_buffer.address);
+    var node = @intToPtr(*RNUFS.Node, write_buffer.virtual_address);
     node.size = file_content.len;
     std.assert(filename.len < node.name.len);
     std.copy(u8, &node.name, filename);
@@ -91,7 +91,7 @@ pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filenam
     node.last_modification = 0;
 
     // Copy the actual file content
-    std.copy(u8, @intToPtr([*]u8, write_buffer.address)[sector_size..write_buffer.total_size], file_content);
+    std.copy(u8, @intToPtr([*]u8, write_buffer.virtual_address)[sector_size..write_buffer.total_size], file_content);
 
     const bytes = fs_driver.disk.access(fs_driver.disk, &write_buffer, .{
         .sector_offset = sector,

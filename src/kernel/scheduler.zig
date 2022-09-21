@@ -72,7 +72,6 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     //const new_thread = current_thread.time_slices == 1;
 
     // TODO: close reference or dettach address space
-    _ = old_address_space;
     // TODO: set up last know instruction address
 
     // TODO: this is only supposed to be called from an interrupt

@@ -18,7 +18,7 @@ pub const Region = struct {
     allocated: u64 = 0,
 };
 
-allocator: std.Allocator = undefined,
+allocator: std.CustomAllocator = undefined,
 regions: [region_count]Region = [1]Region{.{}} ** region_count,
 lock: Spinlock = .{},
 
@@ -27,7 +27,7 @@ pub const region_count = 0x1000_0000 / region_size;
 
 pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
     return Heap{
-        .allocator = std.Allocator{
+        .allocator = std.CustomAllocator{
             .ptr = virtual_address_space,
             .vtable = &vtable,
         },
@@ -40,10 +40,6 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
     virtual_address_space.heap.lock.acquire();
     defer virtual_address_space.heap.lock.release();
     std.assert(virtual_address_space.lock.status == 0);
-    _ = return_address;
-    _ = len_align;
-    _ = ptr_align;
-    _ = size;
 
     log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
 
@@ -54,7 +50,6 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
         .write = true,
         .user = virtual_address_space.privilege_level == .user,
     };
-    _ = flags;
 
     if (flags.user and !virtual_address_space.is_current()) {
         // TODO: currently the Zig allocator somehow dereferences memory so allocating memory for another address space make this not viable

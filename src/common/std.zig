@@ -64,6 +64,7 @@ pub const ends_with = std.mem.endsWith;
 pub const as_bytes = std.mem.asBytes;
 pub const internal_read_int_big = std.mem.readIntBig;
 pub const read_int_slice_big_endian = std.mem.readIntSliceBig;
+pub const concatenate = std.mem.concat;
 
 // INTERNAL
 pub const internal_format = std.fmt.format;
@@ -172,3 +173,13 @@ pub fn is_same_packed_size(comptime A: type, comptime B: type) bool {
 pub fn enum_count(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
 }
+
+/// This is done so the allocator can respect allocating from different address spaces
+pub const CustomAllocator = struct {
+    allocate: *const AllocateFunction,
+    context: ?*anyopaque,
+
+    pub const AllocateFunction = fn (allocator: CustomAllocator, size: u64, alignment: u64, kernel: bool) Result;
+    pub const Result = struct { address: u64, size: u64 };
+    pub const Error = error{OutOfMemory};
+};

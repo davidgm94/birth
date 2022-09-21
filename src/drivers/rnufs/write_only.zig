@@ -5,8 +5,6 @@ const FilesystemInterface = @import("../filesystem_interface.zig");
 const DiskInterface = @import("../disk_interface.zig");
 const DMA = @import("../dma.zig");
 
-const Allocator = std.Allocator;
-
 const Driver = @This();
 
 fs: FilesystemInterface,

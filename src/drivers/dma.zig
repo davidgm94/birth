@@ -1,5 +1,5 @@
-const std = @import("std");
-const Allocator = std.mem.Allocator;
+const std = @import("../common/std.zig");
+const Allocator = std.CustomAllocator;
 
 pub const Buffer = struct {
     virtual_address: u64,
@@ -16,12 +16,13 @@ pub const Buffer = struct {
         alignment: u64,
     };
 
-    pub fn new(virtual_address: u64, size: u64) !Buffer {
+    pub fn new(allocator: Allocator, size: u64, alignment: u64) !Buffer {
+        const result = allocator.allocate(allocator, size, alignment, true);
         //const allocation_slice = try allocator.allocBytes(@intCast(u29, initialization.alignment), initialization.size, 0, 0);
         // INFO: this can never be zero since the allocator guarantees a valid address in RNU
         return Buffer{
-            .address = virtual_address,
-            .total_size = size,
+            .virtual_address = result.address,
+            .total_size = result.size,
             .completed_size = 0,
         };
     }

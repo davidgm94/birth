@@ -104,8 +104,6 @@ const HeaderType = enum(u8) {
 };
 
 fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
-    _ = device_manager;
-    _ = virtual_address_space;
     var bus_scan_states = std.zeroes([256]BusScanState);
     var base_function: u8 = 0;
     const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
