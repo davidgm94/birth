@@ -15,10 +15,11 @@ const PCI = @import("pci.zig");
 const Disk = @import("disk.zig");
 const DMA = @import("dma.zig");
 
+const Allocator = std.CustomAllocator;
+const log = std.log.scoped(.AHCI);
 const panic = crash.panic;
 const StableBuffer = List.StableBuffer;
 const TODO = crash.TODO;
-const log = std.log.scoped(.AHCI);
 
 pci: PCI.Device,
 abar: *HBAMemory,
@@ -338,7 +339,7 @@ pub const Drive = struct {
         std.zero_slice(HBAPRDTEntry, entries);
 
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
-        const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.address)) orelse @panic("wtF");
+        const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.virtual_address)) orelse @panic("wtF");
         const buffer_physical_address = buffer_base_physical_address.offset(buffer.completed_size);
 
         // TODO: stop hardcoding this?
@@ -386,10 +387,12 @@ pub const Drive = struct {
         return disk_work.sector_count;
     }
 
-    fn get_dma_buffer(disk: *DiskInterface, allocator: std.Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *DiskInterface, allocator: Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer {
         const sector_size = disk.sector_size;
         const byte_size = sector_count * sector_size;
-        return DMA.Buffer.new(allocator, .{ .size = std.align_forward(byte_size, arch.page_size), .alignment = std.align_forward(sector_size, arch.page_size) }) catch @panic("unable to initialize buffer");
+        const size = std.align_forward(byte_size, arch.page_size);
+        const alignment = std.align_forward(sector_size, arch.page_size);
+        return DMA.Buffer.new(allocator, size, alignment) catch @panic("unable to initialize buffer");
     }
 
     fn start_command(drive: *Drive) void {

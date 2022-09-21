@@ -28,6 +28,8 @@ pub const fork = zig_std.os.fork;
 pub const ChildProcess = zig_std.ChildProcess;
 pub const waitpid = zig_std.os.waitpid;
 
+const CustomAllocator = std.CustomAllocator;
+
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
         .windows => {
@@ -43,30 +45,28 @@ pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     }
 }
 
-pub fn get_allocator(builder: *Builder) std.CustomAllocator {
-    return std.CustomAllocator{
-        .allocate = allocate,
+pub fn get_allocator(builder: *Builder) CustomAllocator {
+    return CustomAllocator{
+        .callback_allocate = allocate,
         .context = builder,
     };
 }
-pub const zero_allocator = std.CustomAllocator{ .allocate = zero_allocate, .context = null };
+pub const zero_allocator = CustomAllocator{ .allocate = zero_allocate, .context = null };
 
-fn allocate(allocator: std.CustomAllocator, size: u64, alignment: u64, kernel: bool) std.CustomAllocator.Result {
-    _ = kernel;
+fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     const builder = @ptrCast(*Builder, allocator.context);
     const result = builder.allocator.allocBytes(@intCast(u29, alignment), size, 0, 0) catch unreachable;
-    return std.CustomAllocator.Result{
+    return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
         .size = result.len,
     };
 }
 
-fn zero_allocate(allocator: std.CustomAllocator, size: u64, alignment: u64, kernel: bool) std.CustomAllocator.Result {
+fn zero_allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Result {
     _ = allocator;
-    _ = kernel;
     std.assert(alignment <= 0x1000);
     const result = allocate_zero_memory(size) catch unreachable;
-    return std.CustomAllocator.Result{
+    return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
         .size = result.size,
     };
@@ -123,7 +123,7 @@ pub const Disk = struct {
         }
     }
 
-    fn get_dma_buffer(disk: *DiskInterface, allocator: std.CustomAllocator, sector_count: u64) std.CustomAllocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *DiskInterface, allocator: CustomAllocator, sector_count: u64) CustomAllocator.Error!DMA.Buffer {
         const allocation_size = disk.sector_size * sector_count;
         const alignment = 0x1000;
         log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });

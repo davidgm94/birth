@@ -36,7 +36,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         new_framebuffer.* = framebuffer;
     }
 
-    try device_manager.register(Driver, virtual_address_space.heap.allocator, adapter);
+    try device_manager.register(Driver, virtual_address_space.heap.allocator.get_allocator(), adapter);
 }
 
 pub fn get_main_framebuffer(driver: *Driver) *Framebuffer {

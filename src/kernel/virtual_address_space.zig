@@ -63,8 +63,16 @@ const Result = struct {
 };
 
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
-    if (already_locked == .no) virtual_address_space.lock.acquire();
-    defer if (already_locked == .no) virtual_address_space.lock.release();
+    if (already_locked == .no) {
+        log.debug("Acquiring -- allocate_extended", .{});
+        virtual_address_space.lock.acquire();
+    }
+    defer {
+        if (already_locked == .no) {
+            log.debug("Releasing -- allocate_extended", .{});
+            virtual_address_space.lock.release();
+        }
+    }
 
     const page_count = @divFloor(byte_count, arch.page_size);
     const page_aligned_size = page_count * arch.page_size;
@@ -115,10 +123,12 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
+        log.debug("Acquiring -- map_extended", .{});
         virtual_address_space.lock.acquire();
     }
     defer {
         if (already_locked == .no) {
+            log.debug("Releasing -- map_extended", .{});
             virtual_address_space.lock.release();
         }
     }
@@ -214,10 +224,12 @@ pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, v
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
+        log.debug("Acquiring -- translate_address_extended", .{});
         virtual_address_space.lock.acquire();
     }
     defer {
         if (already_locked == .no) {
+            log.debug("Releasing -- translate_address_extended", .{});
             virtual_address_space.lock.release();
         }
     }
@@ -253,7 +265,7 @@ pub const Flags = packed struct {
 
 pub fn add_used_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
     if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {
-        try virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator, region);
+        try virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator.get_allocator(), region);
     } else {
         @panic("Invalid region");
     }
@@ -346,7 +358,7 @@ pub const Region = struct {
 pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, size: u64, flags: Flags) void {
     std.assert(virtual_address_space == &kernel.virtual_address_space);
     // Fake a free region
-    virtual_address_space.free_regions.append(virtual_address_space.heap.allocator, VirtualAddressSpace.Region{
+    virtual_address_space.free_regions.append(virtual_address_space.heap.allocator.get_allocator(), VirtualAddressSpace.Region{
         .address = virtual_address,
         .size = size,
         .flags = flags,

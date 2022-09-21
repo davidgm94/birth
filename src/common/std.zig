@@ -176,10 +176,60 @@ pub fn enum_count(comptime E: type) usize {
 
 /// This is done so the allocator can respect allocating from different address spaces
 pub const CustomAllocator = struct {
-    allocate: *const AllocateFunction,
+    callback_allocate: *const AllocateFunction,
     context: ?*anyopaque,
 
-    pub const AllocateFunction = fn (allocator: CustomAllocator, size: u64, alignment: u64, kernel: bool) Result;
+    pub fn allocate_many(allocator: CustomAllocator, comptime T: type, count: usize) Error![]T {
+        const result = try allocator.callback_allocate(allocator, @sizeOf(T) * count, @alignOf(T));
+        return @intToPtr([*]T, result.address)[0..count];
+    }
+
+    pub fn create(allocator: CustomAllocator, comptime T: type) Error!*T {
+        const result = try allocator.callback_allocate(allocator, @sizeOf(T), @alignOf(T));
+        return @intToPtr(*T, result.address);
+    }
+
+    pub fn get_allocator(allocator: *const CustomAllocator) Allocator {
+        return Allocator{
+            .ptr = allocator,
+            .vtable = &vtable,
+        };
+    }
+
+    const vtable = Allocator.VTable{
+        .alloc = zig_alloc,
+        .resize = zig_resize,
+        .free = zig_free,
+    };
+
+    fn zig_alloc(context: *anyopaque, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
+        _ = len_align;
+        _ = return_address;
+        const allocator = @ptrCast(*CustomAllocator, context);
+        const result = allocator.callback_allocate(allocator.*, size, ptr_align) catch return Allocator.Error.OutOfMemory;
+        const byte_slice = @intToPtr([*]u8, result.address)[0..result.size];
+        return byte_slice;
+    }
+
+    fn zig_resize(context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {
+        _ = context;
+        _ = old_mem;
+        _ = old_align;
+        _ = new_size;
+        _ = len_align;
+        _ = return_address;
+        @panic("TODO resize");
+    }
+
+    fn zig_free(context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void {
+        _ = context;
+        _ = old_mem;
+        _ = old_align;
+        _ = return_address;
+        @panic("TODO free");
+    }
+
+    pub const AllocateFunction = fn (allocator: CustomAllocator, size: u64, alignment: u64) Error!Result;
     pub const Result = struct { address: u64, size: u64 };
     pub const Error = error{OutOfMemory};
 };

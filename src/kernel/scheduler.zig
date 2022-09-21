@@ -42,6 +42,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
         @panic("spins active when yielding");
     }
     interrupts.disable();
+    log.debug("Acquiring -- Yield", .{});
     scheduler.lock.acquire();
     std.log.scoped(.Yield).debug("Current thread: #{}", .{current_thread.id});
     var old_address_space: *VirtualAddressSpace = undefined;
@@ -66,6 +67,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     }
     //old_context.check(@src());
     TLS.set_current(scheduler, new_thread, current_cpu);
+    log.debug("Releasing -- Yield", .{});
     scheduler.lock.release();
 
     // TODO: checks
@@ -140,8 +142,12 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
 }
 
 pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
+    log.debug("Acquiring -- spawn_thread", .{});
     scheduler.lock.acquire();
-    defer scheduler.lock.release();
+    defer {
+        log.debug("Releasing -- spawn_thread", .{});
+        scheduler.lock.release();
+    }
 
     const thread_id = scheduler.thread_buffer.element_count;
     const thread = scheduler.thread_buffer.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");

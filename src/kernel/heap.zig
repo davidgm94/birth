@@ -11,6 +11,7 @@ const VirtualAddressSpace = @import("virtual_address_space.zig");
 const log = std.log.scoped(.Heap);
 const Spinlock = @import("spinlock.zig");
 const TODO = crash.TODO;
+const Allocator = std.CustomAllocator;
 
 pub const Region = struct {
     virtual: VirtualAddress = VirtualAddress{ .value = 0 },
@@ -18,7 +19,7 @@ pub const Region = struct {
     allocated: u64 = 0,
 };
 
-allocator: std.CustomAllocator = undefined,
+allocator: Allocator = undefined,
 regions: [region_count]Region = [1]Region{.{}} ** region_count,
 lock: Spinlock = .{},
 
@@ -27,24 +28,26 @@ pub const region_count = 0x1000_0000 / region_size;
 
 pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
     return Heap{
-        .allocator = std.CustomAllocator{
-            .ptr = virtual_address_space,
-            .vtable = &vtable,
+        .allocator = Allocator{
+            .context = virtual_address_space,
+            .callback_allocate = allocate_function,
         },
         .regions = std.zeroes([region_count]Region),
         .lock = Spinlock{},
     };
 }
 
-fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u29, len_align: u29, return_address: usize) std.Allocator.Error![]u8 {
+fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
+    const virtual_address_space = @ptrCast(?*VirtualAddressSpace, allocator.context) orelse unreachable;
+    log.debug("Acquiring -- allocate", .{});
     virtual_address_space.heap.lock.acquire();
-    defer virtual_address_space.heap.lock.release();
+    defer {
+        log.debug("Releasing -- allocate", .{});
+        virtual_address_space.heap.lock.release();
+    }
     std.assert(virtual_address_space.lock.status == 0);
 
-    log.debug("Asked allocation: Size: {}. Pointer alignment: {}. Length alignment: {}. Return address: 0x{x}", .{ size, ptr_align, len_align, return_address });
-
-    var alignment: u64 = len_align;
-    if (ptr_align > alignment) alignment = ptr_align;
+    log.debug("Asked allocation: Size: {}. Alignment: {}", .{ size, alignment });
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
@@ -94,9 +97,11 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
             std.assert(virtual_address_space.translate_address(VirtualAddress.new(std.align_backward(result_address, 0x1000))) != null);
         }
         region.allocated += size;
-        const result = @intToPtr([*]u8, result_address)[0..size];
 
-        return result;
+        return .{
+            .address = result_address,
+            .size = size,
+        };
     } else {
         const allocation_size = std.align_forward(size, arch.page_size);
         const virtual_address = virtual_address_space.allocate(allocation_size, null, flags) catch |err| {
@@ -104,7 +109,11 @@ fn alloc(virtual_address_space: *VirtualAddressSpace, size: usize, ptr_align: u2
             return std.Allocator.Error.OutOfMemory;
         };
         log.debug("Big allocation happened!", .{});
-        return virtual_address.access([*]u8)[0..size];
+
+        return .{
+            .address = virtual_address.value,
+            .size = size,
+        };
     }
 }
 
@@ -125,9 +134,3 @@ fn free(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u
     _ = return_address;
     TODO();
 }
-
-const vtable: std.Allocator.VTable = .{
-    .alloc = @ptrCast(*const std.AllocatorAllocFunction, &alloc),
-    .resize = @ptrCast(*const std.AllocatorResizeFunction, &resize),
-    .free = @ptrCast(*const std.AllocatorFreeFunction, &free),
-};

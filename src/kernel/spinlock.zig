@@ -14,7 +14,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
     const are_interrupts_enabled = @boolToInt(interrupts.are_enabled());
     interrupts.disable();
     const expected: @TypeOf(spinlock.status) = 0;
-    //spinlock.assert_lock_status(expected);
+    spinlock.assert_lock_status(expected);
     if (TLS.get_current().cpu) |current_cpu| {
         current_cpu.spinlock_count += 1;
     }

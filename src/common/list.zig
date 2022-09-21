@@ -1,5 +1,5 @@
 const std = @import("std.zig");
-const Allocator = std.Allocator;
+const Allocator = std.CustomAllocator;
 
 const log = std.log.scoped(.List);
 
@@ -137,7 +137,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             if (stable_buffer.first == null) {
                 const bucket_count = std.div_ceil(u64, count, Bucket.size) catch unreachable;
                 //std.assert(bucket_count == 1);
-                const buckets = try allocator.alloc(Bucket, bucket_count);
+                const buckets = try allocator.allocate_many(Bucket, bucket_count);
 
                 var elements_allocated: u64 = count;
                 var i: u64 = 0;

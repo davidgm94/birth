@@ -76,7 +76,6 @@ var writer: std.Writer(void, Writer.Error, Writer.write) = undefined;
 // TODO: handle errors
 pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     var buffer: [0x2000]u8 = undefined;
-    _ = buffer;
     Writer.lock.acquire();
     defer Writer.lock.release();
     const lock_address = @ptrToInt(&Writer.lock);

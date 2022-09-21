@@ -255,6 +255,9 @@ pub export fn kernel_entry_point() noreturn {
     }
 
     {
+        const current_thread = TLS.get_current();
+        const current_cpu = @ptrCast(*volatile CPU, current_thread.cpu orelse unreachable);
+        logger.debug("[0] Spinlock count: {}", .{current_cpu.spinlock_count});
         const response = bootloader_smp.response orelse @panic("SMP response not found");
         const cpu_count = response.cpu_count;
         if (cpu_count == 0) @panic("SMP response has no CPU information");
@@ -274,20 +277,22 @@ pub export fn kernel_entry_point() noreturn {
         kernel.bootstrap_context.thread.context = &foo2;
         kernel.bootstrap_context.thread.address_space = &kernel.virtual_address_space;
 
-        kernel.scheduler.lock.acquire();
-
         const threads = kernel.scheduler.thread_buffer.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
-        kernel.scheduler.current_threads = kernel.virtual_address_space.heap.allocator.alloc(*Thread, threads.len) catch @panic("wtf");
+        kernel.scheduler.current_threads = kernel.virtual_address_space.heap.allocator.allocate_many(*Thread, threads.len) catch @panic("wtf");
         const thread_stack_size = Scheduler.default_kernel_stack_size;
         const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
         const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
-        kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.alloc(CPU, cpu_count) catch @panic("wtF");
+        kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.allocate_many(CPU, cpu_count) catch @panic("wtF");
         kernel.scheduler.cpus[0].id = cpus[0].processor_id;
+        logger.debug("[1] Spinlock count: {}", .{kernel.scheduler.cpus[0].spinlock_count});
+
         // Dummy context
         TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[0]);
         TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
         // Map LAPIC address on just one CPU (since it's global)
         CPU.map_lapic();
+
+        kernel.scheduler.lock.acquire();
 
         // TODO: figure out stacks
         // TODO: ignore BSP cpu when AP initialization?
@@ -316,7 +321,6 @@ pub export fn kernel_entry_point() noreturn {
 
         // Update bsp CPU
         // TODO: maybe this is necessary?
-
         kernel.scheduler.lock.release();
 
         logger.debug("Processed SMP info", .{});

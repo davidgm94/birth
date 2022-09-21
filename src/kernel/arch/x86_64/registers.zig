@@ -117,7 +117,7 @@ pub const cr3 = packed struct(u64) {
         );
     }
 
-    pub inline fn equal(self: cr3, other: cr3) u64 {
+    pub inline fn equal(self: cr3, other: cr3) bool {
         std.assert(x86_64.max_physical_address_bit == 40);
 
         const self_int = @bitCast(u64, self);

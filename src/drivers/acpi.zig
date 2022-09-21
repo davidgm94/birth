@@ -84,7 +84,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                         iso_count += @boolToInt(entry_type == .ISO);
                     }
 
-                    interrupts.iso = virtual_address_space.heap.allocator.alloc(interrupts.ISO, iso_count) catch @panic("iso");
+                    interrupts.iso = virtual_address_space.heap.allocator.allocate_many(interrupts.ISO, iso_count) catch @panic("iso");
                     var iso_i: u64 = 0;
 
                     offset = @ptrToInt(madt) + @sizeOf(MADT);

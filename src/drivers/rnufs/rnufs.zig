@@ -13,7 +13,7 @@ const common = @import("../../common/rnufs.zig");
 const VirtualAddressSpace = @import("../../kernel/virtual_address_space.zig");
 
 const log = std.log.scoped(.RNUFS);
-const Allocator = std.Allocator;
+const Allocator = std.CustomAllocator;
 const panic = crash.panic;
 
 fs: Filesystem,
@@ -33,7 +33,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     std.assert(result == 1);
     std.assert(dma_buffer.completed_size == disk.interface.sector_size);
 
-    const possible_signature = @intToPtr([*]const u8, dma_buffer.address)[0..common.default_signature.len];
+    const possible_signature = @intToPtr([*]const u8, dma_buffer.virtual_address)[0..common.default_signature.len];
     if (!std.string_eq(possible_signature, &common.default_signature)) {
         return InitError.not_found;
     }
@@ -79,7 +79,7 @@ pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
         //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
         //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
         //}
-        var node = @intToPtr(*common.Node, search_buffer.address);
+        var node = @intToPtr(*common.Node, search_buffer.virtual_address);
         if (node.type == .empty) break;
         const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
         const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
@@ -128,7 +128,7 @@ pub fn read_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []
 
         if (sectors_read != sector_count) panic("Driver internal error: cannot read file", .{});
 
-        return @intToPtr([*]const u8, buffer.address)[0..node_size];
+        return @intToPtr([*]const u8, buffer.virtual_address)[0..node_size];
     } else {
         @panic("unable to find file");
     }
