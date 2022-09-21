@@ -95,7 +95,19 @@ pub const Manager = struct {
                                 @panic("file could not be read");
                             }
                         },
-                        else => @panic(@tagName(id)),
+                        .allocate_memory => {
+                            const ptr = result.a;
+                            const size = result.b;
+                            if (size != parameters.byte_count) {
+                                @panic("size mismatch");
+                            }
+                            if (ptr == 0) {
+                                @panic("nullptr");
+                            }
+
+                            return @intToPtr([*]u8, ptr)[0..size];
+                        },
+                        else => @panic("User syscall not implemented: " ++ @tagName(id)),
                     },
                 }
             },

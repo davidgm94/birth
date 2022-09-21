@@ -21,7 +21,7 @@ export fn user_entry_point() callconv(.C) void {
     }
     std.assert(user.Writer.lock.status == 0xff or user.Writer.lock.status == 0);
     const memory = syscall_manager.syscall(.allocate_memory, .blocking, .{ .byte_count = 5001, .alignment = 1 });
-    _ = memory;
+    memory[0] = 1;
     syscall_manager.syscall(.thread_exit, .blocking, .{ .message = "Thread terminated successfully" });
     while (true) {}
 }

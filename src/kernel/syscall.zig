@@ -72,14 +72,6 @@ const HandlerPrototype = fn (Syscall.Input, u64, u64, u64, u64, u64) callconv(.C
 pub const handler: *const HandlerPrototype = kernel_syscall_handler;
 
 pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
-    //{
-    //const thread = common.arch.get_current_thread();
-    //for (common.arch.x86_64.interrupts.handlers) |interrupt_handler| {
-    //const handler_address = @ptrToInt(interrupt_handler);
-    //std.assert(thread.address_space.translate_address(common.VirtualAddress.new(handler_address).aligned_forward(context.page_size)) != null);
-    //}
-    //}
-
     const submission = Syscall.Submission{
         .input = input,
         .arguments = [_]u64{ argument1, argument2, argument3, argument4, argument5 },
@@ -136,7 +128,18 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 return result;
                             },
                             .allocate_memory => {
-                                TODO();
+                                logger.debug("Submission: {}", .{submission});
+                                const size = submission.arguments[0];
+                                const alignment = submission.arguments[1];
+                                const allocation_result = current_thread.address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
+                                const result = Syscall.RawResult{
+                                    .a = allocation_result.address,
+                                    .b = allocation_result.size,
+                                };
+                                std.assert(result.a != 0);
+                                std.assert(result.b != 0);
+
+                                return result;
                             },
                         }
                     } else {

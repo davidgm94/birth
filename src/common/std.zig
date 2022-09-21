@@ -179,6 +179,10 @@ pub const CustomAllocator = struct {
     callback_allocate: *const AllocateFunction,
     context: ?*anyopaque,
 
+    pub fn allocate_bytes(allocator: CustomAllocator, size: u64, alignment: u64) Error!Result {
+        return try allocator.callback_allocate(allocator, size, alignment);
+    }
+
     pub fn allocate_many(allocator: CustomAllocator, comptime T: type, count: usize) Error![]T {
         const result = try allocator.callback_allocate(allocator, @sizeOf(T) * count, @alignOf(T));
         return @intToPtr([*]T, result.address)[0..count];
