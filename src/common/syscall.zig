@@ -56,7 +56,7 @@ pub const ReadFileParameters = struct {
 };
 
 pub const AllocateMemoryParameters = struct {
-    byte_count: u64,
+    size: u64,
     alignment: u64,
 };
 

@@ -78,11 +78,8 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     var buffer: [0x2000]u8 = undefined;
     Writer.lock.acquire();
     defer Writer.lock.release();
-    const lock_address = @ptrToInt(&Writer.lock);
     const resulting_slice = std.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
     writer.writeAll(resulting_slice) catch unreachable;
-    const resulting_slice2 = std.bufPrint(&buffer, "Writer lock: 0x{x}. Address in kernel: 0x{x}\n", .{ lock_address, lock_address + 0xffff_ffff_8000_0000 }) catch unreachable;
-    writer.writeAll(resulting_slice2) catch unreachable;
 }
 
 // TODO: improve user panic implementation

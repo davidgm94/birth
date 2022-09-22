@@ -57,16 +57,13 @@ pub fn initialize(file: []const u8) void {
 }
 
 export fn malloc(size: usize) ?*anyopaque {
-    _ = size;
-    @panic("todo malloc");
-    //const result = kernel.virtual_address_space.heap.allocator.allocBytes(0x1000, size, 0, 0) catch return null;
-    //log.debug("allocated {} bytes into 0x{x}", .{ size, @ptrToInt(result.ptr) });
-    //return result.ptr;
+    const allocation_result = @import("root").syscall_manager.syscall(.allocate_memory, .blocking, .{ .size = size, .alignment = 0x1000 });
+    return allocation_result.ptr;
 }
 
+// TODO:
 export fn free(ptr: ?*anyopaque) void {
-    _ = ptr;
-    @panic("todo free");
+    std.log.scoped(.stbtt).debug("TODO free 0x{x}", .{@ptrToInt(ptr)});
 }
 
 export fn puts(message: [*:0]const u8) void {

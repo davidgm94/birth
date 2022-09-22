@@ -31,7 +31,7 @@ pub fn read_file(parameters: ReadFileParameters) Submission {
 const AllocateMemoryParameters = common.AllocateMemoryParameters;
 /// @Syscall
 pub fn allocate_memory(parameters: AllocateMemoryParameters) Submission {
-    return new_submission(.allocate_memory, parameters.byte_count, parameters.alignment, 0, 0, 0);
+    return new_submission(.allocate_memory, parameters.size, parameters.alignment, 0, 0, 0);
 }
 
 const ThreadExitParameters = common.ThreadExitParameters;
@@ -98,7 +98,7 @@ pub const Manager = struct {
                         .allocate_memory => {
                             const ptr = result.a;
                             const size = result.b;
-                            if (size != parameters.byte_count) {
+                            if (size != parameters.size) {
                                 @panic("size mismatch");
                             }
                             if (ptr == 0) {
