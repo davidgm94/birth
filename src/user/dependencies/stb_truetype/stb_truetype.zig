@@ -1,5 +1,11 @@
 const std = @import("../../../common/std.zig");
 const log = std.log.scoped(.STBTrueType);
+const libc = @import("../../../libc/libc.zig");
+
+// Working way of forcing the exports
+comptime {
+    std.reference_all_declarations(libc);
+}
 
 const FontInfo = extern struct {
     user_data: ?*anyopaque,

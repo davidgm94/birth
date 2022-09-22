@@ -61,6 +61,7 @@ pub const equal = std.mem.eql;
 pub const length = std.mem.len;
 pub const starts_with = std.mem.startsWith;
 pub const ends_with = std.mem.endsWith;
+pub const last_index_of = std.mem.lastIndexOf;
 pub const as_bytes = std.mem.asBytes;
 pub const internal_read_int_big = std.mem.readIntBig;
 pub const read_int_slice_big_endian = std.mem.readIntSliceBig;

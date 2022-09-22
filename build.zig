@@ -11,51 +11,49 @@ const cache_dir = "zig-cache";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ "/" ++ kernel_name;
 
-const UserProgramBuild = struct {
-    path: []const u8,
-    dependencies: ?*UserProgramBuild,
-
-    fn make(source_file: anytype) UserProgramBuild {
-        const path = source_file.path;
-        const dependencies = source_file.dependencies;
-        return UserProgramBuild{
-            .path = path,
-            .dependencies = dependencies,
-        };
-        //var maybe_dependencies = source_file.dependencies;
-        //while (maybe_dependencies) |dependencies| {
-        //}
-    }
-};
+const user_programs = .{@import("src/user/programs/minimal/dependency.zig")};
+const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
 pub fn build(b: *Build.Builder) void {
     std.test_comptime_hack();
     const kernel = b.allocator.create(Kernel) catch unreachable;
-    // zig fmt: off
-    kernel.* = Kernel {
+    kernel.* = Kernel{
         .builder = b,
         .options = .{
-            .arch = Kernel.Options.x86_64.new(.{ .bootloader = .limine, .protocol = .limine }),
+            .arch = Kernel.Options.x86_64.new(.{
+                .bootloader = .limine,
+                .protocol = .limine,
+            }),
             .run = .{
                 .disks = &.{
-                    .{ .interface = .ahci, .filesystem = .RNU, .userspace_programs = &.{
-                        UserProgramBuild.make(@import("src/user/programs/minimal/dependencies.zig")),
-                    }, .resource_files = &.{ "zap-light16.psf", "FiraSans-Regular.otf", } },
+                    .{
+                        .interface = .ahci,
+                        .filesystem = .RNU,
+                    },
                 },
-                .memory = .{ .amount = 4, .unit = .G, },
+                .memory = .{
+                    .amount = 4,
+                    .unit = .G,
+                },
                 .emulator = .{
                     .qemu = .{
                         .vga = .std,
                         .smp = null,
-                        .log = .{ .file = null, .guest_errors = true, .cpu = false, .assembly = false, .interrupts = true, },
+                        .log = .{
+                            .file = null,
+                            .guest_errors = true,
+                            .cpu = false,
+                            .assembly = false,
+                            .interrupts = true,
+                        },
                         .run_for_debug = true,
                         .print_command = false,
                     },
                 },
             },
-        }
+        },
     };
-    // zig fmt: on
+
     kernel.create();
 }
 
@@ -133,24 +131,27 @@ const Kernel = struct {
     fn create_userspace_programs(kernel: *Kernel) void {
         const linker_script_path = kernel.builder.fmt("src/user/arch/{s}/linker.ld", .{@tagName(kernel.options.arch)});
 
-        var unique_programs = std.ArrayListManaged([]const u8).init(kernel.builder.allocator);
-        {
-            for (kernel.options.run.disks) |disk| {
-                next_program: for (disk.userspace_programs) |program| {
-                    for (unique_programs.items) |unique_program| {
-                        if (std.equal(u8, unique_program, program.path)) continue :next_program;
-                    }
+        var libexeobj_steps = std.ArrayListManaged(*Build.LibExeObjStep).initCapacity(kernel.builder.allocator, user_programs.len) catch unreachable;
+        inline for (user_programs) |user_program| {
+            const unique_program = Build.UserProgram.make(kernel.builder.allocator, user_program);
+            const out_filename = kernel.builder.fmt("{s}.elf", .{unique_program.name});
+            const main_source_file = unique_program.path;
+            const program = kernel.builder.addExecutable(out_filename, main_source_file);
 
-                    unique_programs.append(program.path) catch unreachable;
+            for (unique_program.dependency.dependencies) |dependency| {
+                switch (dependency.type) {
+                    .c_objects => {
+                        const cobjects = @ptrCast(*Build.CObject, dependency);
+                        for (cobjects.objects) |object_name| {
+                            const path_to_cobject = cobjects.dependency.get_path_to_file(kernel.builder.allocator, object_name);
+                            program.addObjectFile(path_to_cobject);
+                        }
+                        std.assert(cobjects.dependency.dependencies.len == 0);
+                    },
+                    else => unreachable,
                 }
             }
-        }
-        var userspace_programs = std.ArrayListManaged(*Build.LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len) catch unreachable;
 
-        for (unique_programs.items) |userspace_program_name| {
-            const out_filename = kernel.builder.fmt("{s}.elf", .{userspace_program_name});
-            const main_source_file = kernel.builder.fmt("src/user/programs/{s}/main.zig", .{userspace_program_name});
-            const program = kernel.builder.addExecutable(out_filename, main_source_file);
             program.setMainPkgPath("src");
             program.setTarget(get_target(kernel.options.arch, true));
             program.setOutputDir(cache_dir);
@@ -161,10 +162,10 @@ const Kernel = struct {
 
             kernel.builder.default_step.dependOn(&program.step);
 
-            userspace_programs.appendAssumeCapacity(program);
+            libexeobj_steps.appendAssumeCapacity(program);
         }
 
-        kernel.userspace_programs = userspace_programs.items;
+        kernel.userspace_programs = libexeobj_steps.items;
     }
 
     fn create_boot_image(kernel: *Kernel) void {
@@ -474,7 +475,8 @@ const Kernel = struct {
             const kernel = @fieldParentPtr(Kernel, "disk_step", step);
             const max_file_length = std.max_int(usize);
 
-            for (kernel.options.run.disks) |disk, disk_i| {
+            // TODO:
+            for (kernel.options.run.disks) |_, disk_i| {
                 const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024) catch unreachable;
                 var build_disk_buffer = std.ArrayListAligned(u8, 0x1000){
                     .items = disk_memory,
@@ -491,15 +493,18 @@ const Kernel = struct {
                     dst_byte.* = signature_byte;
                 }
 
-                for (disk.resource_files) |resource_file| {
+                for (resource_files) |resource_file| {
                     const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
                     build_fs.fs.write_file(Build.get_allocator(kernel.builder), resource_file, file, null) catch unreachable;
                 }
 
-                for (disk.userspace_programs) |userspace_program_name| {
-                    const userspace_program = find_userspace_program(kernel, userspace_program_name) orelse @panic("wtf");
-                    const exe_name = userspace_program.out_filename;
-                    const exe_path = userspace_program.output_path_source.getPath();
+                std.assert(kernel.userspace_programs.len > 0);
+
+                for (kernel.userspace_programs) |program| {
+                    const exe_name = program.out_filename;
+                    std.log.debug("Exe name: {s}", .{exe_name});
+                    const exe_path = program.output_path_source.getPath();
+                    std.log.debug("Exe path: {s}", .{exe_path});
                     const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.max_int(usize));
                     build_fs.fs.write_file(Build.get_allocator(kernel.builder), exe_name, exe_file_content, null) catch unreachable;
                 }
@@ -663,8 +668,6 @@ const Kernel = struct {
             const DiskOptions = struct {
                 interface: DiskDriverType,
                 filesystem: FilesystemDriverType,
-                userspace_programs: []const UserProgramBuild,
-                resource_files: []const []const u8,
             };
 
             const LogOptions = struct {

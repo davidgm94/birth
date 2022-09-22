@@ -144,3 +144,54 @@ pub const Disk = struct {
         };
     }
 };
+
+pub const Dependency = struct {
+    type: Type,
+    path: []const u8,
+    dependencies: []const *const Dependency,
+
+    pub fn from_source_file(source_file: anytype) *const Dependency {
+        return &source_file.dependency.dependency;
+    }
+
+    pub fn get_path_to_file(dependency: Dependency, allocator: std.Allocator, file: []const u8) []const u8 {
+        const directory_length = std.last_index_of(u8, dependency.path, "dependency.zig") orelse unreachable;
+        const directory_path = dependency.path[0..directory_length];
+        const path_to_file = std.concatenate(allocator, u8, &.{ directory_path, file }) catch unreachable;
+        return path_to_file;
+    }
+
+    fn get_program_name(dependency: Dependency) []const u8 {
+        const directory_length = std.last_index_of(u8, dependency.path, "/dependency.zig") orelse unreachable;
+        const directory_path = dependency.path[0..directory_length];
+        const directory_name = basename(directory_path);
+        return directory_name;
+    }
+
+    pub const Type = enum(u32) {
+        zig_exe = 0,
+        zig_static_lib = 1,
+        zig_dynamic_lib = 2,
+        c_objects = 3,
+    };
+};
+
+pub const CObject = struct {
+    dependency: Dependency,
+    objects: []const []const u8,
+};
+
+pub const UserProgram = struct {
+    dependency: Dependency,
+    path: []const u8 = undefined,
+    name: []const u8 = undefined,
+
+    pub fn make(allocator: std.Allocator, dependencies_file: anytype) UserProgram {
+        var zig_exe = dependencies_file.dependency;
+        std.assert(zig_exe.dependency.type == .zig_exe);
+        zig_exe.path = zig_exe.dependency.get_path_to_file(allocator, "main.zig");
+        zig_exe.name = zig_exe.dependency.get_program_name();
+
+        return zig_exe;
+    }
+};
