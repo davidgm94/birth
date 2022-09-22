@@ -76,6 +76,10 @@ pub fn get_primary(device_manager: *DeviceManager, comptime DeviceT: type) *Devi
     };
 }
 
+pub fn get_primary_graphics(device_manager: *DeviceManager) *Graphics {
+    return device_manager.get_primary(Graphics);
+}
+
 //pub fn initialize_graphics(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) void {
 ////var i: u8 = 0;
 //const graphics = device_manager.get_primary(Graphics);

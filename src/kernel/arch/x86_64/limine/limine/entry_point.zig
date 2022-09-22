@@ -232,18 +232,22 @@ pub export fn kernel_entry_point() noreturn {
         // For now ignore virtual address since we are using our own mapping
         //
         // TODO: make sure there is just an entry here
-        const framebuffer_virtual_address = blk: {
+        const framebuffer_physical_address = blk: {
             for (memory_map_entries) |entry| {
                 if (entry.type == .framebuffer) {
-                    break :blk PhysicalAddress.new(entry.address).to_higher_half_virtual_address();
+                    break :blk PhysicalAddress.new(entry.address);
                 }
             }
 
             unreachable;
         };
 
+        const framebuffer_virtual_address = framebuffer_physical_address.to_higher_half_virtual_address();
+        const mapped_address = kernel.virtual_address_space.translate_address(framebuffer_virtual_address) orelse unreachable;
+        std.assert(mapped_address.value == framebuffer_physical_address.value);
+
         kernel.bootloader_framebuffer = Framebuffer{
-            .virtual_address = framebuffer_virtual_address,
+            .virtual_address = framebuffer_virtual_address.value,
             .width = framebuffer.width,
             .height = framebuffer.height,
             .bytes_per_pixel = bytes_per_pixel,

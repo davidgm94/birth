@@ -43,7 +43,14 @@ extern fn stbtt_InitFont(font_info: *FontInfo, data: [*]const u8, offset: c_int)
 extern fn stbtt_GetCodepointBitmap(font_info: *const FontInfo, scale_x: f32, scale_y: f32, codepoint: c_int, width: *c_int, height: *c_int, xoff: *c_int, yoff: *c_int) callconv(.C) ?[*]const u8;
 extern fn stbtt_ScaleForPixelHeight(font_info: *const FontInfo, height: f32) callconv(.C) f32;
 
-pub fn initialize(file: []const u8) void {
+const FontCharacterResult = struct {
+    ptr: [*]const u8,
+    width: u32,
+    height: u32,
+    x_offset: i32,
+    y_offset: i32,
+};
+pub fn initialize(file: []const u8) FontCharacterResult {
     var info: FontInfo = undefined;
     const init_result = stbtt_InitFont(&info, file.ptr, 0);
     log.debug("Init Result: {}", .{init_result});
@@ -52,8 +59,16 @@ pub fn initialize(file: []const u8) void {
     var x_offset: c_int = 0;
     var y_offset: c_int = 0;
 
-    const result = stbtt_GetCodepointBitmap(&info, 0, stbtt_ScaleForPixelHeight(&info, 120.0), 'D', &width, &height, &x_offset, &y_offset);
-    log.debug("Result: {?*}", .{result});
+    const result = stbtt_GetCodepointBitmap(&info, 0, stbtt_ScaleForPixelHeight(&info, 120.0), 'D', &width, &height, &x_offset, &y_offset) orelse unreachable;
+    log.debug("Width: {}. Height: {}. X offset: {}. Y offset: {}", .{ width, height, x_offset, y_offset });
+
+    return FontCharacterResult{
+        .ptr = result,
+        .width = @intCast(u32, width),
+        .height = @intCast(u32, height),
+        .x_offset = x_offset,
+        .y_offset = y_offset,
+    };
 }
 
 export fn malloc(size: usize) ?*anyopaque {

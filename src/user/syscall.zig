@@ -1,6 +1,7 @@
 const std = @import("../common/std.zig");
 
 const common = @import("../common/syscall.zig");
+const Framebuffer = @import("../common/framebuffer.zig");
 
 const ExecutionMode = common.ExecutionMode;
 const HardwareID = common.HardwareID;
@@ -32,6 +33,13 @@ const AllocateMemoryParameters = common.AllocateMemoryParameters;
 /// @Syscall
 pub fn allocate_memory(parameters: AllocateMemoryParameters) Submission {
     return new_submission(.allocate_memory, parameters.size, parameters.alignment, 0, 0, 0);
+}
+
+const GetFramebufferParameters = common.GetFramebufferParameters;
+/// @Syscall
+pub fn get_framebuffer(parameters: GetFramebufferParameters) Submission {
+    _ = parameters;
+    return new_submission(.get_framebuffer, 0, 0, 0, 0, 0);
 }
 
 const ThreadExitParameters = common.ThreadExitParameters;
@@ -79,6 +87,7 @@ pub const Manager = struct {
             .log => log(parameters),
             .read_file => read_file(parameters),
             .allocate_memory => allocate_memory(parameters),
+            .get_framebuffer => get_framebuffer(parameters),
         };
 
         switch (execution_mode) {
@@ -106,6 +115,10 @@ pub const Manager = struct {
                             }
 
                             return @intToPtr([*]u8, ptr)[0..size];
+                        },
+                        .get_framebuffer => {
+                            const framebuffer = @intToPtr(*Framebuffer, result.a);
+                            return framebuffer;
                         },
                         else => @panic("User syscall not implemented: " ++ @tagName(id)),
                     },

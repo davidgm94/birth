@@ -3,6 +3,7 @@ const Scheduler = @This();
 const std = @import("../common/std.zig");
 
 const arch = @import("arch/common.zig");
+const common = @import("common.zig");
 const Context = arch.Context;
 const context_switch = @import("arch/context_switch.zig");
 const CPU = arch.CPU;
@@ -10,6 +11,8 @@ const crash = @import("crash.zig");
 const ELF = @import("elf.zig");
 const Filesystem = @import("../drivers/filesystem.zig");
 const interrupts = @import("arch/interrupts.zig");
+const kernel = @import("kernel.zig");
+const PhysicalAddress = @import("physical_address.zig");
 const PhysicalAddressSpace = @import("physical_address_space.zig");
 const PhysicalMemoryRegion = @import("physical_memory_region.zig");
 const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
@@ -207,6 +210,26 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
             .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
             .kernel => .{ .kernel = null, .user = null },
         };
+
+        if (privilege_level == .user) {
+            // TODO: be more careful about virtual and physical addresses
+            const primary_graphics = kernel.device_manager.get_primary_graphics();
+            const primary_framebuffer = primary_graphics.get_main_framebuffer();
+            const framebuffer_kernel_virtual_address = VirtualAddress.new(primary_framebuffer.virtual_address);
+            log.debug("Trying to find out framebuffer physical address out of this virtual address: {}", .{framebuffer_kernel_virtual_address});
+            const framebuffer_physical_address = thread_virtual_address_space.translate_address(framebuffer_kernel_virtual_address) orelse unreachable;
+            const framebuffer_virtual_address = VirtualAddress.new(framebuffer_physical_address.value);
+            thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, std.align_forward(primary_framebuffer.width * primary_framebuffer.height * primary_framebuffer.bytes_per_pixel, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
+            thread.framebuffer = thread_virtual_address_space.heap.allocator.create(common.Framebuffer) catch unreachable;
+            const framebuffer = PhysicalAddress.new(@ptrToInt(thread.framebuffer)).to_higher_half_virtual_address().access(*common.Framebuffer);
+            framebuffer.* = primary_framebuffer.*;
+            framebuffer.virtual_address = framebuffer_virtual_address.value;
+        } else {
+            // Index out of bounds
+            //const primary_graphics = kernel.device_manager.get_primary_graphics();
+            //const primary_framebuffer = primary_graphics.get_main_framebuffer();
+            //thread.framebuffer = primary_framebuffer;
+        }
 
         scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
     }

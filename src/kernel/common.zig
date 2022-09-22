@@ -6,21 +6,4 @@ pub const FileInMemory = struct {
     size: u64,
 };
 
-pub const Framebuffer = struct {
-    virtual_address: VirtualAddress,
-    width: u64,
-    height: u64,
-    bytes_per_pixel: u8,
-    red_mask: ColorMask,
-    blue_mask: ColorMask,
-    green_mask: ColorMask,
-
-    pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
-        return @as(u32, framebuffer.width) * framebuffer.height;
-    }
-};
-
-pub const ColorMask = struct {
-    size: u8,
-    shift: u8,
-};
+pub const Framebuffer = @import("../common/framebuffer.zig");

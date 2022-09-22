@@ -42,6 +42,8 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     };
 
     VAS.init_user(virtual_address_space);
+
+    //const graphics = virtual_address_space.translate_address() orelse unreachable;
 }
 
 pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {

@@ -141,6 +141,13 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
 
                                 return result;
                             },
+                            .get_framebuffer => {
+                                const framebuffer = current_thread.framebuffer;
+                                return Syscall.RawResult{
+                                    .a = @ptrToInt(framebuffer),
+                                    .b = 0,
+                                };
+                            },
                         }
                     } else {
                         @panic("unrecognized software syscall");

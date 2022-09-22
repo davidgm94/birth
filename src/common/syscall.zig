@@ -1,4 +1,5 @@
 const std = @import("std.zig");
+const Framebuffer = @import("framebuffer.zig");
 comptime {
     if (@import("builtin").os.tag != .freestanding) @compileError("This file should not be imported in build.zig");
 }
@@ -60,6 +61,8 @@ pub const AllocateMemoryParameters = struct {
     alignment: u64,
 };
 
+pub const GetFramebufferParameters = void;
+
 pub const ExecutionMode = enum(u1) {
     blocking,
     non_blocking,
@@ -76,6 +79,8 @@ pub const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ServiceID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.blocking)] = []u8;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *Framebuffer;
+    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };
 
@@ -85,6 +90,7 @@ pub const SyscallParameters = blk: {
     ParameterTypes[@enumToInt(ServiceID.log)] = LogParameters;
     ParameterTypes[@enumToInt(ServiceID.read_file)] = ReadFileParameters;
     ParameterTypes[@enumToInt(ServiceID.allocate_memory)] = AllocateMemoryParameters;
+    ParameterTypes[@enumToInt(ServiceID.get_framebuffer)] = GetFramebufferParameters;
     break :blk ParameterTypes;
 };
 
@@ -131,6 +137,7 @@ pub const ServiceID = enum(Input.IDIntType) {
     log = 1,
     read_file = 2,
     allocate_memory = 3,
+    get_framebuffer = 4,
 
     pub const count = std.enum_count(@This());
 };

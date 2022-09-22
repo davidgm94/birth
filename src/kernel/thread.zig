@@ -3,6 +3,7 @@ const Thread = @This();
 const std = @import("../common/std.zig");
 
 const arch = @import("arch/common.zig");
+const common = @import("common.zig");
 const Context = arch.Context;
 const CPU = arch.CPU;
 const VirtualAddress = @import("virtual_address.zig");
@@ -28,6 +29,7 @@ cpu: ?*CPU,
 syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,
+framebuffer: *common.Framebuffer,
 executing: bool,
 
 pub const Type = enum(u1) {
