@@ -7,7 +7,7 @@ comptime {
     std.reference_all_declarations(libc);
 }
 
-const FontInfo = extern struct {
+pub const FontInfo = extern struct {
     user_data: ?*anyopaque,
     data: [*]const u8,
     font_start: c_int,
@@ -31,6 +31,61 @@ const FontInfo = extern struct {
     subrs: Buffer, // private charstring subroutines index
     fontdicts: Buffer, // array of font dicts
     fdselect: Buffer, // map from glyph to fontdict
+    //
+    pub fn get_v_metrics(font_info: *const FontInfo) VMetrics {
+        var ascent: c_int = 0;
+        var descent: c_int = 0;
+        var line_gap: c_int = 0;
+        stbtt_GetFontVMetrics(font_info, &ascent, &descent, &line_gap);
+
+        return VMetrics{
+            .ascent = ascent,
+            .descent = descent,
+            .line_gap = line_gap,
+        };
+    }
+
+    pub fn get_codepoint_h_metrics(font_info: *const FontInfo, character: c_int) HMetrics {
+        var advance_width: c_int = 0;
+        var left_side_bearing: c_int = 0;
+        stbtt_GetCodepointHMetrics(font_info, character, &advance_width, &left_side_bearing);
+
+        return HMetrics{
+            .advance_width = advance_width,
+            .left_side_bearing = left_side_bearing,
+        };
+    }
+
+    pub fn get_codepoint_bitmap_box(font_info: *const FontInfo, codepoint: c_int, scale_x: f32, scale_y: f32) CodepointBitmapBox {
+        var result = CodepointBitmapBox{
+            .ix0 = 0,
+            .iy0 = 0,
+            .ix1 = 0,
+            .iy1 = 0,
+        };
+
+        stbtt_GetCodepointBitmapBox(font_info, codepoint, scale_x, scale_y, &result.ix0, &result.iy0, &result.ix1, &result.iy1);
+
+        return result;
+    }
+};
+
+const HMetrics = struct {
+    advance_width: i32,
+    left_side_bearing: i32,
+};
+
+const VMetrics = struct {
+    ascent: i32,
+    descent: i32,
+    line_gap: i32,
+};
+
+const CodepointBitmapBox = struct {
+    ix0: i32,
+    iy0: i32,
+    ix1: i32,
+    iy1: i32,
 };
 
 const Buffer = extern struct {
@@ -39,36 +94,29 @@ const Buffer = extern struct {
     size: c_int,
 };
 
-extern fn stbtt_InitFont(font_info: *FontInfo, data: [*]const u8, offset: c_int) callconv(.C) c_int;
-extern fn stbtt_GetCodepointBitmap(font_info: *const FontInfo, scale_x: f32, scale_y: f32, codepoint: c_int, width: *c_int, height: *c_int, xoff: *c_int, yoff: *c_int) callconv(.C) ?[*]const u8;
-extern fn stbtt_ScaleForPixelHeight(font_info: *const FontInfo, height: f32) callconv(.C) f32;
-
-const FontCharacterResult = struct {
-    ptr: [*]const u8,
+pub const CodepointBitmap = struct {
+    output: [*]const u8,
     width: u32,
     height: u32,
-    x_offset: i32,
-    y_offset: i32,
+    stride: i32,
 };
-pub fn initialize(file: []const u8) FontCharacterResult {
-    var info: FontInfo = undefined;
-    const init_result = stbtt_InitFont(&info, file.ptr, 0);
-    log.debug("Init Result: {}", .{init_result});
-    var width: c_int = 0;
-    var height: c_int = 0;
-    var x_offset: c_int = 0;
-    var y_offset: c_int = 0;
 
-    const result = stbtt_GetCodepointBitmap(&info, 0, stbtt_ScaleForPixelHeight(&info, 120.0), 'D', &width, &height, &x_offset, &y_offset) orelse unreachable;
-    log.debug("Width: {}. Height: {}. X offset: {}. Y offset: {}", .{ width, height, x_offset, y_offset });
+pub extern fn stbtt_InitFont(font_info: *FontInfo, data: [*]const u8, offset: c_int) callconv(.C) c_int;
+pub extern fn stbtt_GetCodepointBitmap(font_info: *const FontInfo, scale_x: f32, scale_y: f32, codepoint: c_int, width: *c_int, height: *c_int, xoff: *c_int, yoff: *c_int) callconv(.C) ?[*]const u8;
+pub extern fn stbtt_ScaleForPixelHeight(font_info: *const FontInfo, height: f32) callconv(.C) f32;
+pub extern fn stbtt_GetFontVMetrics(font_info: *const FontInfo, ascent: *c_int, descent: *c_int, line_gap: *c_int) callconv(.C) void;
+pub extern fn stbtt_GetCodepointHMetrics(font_info: *const FontInfo, codepoint: c_int, advance_width: *c_int, left_side_bearing: *c_int) callconv(.C) void;
+pub extern fn stbtt_GetCodepointBitmapBox(font_info: *const FontInfo, codepoint: c_int, scale_x: f32, scale_y: f32, ix0: *c_int, iy0: *c_int, ix1: *c_int, iy1: *c_int) callconv(.C) void;
+pub extern fn stbtt_MakeCodepointBitmap(font_info: *const FontInfo, output: [*]u8, out_w: c_int, out_h: c_int, out_stride: c_int, scale_x: f32, scale_y: f32, codepoint: c_int) callconv(.C) void;
+pub extern fn stbtt_GetCodepointKernAdvance(font_info: *const FontInfo, codepoint1: c_int, codepoint2: c_int) callconv(.C) c_int;
 
-    return FontCharacterResult{
-        .ptr = result,
-        .width = @intCast(u32, width),
-        .height = @intCast(u32, height),
-        .x_offset = x_offset,
-        .y_offset = y_offset,
-    };
+pub fn load_font(file: []const u8) ?FontInfo {
+    var font: FontInfo = undefined;
+    if (stbtt_InitFont(&font, file.ptr, 0) == 0) {
+        return null;
+    }
+
+    return font;
 }
 
 export fn malloc(size: usize) ?*anyopaque {

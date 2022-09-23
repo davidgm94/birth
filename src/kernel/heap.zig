@@ -39,15 +39,11 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
 
 fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
     const virtual_address_space = @ptrCast(?*VirtualAddressSpace, allocator.context) orelse unreachable;
-    log.debug("Acquiring -- allocate", .{});
     virtual_address_space.heap.lock.acquire();
     defer {
-        log.debug("Releasing -- allocate", .{});
         virtual_address_space.heap.lock.release();
     }
     std.assert(virtual_address_space.lock.status == 0);
-
-    log.debug("Asked allocation: Size: {}. Alignment: {}", .{ size, alignment });
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
@@ -87,7 +83,6 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
         };
 
         const result_address = region.virtual.value + region.allocated;
-        log.debug("Result address: 0x{x}", .{result_address});
         if (kernel.config.safe_slow) {
             std.assert(virtual_address_space.translate_address(VirtualAddress.new(std.align_backward(result_address, 0x1000))) != null);
         }
