@@ -46,7 +46,7 @@ pub fn build(b: *Build.Builder) void {
                             .assembly = false,
                             .interrupts = true,
                         },
-                        .run_for_debug = false,
+                        .run_for_debug = true,
                         .print_command = false,
                     },
                 },
