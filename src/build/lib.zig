@@ -54,7 +54,7 @@ pub fn get_allocator(builder: *Builder) CustomAllocator {
 pub const zero_allocator = CustomAllocator{ .allocate = zero_allocate, .context = null };
 
 fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
-    const builder = @ptrCast(*Builder, allocator.context);
+    const builder = @ptrCast(*Builder, @alignCast(@alignOf(Builder), allocator.context));
     const result = builder.allocator.allocBytes(@intCast(u29, alignment), size, 0, 0) catch unreachable;
     return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),

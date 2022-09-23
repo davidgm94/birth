@@ -46,7 +46,7 @@ pub fn build(b: *Build.Builder) void {
                             .assembly = false,
                             .interrupts = true,
                         },
-                        .run_for_debug = true,
+                        .run_for_debug = false,
                         .print_command = false,
                     },
                 },
@@ -141,7 +141,7 @@ const Kernel = struct {
             for (unique_program.dependency.dependencies) |dependency| {
                 switch (dependency.type) {
                     .c_objects => {
-                        const cobjects = @ptrCast(*Build.CObject, dependency);
+                        const cobjects = @ptrCast(*const Build.CObject, dependency);
                         for (cobjects.objects) |object_name| {
                             const path_to_cobject = cobjects.dependency.get_path_to_file(kernel.builder.allocator, object_name);
                             program.addObjectFile(path_to_cobject);

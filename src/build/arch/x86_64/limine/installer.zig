@@ -73,7 +73,7 @@ fn print_error_and_exit(e: InstallerError) InstallerError {
     return e;
 }
 
-const gpt_header_signature = @ptrCast(*const u64, "EFI PART").*;
+const gpt_header_signature = @ptrCast(*align(1) const u64, "EFI PART").*;
 
 fn div_roundup(a: u64, b: u64) u64 {
     return (((a) + ((b) - 1)) / (b));
@@ -1542,7 +1542,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
     var lb_size: u64 = 0;
 
     for (lb_guesses) |guess| {
-        gpt_header = @ptrCast(*GPT.Header, &device[guess]);
+        gpt_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), &device[guess]));
         if (gpt_header.signature == gpt_header_signature) {
             lb_size = guess;
             do_gpt = !force_mbr;
@@ -1553,7 +1553,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         }
     }
 
-    const secondary_GPT_header = @ptrCast(*GPT.Header, &device[lb_size * gpt_header.alternate_LBA]);
+    const secondary_GPT_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), &device[lb_size * gpt_header.alternate_LBA]));
     if (do_gpt) {
         //print("Installing to GPT. Logical block size of {}\nSecondary header at LBA 0x{x}\n", .{lb_size, gpt_header.alternate_LBA});
         if (secondary_GPT_header.signature != gpt_header_signature) {
