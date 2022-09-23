@@ -18,11 +18,11 @@ const panic = crash.panic;
 const TODO = crash.TODO;
 
 const Signature = enum(u32) {
-    APIC = @ptrCast(*const u32, "APIC").*,
-    FACP = @ptrCast(*const u32, "FACP").*,
-    HPET = @ptrCast(*const u32, "HPET").*,
-    MCFG = @ptrCast(*const u32, "MCFG").*,
-    WAET = @ptrCast(*const u32, "WAET").*,
+    APIC = @ptrCast(*align(1) const u32, "APIC").*,
+    FACP = @ptrCast(*align(1) const u32, "FACP").*,
+    HPET = @ptrCast(*align(1) const u32, "HPET").*,
+    MCFG = @ptrCast(*align(1) const u32, "MCFG").*,
+    WAET = @ptrCast(*align(1) const u32, "WAET").*,
 };
 
 comptime {

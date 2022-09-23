@@ -349,7 +349,7 @@ pub const Drive = struct {
         entry.byte_count = @intCast(u22, (disk_work.sector_count << 9) - 1);
         entry.interrupt_on_completion = true;
 
-        const command_fis = @ptrCast(*FISRegisterHardwareToDevice, &command_table.command_fis);
+        const command_fis = @ptrCast(*FISRegisterHardwareToDevice, @alignCast(@alignOf(FISRegisterHardwareToDevice), &command_table.command_fis));
         command_fis.f.fis_type = .reg_h2d;
         command_fis.f.command_control = true;
         command_fis.command = .read_dma_ex;

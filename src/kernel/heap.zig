@@ -38,7 +38,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
 }
 
 fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
-    const virtual_address_space = @ptrCast(?*VirtualAddressSpace, allocator.context) orelse unreachable;
+    const virtual_address_space = @ptrCast(?*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), allocator.context)) orelse unreachable;
     virtual_address_space.heap.lock.acquire();
     defer {
         virtual_address_space.heap.lock.release();

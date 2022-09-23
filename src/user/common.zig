@@ -83,7 +83,7 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
 }
 
 // TODO: improve user panic implementation
-pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
+pub fn panic(message: []const u8, _: ?*std.StackTrace, _: ?usize) noreturn {
     std.log.scoped(.PANIC).err("{s}", .{message});
     while (true) {}
 }

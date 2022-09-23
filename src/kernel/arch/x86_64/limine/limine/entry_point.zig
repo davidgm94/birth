@@ -449,6 +449,6 @@ pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     default_logger.writer.writeByte('\n') catch unreachable;
 }
 
-pub fn panic(message: []const u8, _: ?*std.StackTrace) noreturn {
+pub fn panic(message: []const u8, _: ?*std.StackTrace, _: ?usize) noreturn {
     crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
 }

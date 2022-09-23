@@ -194,9 +194,9 @@ pub const CustomAllocator = struct {
         return @intToPtr(*T, result.address);
     }
 
-    pub fn get_allocator(allocator: *const CustomAllocator) Allocator {
+    pub fn get_allocator(allocator: *CustomAllocator) Allocator {
         return Allocator{
-            .ptr = allocator,
+            .ptr = @ptrCast(*anyopaque, allocator),
             .vtable = &vtable,
         };
     }
@@ -210,7 +210,7 @@ pub const CustomAllocator = struct {
     fn zig_alloc(context: *anyopaque, size: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8 {
         _ = len_align;
         _ = return_address;
-        const allocator = @ptrCast(*CustomAllocator, context);
+        const allocator = @ptrCast(*CustomAllocator, @alignCast(@alignOf(CustomAllocator), context));
         const result = allocator.callback_allocate(allocator.*, size, ptr_align) catch return Allocator.Error.OutOfMemory;
         const byte_slice = @intToPtr([*]u8, result.address)[0..result.size];
         return byte_slice;
