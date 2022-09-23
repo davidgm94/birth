@@ -105,7 +105,7 @@ const Kernel = struct {
         kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
-        kernel.executable.emit_llvm_ir = .{ .emit_to = "zig-cache/kernel_llvm.ir" };
+        kernel.executable.emit_llvm_ir = .{ .emit_to = cache_dir ++ "/kernel_llvm.ir" };
 
         //kernel.executable.addCSourceFile("./src/dependencies/stb_truetype/stb_truetype.c", &.{});
 
@@ -256,7 +256,7 @@ const Kernel = struct {
 
                 for (kernel.options.run.disks) |disk, disk_i| {
                     const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
-                    const disk_path = kernel.builder.fmt("zig-cache/{s}.bin", .{disk_id});
+                    const disk_path = kernel.builder.fmt("{s}/{s}.bin", .{ cache_dir, disk_id });
 
                     switch (disk.interface) {
                         .nvme => {
@@ -407,7 +407,7 @@ const Kernel = struct {
                 const build_installer_path = "src/build/arch/x86_64/limine/";
                 const installer = @import("src/build/arch/x86_64/limine/installer.zig");
                 const base_path = "src/kernel/arch/x86_64/limine/";
-                const image_path = "zig-cache/universal.iso";
+                const image_path = cache_dir ++ "/universal.iso";
 
                 fn new(kernel: *Kernel) Build.Step {
                     var step = Build.Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build);
@@ -513,7 +513,7 @@ const Kernel = struct {
                 const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
                 Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
-                try Build.cwd().writeFile(kernel.builder.fmt("zig-cache/disk{}.bin", .{disk_i}), build_disk.buffer.items);
+                try Build.cwd().writeFile(kernel.builder.fmt("{s}/disk{}.bin", .{ cache_dir, disk_i }), build_disk.buffer.items);
             }
         }
 

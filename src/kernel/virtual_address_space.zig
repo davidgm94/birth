@@ -3,7 +3,6 @@ const VirtualAddressSpace = @This();
 const std = @import("../common/std.zig");
 
 const arch = @import("arch/common.zig");
-const AVL = @import("../common/avl.zig");
 const crash = @import("crash.zig");
 const Heap = @import("heap.zig");
 const kernel = @import("kernel.zig");

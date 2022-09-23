@@ -6,7 +6,6 @@ const common = @import("../kernel/common.zig");
 const crash = @import("../kernel/crash.zig");
 const Drivers = @import("common.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
-const Font = @import("../common/psf1.zig");
 const List = @import("../common/list.zig");
 const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
 
@@ -42,36 +41,6 @@ pub fn get_main_framebuffer(driver: *Driver) *Framebuffer {
     return &driver.framebuffers.first.?.data[driver.primary];
 }
 
-pub fn draw_char(driver: *Driver, font: Font, color: Color, point: Point, character: u8) void {
-    const framebuffer = driver.framebuffer.buffer[0 .. driver.framebuffer.width * driver.framebuffer.height];
-    const font_buffer_char_offset = @intCast(u64, character) * font.header.char_size;
-    const font_buffer = font.glyph_buffer[font_buffer_char_offset .. font_buffer_char_offset + font.header.char_size];
-
-    for (font_buffer[0..16]) |font_byte, offset_from_y| {
-        const y = point.y + offset_from_y;
-        var x = point.x;
-        const x_max = point.x + 8;
-
-        while (x < x_max) : (x += 1) {
-            if (font_byte & (@as(u8, 0b1000_0000) >> @intCast(u3, x - point.x)) != 0) {
-                framebuffer[x + (y * driver.framebuffer.width)] = @bitCast(u32, color);
-            }
-        }
-    }
-}
-
-pub fn draw_string(driver: *Driver, font: Font, color: Color, string: []const u8) void {
-    const framebuffer = &driver.framebuffer;
-    for (string) |char| {
-        driver.draw_char(font, color, framebuffer.cursor, char);
-        framebuffer.cursor.x += 8;
-
-        if (driver.framebuffer.cursor.x + 8 > driver.framebuffer.width) {
-            driver.framebuffer.cursor.x = 0;
-            driver.framebuffer.cursor.y += 16;
-        }
-    }
-}
 pub fn draw_horizontal_line(driver: *Driver, line: Line, color: Color) void {
     common.runtime_assert(@src(), line.start.y == line.end.y);
     common.runtime_assert(@src(), line.start.x < line.end.x);
