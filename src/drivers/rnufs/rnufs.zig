@@ -23,7 +23,7 @@ const InitError = error{
 };
 
 // TODO: free
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, disk: *Disk, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, disk: *Disk) !void {
     var dma_buffer = try disk.interface.get_dma_buffer(&disk.interface, virtual_address_space.heap.allocator, 1);
     const result = disk.interface.access(&disk.interface, &dma_buffer, .{
         .sector_offset = 0,
@@ -47,11 +47,8 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
             .callback_write_file = common.write_file,
         },
     };
-    if (maybe_driver_tree) |driver_tree| {
-        inline for (driver_tree) |driver_node| {
-            try driver_node.type.init(device_manager, virtual_address_space, &rnufs.fs, driver_node.children);
-        }
-    }
+
+    try Filesystem.init(device_manager, virtual_address_space, &rnufs.fs);
 }
 
 pub fn seek_file(fs_driver: *FilesystemInterface, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) ?SeekResult {

@@ -1,5 +1,6 @@
 const std = @import("../../../../../common/std.zig");
 
+const bootloader = @import("../../../../bootloader.zig");
 const common = @import("../../../../common.zig");
 const CPUID = @import("../../../../../common/arch/x86_64/cpuid.zig");
 const crash = @import("../../../../crash.zig");
@@ -218,19 +219,15 @@ pub export fn kernel_entry_point() noreturn {
         const ptr_framebuffer_ptr = response.framebuffers orelse @panic("Framebuffer response has an invalid pointer");
         const framebuffer_ptr = ptr_framebuffer_ptr.*;
         const framebuffers = framebuffer_ptr[0..response.framebuffer_count];
-        std.assert(framebuffers.len == 1);
         const framebuffer = framebuffers[0];
+
+        std.assert(framebuffers.len == 1);
         std.assert(framebuffer.pitch % framebuffer.width == 0);
         std.assert(framebuffer.bpp % @bitSizeOf(u8) == 0);
         const bytes_per_pixel = @intCast(u8, framebuffer.bpp / @bitSizeOf(u8));
         std.assert(framebuffer.pitch / framebuffer.width == bytes_per_pixel);
 
-        // TODO: Make sure this correspnds with the framebuffer region
-        //const mapped_address = kernel.bootstrap_virtual_address_space.translate_address(VirtualAddress.new(framebuffer.address)) orelse unreachable;
-        //logger.debug("Mapped address: {}", .{mapped_address});
-
         // For now ignore virtual address since we are using our own mapping
-        //
         // TODO: make sure there is just an entry here
         const framebuffer_physical_address = blk: {
             for (memory_map_entries) |entry| {
@@ -246,15 +243,7 @@ pub export fn kernel_entry_point() noreturn {
         const mapped_address = kernel.virtual_address_space.translate_address(framebuffer_virtual_address) orelse unreachable;
         std.assert(mapped_address.value == framebuffer_physical_address.value);
 
-        kernel.bootloader_framebuffer = Framebuffer{
-            .virtual_address = framebuffer_virtual_address.value,
-            .width = framebuffer.width,
-            .height = framebuffer.height,
-            .bytes_per_pixel = bytes_per_pixel,
-            .red_mask = .{ .size = framebuffer.red_mask_size, .shift = framebuffer.red_mask_shift },
-            .blue_mask = .{ .size = framebuffer.blue_mask_size, .shift = framebuffer.blue_mask_shift },
-            .green_mask = .{ .size = framebuffer.green_mask_size, .shift = framebuffer.green_mask_shift },
-        };
+        kernel.bootloader_framebuffer = bootloader.get_framebuffer(framebuffer);
         logger.debug("Processed framebuffer", .{});
     }
 
@@ -378,7 +367,7 @@ export var bootloader_hhdm = Limine.HHDM.Request{
     .revision = 0,
 };
 
-export var bootloader_framebuffer = Limine.Framebuffer.Request{
+pub export var bootloader_framebuffer = Limine.Framebuffer.Request{
     .revision = 0,
 };
 

@@ -8,6 +8,7 @@ const Disk = @import("../../../drivers/disk.zig");
 const Filesystem = @import("../../../drivers/filesystem.zig");
 const Graphics = @import("../../../drivers/graphics.zig");
 const kernel = @import("../../kernel.zig");
+const LimineGraphics = @import("../../../drivers/limine_graphics.zig");
 const PCI = @import("../../../drivers/pci.zig");
 const PhysicalAddress = @import("../../physical_address.zig");
 const RNUFS = @import("../../../drivers/rnufs/rnufs.zig");
@@ -17,42 +18,7 @@ const VirtualAddressSpace = @import("../../virtual_address_space.zig");
 const log = std.log.scoped(.Drivers);
 
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
-    try driver_tree[0].type.init(device_manager, virtual_address_space, driver_tree[0].children);
-    try driver_tree[1].type.init(device_manager, virtual_address_space, driver_tree[1].children);
-    try Graphics.init(device_manager, virtual_address_space, &.{kernel.bootloader_framebuffer}, driver_tree[2].children);
+    try ACPI.init(device_manager, virtual_address_space);
+    try PCI.init(device_manager, virtual_address_space);
+    try LimineGraphics.init(@import("root").bootloader_framebuffer.response.?.framebuffers.?.*[0]);
 }
-
-pub const driver_tree = [_]Driver.Tree{
-    .{
-        .type = ACPI,
-        .children = null,
-    },
-    .{
-        .type = PCI,
-        .children = &.{
-            .{
-                .type = AHCI,
-                .children = &.{
-                    .{
-                        .type = Disk,
-                        .children = &.{
-                            .{
-                                .type = RNUFS,
-                                .children = &.{
-                                    .{
-                                        .type = Filesystem,
-                                        .children = null,
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    },
-    .{
-        .type = Graphics,
-        .children = null,
-    },
-};

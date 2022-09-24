@@ -37,7 +37,7 @@ pub const InitError = error{
     allocation_failed,
 };
 
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device) !void {
     const driver = try drivers.add_one(virtual_address_space.heap.allocator);
     driver.pci = pci_device;
     driver.abar = (driver.pci.enable_bar(virtual_address_space, 5) catch @panic("wtf")).access(*HBAMemory);
@@ -50,11 +50,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     for (driver.drives[0..driver.drive_count]) |*drive| {
         drive.configure(virtual_address_space);
 
-        if (maybe_driver_tree) |driver_tree| {
-            inline for (driver_tree) |driver_node| {
-                try driver_node.type.init(device_manager, virtual_address_space, &drive.disk, driver_node.children);
-            }
-        }
+        try Disk.init(device_manager, virtual_address_space, &drive.disk);
     }
 }
 

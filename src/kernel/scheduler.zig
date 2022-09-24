@@ -45,7 +45,6 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
         @panic("spins active when yielding");
     }
     interrupts.disable();
-    log.debug("Acquiring -- Yield", .{});
     scheduler.lock.acquire();
     std.log.scoped(.Yield).debug("Current thread: #{}", .{current_thread.id});
     var old_address_space: *VirtualAddressSpace = undefined;
@@ -70,7 +69,6 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     }
     //old_context.check(@src());
     TLS.set_current(scheduler, new_thread, current_cpu);
-    log.debug("Releasing -- Yield", .{});
     scheduler.lock.release();
 
     // TODO: checks
@@ -145,10 +143,8 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
 }
 
 pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
-    log.debug("Acquiring -- spawn_thread", .{});
     scheduler.lock.acquire();
     defer {
-        log.debug("Releasing -- spawn_thread", .{});
         scheduler.lock.release();
     }
 
@@ -214,16 +210,16 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
         if (privilege_level == .user) {
             // TODO: be more careful about virtual and physical addresses
             const primary_graphics = kernel.device_manager.get_primary_graphics();
-            const primary_framebuffer = primary_graphics.get_main_framebuffer();
-            const framebuffer_kernel_virtual_address = VirtualAddress.new(primary_framebuffer.virtual_address);
+            const primary_framebuffer = primary_graphics.framebuffer;
+            const framebuffer_kernel_virtual_address = VirtualAddress.new(@ptrToInt(primary_framebuffer.bytes));
             log.debug("Trying to find out framebuffer physical address out of this virtual address: {}", .{framebuffer_kernel_virtual_address});
             const framebuffer_physical_address = thread_virtual_address_space.translate_address(framebuffer_kernel_virtual_address) orelse unreachable;
             const framebuffer_virtual_address = VirtualAddress.new(framebuffer_physical_address.value);
-            thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, std.align_forward(primary_framebuffer.width * primary_framebuffer.height * primary_framebuffer.bytes_per_pixel, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
+            thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, std.align_forward(primary_framebuffer.stride * primary_framebuffer.height, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
             thread.framebuffer = thread_virtual_address_space.heap.allocator.create(common.Framebuffer) catch unreachable;
             const framebuffer = PhysicalAddress.new(@ptrToInt(thread.framebuffer)).to_higher_half_virtual_address().access(*common.Framebuffer);
-            framebuffer.* = primary_framebuffer.*;
-            framebuffer.virtual_address = framebuffer_virtual_address.value;
+            framebuffer.* = primary_framebuffer;
+            framebuffer.bytes = framebuffer_virtual_address.access([*]u8);
         } else {
             // Index out of bounds
             //const primary_graphics = kernel.device_manager.get_primary_graphics();

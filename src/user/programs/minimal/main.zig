@@ -24,7 +24,7 @@ export fn user_entry_point() callconv(.C) void {
         for (bitmap_row) |bitmap_byte, i| {
             const bitmap_u32 = @as(u32, bitmap_byte);
             const index = framebuffer_offset_index + i;
-            @intToPtr([*]u32, framebuffer.virtual_address)[index] = (bitmap_u32 << 24) | (bitmap_u32 << 16) | (bitmap_u32 << 8) | (bitmap_u32 << 0);
+            @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.bytes))[index] = (bitmap_u32 << 24) | (bitmap_u32 << 16) | (bitmap_u32 << 8) | (bitmap_u32 << 0);
         }
     }
 

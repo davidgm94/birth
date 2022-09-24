@@ -20,6 +20,7 @@ pub const max_int = std.math.maxInt;
 pub const max = std.math.max;
 pub const min = std.math.min;
 pub const div_ceil = std.math.divCeil;
+pub const clamp = std.math.clamp;
 
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;

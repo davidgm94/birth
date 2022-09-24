@@ -3,6 +3,7 @@ const Controller = @This();
 
 const std = @import("../common/std.zig");
 
+const AHCI = @import("ahci.zig");
 const arch = @import("../kernel/arch/common.zig");
 const crash = @import("../kernel/crash.zig");
 const DeviceManager = @import("../kernel/device_manager.zig");
@@ -25,8 +26,9 @@ pub var controller: Controller = undefined;
 const Error = error{
     no_device_found,
 };
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime driver_tree: ?[]const Drivers.Tree) !void {
-    try enumerate(device_manager, virtual_address_space, driver_tree);
+
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
+    try enumerate(device_manager, virtual_address_space);
 }
 
 const BusScanState = enum(u8) {
@@ -103,7 +105,9 @@ const HeaderType = enum(u8) {
     x2 = 2,
 };
 
-fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime maybe_driver_tree: ?[]const Drivers.Tree) !void {
+const PCIDevices = .{AHCI};
+
+fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     var bus_scan_states = std.zeroes([256]BusScanState);
     var base_function: u8 = 0;
     const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
@@ -231,13 +235,10 @@ fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddr
 
                     log.debug("PCI device. Class 0x{x} ({s}). Subclass: 0x{x} ({s}). Prog IF: 0x{x}", .{ pci_device.class_code, class_code_name, pci_device.subclass_code, subclass_code_name, pci_device.prog_if });
 
-                    if (maybe_driver_tree) |driver_tree| {
-                        inline for (driver_tree) |node| {
-                            const Driver = node.type;
-                            if (Driver.class_code == pci_device.class_code and Driver.subclass_code == pci_device.subclass_code) {
-                                try Driver.init(device_manager, virtual_address_space, pci_device, node.children);
-                                break;
-                            }
+                    inline for (PCIDevices) |PCIDevice| {
+                        if (PCIDevice.class_code == pci_device.class_code and PCIDevice.subclass_code == pci_device.subclass_code) {
+                            try PCIDevice.init(device_manager, virtual_address_space, pci_device);
+                            break;
                         }
                     }
                 }

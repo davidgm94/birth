@@ -43,9 +43,8 @@ fn is_in_page_range(a: u64, b: u64) bool {
 }
 
 /// ACPI initialization. We should have a page mapper ready before executing this function
-pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, comptime driver_tree: ?[]const Drivers.Tree) !void {
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     _ = device_manager;
-    _ = driver_tree;
 
     const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(x86_64.rsdp_physical_address), null).access(*align(1) RSDP1);
 

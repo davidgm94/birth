@@ -65,12 +65,10 @@ const Result = struct {
 
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
     if (already_locked == .no) {
-        log.debug("Acquiring -- allocate_extended", .{});
         virtual_address_space.lock.acquire();
     }
     defer {
         if (already_locked == .no) {
-            log.debug("Releasing -- allocate_extended", .{});
             virtual_address_space.lock.release();
         }
     }
@@ -124,12 +122,10 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
-        log.debug("Acquiring -- map_extended", .{});
         virtual_address_space.lock.acquire();
     }
     defer {
         if (already_locked == .no) {
-            log.debug("Releasing -- map_extended", .{});
             virtual_address_space.lock.release();
         }
     }
@@ -225,12 +221,10 @@ pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, v
     if (already_locked == .yes) {
         std.assert(virtual_address_space.lock.status != 0);
     } else {
-        log.debug("Acquiring -- translate_address_extended", .{});
         virtual_address_space.lock.acquire();
     }
     defer {
         if (already_locked == .no) {
-            log.debug("Releasing -- translate_address_extended", .{});
             virtual_address_space.lock.release();
         }
     }

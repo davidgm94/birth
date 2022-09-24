@@ -14,6 +14,7 @@ const PhysicalAddressSpace = @import("physical_address_space.zig");
 const VirtualAddress = @import("virtual_address.zig");
 const VirtualAddressSpace = @import("virtual_address_space.zig");
 const VirtualMemoryRegion = @import("virtual_memory_region.zig");
+const Window = @import("window.zig");
 
 const CPU = arch.CPU;
 const Context = arch.Context;
@@ -62,6 +63,8 @@ pub const BootstrapContext = struct {
     context: Context,
 };
 pub var bootstrap_context: BootstrapContext = undefined;
+
+pub var window_manager = Window.Manager{};
 
 pub const config = struct {
     safe_slow: bool = false,
