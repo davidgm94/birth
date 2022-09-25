@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 
 comptime {
-    std.assert(@import("builtin").cpu.arch.endian() == .Little);
+    assert(@import("builtin").cpu.arch.endian() == .Little);
 }
 
 const InstallerError = error{

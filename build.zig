@@ -84,9 +84,7 @@ const Kernel = struct {
 
         switch (kernel.options.arch) {
             .x86_64 => {
-                const limine_entry_point = std.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), "/entry_point.zig" }) catch unreachable;
-                const linker_script_path = std.concatenate(kernel.builder.allocator, u8, &.{ BootImage.x86_64.Limine.base_path, @tagName(kernel.options.arch.x86_64.bootloader.limine.protocol), ".ld" }) catch unreachable;
-                kernel.executable = kernel.builder.addExecutable(kernel_name, limine_entry_point);
+                kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/arch/x86_64/limine.zig");
                 kernel.executable.code_model = .kernel;
                 //kernel.executable.pie = true;
                 kernel.executable.force_pic = true;
@@ -96,7 +94,7 @@ const Kernel = struct {
                 kernel.executable.red_zone = false;
                 kernel.executable.omit_frame_pointer = false;
                 kernel.executable.entry_symbol_name = "kernel_entry_point";
-                kernel.executable.setLinkerScriptPath(Build.FileSource.relative(linker_script_path));
+                kernel.executable.setLinkerScriptPath(Build.FileSource.relative("src/kernel/arch/x86_64/linker.ld"));
             },
             else => unreachable,
         }
@@ -106,8 +104,6 @@ const Kernel = struct {
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
         kernel.executable.emit_llvm_ir = .{ .emit_to = cache_dir ++ "/kernel_llvm.ir" };
-
-        //kernel.executable.addCSourceFile("./src/dependencies/stb_truetype/stb_truetype.c", &.{});
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
@@ -404,9 +400,9 @@ const Kernel = struct {
     const BootImage = struct {
         const x86_64 = struct {
             const Limine = struct {
-                const build_installer_path = "src/build/arch/x86_64/limine/";
-                const installer = @import("src/build/arch/x86_64/limine/installer.zig");
-                const base_path = "src/kernel/arch/x86_64/limine/";
+                const installer = @import("src/bootloader/limine/installer.zig");
+                const base_path = "src/bootloader/limine";
+                const installables_path = base_path ++ "/installables";
                 const image_path = cache_dir ++ "/universal.iso";
 
                 fn new(kernel: *Kernel) Build.Step {
@@ -423,9 +419,8 @@ const Kernel = struct {
                     cwd.deleteFile(image_path) catch {};
                     const img_dir = try cwd.makeOpenPath(img_dir_path, .{});
                     const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-                    const to_install_path = kernel.builder.fmt(base_path ++ "{s}/to_install", .{@tagName(kernel.options.arch.x86_64.bootloader.limine.protocol)});
 
-                    const limine_dir = try cwd.openDir(to_install_path, .{});
+                    const limine_dir = try cwd.openDir(installables_path, .{});
 
                     const limine_efi_bin_file = "limine-cd-efi.bin";
                     const files_to_copy_from_limine_dir = [_][]const u8{
@@ -536,7 +531,7 @@ const Kernel = struct {
 
         const x86_64 = struct {
             bootloader: union(Bootloader) {
-                limine: Limine,
+                limine: void,
             },
 
             const Bootloader = enum {
@@ -548,24 +543,13 @@ const Kernel = struct {
                     .limine => .{
                         .x86_64 = .{
                             .bootloader = .{
-                                .limine = .{
-                                    .protocol = context.protocol,
-                                },
+                                .limine = {},
                             },
                         },
                     },
                     else => unreachable,
                 };
             }
-
-            const Limine = struct {
-                protocol: Protocol,
-
-                const Protocol = enum(u32) {
-                    stivale2,
-                    limine,
-                };
-            };
         };
 
         const ArchSpecific = union(Arch) {
