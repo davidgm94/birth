@@ -1,31 +1,11 @@
 const std = @import("../../../../../common/std.zig");
 
-const bootloader = @import("../../../../bootloader.zig");
-const common = @import("../../../../common.zig");
-const CPUID = @import("../../../../../common/arch/x86_64/cpuid.zig");
-const crash = @import("../../../../crash.zig");
-const default_logger = @import("../../../../log.zig");
-const kernel = @import("../../../../kernel.zig");
-const main = @import("../../../../main.zig").main;
-const Limine = @import("limine.zig");
-const TLS = @import("../../tls.zig");
-const x86_64 = @import("../../common.zig");
+const kernel = @import("../../kernel.zig");
+const RNU = @import("../../rnu.zig");
 
-const Context = @import("../../context.zig");
-const CPU = @import("../../cpu.zig");
-const Heap = @import("../../../../heap.zig");
-const PhysicalAddress = @import("../../../../physical_address.zig");
-const PhysicalAddressSpace = @import("../../../../physical_address_space.zig");
-const PhysicalMemoryRegion = @import("../../../../physical_memory_region.zig");
-const Scheduler = @import("../../../../scheduler.zig");
-const Spinlock = @import("../../../../spinlock.zig");
-const Thread = @import("../../../../thread.zig");
-const VAS = @import("../../vas.zig");
-const VirtualAddress = @import("../../../../virtual_address.zig");
-const VirtualMemoryRegion = @import("../../../../virtual_memory_region.zig");
-const VirtualAddressSpace = @import("../../../../virtual_address_space.zig");
+const x86_64 = @import("../x86_64.zig");
+const CPU = x86_64.CPU;
 
-const Framebuffer = common.Framebuffer;
 const logger = std.log.scoped(.Limine);
 
 pub export fn kernel_entry_point() noreturn {
