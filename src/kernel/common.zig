@@ -5,5 +5,3 @@ pub const FileInMemory = struct {
     address: VirtualAddress,
     size: u64,
 };
-
-pub const Framebuffer = @import("../common/framebuffer.zig");

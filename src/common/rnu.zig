@@ -1,5 +1,3 @@
-// This is only a definition file. Imports are forbidden
-
 pub const DiskDriverType = enum(u32) {
     virtio = 0,
     nvme = 1,
@@ -13,7 +11,7 @@ pub const FilesystemDriverType = enum(u32) {
     ext2 = 1,
 };
 
-/// This is only meant to be used at comptime
-pub const Tree = struct {
-    type: type,
+pub const DrawingAreaDescriptor = struct {
+    width: u32,
+    height: u32,
 };

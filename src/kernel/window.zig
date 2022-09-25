@@ -68,15 +68,25 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i64
 
 pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
     manager.lock.assert_locked();
-    _ = graphics;
 
     // TODO: check for resizing
 
     const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
     const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
-    const rectangle = Rectangle { .left = 0, .right = graphics.framebuffer.width, .top = 0, .bottom = graphics.framebuffer.height };
+    const bounds = Rectangle{ .left = 0, .right = graphics.framebuffer.width, .top = 0, .bottom = graphics.framebuffer.height };
 
-    const cursor_bounds = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.height };
+    const cursor_bounds = blk: {
+        var result = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.height };
+        result = result.clip(Rectangle{ .left = 0, .right = bounds.get_width(), .top = 0, .bottom = bounds.get_height() }).rectangle;
+        break :blk result;
+    };
+
+    manager.cursor.surface.swap.copy(
+        &graphics.framebuffer,
+        0, // point 0 TODO
+        cursor_bounds,
+        true,
+    );
 
     @panic("todo update screen");
     //const cursor_x = manager.

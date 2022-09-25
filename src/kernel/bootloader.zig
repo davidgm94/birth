@@ -1,4 +1,3 @@
-const Framebuffer = @import("../common/framebuffer.zig");
 const ID = enum {
     limine,
 };

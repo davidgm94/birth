@@ -9,7 +9,6 @@ const DeviceManager = @import("../kernel/device_manager.zig");
 const kernel = @import("../kernel/kernel.zig");
 const List = @import("../common/list.zig");
 
-const Framebuffer = common.Framebuffer;
 const log = std.log.scoped(.graphics);
 const StableBuffer = List.StableBuffer;
 const TODO = crash.TODO;
@@ -44,19 +43,37 @@ pub const Rectangle = struct {
     top: u64,
     bottom: u64,
 
-    pub fn clip(rectangle: Rectangle, current: Rectangle) ?Rectangle {
-        const intersection = std.zeroes(Rectangle);
+    pub const ClipResult = struct {
+        rectangle: ClipResult,
+        result: bool,
+    };
 
-        if (!((current.left > rectangle.right and current.right > rectangle.left) or (current.top > rectangle.bottom and current.bottom > rectangle.top))) {
-            intersection.left = if (current.left > rectangle.left) current.left else rectangle.left;
-            intersection.right = if (current.right < rectangle.right) current.right else rectangle.right;
-            intersection.top = if (current.top > rectangle.top) current.top else rectangle.top;
-            intersection.bottom = if (current.bottom < rectangle.bottom) current.bottom else rectangle.bottom;
-        } else {
-            intersection = {};
-        }
+    pub fn clip(rectangle: Rectangle, current: Rectangle) ClipResult {
+        const intersection = blk: {
+            if (!((current.left > rectangle.right and current.right > rectangle.left) or (current.top > rectangle.bottom and current.bottom > rectangle.top))) {
+                break :blk Rectangle{
+                    .left = if (current.left > rectangle.left) current.left else rectangle.left,
+                    .right = if (current.right < rectangle.right) current.right else rectangle.right,
+                    .top = if (current.top > rectangle.top) current.top else rectangle.top,
+                    .bottom = if (current.bottom < rectangle.bottom) current.bottom else rectangle.bottom,
+                };
+            } else {
+                break :blk std.zeroes(Rectangle);
+            }
+        };
 
-        if (intersection.left < intersection.right and intersection.top < intersection.bottom) intersection else return null;
+        return ClipResult{
+            .rectangle = intersection,
+            .result = intersection.left < intersection.right and intersection.top < intersection.bottom,
+        };
+    }
+
+    pub fn get_width(rectangle: Rectangle) u64 {
+        return rectangle.right - rectangle.left;
+    }
+
+    pub fn get_height(rectangle: Rectangle) u64 {
+        return rectangle.bottom - rectangle.top;
     }
 };
 
@@ -166,3 +183,29 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 //};
 //}
 //};
+//
+const Framebuffer = struct {
+    bytes: [*]u8,
+    width: u64,
+    height: u64,
+    stride: u64,
+
+    pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
+        return @as(u32, framebuffer.width) * framebuffer.height;
+    }
+
+    pub fn copy(framebuffer: *Framebuffer, source: *Framebuffer, destination_point: Point, source_region: Rectangle, add_to_modified_region: bool) void {
+        _ = framebuffer;
+        _ = source;
+        _ = destination_point;
+        _ = source_region;
+        _ = add_to_modified_region;
+
+        @panic("todo copy");
+    }
+
+    pub const Point = struct {
+        x: u64,
+        y: u64,
+    };
+};

@@ -1,6 +1,5 @@
 const Driver = @This();
 const Drivers = @import("common.zig");
-const Framebuffer = @import("../common/framebuffer.zig");
 const Graphics = @import("graphics.zig");
 const kernel = @import("../kernel/kernel.zig");
 const Limine = @import("../kernel/arch/x86_64/limine/limine/limine.zig");

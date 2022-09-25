@@ -2,6 +2,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
+comptime {
+    std.assert(@import("builtin").cpu.arch.endian() == .Little);
+}
+
 const InstallerError = error{
     not_64_bit,
     unable_to_get_arguments,
@@ -143,27 +147,6 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         // Do MBR sanity checks
 
         {
-            const hint = @ptrCast(*align(1) u16, &device[218]);
-            if (hint.* != 0) {
-                if (!force_mbr) mbr = false else hint.* = 0;
-            }
-        }
-
-        {
-            const hint = @ptrCast(*align(1) u16, &device[444]);
-            if (hint.* != 0 and hint.* != 0x5a5a) {
-                if (!force_mbr) mbr = false else hint.* = 0;
-            }
-        }
-
-        {
-            const hint = @ptrCast(*align(1) u16, &device[510]);
-            if (hint.* != 0xaa55) {
-                if (!force_mbr) mbr = false else hint.* = 0xaa55;
-            }
-        }
-
-        {
             const hint = @ptrCast(*u8, &device[446]);
             if (hint.* != 0 and hint.* != 0x80) {
                 if (!force_mbr) mbr = false else hint.* = if (hint.* & 0x80 != 0) 0x80 else 0;
@@ -194,13 +177,34 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         {
             const hint = @ptrCast(*[8]u8, &device[4]);
             if (std.mem.eql(u8, hint, "_ECH_FS_")) {
-                if (!force_mbr) mbr = false;
+                if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([8]u8);
+            }
+        }
+
+        {
+            const hint = @ptrCast(*[4]u8, &device[3]);
+            if (std.mem.eql(u8, hint, "NTFS")) {
+                if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([4]u8);
             }
         }
 
         {
             const hint = @ptrCast(*[5]u8, &device[54]);
             if (std.mem.eql(u8, hint[0..3], "FAT")) {
+                if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
+            }
+        }
+
+        {
+            const hint = @ptrCast(*[5]u8, &device[82]);
+            if (std.mem.eql(u8, hint[0..3], "FAT")) {
+                if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
+            }
+        }
+
+        {
+            const hint = @ptrCast(*[5]u8, &device[3]);
+            if (std.mem.eql(u8, hint, "FAT32")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
             }
         }
@@ -229,12 +233,20 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
         } else {
             //stdout_write("GPT partition not specified. Attempting GPT embedding\n");
 
+            const partition_entry_count = gpt_header.partition_entry_count;
+            if (partition_entry_count == 0) @panic("no partitions");
+            const partition_entry_base_address = @ptrToInt(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
+            var partition_entry_address = partition_entry_base_address;
+
             var max_partition_entry_used: u64 = 0;
-            const partition_entries = @intToPtr([*]GPT.Entry, @ptrToInt(device.ptr) + gpt_header.partition_entry_LBA * lb_size)[0..gpt_header.partition_entry_count];
-            if (gpt_header.partition_entry_count == 0) @panic("no partitions");
-            for (partition_entries) |entry, i| {
-                if (entry.unique_partition_guid0 != 0 or entry.unique_partition_guid1 != 0) {
-                    if (i > max_partition_entry_used) max_partition_entry_used = i;
+
+            var partition_entry_i: u64 = 0;
+            while (partition_entry_i < partition_entry_count) : (partition_entry_i += 1) {
+                const partition_entry = @intToPtr(*GPT.Entry, partition_entry_address);
+                defer partition_entry_address += gpt_header.partition_entry_size;
+
+                if (partition_entry.unique_partition_guid0 != 0 or partition_entry.unique_partition_guid1 != 0) {
+                    if (partition_entry_i > max_partition_entry_used) max_partition_entry_used = partition_entry_i;
                 }
             }
 
@@ -262,7 +274,7 @@ pub fn install(image_path: []const u8, force_mbr: bool, partition_number: ?u32) 
             assert(gpt_header.partition_entry_count * @sizeOf(GPT.Entry) == gpt_header.partition_entry_count * gpt_header.partition_entry_size);
             assert(secondary_GPT_header.partition_entry_count * @sizeOf(GPT.Entry) == secondary_GPT_header.partition_entry_count * secondary_GPT_header.partition_entry_size);
 
-            gpt_header.partition_entry_array_CRC32 = crc32(@intToPtr([*]u8, @ptrToInt(partition_entries.ptr))[0..new_partition_entry_count]);
+            gpt_header.partition_entry_array_CRC32 = crc32(@intToPtr([*]u8, partition_entry_base_address)[0 .. new_partition_entry_count * gpt_header.partition_entry_size]);
             gpt_header.partition_entry_count = @intCast(u32, new_partition_entry_count);
             gpt_header.CRC32 = 0;
             gpt_header.CRC32 = crc32(std.mem.asBytes(gpt_header));

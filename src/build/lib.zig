@@ -1,6 +1,5 @@
 const std = @import("../common/std.zig");
 const zig_std = @import("std");
-const builtin = @import("builtin");
 
 comptime {
     if (os == .freestanding) @compileError("This is only meant to be imported in build.zig");
@@ -18,8 +17,8 @@ pub const Target = zig_std.Target;
 pub const Arch = Target.Cpu.Arch;
 pub const CrossTarget = zig_std.zig.CrossTarget;
 
-pub const os = builtin.target.os.tag;
-pub const arch = builtin.target.cpu.arch;
+pub const os = @import("builtin").target.os.tag;
+pub const arch = @import("builtin").target.cpu.arch;
 
 pub const print = zig_std.debug.print;
 pub const log = std.log;
@@ -85,63 +84,64 @@ pub fn add_qemu_debug_isa_exit(builder: *Builder, list: *std.ArrayListManaged([]
     try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
 }
 
-const DiskInterface = @import("../drivers/disk_interface.zig");
-const DMA = @import("../drivers/dma.zig");
-
 pub const Disk = struct {
     const BufferType = std.ArrayListAligned(u8, 0x1000);
-
-    disk: DiskInterface,
+    //disk: DiskInterface,
     buffer: BufferType,
 
-    fn access(disk: *DiskInterface, buffer: *DMA.Buffer, disk_work: DiskInterface.Work, extra_context: ?*anyopaque) u64 {
-        const build_disk = @fieldParentPtr(Disk, "disk", disk);
+    fn access(disk: *Disk, extra_context: ?*anyopaque) u64 {
+        _ = disk;
         _ = extra_context;
-        const sector_size = disk.sector_size;
-        log.debug("Disk work: {}", .{disk_work});
-        switch (disk_work.operation) {
-            .write => {
-                const work_byte_size = disk_work.sector_count * sector_size;
-                const byte_count = work_byte_size;
-                const write_source_buffer = @intToPtr([*]const u8, buffer.virtual_address)[0..byte_count];
-                const disk_slice_start = disk_work.sector_offset * sector_size;
-                log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
-                std.assert(disk_slice_start == build_disk.buffer.items.len);
-                build_disk.buffer.appendSliceAssumeCapacity(write_source_buffer);
+        @panic("todo disk access");
+        //const build_disk = @fieldParentPtr(Disk, "disk", disk);
+        //_ = extra_context;
+        //const sector_size = disk.sector_size;
+        ////log.debug("Disk work: {}", .{disk_work});
+        //switch (disk_work.operation) {
+        //.write => {
+        //const work_byte_size = disk_work.sector_count * sector_size;
+        //const byte_count = work_byte_size;
+        //const write_source_buffer = @intToPtr([*]const u8, buffer.virtual_address)[0..byte_count];
+        //const disk_slice_start = disk_work.sector_offset * sector_size;
+        //log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
+        //std.assert(disk_slice_start == build_disk.buffer.items.len);
+        //build_disk.buffer.appendSliceAssumeCapacity(write_source_buffer);
 
-                return byte_count;
-            },
-            .read => {
-                const offset = disk_work.sector_offset * sector_size;
-                const bytes = disk_work.sector_count * sector_size;
-                const previous_len = build_disk.buffer.items.len;
+        //return byte_count;
+        //},
+        //.read => {
+        //const offset = disk_work.sector_offset * sector_size;
+        //const bytes = disk_work.sector_count * sector_size;
+        //const previous_len = build_disk.buffer.items.len;
 
-                if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
-                std.copy(u8, @intToPtr([*]u8, buffer.virtual_address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
-                if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
+        //if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
+        //std.copy(u8, @intToPtr([*]u8, buffer.virtual_address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
+        //if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
 
-                return disk_work.sector_count;
-            },
-        }
+        //return disk_work.sector_count;
+        //},
+        //}
     }
 
-    fn get_dma_buffer(disk: *DiskInterface, allocator: CustomAllocator, sector_count: u64) CustomAllocator.Error!DMA.Buffer {
-        const allocation_size = disk.sector_size * sector_count;
-        const alignment = 0x1000;
-        log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });
-        return DMA.Buffer.new(allocator, allocation_size, alignment);
-    }
+    //fn get_dma_buffer(disk: *Disk, allocator: CustomAllocator, sector_count: u64) CustomAllocator.Error!DMA.Buffer {
+    //const allocation_size = disk.sector_size * sector_count;
+    //const alignment = 0x1000;
+    //log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });
+    //return DMA.Buffer.new(allocator, allocation_size, alignment);
+    //}
 
     pub fn new(buffer: BufferType) Disk {
-        return Disk{
-            .disk = DiskInterface{
-                .sector_size = 0x200,
-                .access = access,
-                .get_dma_buffer = get_dma_buffer,
-                .type = .memory,
-            },
-            .buffer = buffer,
-        };
+        _ = buffer;
+        @panic("todo disk dma buffer");
+        //return Disk{
+        //.disk = DiskInterface{
+        //.sector_size = 0x200,
+        //.access = access,
+        //.get_dma_buffer = get_dma_buffer,
+        //.type = .memory,
+        //},
+        //.buffer = buffer,
+        //};
     }
 };
 
@@ -193,5 +193,30 @@ pub const UserProgram = struct {
         zig_exe.name = zig_exe.dependency.get_program_name();
 
         return zig_exe;
+    }
+};
+
+pub const Filesystem = struct {
+    pub fn new(disk: *Disk) Filesystem {
+        _ = disk;
+        @panic("todo filesystem new");
+        // TODO: copy signature
+        //const rnufs_signature = Build.Filesystem.get_signature();
+        //build_disk.buffer.items.len = Build.Filesystem.get_superblock_size();
+
+        //for (rnufs_signature) |signature_byte, byte_i| {
+        //const dst_byte = &build_disk.buffer.items[byte_i];
+        //dst_byte.* = signature_byte;
+        //}
+    }
+
+    pub fn get_signature() []const u8 {
+        @panic("todo get signature");
+    }
+
+    pub fn write_file(filesystem: *Filesystem, file_content: []const u8) void {
+        _ = filesystem;
+        _ = file_content;
+        @panic("todo write_file");
     }
 };

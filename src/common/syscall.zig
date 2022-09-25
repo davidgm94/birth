@@ -1,5 +1,4 @@
 const std = @import("std.zig");
-const Framebuffer = @import("framebuffer.zig");
 comptime {
     if (@import("builtin").os.tag != .freestanding) @compileError("This file should not be imported in build.zig");
 }

@@ -1,7 +1,6 @@
 const std = @import("../common/std.zig");
 
 const common = @import("../common/syscall.zig");
-const Framebuffer = @import("../common/framebuffer.zig");
 
 const ExecutionMode = common.ExecutionMode;
 const HardwareID = common.HardwareID;

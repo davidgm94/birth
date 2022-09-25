@@ -1,9 +1,9 @@
 const std = @import("src/common/std.zig");
 const Build = @import("src/build/lib.zig");
-const drivers = @import("src/drivers/common.zig");
-const DiskDriverType = drivers.DiskDriverType;
-const FilesystemDriverType = drivers.FilesystemDriverType;
-const WriteOnlyRNUFS = @import("src/drivers/rnufs/write_only.zig");
+//const WriteOnlyRNUFS = @import("src/drivers/rnufs/write_only.zig");
+const RNU = @import("src/common/rnu.zig");
+const DiskDriverType = RNU.DiskDriverType;
+const FilesystemDriverType = RNU.FilesystemDriverType;
 
 const Arch = Build.Arch;
 
@@ -484,18 +484,15 @@ const Kernel = struct {
                 };
                 build_disk_buffer.items.len = 0;
                 var build_disk = Build.Disk.new(build_disk_buffer);
-                var build_fs = WriteOnlyRNUFS.new(&build_disk.disk);
-                const rnufs_signature = WriteOnlyRNUFS.get_signature();
-                build_disk.buffer.items.len = WriteOnlyRNUFS.get_superblock_size();
+                var build_fs = Build.Filesystem.new(&build_disk);
 
-                for (rnufs_signature) |signature_byte, byte_i| {
-                    const dst_byte = &build_disk.buffer.items[byte_i];
-                    dst_byte.* = signature_byte;
-                }
+                std.assert(resource_files.len > 0);
 
                 for (resource_files) |resource_file| {
                     const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
-                    build_fs.fs.write_file(Build.get_allocator(kernel.builder), resource_file, file, null) catch unreachable;
+                    build_fs.write_file(file);
+                    // TODO:
+                    //build_fs.write_file(Build.get_allocator(kernel.builder), resource_file, file, null) catch unreachable;
                 }
 
                 std.assert(kernel.userspace_programs.len > 0);
@@ -506,12 +503,14 @@ const Kernel = struct {
                     const exe_path = program.output_path_source.getPath();
                     std.log.debug("Exe path: {s}", .{exe_path});
                     const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.max_int(usize));
-                    build_fs.fs.write_file(Build.get_allocator(kernel.builder), exe_name, exe_file_content, null) catch unreachable;
+                    build_fs.write_file(exe_file_content);
+                    // TODO:
+                    //build_fs.write_file(Build.get_allocator(kernel.builder), exe_name, exe_file_content, null) catch unreachable;
                 }
 
-                const disk_size = build_disk.buffer.items.len;
-                const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
-                Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
+                //const disk_size = build_disk.buffer.items.len;
+                //const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
+                //Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
                 try Build.cwd().writeFile(kernel.builder.fmt("{s}/disk{}.bin", .{ cache_dir, disk_i }), build_disk.buffer.items);
             }
