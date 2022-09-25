@@ -99,6 +99,34 @@ const Kernel = struct {
             else => unreachable,
         }
 
+        var rnu_package = Build.Package{
+            .name = "RNU",
+            .source = Build.FileSource.relative("src/kernel/rnu.zig"),
+        };
+
+        var kernel_package = Build.Package{
+            .name = "kernel",
+            .source = Build.FileSource.relative("src/kernel.zig"),
+            .dependencies = &.{rnu_package},
+        };
+
+        var x86_64_package = Build.Package{
+            .name = "x86_64",
+            .source = Build.FileSource.relative("src/kernel/arch/x86_64.zig"),
+            .dependencies = &.{kernel_package},
+        };
+
+        var arch_package = Build.Package{
+            .name = "arch",
+            .source = Build.FileSource.relative("src/kernel/rnu.zig"),
+            .dependencies = &.{x86_64_package},
+        };
+
+        kernel.executable.addPackage(kernel_package);
+        kernel.executable.addPackage(rnu_package);
+        kernel.executable.addPackage(x86_64_package);
+        kernel.executable.addPackage(arch_package);
+
         kernel.executable.setMainPkgPath("src");
         kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());

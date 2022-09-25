@@ -1,7 +1,8 @@
 const std = @import("../../../../../common/std.zig");
 
-const kernel = @import("../../kernel.zig");
-const RNU = @import("../../rnu.zig");
+const kernel = @import("kernel");
+const RNU = @import("RNU");
+const VirtualAddress = RNU.VirtualAddress;
 
 const x86_64 = @import("../x86_64.zig");
 const CPU = x86_64.CPU;

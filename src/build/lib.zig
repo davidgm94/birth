@@ -6,11 +6,12 @@ comptime {
 }
 
 pub const Builder = zig_std.build.Builder;
-pub const LibExeObjStep = zig_std.build.LibExeObjStep;
-pub const Step = zig_std.build.Step;
-pub const RunStep = zig_std.build.RunStep;
 pub const FileSource = zig_std.build.FileSource;
+pub const LibExeObjStep = zig_std.build.LibExeObjStep;
 pub const OptionsStep = zig_std.build.OptionsStep;
+pub const Package = zig_std.build.Pkg;
+pub const RunStep = zig_std.build.RunStep;
+pub const Step = zig_std.build.Step;
 pub const WriteFileStep = zig_std.build.WriteFileStep;
 
 pub const Target = zig_std.Target;
