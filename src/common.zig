@@ -233,9 +233,11 @@ pub const CustomAllocator = struct {
     pub const Error = error{OutOfMemory};
 };
 
-pub const DrawingAreaDescriptor = struct {
-    width: u32,
-    height: u32,
+pub const DrawingArea = struct {
+    bytes: [*]u8 = undefined,
+    width: u32 = 0,
+    height: u32 = 0,
+    stride: u32 = 0,
 };
 
 pub const Disk = @import("common/disk.zig");

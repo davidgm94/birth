@@ -45,10 +45,12 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
         .graphics = Graphics{
             .type = .limine,
             .framebuffer = Graphics.Framebuffer{
-                .bytes = @intToPtr([*]u8, framebuffer.address),
-                .width = framebuffer.width,
-                .height = framebuffer.height,
-                .stride = framebuffer.bpp * framebuffer.width,
+                .area = .{
+                    .bytes = @intToPtr([*]u8, framebuffer.address),
+                    .width = @intCast(u32, framebuffer.width),
+                    .height = @intCast(u32, framebuffer.height),
+                    .stride = @intCast(u32, framebuffer.bpp * framebuffer.width),
+                },
             },
             .callback_update_screen = update_screen,
         },

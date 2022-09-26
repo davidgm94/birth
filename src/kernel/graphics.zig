@@ -1,6 +1,7 @@
 const Driver = @This();
 
 const common = @import("common");
+const DrawingArea = common.DrawingArea;
 const zeroes = common.zeroes;
 
 const kernel = @import("kernel");
@@ -29,6 +30,11 @@ fn register(driver: *Driver) !void {
     @panic("todo");
 }
 
+pub const Point = struct {
+    x: u32,
+    y: u32,
+};
+
 pub const Rectangle = struct {
     left: u64,
     right: u64,
@@ -36,7 +42,7 @@ pub const Rectangle = struct {
     bottom: u64,
 
     pub const ClipResult = struct {
-        rectangle: ClipResult,
+        rectangle: Rectangle,
         result: bool,
     };
 
@@ -138,11 +144,6 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 ////cursor: Point,
 ////};
 
-//pub const Point = struct {
-//x: u32,
-//y: u32,
-//};
-
 //pub const Color = struct {
 //red: u8,
 //green: u8,
@@ -177,13 +178,10 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 //};
 //
 pub const Framebuffer = struct {
-    bytes: [*]u8 = undefined,
-    width: u64 = 0,
-    height: u64 = 0,
-    stride: u64 = 0,
+    area: DrawingArea = .{},
 
     pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
-        return @as(u32, framebuffer.width) * framebuffer.height;
+        return framebuffer.area.width * framebuffer.area.height;
     }
 
     pub fn copy(framebuffer: *Framebuffer, source: *Framebuffer, destination_point: Point, source_region: Rectangle, add_to_modified_region: bool) void {
@@ -195,9 +193,4 @@ pub const Framebuffer = struct {
 
         @panic("todo copy");
     }
-
-    pub const Point = struct {
-        x: u64,
-        y: u64,
-    };
 };

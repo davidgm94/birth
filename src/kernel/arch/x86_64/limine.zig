@@ -244,12 +244,12 @@ pub export fn kernel_entry_point() noreturn {
         const mapped_address = kernel.virtual_address_space.translate_address(framebuffer_virtual_address) orelse unreachable;
         assert(mapped_address.value == framebuffer_physical_address.value);
 
-        kernel.bootloader_framebuffer = .{
+        kernel.bootloader_framebuffer = .{ .area = .{
             .bytes = @intToPtr([*]u8, framebuffer.address),
-            .width = framebuffer.width,
-            .height = framebuffer.height,
-            .stride = framebuffer.bpp * framebuffer.width,
-        };
+            .width = @intCast(u32, framebuffer.width),
+            .height = @intCast(u32, framebuffer.height),
+            .stride = @intCast(u32, framebuffer.bpp * framebuffer.width),
+        } };
 
         logger.debug("Processed framebuffer", .{});
     }
