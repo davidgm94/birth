@@ -30,6 +30,7 @@ pub const waitpid = zig_std.os.waitpid;
 
 const Allocator = std.Allocator;
 const CustomAllocator = std.CustomAllocator;
+const RNUFS = std.RNUFS;
 
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
@@ -88,13 +89,20 @@ pub fn add_qemu_debug_isa_exit(builder: *Builder, list: *std.ArrayListManaged([]
 }
 
 pub const Disk = struct {
-    const BufferType = std.ArrayListAligned(u8, 0x1000);
-    //disk: DiskInterface,
+    type: std.Disk.Type = .memory,
     buffer: BufferType,
+    sector_size: u64 = 0x200,
 
-    fn access(disk: *Disk, extra_context: ?*anyopaque) u64 {
+    const BufferType = std.ArrayListAligned(u8, 0x1000);
+
+    pub fn access(disk: *Disk, buffer: []u8, work: std.Disk.Work, extra_context: ?*anyopaque) u64 {
+        switch (work.operation) {
+            .read => unreachable,
+            .write => unreachable,
+        }
         _ = disk;
         _ = extra_context;
+        _ = buffer;
         @panic("todo disk access");
         //const build_disk = @fieldParentPtr(Disk, "disk", disk);
         //_ = extra_context;
@@ -125,13 +133,6 @@ pub const Disk = struct {
         //},
         //}
     }
-
-    //fn get_dma_buffer(disk: *Disk, allocator: CustomAllocator, sector_count: u64) CustomAllocator.Error!DMA.Buffer {
-    //const allocation_size = disk.sector_size * sector_count;
-    //const alignment = 0x1000;
-    //log.debug("DMA buffer allocation size: {}, alignment: {}", .{ allocation_size, alignment });
-    //return DMA.Buffer.new(allocator, allocation_size, alignment);
-    //}
 
     pub fn new(allocator: CustomAllocator, capacity: u64) Disk {
         return Disk{
@@ -192,26 +193,17 @@ pub const UserProgram = struct {
 };
 
 pub const Filesystem = struct {
+    disk: *Disk,
+
     pub fn new(disk: *Disk) Filesystem {
-        _ = disk;
-        @panic("todo filesystem new");
-        // TODO: copy signature
-        //const rnufs_signature = Build.Filesystem.get_signature();
-        //build_disk.buffer.items.len = Build.Filesystem.get_superblock_size();
-
-        //for (rnufs_signature) |signature_byte, byte_i| {
-        //const dst_byte = &build_disk.buffer.items[byte_i];
-        //dst_byte.* = signature_byte;
-        //}
+        disk.buffer.appendSliceAssumeCapacity(&RNUFS.default_signature);
+        disk.buffer.items.len = @sizeOf(RNUFS.Superblock);
+        return Filesystem{
+            .disk = disk,
+        };
     }
 
-    pub fn get_signature() []const u8 {
-        @panic("todo get signature");
-    }
-
-    pub fn write_file(filesystem: *Filesystem, file_content: []const u8) void {
-        _ = filesystem;
-        _ = file_content;
-        @panic("todo write_file");
+    pub fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
+        try RNUFS.write_file(filesystem, allocator, filename, file_content, null);
     }
 };

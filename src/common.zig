@@ -233,24 +233,13 @@ pub const CustomAllocator = struct {
     pub const Error = error{OutOfMemory};
 };
 
-pub const DiskDriverType = enum(u32) {
-    virtio = 0,
-    nvme = 1,
-    ahci = 2,
-    ide = 3,
-    memory = 4,
-};
-
-pub const FilesystemDriverType = enum(u32) {
-    RNU = 0,
-    ext2 = 1,
-};
-
 pub const DrawingAreaDescriptor = struct {
     width: u32,
     height: u32,
 };
 
+pub const Disk = @import("common/disk.zig");
+pub const Filesystem = @import("common/filesystem.zig");
 pub const List = @import("common/list.zig");
 pub const QEMU = @import("common/qemu.zig");
 pub const RNUFS = @import("common/rnufs.zig");

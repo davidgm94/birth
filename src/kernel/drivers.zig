@@ -2,6 +2,8 @@ const common = @import("common");
 const Allocator = common.CustomAllocator;
 
 // This is only a definition file. Imports are forbidden
+//
+// TODO: rewrite for a simple slice?
 
 pub const DMA = struct {
     pub const Buffer = struct {

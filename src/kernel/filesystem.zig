@@ -2,16 +2,24 @@ const Driver = @This();
 
 const common = @import("common");
 const Allocator = common.CustomAllocator;
-pub const Type = common.FilesystemDriverType;
+pub const Type = common.Filesystem.Type;
+pub const WriteError = common.Filesystem.WriteError;
+pub const ReadError = common.Filesystem.ReadError;
 
 const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
 const Disk = RNU.Disk;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
 type: Type,
 disk: *Disk,
 /// At the moment, the memory returned by the filesystem driver is constant
 callback_read_file: *const ReadFile,
 callback_write_file: *const WriteFile,
+
+pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, filesystem: *Driver) !void {
+    try device_manager.register(Driver, virtual_address_space.heap.allocator.get_allocator(), filesystem);
+}
 
 pub fn read_file(driver: *Driver, allocator: Allocator, filename: []const u8, extra_context: ?*anyopaque) ReadError![]const u8 {
     return try driver.callback_read_file(driver, allocator, filename, extra_context);
@@ -46,14 +54,4 @@ pub fn new(parameters: InitializationParameters) Driver {
 
 pub const InitializationError = error{
     allocation_failure,
-};
-
-pub const ReadError = error{
-    unsupported,
-    failed,
-};
-
-pub const WriteError = error{
-    unsupported,
-    failed,
 };

@@ -40,7 +40,7 @@ timestamp_ticks_per_ms: u64 = 0,
 ready: bool,
 
 pub fn early_bsp_bootstrap() void {
-    x86_64.max_physical_address_bit = CPUID.get_max_physical_address_bit();
+    arch.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
     kernel.bootstrap_context.cpu.id = 0;
     TLS.preset_bsp(&kernel.scheduler, &kernel.bootstrap_context.thread, &kernel.bootstrap_context.cpu);

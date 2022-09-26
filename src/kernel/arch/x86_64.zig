@@ -27,4 +27,3 @@ pub const page_size = valid_page_sizes[0];
 pub const page_shifter = @ctz(@as(u32, page_size));
 
 pub var rsdp_physical_address = PhysicalAddress.temporary_invalid();
-pub var max_physical_address_bit: u6 = 0;

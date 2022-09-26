@@ -1,9 +1,5 @@
 const common = @import("src/common.zig");
 const Build = @import("src/build/lib.zig");
-//const WriteOnlyRNUFS = @import("src/drivers/rnufs/write_only.zig");
-const DiskDriverType = common.DiskDriverType;
-const FilesystemDriverType = common.FilesystemDriverType;
-
 const Arch = Build.Arch;
 
 const cache_dir = "zig-cache";
@@ -519,36 +515,32 @@ const Kernel = struct {
 
             // TODO:
             for (kernel.options.run.disks) |_, disk_i| {
-                var build_disk = Build.Disk.new(Build.zero_allocator, 1024 * 1024 * 1024);
-                var build_fs = Build.Filesystem.new(&build_disk);
+                var disk = Build.Disk.new(Build.zero_allocator, 1024 * 1024 * 1024);
+                var filesystem = Build.Filesystem.new(&disk);
 
                 common.assert(resource_files.len > 0);
 
-                for (resource_files) |resource_file| {
-                    const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
-                    build_fs.write_file(file);
-                    // TODO:
-                    //build_fs.write_file(Build.get_allocator(kernel.builder), resource_file, file, null) catch unreachable;
+                for (resource_files) |filename| {
+                    const file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
+                    filesystem.write_file(Build.get_allocator(kernel.builder), filename, file_content) catch unreachable;
                 }
 
                 common.assert(kernel.userspace_programs.len > 0);
 
                 for (kernel.userspace_programs) |program| {
-                    const exe_name = program.out_filename;
-                    common.log.debug("Exe name: {s}", .{exe_name});
-                    const exe_path = program.output_path_source.getPath();
-                    common.log.debug("Exe path: {s}", .{exe_path});
-                    const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, common.max_int(usize));
-                    build_fs.write_file(exe_file_content);
-                    // TODO:
-                    //build_fs.write_file(Build.get_allocator(kernel.builder), exe_name, exe_file_content, null) catch unreachable;
+                    const filename = program.out_filename;
+                    common.log.debug("Exe name: {s}", .{filename});
+                    const file_path = program.output_path_source.getPath();
+                    common.log.debug("Exe path: {s}", .{file_path});
+                    const file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, file_path, common.max_int(usize));
+                    filesystem.write_file(Build.get_allocator(kernel.builder), filename, file_content) catch unreachable;
                 }
 
                 //const disk_size = build_disk.buffer.items.len;
                 //const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
                 //Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
-                try Build.cwd().writeFile(kernel.builder.fmt("{s}/disk{}.bin", .{ cache_dir, disk_i }), build_disk.buffer.items);
+                try Build.cwd().writeFile(kernel.builder.fmt("{s}/disk{}.bin", .{ cache_dir, disk_i }), filesystem.disk.buffer.items);
             }
         }
 
@@ -690,8 +682,8 @@ const Kernel = struct {
             };
 
             const DiskOptions = struct {
-                interface: DiskDriverType,
-                filesystem: FilesystemDriverType,
+                interface: common.Disk.Type,
+                filesystem: common.Filesystem.Type,
             };
 
             const LogOptions = struct {

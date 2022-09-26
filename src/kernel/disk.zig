@@ -4,7 +4,9 @@ const common = @import("common");
 const assert = common.assert;
 const Allocator = common.CustomAllocator;
 const log = common.log.scoped(.Disk);
-pub const Type = common.DiskDriverType;
+pub const Type = common.Disk.Type;
+pub const Work = common.Disk.Work;
+pub const Operation = common.Disk.Operation;
 
 const RNU = @import("RNU");
 const DeviceManager = RNU.DeviceManager;
@@ -38,21 +40,3 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         Filesystem.init(device_manager, virtual_address_space, disk) catch |err| log.err("Failed to initialized filesystem {}: {}", .{ Filesystem, err });
     }
 }
-
-pub const Work = struct {
-    sector_offset: u64,
-    sector_count: u64,
-    operation: Operation,
-};
-
-pub const Operation = enum(u1) {
-    read = 0,
-    write = 1,
-
-    // This is used by NVMe and AHCI
-    comptime {
-        assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-        assert(@enumToInt(Operation.read) == 0);
-        assert(@enumToInt(Operation.write) == 1);
-    }
-};

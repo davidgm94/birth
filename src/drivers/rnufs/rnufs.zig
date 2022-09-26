@@ -46,7 +46,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         .type = .RNU,
         .disk = disk,
         .callback_read_file = read_file,
-        .callback_write_file = unreachable,
+        .callback_write_file = write_file,
     };
 
     try Filesystem.init(device_manager, virtual_address_space, &rnufs.fs);
@@ -130,6 +130,16 @@ pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, name: []const u8,
     } else {
         @panic("unable to find file");
     }
+}
+
+pub fn write_file(filesystem: *Filesystem, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) Filesystem.WriteError!void {
+    _ = filesystem;
+    _ = allocator;
+    _ = filename;
+    _ = file_content;
+    _ = extra_context;
+
+    @panic("todo write file");
 }
 
 pub const SeekResult = struct {
