@@ -13,6 +13,17 @@ const kernel_path = cache_dir ++ "/" ++ kernel_name;
 const user_programs = .{@import("src/user/programs/minimal/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
+const common_package = Build.Package{
+    .name = "common",
+    .source = Build.FileSource.relative("src/common.zig"),
+    .dependencies = &.{common_package_dummy},
+};
+
+const common_package_dummy = Build.Package{
+    .name = "common",
+    .source = Build.FileSource.relative("src/common.zig"),
+};
+
 pub fn build(b: *Build.Builder) void {
     const kernel = b.allocator.create(Kernel) catch unreachable;
     kernel.* = Kernel{
@@ -97,11 +108,6 @@ const Kernel = struct {
             else => unreachable,
         }
 
-        var common_package = Build.Package{
-            .name = "common",
-            .source = Build.FileSource.relative("src/common.zig"),
-        };
-
         var bootloader_package = Build.Package{
             .name = "bootloader",
             .source = Build.FileSource.relative("src/bootloader.zig"),
@@ -122,7 +128,6 @@ const Kernel = struct {
             .source = Build.FileSource.relative("src/kernel.zig"),
         };
 
-        common_package.dependencies = &.{common_package};
         arch_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package, bootloader_package };
         rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
         kernel_package.dependencies = &.{ common_package, rnu_package, arch_package };
@@ -189,6 +194,14 @@ const Kernel = struct {
             //program.setBuildMode(.ReleaseSafe);
             program.setLinkerScriptPath(Build.FileSource.relative(linker_script_path));
             program.entry_symbol_name = "user_entry_point";
+
+            const user_package = Build.Package{
+                .name = "user",
+                .source = Build.FileSource.relative("src/user.zig"),
+                .dependencies = &.{common_package},
+            };
+            program.addPackage(common_package);
+            program.addPackage(user_package);
 
             kernel.builder.default_step.dependOn(&program.step);
 

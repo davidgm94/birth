@@ -1,47 +1,47 @@
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const Syscall = common.Syscall;
 
-const common = @import("../common/syscall.zig");
+const ExecutionMode = Syscall.ExecutionMode;
+const HardwareID = Syscall.HardwareID;
+const Input = Syscall.Input;
+const QueueDescriptor = Syscall.QueueDescriptor;
+const RawResult = Syscall.RawResult;
+const ServiceID = Syscall.ServiceID;
+const Submission = Syscall.Submission;
+const SyscallParameters = Syscall.SyscallParameters;
+const SyscallReturnType = Syscall.SyscallReturnType;
 
-const ExecutionMode = common.ExecutionMode;
-const HardwareID = common.HardwareID;
-const Input = common.Input;
-const QueueDescriptor = common.QueueDescriptor;
-const RawResult = common.RawResult;
-const ServiceID = common.ServiceID;
-const Submission = common.Submission;
-const SyscallParameters = common.SyscallParameters;
-const SyscallReturnType = common.SyscallReturnType;
-
-const LogParameters = common.LogParameters;
+const LogParameters = Syscall.LogParameters;
 /// @Syscall
 pub fn log(parameters: LogParameters) Submission {
     return new_submission(.log, @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0);
 }
 
-const ReadFileParameters = common.ReadFileParameters;
+const ReadFileParameters = Syscall.ReadFileParameters;
 /// @Syscall
 pub fn read_file(parameters: ReadFileParameters) Submission {
     const file_name_address = @ptrToInt(parameters.name.ptr);
     const file_name_length = parameters.name.len;
-    std.assert(file_name_address != 0);
-    std.assert(file_name_length != 0);
+    assert(file_name_address != 0);
+    assert(file_name_length != 0);
     return new_submission(.read_file, file_name_address, file_name_length, 0, 0, 0);
 }
 
-const AllocateMemoryParameters = common.AllocateMemoryParameters;
+const AllocateMemoryParameters = Syscall.AllocateMemoryParameters;
 /// @Syscall
 pub fn allocate_memory(parameters: AllocateMemoryParameters) Submission {
     return new_submission(.allocate_memory, parameters.size, parameters.alignment, 0, 0, 0);
 }
 
-const GetFramebufferParameters = common.GetFramebufferParameters;
+const GetFramebufferParameters = Syscall.GetFramebufferParameters;
 /// @Syscall
 pub fn get_framebuffer(parameters: GetFramebufferParameters) Submission {
     _ = parameters;
     return new_submission(.get_framebuffer, 0, 0, 0, 0, 0);
 }
 
-const ThreadExitParameters = common.ThreadExitParameters;
+const ThreadExitParameters = Syscall.ThreadExitParameters;
 /// @Syscall
 pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
     var message_ptr: ?[*]const u8 = undefined;
@@ -116,7 +116,7 @@ pub const Manager = struct {
                             return @intToPtr([*]u8, ptr)[0..size];
                         },
                         .get_framebuffer => {
-                            const framebuffer = @intToPtr(*Framebuffer, result.a);
+                            const framebuffer = @intToPtr(*common.DrawingAreaDescriptor, result.a);
                             return framebuffer;
                         },
                         else => @panic("User syscall not implemented: " ++ @tagName(id)),
@@ -147,7 +147,7 @@ pub const Manager = struct {
     pub fn flush(manager: *Manager) void {
         const submission_queue_head = manager.submission_queue.head;
         _ = hardware_syscall(.flush_syscall_manager);
-        std.assert(manager.completion_queue.head == submission_queue_head);
+        assert(manager.completion_queue.head == submission_queue_head);
     }
 };
 
