@@ -1,13 +1,31 @@
-const std = @import("../../../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const logger = common.log.scoped(.Limine);
+
+const bootloader = @import("bootloader");
+const Limine = bootloader.Limine;
 
 const kernel = @import("kernel");
+
 const RNU = @import("RNU");
+const Heap = RNU.Heap;
+const PhysicalAddress = RNU.PhysicalAddress;
+const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
+const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
+const Scheduler = RNU.Scheduler;
+const Spinlock = RNU.Spinlock;
+const Thread = RNU.Thread;
 const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const VirtualMemoryRegion = RNU.VirtualMemoryRegion;
 
-const x86_64 = @import("../x86_64.zig");
-const CPU = x86_64.CPU;
+const arch = @import("arch");
+const Context = arch.Context;
+const CPU = arch.CPU;
+const TLS = arch.TLS;
+const VAS = arch.VAS;
 
-const logger = std.log.scoped(.Limine);
+const x86_64 = arch.x86_64;
 
 pub export fn kernel_entry_point() noreturn {
     CPU.early_bsp_bootstrap();
@@ -21,12 +39,14 @@ pub export fn kernel_entry_point() noreturn {
     };
     logger.debug("HHDM: {}", .{kernel.higher_half_direct_map});
 
-    x86_64.rsdp_physical_address = blk: {
-        const response = bootloader_rsdp.response orelse @panic("RSDP response not present");
-        if (response.address == 0) @panic("RSDP address is null");
-        break :blk response.address - kernel.higher_half_direct_map.value;
-    };
-    logger.debug("RSDP: 0x{x}", .{x86_64.rsdp_physical_address});
+    switch (common.cpu.arch) {
+        .x86_64 => {
+            const response = bootloader_rsdp.response orelse @panic("RSDP response not present");
+            if (response.address == 0) @panic("RSDP address is null");
+            x86_64.rsdp_physical_address = PhysicalAddress.new(response.address - kernel.higher_half_direct_map.value);
+        },
+        else => {},
+    }
 
     const memory_map_response = bootloader_memory_map.response orelse @panic("Memory map response not present");
     const memory_map_entry_count = memory_map_response.entry_count;
@@ -90,11 +110,11 @@ pub export fn kernel_entry_point() noreturn {
         };
 
         VAS.init_kernel(&kernel.virtual_address_space, &kernel.physical_address_space);
-        std.log.scoped(.CR3).debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
+        logger.debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
 
         // Map the kernel and do some tests
         {
-            std.log.scoped(.MyMap).debug("Starting mapping kernel executable", .{});
+            logger.debug("Starting mapping kernel executable", .{});
 
             logger.debug("Kernel address. PA: 0x{x}. VA: 0x{x}", .{ kernel_address_response.physical_address, kernel_address_response.virtual_address });
             const kernel_base_physical_address = PhysicalAddress.new(kernel_address_response.physical_address);
@@ -183,7 +203,7 @@ pub export fn kernel_entry_point() noreturn {
 
                         //kernel.virtual_address_space.add_used_region(region) catch unreachable;
                     },
-                    else => crash.panic("ni: {}", .{entry.type}),
+                    else => RNU.panic("ni: {}", .{entry.type}),
                 }
             }
         }
@@ -202,11 +222,11 @@ pub export fn kernel_entry_point() noreturn {
         const framebuffers = framebuffer_ptr[0..response.framebuffer_count];
         const framebuffer = framebuffers[0];
 
-        std.assert(framebuffers.len == 1);
-        std.assert(framebuffer.pitch % framebuffer.width == 0);
-        std.assert(framebuffer.bpp % @bitSizeOf(u8) == 0);
+        assert(framebuffers.len == 1);
+        assert(framebuffer.pitch % framebuffer.width == 0);
+        assert(framebuffer.bpp % @bitSizeOf(u8) == 0);
         const bytes_per_pixel = @intCast(u8, framebuffer.bpp / @bitSizeOf(u8));
-        std.assert(framebuffer.pitch / framebuffer.width == bytes_per_pixel);
+        assert(framebuffer.pitch / framebuffer.width == bytes_per_pixel);
 
         // For now ignore virtual address since we are using our own mapping
         // TODO: make sure there is just an entry here
@@ -222,9 +242,15 @@ pub export fn kernel_entry_point() noreturn {
 
         const framebuffer_virtual_address = framebuffer_physical_address.to_higher_half_virtual_address();
         const mapped_address = kernel.virtual_address_space.translate_address(framebuffer_virtual_address) orelse unreachable;
-        std.assert(mapped_address.value == framebuffer_physical_address.value);
+        assert(mapped_address.value == framebuffer_physical_address.value);
 
-        kernel.bootloader_framebuffer = bootloader.get_framebuffer(framebuffer);
+        kernel.bootloader_framebuffer = .{
+            .bytes = @intToPtr([*]u8, framebuffer.address),
+            .width = framebuffer.width,
+            .height = framebuffer.height,
+            .stride = framebuffer.bpp * framebuffer.width,
+        };
+
         logger.debug("Processed framebuffer", .{});
     }
 
@@ -242,7 +268,7 @@ pub export fn kernel_entry_point() noreturn {
         for (cpus) |cpu| {
             logger.debug("CPU {}", .{cpu});
         }
-        std.assert(cpus[0].lapic_id == response.bsp_lapic_id);
+        assert(cpus[0].lapic_id == response.bsp_lapic_id);
         // @Allocation
         kernel.bootstrap_context.cpu.idle_thread = &foo;
         kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
@@ -305,7 +331,7 @@ pub export fn kernel_entry_point() noreturn {
     cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
 
     _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
-        .address = @ptrToInt(&main),
+        .address = @ptrToInt(&kernel.main),
     });
 
     logger.debug("Congrats! Reached to the end", .{});
@@ -396,29 +422,32 @@ fn map_section(comptime section_name: []const u8, kernel_base_physical_address: 
 }
 
 /// Define root.log_level to override the default
-pub const log_level: std.log.Level = switch (std.build_mode) {
+pub const log_level: common.log.Level = switch (common.build_mode) {
     .Debug => .debug,
     .ReleaseSafe => .debug,
     .ReleaseFast, .ReleaseSmall => .debug,
 };
 
-pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    default_logger.lock.acquire();
-    defer default_logger.lock.release();
+    arch.writer_lock.acquire();
+    defer arch.writer_lock.release();
+
     const current_thread = TLS.get_current();
+
     if (current_thread.cpu) |current_cpu| {
         const processor_id = current_cpu.id;
-        default_logger.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+        arch.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
     } else {
-        default_logger.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
+        arch.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
     }
-    default_logger.writer.writeAll(prefix) catch unreachable;
-    default_logger.writer.print(format, args) catch unreachable;
-    default_logger.writer.writeByte('\n') catch unreachable;
+
+    arch.writer.writeAll(prefix) catch unreachable;
+    arch.writer.print(format, args) catch unreachable;
+    arch.writer.writeByte('\n') catch unreachable;
 }
 
-pub fn panic(message: []const u8, _: ?*std.StackTrace, _: ?usize) noreturn {
-    crash.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
+pub fn panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
+    RNU.panic_extended("{s}", .{message}, @returnAddress(), @frameAddress());
 }

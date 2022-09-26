@@ -1,21 +1,20 @@
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const string_eq = common.string_eq;
+const log = common.log.scoped(.ACPI);
 
-const arch = @import("../kernel/arch/common.zig");
-const DeviceManager = @import("../kernel/device_manager.zig");
-const Drivers = @import("common.zig");
-const crash = @import("../kernel/crash.zig");
-const kernel = @import("../kernel/kernel.zig");
-const PhysicalAddress = @import("../kernel/physical_address.zig");
-const interrupts = @import("../kernel/arch/x86_64/interrupts.zig");
-const VirtualAddress = @import("../kernel/virtual_address.zig");
-const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
-const x86_64 = @import("../kernel/arch/x86_64/common.zig");
+const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
+const panic = RNU.panic;
+const PhysicalAddress = RNU.PhysicalAddress;
+const TODO = RNU.TODO;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
-const Allocator = std.Allocator;
-const log = std.log.scoped(.ACPI);
+const arch = @import("arch");
+const interrupts = arch.interrupts;
 const page_size = arch.page_size;
-const panic = crash.panic;
-const TODO = crash.TODO;
+const x86_64 = arch.x86_64;
 
 const Signature = enum(u32) {
     APIC = @ptrCast(*align(1) const u32, "APIC").*,
@@ -26,7 +25,7 @@ const Signature = enum(u32) {
 };
 
 comptime {
-    std.assert(std.cpu.arch == .x86_64);
+    assert(common.cpu.arch == .x86_64);
 }
 
 inline fn map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, comptime maybe_flags: ?VirtualAddressSpace.Flags) VirtualAddress {
@@ -46,7 +45,7 @@ fn is_in_page_range(a: u64, b: u64) bool {
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     _ = device_manager;
 
-    const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, PhysicalAddress.new(x86_64.rsdp_physical_address), null).access(*align(1) RSDP1);
+    const rsdp1 = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, x86_64.rsdp_physical_address, null).access(*align(1) RSDP1);
 
     if (rsdp1.revision == 0) {
         log.debug("First version", .{});
@@ -96,12 +95,12 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                             .LAPIC => {
                                 const lapic = @intToPtr(*align(1) MADT.LAPIC, offset);
                                 log.debug("LAPIC: {}", .{lapic});
-                                std.assert(@sizeOf(MADT.LAPIC) == entry_length);
+                                assert(@sizeOf(MADT.LAPIC) == entry_length);
                             },
                             .IO_APIC => {
                                 const ioapic = @intToPtr(*align(1) MADT.IO_APIC, offset);
                                 log.debug("IO_APIC: {}", .{ioapic});
-                                std.assert(@sizeOf(MADT.IO_APIC) == entry_length);
+                                assert(@sizeOf(MADT.IO_APIC) == entry_length);
                                 interrupts.ioapic.gsi = ioapic.global_system_interrupt_base;
                                 interrupts.ioapic.address = PhysicalAddress.new(ioapic.IO_APIC_address);
                                 _ = map_a_page_to_higher_half_from_not_aligned_physical_address(virtual_address_space, interrupts.ioapic.address, .{ .write = true, .cache_disable = true });
@@ -110,7 +109,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                             .ISO => {
                                 const iso = @intToPtr(*align(1) MADT.InterruptSourceOverride, offset);
                                 log.debug("ISO: {}", .{iso});
-                                std.assert(@sizeOf(MADT.InterruptSourceOverride) == entry_length);
+                                assert(@sizeOf(MADT.InterruptSourceOverride) == entry_length);
                                 const iso_ptr = &interrupts.iso[iso_i];
                                 iso_i += 1;
                                 iso_ptr.gsi = iso.global_system_interrupt;
@@ -121,7 +120,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
                             .LAPIC_NMI => {
                                 const lapic_nmi = @intToPtr(*align(1) MADT.LAPIC_NMI, offset);
                                 log.debug("LAPIC_NMI: {}", .{lapic_nmi});
-                                std.assert(@sizeOf(MADT.LAPIC_NMI) == entry_length);
+                                assert(@sizeOf(MADT.LAPIC_NMI) == entry_length);
                             },
                             else => panic("ni: {}", .{entry_type}),
                         }
@@ -133,7 +132,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
             }
         }
     } else {
-        std.assert(rsdp1.revision == 2);
+        assert(rsdp1.revision == 2);
         //const rsdp2 = @ptrCast(*RSDP2, rsdp1);
         log.debug("Second version", .{});
         TODO();
@@ -143,11 +142,11 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
 const rsdt_signature = [4]u8{ 'R', 'S', 'D', 'T' };
 pub fn check_valid_sdt(rsdt: *align(1) Header) void {
     log.debug("Header size: {}", .{@sizeOf(Header)});
-    std.assert(@sizeOf(Header) == 36);
+    assert(@sizeOf(Header) == 36);
     if (rsdt.revision != 1) {
         @panic("bad revision");
     }
-    if (!std.string_eq(&rsdt.signature, &rsdt_signature)) {
+    if (!string_eq(&rsdt.signature, &rsdt_signature)) {
         @panic("bad signature");
     }
     if (rsdt.length >= 16384) {
@@ -177,7 +176,7 @@ const RSDP1 = extern struct {
     RSDT_address: u32,
 
     comptime {
-        std.assert(@sizeOf(RSDP1) == 20);
+        assert(@sizeOf(RSDP1) == 20);
     }
 };
 
@@ -200,7 +199,7 @@ const Header = extern struct {
     creator_ID: u32,
     creator_revision: u32,
     comptime {
-        std.assert(@sizeOf(Header) == 36);
+        assert(@sizeOf(Header) == 36);
     }
 };
 
@@ -236,7 +235,7 @@ const MADT = extern struct {
         flags: u32,
 
         comptime {
-            std.assert(@sizeOf(@This()) == @sizeOf(u64));
+            assert(@sizeOf(@This()) == @sizeOf(u64));
         }
     };
 
@@ -249,7 +248,7 @@ const MADT = extern struct {
         global_system_interrupt_base: u32,
 
         comptime {
-            std.assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u32));
+            assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u32));
         }
     };
 
@@ -262,7 +261,7 @@ const MADT = extern struct {
         flags: u16 align(2),
 
         comptime {
-            std.assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u16));
+            assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u16));
         }
     };
 
@@ -274,7 +273,7 @@ const MADT = extern struct {
         LAPIC_lint: u8,
 
         comptime {
-            std.assert(@sizeOf(@This()) == @sizeOf(u32) + @sizeOf(u16));
+            assert(@sizeOf(@This()) == @sizeOf(u32) + @sizeOf(u16));
         }
     };
 };
@@ -290,8 +289,8 @@ const MCFG = packed struct {
     }
 
     comptime {
-        std.assert(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
-        std.assert(@sizeOf(Configuration) == 0x10);
+        assert(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
+        assert(@sizeOf(Configuration) == 0x10);
     }
 
     const Configuration = packed struct {

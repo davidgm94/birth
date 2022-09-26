@@ -1,17 +1,9 @@
 const Driver = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const zeroes = common.zeroes;
 
-const common = @import("../kernel/common.zig");
-const crash = @import("../kernel/crash.zig");
-const Drivers = @import("common.zig");
-const DeviceManager = @import("../kernel/device_manager.zig");
-const kernel = @import("../kernel/kernel.zig");
-const List = @import("../common/list.zig");
-
-const log = std.log.scoped(.graphics);
-const StableBuffer = List.StableBuffer;
-const TODO = crash.TODO;
+const kernel = @import("kernel");
 
 const Type = enum(u64) {
     limine = 0,
@@ -58,7 +50,7 @@ pub const Rectangle = struct {
                     .bottom = if (current.bottom < rectangle.bottom) current.bottom else rectangle.bottom,
                 };
             } else {
-                break :blk std.zeroes(Rectangle);
+                break :blk zeroes(Rectangle);
             }
         };
 
@@ -184,11 +176,11 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 //}
 //};
 //
-const Framebuffer = struct {
-    bytes: [*]u8,
-    width: u64,
-    height: u64,
-    stride: u64,
+pub const Framebuffer = struct {
+    bytes: [*]u8 = undefined,
+    width: u64 = 0,
+    height: u64 = 0,
+    stride: u64 = 0,
 
     pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
         return @as(u32, framebuffer.width) * framebuffer.height;

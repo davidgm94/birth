@@ -1,11 +1,13 @@
 const GDT = @This();
 
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.GDT);
 
-const DescriptorTable = @import("descriptor_table.zig");
-const TLS = @import("tls.zig");
-const TSS = @import("tss.zig");
-const log = std.log.scoped(.GDT);
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const DescriptorTable = x86_64.DescriptorTable;
+const TSS = x86_64.TSS;
 
 pub const Table = packed struct {
     null_entry: Entry = 0, // 0x00
@@ -23,13 +25,13 @@ pub const Table = packed struct {
 
     comptime {
         const entry_count = 10;
-        std.assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
-        std.assert(@offsetOf(Table, "code_64") == 0x28);
-        std.assert(@offsetOf(Table, "data_64") == 0x30);
-        std.assert(@offsetOf(Table, "user_code_32") == 0x38);
-        std.assert(@offsetOf(Table, "user_data") == 0x40);
-        std.assert(@offsetOf(Table, "user_code_64") == 0x48);
-        std.assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
+        assert(@sizeOf(Table) == entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor));
+        assert(@offsetOf(Table, "code_64") == 0x28);
+        assert(@offsetOf(Table, "data_64") == 0x30);
+        assert(@offsetOf(Table, "user_code_32") == 0x38);
+        assert(@offsetOf(Table, "user_data") == 0x40);
+        assert(@offsetOf(Table, "user_code_64") == 0x48);
+        assert(@offsetOf(Table, "tss") == entry_count * @sizeOf(Entry));
     }
 
     pub fn setup(gdt: *Table) void {

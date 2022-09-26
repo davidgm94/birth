@@ -1,16 +1,17 @@
 const PhysicalAddress = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const max_int = common.max_int;
 
-const arch = @import("arch/common.zig");
-const crash = @import("crash.zig");
-const kernel = @import("kernel.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const VirtualAddress = @import("virtual_address.zig");
+const RNU = @import("RNU");
+const panic = RNU.panic;
+const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
+const VirtualAddress = RNU.VirtualAddress;
 
-const TODO = crash.TODO;
-const panic = crash.panic;
-const log = std.log.scoped(.PhysicalAddress);
+const kernel = @import("kernel");
+
+const arch = @import("arch");
 
 value: u64,
 
@@ -37,10 +38,10 @@ pub inline fn maybe_invalid(value: u64) PhysicalAddress {
 }
 
 pub inline fn is_valid(physical_address: PhysicalAddress) bool {
-    std.assert(physical_address.value != 0);
-    std.assert(arch.max_physical_address_bit != 0);
+    assert(physical_address.value != 0);
+    assert(arch.max_physical_address_bit != 0);
     const max = @as(u64, 1) << arch.max_physical_address_bit;
-    std.assert(max > std.max_int(u32));
+    assert(max > max_int(u32));
     //log.debug("Physical address 0x{x} validation in the kernel: {}. Max bit: {}. Maximum physical address: 0x{x}", .{ physical_address.value, is_kernel, cpu_features.physical_address_max_bit, max });
     return physical_address.value <= max;
 }
@@ -73,11 +74,11 @@ pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) 
 //}
 
 pub inline fn aligned_forward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {
-    return PhysicalAddress{ .value = std.align_forward(virtual_address.value, alignment) };
+    return PhysicalAddress{ .value = common.align_forward(virtual_address.value, alignment) };
 }
 
 pub inline fn aligned_backward(virtual_address: PhysicalAddress, alignment: u64) PhysicalAddress {
-    return PhysicalAddress{ .value = std.align_backward(virtual_address.value, alignment) };
+    return PhysicalAddress{ .value = common.align_backward(virtual_address.value, alignment) };
 }
 
 pub inline fn align_forward(virtual_address: *VirtualAddress, alignment: u64) void {
@@ -88,6 +89,6 @@ pub inline fn align_backward(virtual_address: *VirtualAddress, alignment: u64) v
     virtual_address.* = virtual_address.aligned_backward(alignment);
 }
 
-pub fn format(physical_address: PhysicalAddress, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try std.internal_format(writer, "0x{x}", .{physical_address.value});
+pub fn format(physical_address: PhysicalAddress, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try common.internal_format(writer, "0x{x}", .{physical_address.value});
 }

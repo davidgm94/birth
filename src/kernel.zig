@@ -1,23 +1,25 @@
-const std = @import("../common/std.zig");
+const common = @import("common");
+const log = common.log.scoped(.Kernel);
 
-const common = @import("common.zig");
+const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
+const FileInMemory = RNU.FileInMemory;
+const Framebuffer = Graphics.Framebuffer;
+const Graphics = RNU.Graphics;
+const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
+const Scheduler = RNU.Scheduler;
+const Spinlock = RNU.Spinlock;
+const Thread = RNU.Thread;
+const Timer = RNU.Timer;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const VirtualMemoryRegion = RNU.VirtualMemoryRegion;
+const Window = RNU.Window;
 
-const arch = @import("arch/common.zig");
-const DeviceManager = @import("device_manager.zig");
-const FileInMemory = common.FileInMemory;
-const Framebuffer = common.Framebuffer;
-const Scheduler = @import("scheduler.zig");
-const Spinlock = @import("spinlock.zig");
-const Thread = @import("thread.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const PhysicalAddressSpace = @import("physical_address_space.zig");
-const VirtualAddress = @import("virtual_address.zig");
-const VirtualAddressSpace = @import("virtual_address_space.zig");
-const VirtualMemoryRegion = @import("virtual_memory_region.zig");
-const Window = @import("window.zig");
-
-const CPU = arch.CPU;
+const arch = @import("arch");
 const Context = arch.Context;
+const CPU = arch.CPU;
+const TLS = arch.TLS;
 
 pub var scheduler = Scheduler{
     .lock = Spinlock{},
@@ -50,7 +52,7 @@ pub var file = FileInMemory{
 pub var bootloader_framebuffer: Framebuffer = undefined;
 pub var bootstrap_virtual_address_space: *VirtualAddressSpace = undefined;
 var bootstrap_memory: [0x1000 * 30]u8 = undefined;
-pub var bootstrap_allocator = std.FixedBufferAllocator.init(&bootstrap_memory);
+pub var bootstrap_allocator = common.FixedBufferAllocator.init(&bootstrap_memory);
 
 pub var higher_half_direct_map = VirtualAddress.invalid();
 
@@ -69,3 +71,31 @@ pub var window_manager = Window.Manager{};
 pub const config = struct {
     safe_slow: bool = false,
 }{};
+
+const start = @extern(*u8, .{ .name = "kernel_start" });
+const end = @extern(*u8, .{ .name = "kernel_end" });
+
+pub export fn main() callconv(.C) noreturn {
+    var timer = Timer.new();
+    if (scheduler.cpus.len != 1) @panic("WTF");
+    device_manager.init(&virtual_address_space) catch @panic("Failed to initialize drivers");
+    for (scheduler.cpus) |*cpu| {
+        cpu.ready = true;
+    }
+
+    var current_thread = TLS.get_current();
+    log.debug("Current thread before yielding: #{}", .{current_thread.id});
+    const main_storage = device_manager.devices.filesystem.get_main_device();
+    _ = scheduler.load_executable(&virtual_address_space, .user, &physical_address_space, main_storage, "minimal.elf") catch @panic("wtf");
+
+    current_thread = TLS.get_current();
+    log.debug("Current thread just before yielding: #{}", .{current_thread.id});
+
+    const main_cycles = timer.end_and_get_metric();
+    log.info("Main took {} cycles", .{main_cycles});
+    asm volatile ("int $0x40");
+    current_thread = TLS.get_current();
+    log.debug("Current thread after yielding: #{}", .{current_thread.id});
+
+    while (true) {}
+}

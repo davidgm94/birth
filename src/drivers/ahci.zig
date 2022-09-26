@@ -1,25 +1,26 @@
 const Driver = @This();
 
-const std = @import("../common/std.zig");
-const crash = @import("../kernel/crash.zig");
+const common = @import("common");
+const align_forward = common.align_forward;
+const Allocator = common.CustomAllocator;
+const assert = common.assert;
+const log = common.log.scoped(.AHCI);
+const StableBuffer = common.List.StableBuffer;
+const zero = common.zero;
+const zeroes = common.zeroes;
+const zero_slice = common.zero_slice;
 
-const arch = @import("../kernel/arch/common.zig");
-const DeviceManager = @import("../kernel/device_manager.zig");
-const DiskInterface = @import("disk_interface.zig");
-const Drivers = @import("common.zig");
-const List = @import("../common/list.zig");
-const PhysicalAddress = @import("../kernel/physical_address.zig");
-const VirtualAddress = @import("../kernel/virtual_address.zig");
-const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
+const Disk = RNU.Disk;
+const DMA = RNU.Drivers.DMA;
+const PhysicalAddress = RNU.PhysicalAddress;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+
+const arch = @import("arch");
+
 const PCI = @import("pci.zig");
-const Disk = @import("disk.zig");
-const DMA = @import("dma.zig");
-
-const Allocator = std.CustomAllocator;
-const log = std.log.scoped(.AHCI);
-const panic = crash.panic;
-const StableBuffer = List.StableBuffer;
-const TODO = crash.TODO;
 
 pci: PCI.Device,
 abar: *HBAMemory,
@@ -45,7 +46,7 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     driver.probe_ports();
 
     log.debug("Drives found: {}", .{driver.drive_count});
-    std.assert(driver.drive_count == 1);
+    assert(driver.drive_count == 1);
 
     for (driver.drives[0..driver.drive_count]) |*drive| {
         drive.configure(virtual_address_space);
@@ -76,12 +77,10 @@ fn probe_ports(driver: *Driver) void {
                 driver.drive_count += 1;
                 drive.* = Drive{
                     .disk = Disk{
-                        .interface = .{
-                            .sector_size = 0x200, // TODO: stop hardcoding this
-                            .access = Drive.access,
-                            .get_dma_buffer = Drive.get_dma_buffer,
-                            .type = .ahci,
-                        },
+                        .sector_size = 0x200, // TODO: stop hardcoding this
+                        .callback_access = Drive.access,
+                        .callback_get_dma_buffer = Drive.get_dma_buffer,
+                        .type = .ahci,
                     },
                     .hba_port = hba_port,
                     .port_number = i,
@@ -178,9 +177,9 @@ pub const PortType = enum(u3) {
 };
 
 comptime {
-    std.assert(@bitSizeOf(Disk.Operation) == @bitSizeOf(u1));
-    std.assert(@enumToInt(Disk.Operation.read) == 0);
-    std.assert(@enumToInt(Disk.Operation.write) == 1);
+    assert(@bitSizeOf(Disk.Operation) == @bitSizeOf(u1));
+    assert(@enumToInt(Disk.Operation.read) == 0);
+    assert(@enumToInt(Disk.Operation.write) == 1);
 }
 
 pub const Drive = struct {
@@ -202,20 +201,20 @@ pub const Drive = struct {
             // TODO: batch allocations
             const command_list_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("wtf");
             // TODO: what's 1024?
-            std.zero(command_list_alloc_result.virtual_address.access([*]u8)[0..1024]);
+            zero(command_list_alloc_result.virtual_address.access([*]u8)[0..1024]);
             const command_list_base = command_list_alloc_result.physical_address.value;
             drive.hba_port.command_list_base_low = @truncate(u32, command_list_base);
             drive.hba_port.command_list_base_high = @truncate(u32, command_list_base >> 32);
 
             const fis_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
-            std.zero(fis_alloc_result.virtual_address.access([*]u8)[0..256]);
+            zero(fis_alloc_result.virtual_address.access([*]u8)[0..256]);
             const fis_base = fis_alloc_result.physical_address.value;
             drive.hba_port.fis_base_address_low = @truncate(u32, fis_base);
             drive.hba_port.fis_base_address_high = @truncate(u32, fis_base >> 32);
 
             const command_headers = command_list_alloc_result.virtual_address.access([*]volatile HBACommandHeader)[0..32];
             const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
-            std.zero(command_table_address.virtual_address.access([*]u8)[0..arch.page_size]);
+            zero(command_table_address.virtual_address.access([*]u8)[0..arch.page_size]);
             for (command_headers) |*header, i| {
                 header.prdt_length = 8; // TODO: figure out how to get the value
                 const address = command_table_address.physical_address.value + (i << 8);
@@ -266,7 +265,7 @@ pub const Drive = struct {
         reserved1: [4]u8,
 
         comptime {
-            std.assert(@sizeOf(FISRegisterHardwareToDevice) == 5 * @sizeOf(u32));
+            assert(@sizeOf(FISRegisterHardwareToDevice) == 5 * @sizeOf(u32));
         }
     };
 
@@ -279,7 +278,7 @@ pub const Drive = struct {
         interrupt_on_completion: bool,
 
         comptime {
-            std.assert(@sizeOf(HBAPRDTEntry) == @sizeOf(u64) * 2);
+            assert(@sizeOf(HBAPRDTEntry) == @sizeOf(u64) * 2);
         }
     };
 
@@ -293,7 +292,7 @@ pub const Drive = struct {
         }
 
         comptime {
-            std.assert(@sizeOf(HBACommandTable) == @sizeOf(u8) * 128);
+            assert(@sizeOf(HBACommandTable) == @sizeOf(u8) * 128);
         }
     };
 
@@ -310,18 +309,18 @@ pub const Drive = struct {
 
     const hba_pxis_tfes = 1 << 30;
 
-    fn access(disk: *DiskInterface, buffer: *DMA.Buffer, disk_work: Disk.Work, extra_context: ?*anyopaque) u64 {
+    fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Disk.Work, extra_context: ?*anyopaque) u64 {
         const requested_size = disk_work.sector_count * disk.sector_size;
-        std.assert(buffer.completed_size == 0);
-        std.assert(buffer.total_size >= requested_size);
+        assert(buffer.completed_size == 0);
+        assert(buffer.total_size >= requested_size);
         log.debug("Disk work sector offset: {}", .{disk_work.sector_offset});
         const sector_low = @truncate(u32, disk_work.sector_offset);
         const sector_high = @intCast(u16, disk_work.sector_offset >> 32);
-        std.assert(disk_work.sector_count <= std.max_int(u16));
+        assert(disk_work.sector_count <= common.max_int(u16));
         const sector_count = @intCast(u16, disk_work.sector_count);
 
         const drive = @ptrCast(*Drive, disk);
-        drive.hba_port.interrupt_status = std.max_int(u32);
+        drive.hba_port.interrupt_status = common.max_int(u32);
 
         const command_header = PhysicalAddress.new(drive.hba_port.command_list_base_low | (@as(u64, drive.hba_port.command_list_base_high) << 32)).to_higher_half_virtual_address().access(*volatile HBACommandHeader);
         command_header.f.command_fis_length = @sizeOf(FISRegisterHardwareToDevice) / @sizeOf(u32);
@@ -330,9 +329,9 @@ pub const Drive = struct {
         command_header.prdt_length = 1;
 
         const command_table = PhysicalAddress.new(command_header.command_table_base_address_low | (@as(u64, command_header.command_table_base_address_high) << 32)).to_higher_half_virtual_address().access(*volatile HBACommandTable);
-        command_table.* = std.zeroes(HBACommandTable);
+        command_table.* = zeroes(HBACommandTable);
         const entries = command_table.get_entries(command_header.prdt_length);
-        std.zero_slice(HBAPRDTEntry, entries);
+        zero_slice(HBAPRDTEntry, entries);
 
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
         const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.virtual_address)) orelse @panic("wtF");
@@ -345,7 +344,7 @@ pub const Drive = struct {
         entry.byte_count = @intCast(u22, (disk_work.sector_count << 9) - 1);
         entry.interrupt_on_completion = true;
 
-        const command_fis = @ptrCast(*FISRegisterHardwareToDevice, @alignCast(@alignOf(FISRegisterHardwareToDevice), &command_table.command_fis));
+        const command_fis = @ptrCast(*volatile FISRegisterHardwareToDevice, @alignCast(@alignOf(FISRegisterHardwareToDevice), &command_table.command_fis));
         command_fis.f.fis_type = .reg_h2d;
         command_fis.f.command_control = true;
         command_fis.command = .read_dma_ex;
@@ -384,11 +383,11 @@ pub const Drive = struct {
         return disk_work.sector_count;
     }
 
-    fn get_dma_buffer(disk: *DiskInterface, allocator: Allocator, sector_count: u64) std.Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
         const sector_size = disk.sector_size;
         const byte_size = sector_count * sector_size;
-        const size = std.align_forward(byte_size, arch.page_size);
-        const alignment = std.align_forward(sector_size, arch.page_size);
+        const size = align_forward(byte_size, arch.page_size);
+        const alignment = align_forward(sector_size, arch.page_size);
         return DMA.Buffer.new(allocator, size, alignment) catch @panic("unable to initialize buffer");
     }
 
@@ -434,6 +433,6 @@ const HBACommandHeader = extern struct {
     reserved1: [4]u32,
 
     comptime {
-        std.assert(@sizeOf(HBACommandHeader) == 8 * @sizeOf(u32));
+        assert(@sizeOf(HBACommandHeader) == 8 * @sizeOf(u32));
     }
 };

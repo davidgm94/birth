@@ -1,11 +1,12 @@
 const Spinlock = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const log = common.log.scoped(.Spinlock);
+const AtomicRmwOp = common.AtomicRmwOp;
 
-const interrupts = @import("arch/interrupts.zig");
-const TLS = @import("arch/tls.zig");
-const log = std.log.scoped(.Spinlock);
-const AtomicRmwOp = std.AtomicRmwOp;
+const arch = @import("arch");
+const interrupts = arch.interrupts;
+const TLS = arch.TLS;
 
 status: u8 = 0,
 were_interrupts_enabled: u8 = 0,
@@ -19,7 +20,7 @@ pub fn acquire(spinlock: *volatile Spinlock) void {
         current_cpu.spinlock_count += 1;
     }
 
-    while (@cmpxchgStrong(@TypeOf(spinlock.status), @ptrCast(*@TypeOf(spinlock.status), &spinlock.status), expected, ~expected, .Acquire, .Monotonic) != null) {
+    while (@cmpxchgStrong(@TypeOf(spinlock.status), &spinlock.status, expected, ~expected, .Acquire, .Monotonic) != null) {
         asm volatile ("pause" ::: "memory");
     }
 
@@ -50,6 +51,6 @@ pub fn assert_locked(spinlock: *volatile Spinlock) void {
     if (spinlock.status != ~@as(@TypeOf(spinlock.status), 0)) @panic("Spinlock not locked when must be");
 }
 
-pub fn format(spinlock: *const Spinlock, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try std.internal_format(writer, "{s}", .{if (spinlock.status == 0xff) "locked" else if (spinlock.status == 0) "unlocked" else "invalid"});
+pub fn format(spinlock: *const Spinlock, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try common.internal_format(writer, "{s}", .{if (spinlock.status == 0xff) "locked" else if (spinlock.status == 0) "unlocked" else "invalid"});
 }

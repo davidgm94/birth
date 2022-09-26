@@ -1,17 +1,23 @@
 const Heap = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const align_backward = common.align_backward;
+const align_forward = common.align_forward;
+const Allocator = common.CustomAllocator;
+const assert = common.assert;
+const is_aligned = common.is_aligned;
+const log = common.log.scoped(.Heap);
+const zeroes = common.zeroes;
 
-const arch = @import("arch/common.zig");
-const crash = @import("crash.zig");
-const kernel = @import("kernel.zig");
-const VirtualAddress = @import("virtual_address.zig");
-const VirtualAddressSpace = @import("virtual_address_space.zig");
+const RNU = @import("RNU");
+const Spinlock = RNU.Spinlock;
+const TODO = RNU.TODO;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
-const log = std.log.scoped(.Heap);
-const Spinlock = @import("spinlock.zig");
-const TODO = crash.TODO;
-const Allocator = std.CustomAllocator;
+const kernel = @import("kernel");
+
+const arch = @import("arch");
 
 pub const Region = struct {
     virtual: VirtualAddress = VirtualAddress{ .value = 0 },
@@ -32,7 +38,7 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
             .context = virtual_address_space,
             .callback_allocate = allocate_function,
         },
-        .regions = std.zeroes([region_count]Region),
+        .regions = zeroes([region_count]Region),
         .lock = Spinlock{},
     };
 }
@@ -43,7 +49,7 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
     defer {
         virtual_address_space.heap.lock.release();
     }
-    std.assert(virtual_address_space.lock.status == 0);
+    assert(virtual_address_space.lock.status == 0);
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
@@ -57,7 +63,7 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
                 if (region.size > 0) {
                     const aligned_allocated = region.virtual.offset(region.allocated).aligned_forward(alignment).value - region.virtual.value;
                     if (region.size < aligned_allocated + size) continue;
-                    //std.assert((region.size - region.allocated) >= size);
+                    //assert((region.size - region.allocated) >= size);
                     region.allocated = aligned_allocated;
                     break :blk region;
                 } else {
@@ -66,14 +72,14 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
                     region.* = Region{
                         .virtual = virtual_address_space.allocate(region_size, null, flags) catch |err| {
                             log.err("Error allocating small memory from VAS: {}", .{err});
-                            return std.Allocator.Error.OutOfMemory;
+                            return Allocator.Error.OutOfMemory;
                         },
                         .size = region_size,
                         .allocated = 0,
                     };
 
                     // Avoid footguns
-                    std.assert(std.is_aligned(region.virtual.value, alignment));
+                    assert(is_aligned(region.virtual.value, alignment));
 
                     break :blk region;
                 }
@@ -84,7 +90,7 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
 
         const result_address = region.virtual.value + region.allocated;
         if (kernel.config.safe_slow) {
-            std.assert(virtual_address_space.translate_address(VirtualAddress.new(std.align_backward(result_address, 0x1000))) != null);
+            assert(virtual_address_space.translate_address(VirtualAddress.new(align_backward(result_address, 0x1000))) != null);
         }
         region.allocated += size;
 
@@ -93,10 +99,10 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
             .size = size,
         };
     } else {
-        const allocation_size = std.align_forward(size, arch.page_size);
+        const allocation_size = align_forward(size, arch.page_size);
         const virtual_address = virtual_address_space.allocate(allocation_size, null, flags) catch |err| {
             log.err("Error allocating big chunk from VAS: {}", .{err});
-            return std.Allocator.Error.OutOfMemory;
+            return Allocator.Error.OutOfMemory;
         };
         log.debug("Big allocation happened!", .{});
 

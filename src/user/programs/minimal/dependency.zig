@@ -1,4 +1,3 @@
-const std = @import("../../../common/std.zig");
 const Build = @import("../../../build/lib.zig");
 
 fn get_path() []const u8 {

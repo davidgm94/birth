@@ -1,4 +1,7 @@
-const io = @import("io.zig");
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const io = x86_64.io;
+
 pub const master_command = io.Ports.PIC1;
 pub const master_data = io.Ports.PIC1 + 1;
 pub const slave_command = io.Ports.PIC2;

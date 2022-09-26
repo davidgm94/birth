@@ -1,4 +1,5 @@
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
 
 pub const Descriptor = packed struct {
     limit_low: u16,
@@ -17,7 +18,7 @@ pub const Descriptor = packed struct {
     reserved: u32 = 0,
 
     comptime {
-        std.assert(@sizeOf(Descriptor) == 16);
+        assert(@sizeOf(Descriptor) == 16);
     }
 };
 
@@ -31,7 +32,7 @@ pub const Struct = extern struct {
     IO_map_base_address: u16 = 104,
 
     comptime {
-        std.assert(@sizeOf(Struct) == 104);
+        assert(@sizeOf(Struct) == 104);
     }
 
     pub fn get_descriptor(tss: *const Struct) Descriptor {

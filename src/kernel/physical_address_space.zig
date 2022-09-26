@@ -1,16 +1,11 @@
 const PhysicalAddressSpace = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const RNU = @import("RNU");
+const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
+const Spinlock = RNU.Spinlock;
 
-const arch = @import("arch/common.zig");
-const crash = @import("crash.zig");
-const kernel = @import("kernel.zig");
-const PhysicalAddress = @import("physical_address.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const Spinlock = @import("spinlock.zig");
-
-const log = std.log.scoped(.PhysicalAddressSpace);
-const TODO = crash.TODO;
+const log = common.log.scoped(.PhysicalAddressSpace);
 
 zero_free_list: List = .{},
 free_list: List = .{},
@@ -53,7 +48,7 @@ pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime pa
     // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys zero flag
     if (flags.zeroed) {
         const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
-        std.zero(region_bytes);
+        common.zero(region_bytes);
     }
 
     return allocated_region;

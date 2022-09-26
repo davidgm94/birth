@@ -1,25 +1,19 @@
 const DeviceManager = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const Allocator = common.Allocator;
+const ArrayList = common.ArrayList;
+const assert = common.assert;
+const fields = common.fields;
+const log = common.log.scoped(.DeviceManager);
 
-const List = @import("../common/list.zig");
-const StableBuffer = List.StableBuffer;
+const RNU = @import("RNU");
+const Disk = RNU.Disk;
+const Filesystem = RNU.Filesystem;
+const Graphics = RNU.Graphics;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
-const AHCI = @import("../drivers/ahci.zig");
-const ACPI = @import("../drivers/acpi.zig");
-const Disk = @import("../drivers/disk.zig");
-const Filesystem = @import("../drivers/filesystem.zig");
-const Graphics = @import("../drivers/graphics.zig");
-const PCI = @import("../drivers/pci.zig");
-const VirtualAddressSpace = @import("virtual_address_space.zig");
-
-const drivers = switch (std.cpu.arch) {
-    .x86_64 => @import("arch/x86_64/drivers.zig"),
-    else => unreachable,
-};
-
-const Allocator = std.Allocator;
-const log = std.log.scoped(.DeviceManager);
+const arch = @import("arch");
 
 devices: Devices = .{},
 ready: bool = false,
@@ -32,7 +26,7 @@ const Devices = struct {
 
 fn Device(comptime T: type) type {
     return struct {
-        list: std.ArrayList(*T) = .{ .items = &.{}, .capacity = 0 },
+        list: ArrayList(*T) = .{ .items = &.{}, .capacity = 0 },
         main: u32 = 0,
 
         pub const Type = T;
@@ -46,15 +40,15 @@ fn Device(comptime T: type) type {
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
     defer device_manager.ready = true;
 
-    try drivers.init(device_manager, virtual_address_space);
+    try arch.drivers.init(device_manager, virtual_address_space);
 
-    inline for (std.fields(Devices)) |device_field| {
+    inline for (fields(Devices)) |device_field| {
         const device_count = @field(device_manager.devices, device_field.name).list.items.len;
         log.debug("{s} count: {}", .{ device_field.name, device_count });
     }
 
-    std.assert(device_manager.devices.disk.list.items.len > 0);
-    std.assert(device_manager.devices.filesystem.list.items.len > 0);
+    assert(device_manager.devices.disk.list.items.len > 0);
+    assert(device_manager.devices.filesystem.list.items.len > 0);
 }
 
 pub fn register(device_manager: *DeviceManager, comptime DeviceT: type, allocator: Allocator, new_device: *DeviceT) !void {

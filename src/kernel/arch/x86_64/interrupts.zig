@@ -1,26 +1,31 @@
-const interrupts = @This();
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.Interrupts);
 
-const std = @import("../../../common/std.zig");
+const RNU = @import("RNU");
+const panic = RNU.panic;
+const panic_extended = RNU.panic_extended;
+const PhysicalAddress = RNU.PhysicalAddress;
 
-const Context = @import("context.zig");
-const context_switch = @import("context_switch.zig");
-const CPU = @import("cpu.zig");
-const crash = @import("../../crash.zig");
-const kernel = @import("../../kernel.zig");
-const registers = @import("registers.zig");
-const GDT = @import("gdt.zig");
-const IDT = @import("idt.zig");
-const PhysicalAddress = @import("../../physical_address.zig");
-const TLS = @import("tls.zig");
+const kernel = @import("kernel");
+
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const Context = x86_64.Context;
+const context_switch = x86_64.context_switch;
+const CPU = x86_64.CPU;
+const GDT = x86_64.GDT;
+const IDT = x86_64.IDT;
+const interrupts = x86_64.interrupts;
+const registers = x86_64.registers;
+const cr8 = registers.cr8;
+const RFLAGS = registers.RFLAGS;
+const TLS = x86_64.TLS;
 
 const PCI = @import("../../../drivers/pci.zig");
 
-const log = std.log.scoped(.interrupts);
-const cr8 = registers.cr8;
-const panic = crash.panic;
-const RFLAGS = registers.RFLAGS;
-
 const use_cr8 = true;
+
 pub inline fn enable() void {
     if (use_cr8) {
         cr8.write(0);
@@ -366,7 +371,7 @@ const PageFaultErrorCode = packed struct {
     software_guard_extensions: bool,
 
     comptime {
-        std.assert(@sizeOf(PageFaultErrorCode) == @sizeOf(u16));
+        assert(@sizeOf(PageFaultErrorCode) == @sizeOf(u16));
     }
 };
 
@@ -409,15 +414,15 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             const exception = @intToEnum(Exception, context.interrupt_number);
             const usermode = context.cs & 3 != 0;
             if (usermode) {
-                if (context.cs != @offsetOf(GDT.Table, "user_code_64") | 3) crash.panic_extended("User code CS was supposed to be 0x{x}, was 0x{x}", .{ @offsetOf(GDT.Table, "user_code_64"), context.cs }, context.rip, context.rbp);
+                if (context.cs != @offsetOf(GDT.Table, "user_code_64") | 3) panic_extended("User code CS was supposed to be 0x{x}, was 0x{x}", .{ @offsetOf(GDT.Table, "user_code_64"), context.cs }, context.rip, context.rbp);
                 switch (exception) {
                     .page_fault => {
                         const error_code_int = @truncate(u16, context.error_code);
                         const error_code = @bitCast(PageFaultErrorCode, error_code_int);
                         const page_fault_address = registers.cr2.read();
-                        crash.panic_extended("Unresolvable page fault in userspace.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
+                        panic_extended("Unresolvable page fault in userspace.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
                     },
-                    else => crash.panic_extended("Unhandled exception in user mode: {s}", .{@tagName(exception)}, context.rip, context.rbp),
+                    else => panic_extended("Unhandled exception in user mode: {s}", .{@tagName(exception)}, context.rip, context.rbp),
                 }
             } else {
                 if (context.cs != @offsetOf(GDT.Table, "code_64")) @panic("invalid cs");
@@ -427,7 +432,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                         const error_code_int = @truncate(u16, context.error_code);
                         const error_code = @bitCast(PageFaultErrorCode, error_code_int);
                         const page_fault_address = registers.cr2.read();
-                        crash.panic_extended("Unresolvable page fault in the kernel.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
+                        panic_extended("Unresolvable page fault in the kernel.\nVirtual address: 0x{x}. Error code: {}", .{ page_fault_address, error_code }, context.rip, context.rbp);
                     },
                     else => panic("{s}", .{@tagName(exception)}),
                 }
@@ -447,7 +452,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             // TODO: dont hard code
             const handler = irq_handlers[0];
             const result = handler.callback(handler.context, line);
-            std.assert(result);
+            assert(result);
             TLS.get_current().cpu.?.lapic.end_of_interrupt();
         },
         0x80 => {
@@ -604,7 +609,7 @@ fn setup_interrupt_redirection_entry(asked_line: u64) bool {
         if (level_triggered) redirection_entry |= (1 << 15);
 
         ioapic.write(redirection_table_index, 1 << 16);
-        std.assert(TLS.get_current().cpu.? == &kernel.scheduler.cpus[0]);
+        assert(TLS.get_current().cpu.? == &kernel.scheduler.cpus[0]);
         ioapic.write(redirection_table_index + 1, kernel.scheduler.cpus[0].lapic.id << 24);
         ioapic.write(redirection_table_index, redirection_entry);
 
@@ -625,7 +630,7 @@ const IRQHandler = struct {
 };
 
 pub inline fn end(cpu: *CPU) void {
-    std.assert(kernel.virtual_address_space.translate_address(cpu.lapic.address) != null);
+    assert(kernel.virtual_address_space.translate_address(cpu.lapic.address) != null);
     cpu.lapic.end_of_interrupt();
 }
 
@@ -641,7 +646,7 @@ pub fn send_panic_interrupt_to_all_cpus() void {
     };
 
     var bitset: u2048 = 0;
-    std.assert(kernel.scheduler.cpus.len <= @bitSizeOf(@TypeOf(bitset)));
+    assert(kernel.scheduler.cpus.len <= @bitSizeOf(@TypeOf(bitset)));
 
     for (kernel.scheduler.cpus) |*cpu| {
         if (cpu.id == panicked_cpu.id) continue;
@@ -659,12 +664,12 @@ pub fn send_panic_interrupt_to_all_cpus() void {
     }
 
     if (bitset != 0) {
-        std.log.scoped(.PANIC).err("CPUs not ready:", .{});
+        common.log.scoped(.PANIC).err("CPUs not ready:", .{});
 
         var i: u64 = 0;
         while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
             if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
-                std.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i].id});
+                common.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i].id});
             }
         }
     }

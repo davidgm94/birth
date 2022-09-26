@@ -1,23 +1,21 @@
 const Controller = @This();
 // TODO: batch PCI register access
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.PCI);
+const zeroes = common.zeroes;
+
+const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
+const panic = RNU.panic;
+const PhysicalAddress = RNU.PhysicalAddress;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+
+const arch = @import("arch");
 
 const AHCI = @import("ahci.zig");
-const arch = @import("../kernel/arch/common.zig");
-const crash = @import("../kernel/crash.zig");
-const DeviceManager = @import("../kernel/device_manager.zig");
-const Drivers = @import("../drivers/common.zig");
-const PhysicalAddress = @import("../kernel/physical_address.zig");
-const PhysicalMemoryRegion = @import("../kernel/physical_memory_region.zig");
-const VirtualAddress = @import("../kernel/virtual_address.zig");
-const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
-const PCI = @import("../kernel/arch/pci.zig");
-const io = @import("../kernel/arch/io.zig");
-
-const log = std.log.scoped(.PCI);
-const TODO = crash.TODO;
-const panic = crash.panic;
 
 devices: []Device,
 
@@ -52,7 +50,7 @@ pub const CommonHeader = packed struct {
     bist: u8,
 
     comptime {
-        std.assert(@sizeOf(@This()) == 0x10);
+        assert(@sizeOf(@This()) == 0x10);
     }
 };
 
@@ -90,13 +88,13 @@ pub const HeaderType0x00 = packed struct {
     max_latency: u8,
 
     comptime {
-        std.assert(@sizeOf(@This()) == 0x40);
+        assert(@sizeOf(@This()) == 0x40);
     }
 };
 
 fn check_vendor(bus: u8, slot: u8, function: u8) bool {
     const vendor_id = read_field_from_header(CommonHeader, "vendor_id", bus, slot, function);
-    return vendor_id != std.max_int(u16);
+    return vendor_id != common.max_int(u16);
 }
 
 const HeaderType = enum(u8) {
@@ -108,10 +106,10 @@ const HeaderType = enum(u8) {
 const PCIDevices = .{AHCI};
 
 fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace) !void {
-    var bus_scan_states = std.zeroes([256]BusScanState);
+    var bus_scan_states = zeroes([256]BusScanState);
     var base_function: u8 = 0;
     const base_header_type = read_field_from_header(CommonHeader, "header_type", 0, 0, base_function);
-    std.assert(base_header_type == 0x0);
+    assert(base_header_type == 0x0);
     const base_function_count: u8 = if (base_header_type & 0x80 != 0) 8 else 1;
     var buses_to_scan: u8 = 0;
 
@@ -126,7 +124,7 @@ fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddr
     if (buses_to_scan == 0) panic("unable to find any PCI bus", .{});
 
     base_function = 0;
-    std.assert(base_function == 0);
+    assert(base_function == 0);
     var device_count: u64 = 0;
     // First scan the buses to find out how many PCI devices the computer has
     while (buses_to_scan > 0) {
@@ -177,7 +175,7 @@ fn enumerate(device_manager: *DeviceManager, virtual_address_space: *VirtualAddr
     var registered_device_count: u64 = 0;
 
     base_function = 0;
-    std.assert(base_function == 0);
+    assert(base_function == 0);
 
     while (buses_to_scan > 0) {
         var bus_i: u9 = 0;
@@ -309,7 +307,7 @@ pub const FindDeviceResult = struct {
 };
 
 pub fn find_devices(driver: *Controller, class_code: u16, subclass_code: u16) FindDeviceResult {
-    var result = std.zeroes(FindDeviceResult);
+    var result = zeroes(FindDeviceResult);
     for (driver.devices) |*device| {
         if (device.class_code == class_code and device.subclass_code == subclass_code) {
             result.devices[result.count] = device;
@@ -339,11 +337,11 @@ pub const Device = struct {
     bar_physical_addresses: [6]PhysicalAddress,
 
     pub inline fn read_config(device: *Device, comptime T: type, offset: u8) T {
-        return PCI.read_config(T, device.bus, device.slot, device.function, offset);
+        return arch.PCI.read_config(T, device.bus, device.slot, device.function, offset);
     }
 
     pub inline fn write_config(device: *Device, comptime T: type, value: T, offset: u8) void {
-        return PCI.write_config(T, value, device.bus, device.slot, device.function, offset);
+        return arch.PCI.write_config(T, value, device.bus, device.slot, device.function, offset);
     }
 
     const BarEnableError = error{
@@ -366,12 +364,12 @@ pub const Device = struct {
 
         const is_size_64 = bar & 0b100 != 0;
         log.debug("Is size 64: {}", .{is_size_64});
-        std.assert(!is_size_64);
+        assert(!is_size_64);
         const bar_header_offset = @offsetOf(HeaderType0x00, "bar0") + (@sizeOf(u32) * bar_i);
-        device.write_config(u32, std.max_int(u32), bar_header_offset);
+        device.write_config(u32, common.max_int(u32), bar_header_offset);
         const size1 = device.read_config(u32, bar_header_offset);
-        const size2 = size1 | (@as(u64, std.max_int(u32)) << 32);
-        std.assert(size2 != 0);
+        const size2 = size1 | (@as(u64, common.max_int(u32)) << 32);
+        assert(size2 != 0);
         device.write_config(u32, bar, bar_header_offset);
 
         const size3 = size2 & 0xffff_ffff_ffff_fff0;
@@ -397,7 +395,7 @@ pub const Device = struct {
 // TODO: Maybe it's required to implement an extended function which accepts a non-harcoded offset of the field?
 fn read_field_from_header(comptime HT: type, comptime field_name: []const u8, bus: u8, slot: u8, function: u8) TypeFromFieldName(HT, field_name) {
     const FieldType = TypeFromFieldName(HT, field_name);
-    return PCI.read_config(FieldType, bus, slot, function, @offsetOf(HT, field_name));
+    return arch.PCI.read_config(FieldType, bus, slot, function, @offsetOf(HT, field_name));
 }
 
 fn TypeFromFieldName(comptime HeaderT: type, comptime field_name: []const u8) type {

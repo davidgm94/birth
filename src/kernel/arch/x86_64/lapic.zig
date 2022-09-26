@@ -1,14 +1,15 @@
 const LAPIC = @This();
 
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.LAPIC);
 
-const PhysicalAddress = @import("../../physical_address.zig");
-const VirtualAddress = @import("../../virtual_address.zig");
-const VirtualAddressSpace = @import("../../virtual_address_space.zig");
+const RNU = @import("RNU");
+const PhysicalAddress = RNU.PhysicalAddress;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
 pub const timer_interrupt = 0x40;
-
-const log = std.log.scoped(.LAPIC);
 
 // TODO: LAPIC address is shared. Ticks per ms too? Refactor this struct
 address: VirtualAddress,
@@ -31,10 +32,10 @@ const Register = enum(u32) {
 pub inline fn new(virtual_address_space: *VirtualAddressSpace, lapic_physical_address: PhysicalAddress, lapic_id: u32) LAPIC {
     const lapic_virtual_address = lapic_physical_address.to_higher_half_virtual_address();
     log.debug("Virtual address: 0x{x}", .{lapic_virtual_address.value});
-    std.assert(virtual_address_space.translate_address(lapic_virtual_address) != null);
+    assert(virtual_address_space.translate_address(lapic_virtual_address) != null);
     log.debug("Checking assert", .{});
 
-    std.assert((virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
+    assert((virtual_address_space.translate_address(lapic_virtual_address) orelse @panic("Wtfffff")).value == lapic_physical_address.value);
     const lapic = LAPIC{
         .address = lapic_virtual_address,
         .id = lapic_id,
@@ -55,7 +56,7 @@ pub inline fn write(lapic: LAPIC, comptime register: Register, value: u32) void 
 }
 
 pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
-    std.assert(lapic.ticks_per_ms != 0);
+    assert(lapic.ticks_per_ms != 0);
     lapic.write(.LVT_TIMER, timer_interrupt | (1 << 17));
     lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
 }

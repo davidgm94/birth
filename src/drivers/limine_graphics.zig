@@ -1,8 +1,12 @@
 const Driver = @This();
-const Drivers = @import("common.zig");
-const Graphics = @import("graphics.zig");
-const kernel = @import("../kernel/kernel.zig");
-const Limine = @import("../kernel/arch/x86_64/limine/limine/limine.zig");
+
+const RNU = @import("RNU");
+const Graphics = RNU.Graphics;
+
+const kernel = @import("kernel");
+
+const bootloader = @import("bootloader");
+const Limine = bootloader.Limine;
 
 graphics: Graphics,
 memory_model: u8,
@@ -40,7 +44,7 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
     driver.* = Driver{
         .graphics = Graphics{
             .type = .limine,
-            .framebuffer = Framebuffer{
+            .framebuffer = Graphics.Framebuffer{
                 .bytes = @intToPtr([*]u8, framebuffer.address),
                 .width = framebuffer.width,
                 .height = framebuffer.height,

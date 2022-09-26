@@ -1,9 +1,11 @@
 pub const Manager = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const clamp = common.clamp;
 
-const Graphics = @import("../drivers/graphics.zig");
-const Spinlock = @import("spinlock.zig");
+const RNU = @import("RNU");
+const Graphics = RNU.Graphics;
+const Spinlock = RNU.Spinlock;
 
 const Rectangle = Graphics.Rectangle;
 
@@ -17,10 +19,10 @@ const Cursor = struct {
     image_offset: Position = .{},
     properties: Properties = .{},
     surface: struct {
-        current: Framebuffer,
-        swap: Framebuffer,
-        temporary: Framebuffer,
-    },
+        current: Graphics.Framebuffer = .{},
+        swap: Graphics.Framebuffer = .{},
+        temporary: Graphics.Framebuffer = .{},
+    } = .{},
 
     pub const movement_scale = 0x100;
 
@@ -55,8 +57,8 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i64
 
     // TODO: modifiers
     // TODO: divTrunc?
-    manager.cursor.precise_position.x = std.clamp(manager.cursor.precise_position.x + @divTrunc(x_movement, Cursor.movement_scale), 0, graphics.framebuffer.width * Cursor.movement_scale - 1);
-    manager.cursor.precise_position.y = std.clamp(manager.cursor.precise_position.y + @divTrunc(y_movement, Cursor.movement_scale), 0, graphics.framebuffer.height * Cursor.movement_scale - 1);
+    manager.cursor.precise_position.x = clamp(manager.cursor.precise_position.x + @divTrunc(x_movement, Cursor.movement_scale), 0, graphics.framebuffer.width * Cursor.movement_scale - 1);
+    manager.cursor.precise_position.y = clamp(manager.cursor.precise_position.y + @divTrunc(y_movement, Cursor.movement_scale), 0, graphics.framebuffer.height * Cursor.movement_scale - 1);
     // TODO: divTrunc?
     manager.cursor.position.x = @divTrunc(manager.cursor.precise_position.x, Cursor.movement_scale);
     manager.cursor.position.y = @divTrunc(manager.cursor.precise_position.y, Cursor.movement_scale);
@@ -71,23 +73,24 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
 
     // TODO: check for resizing
 
-    const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
-    const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
-    const bounds = Rectangle{ .left = 0, .right = graphics.framebuffer.width, .top = 0, .bottom = graphics.framebuffer.height };
+    //const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
+    //const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
+    //const bounds = Rectangle{ .left = 0, .right = graphics.framebuffer.width, .top = 0, .bottom = graphics.framebuffer.height };
 
-    const cursor_bounds = blk: {
-        var result = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.height };
-        result = result.clip(Rectangle{ .left = 0, .right = bounds.get_width(), .top = 0, .bottom = bounds.get_height() }).rectangle;
-        break :blk result;
-    };
+    //const cursor_bounds = blk: {
+    //var result = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.height };
+    //result = result.clip(Rectangle{ .left = 0, .right = bounds.get_width(), .top = 0, .bottom = bounds.get_height() }).rectangle;
+    //break :blk result;
+    //};
 
-    manager.cursor.surface.swap.copy(
-        &graphics.framebuffer,
-        0, // point 0 TODO
-        cursor_bounds,
-        true,
-    );
+    //manager.cursor.surface.swap.copy(
+    //&graphics.framebuffer,
+    //0, // point 0 TODO
+    //cursor_bounds,
+    //true,
+    //);
 
+    _ = graphics;
     @panic("todo update screen");
     //const cursor_x = manager.
 }

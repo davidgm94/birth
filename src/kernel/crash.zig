@@ -1,12 +1,14 @@
-const std = @import("../common/std.zig");
-const kernel = @import("kernel.zig");
-const interrupts = @import("arch/interrupts.zig");
+const common = @import("common");
+const log = common.log.scoped(.PANIC);
+
+const kernel = @import("kernel");
+const arch = @import("arch");
+const interrupts = arch.interrupts;
 
 pub fn TODO() noreturn {
     @panic("TODO");
 }
 
-const log = std.log.scoped(.PANIC);
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @setCold(true);
     panic_extended(format, arguments, @returnAddress(), @frameAddress());
@@ -39,7 +41,7 @@ const use_zig_stack_iterator = false;
 
 pub fn dump_stack_trace(start_address: usize, frame_pointer: usize) void {
     if (use_zig_stack_iterator) {
-        var stack_iterator = std.StackIterator.init(start_address, frame_pointer);
+        var stack_iterator = common.StackIterator.init(start_address, frame_pointer);
         log.err("Stack trace:", .{});
         var stack_trace_i: u64 = 0;
         while (stack_iterator.next()) |return_address| : (stack_trace_i += 1) {

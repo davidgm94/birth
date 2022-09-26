@@ -1,14 +1,18 @@
-const std = @import("../common/std.zig");
+const common = @import("common");
+const align_forward = common.align_forward;
+const assert = common.assert;
+const copy = common.copy;
+const is_aligned = common.is_aligned;
+const log = common.log.scoped(.ELF);
+const string_eq = common.string_eq;
 
-const arch = @import("arch/common.zig");
-const crash = @import("crash.zig");
-const PhysicalAddressSpace = @import("physical_address_space.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const VirtualAddress = @import("virtual_address.zig");
-const VirtualAddressSpace = @import("virtual_address_space.zig");
+const RNU = @import("RNU");
+const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
+const TODO = RNU.TODO;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
-const TODO = crash.TODO;
-const log = std.log.scoped(.ELF);
+const arch = @import("arch");
 
 const FileHeader = extern struct {
     // e_ident
@@ -102,7 +106,7 @@ const ProgramHeader = extern struct {
         reserved: u29,
 
         comptime {
-            std.assert(@sizeOf(Flags) == @sizeOf(u32));
+            assert(@sizeOf(Flags) == @sizeOf(u32));
         }
     };
 };
@@ -177,9 +181,9 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
     //}
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
     if (file_header.magic != FileHeader.magic) @panic("magic");
-    if (!std.string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
-    std.assert(file_header.program_header_size == @sizeOf(ProgramHeader));
-    std.assert(file_header.section_header_size == @sizeOf(SectionHeader));
+    if (!string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
+    assert(file_header.program_header_size == @sizeOf(ProgramHeader));
+    assert(file_header.section_header_size == @sizeOf(SectionHeader));
     const entry_point = file_header.entry;
     // TODO: further checking
     log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
@@ -194,7 +198,7 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                 const page_size = arch.page_size;
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
-                const segment_size = std.align_forward(ph.size_in_memory + misalignment, page_size);
+                const segment_size = align_forward(ph.size_in_memory + misalignment, page_size);
 
                 if (!ph.flags.writable) {
                     log.debug("Segment virtual address: (0x{x}, 0x{x}) - {}", .{ ph.virtual_address, ph.virtual_address + ph.size_in_memory, ph.flags });
@@ -202,18 +206,18 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                         @panic("ELF file with misaligned segments");
                     }
 
-                    if (!std.is_aligned(ph.offset, page_size)) {
+                    if (!is_aligned(ph.offset, page_size)) {
                         @panic("ELF file with misaligned offset");
                     }
 
                     const page_count = @divExact(segment_size, page_size);
                     const physical_region = address_spaces.physical.allocate_pages(page_size, page_count, .{ .zeroed = true }) orelse @panic("physical");
-                    std.assert(ph.flags.readable);
-                    std.assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
-                    std.assert(address_spaces.user.translate_address(base_virtual_address) == null);
-                    std.assert(std.is_aligned(physical_region.size, arch.page_size));
-                    std.assert(ph.size_in_file <= ph.size_in_memory);
-                    std.assert(misalignment == 0);
+                    assert(ph.flags.readable);
+                    assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
+                    assert(address_spaces.user.translate_address(base_virtual_address) == null);
+                    assert(is_aligned(physical_region.size, arch.page_size));
+                    assert(ph.size_in_file <= ph.size_in_memory);
+                    assert(misalignment == 0);
 
                     const kernel_segment_virtual_address = physical_region.address.to_higher_half_virtual_address();
                     // Giving executable permissions here to perform the copy
@@ -224,8 +228,8 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                     log.debug("Translation result: {}", .{translation_result});
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
-                    std.assert(dst_slice.len >= src_slice.len);
-                    std.copy(u8, dst_slice, src_slice);
+                    assert(dst_slice.len >= src_slice.len);
+                    copy(u8, dst_slice, src_slice);
                 } else {
                     TODO();
                 }

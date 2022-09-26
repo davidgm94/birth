@@ -1,6 +1,9 @@
-const std = @import("std.zig");
+const common = @import("common");
+const assert = common.assert;
+const enum_count = common.enum_count;
+
 comptime {
-    if (@import("builtin").os.tag != .freestanding) @compileError("This file should not be imported in build.zig");
+    if (common.os != .freestanding) @compileError("This file should not be imported in build.zig");
 }
 
 pub const RawResult = extern struct {
@@ -14,7 +17,7 @@ pub const Options = packed struct(u8) {
     unused: u6 = 0,
 
     comptime {
-        std.assert(@bitSizeOf(Options) == @bitSizeOf(u8));
+        assert(@bitSizeOf(Options) == @bitSizeOf(u8));
     }
 };
 
@@ -27,7 +30,7 @@ pub const Input = extern struct {
     unused2: u16 = 0,
 
     comptime {
-        std.assert(@sizeOf(Input) == @sizeOf(u64));
+        assert(@sizeOf(Input) == @sizeOf(u64));
     }
 };
 
@@ -40,7 +43,7 @@ pub const HardwareID = enum(u16) {
     ask_syscall_manager = 0,
     flush_syscall_manager = 1,
 
-    pub const count = std.enum_count(@This());
+    pub const count = enum_count(@This());
 };
 
 pub const ThreadExitParameters = struct {
@@ -65,7 +68,7 @@ pub const GetFramebufferParameters = void;
 pub const ExecutionMode = enum(u1) {
     blocking,
     non_blocking,
-    const count = std.enum_count(@This());
+    const count = enum_count(@This());
 };
 
 pub const SyscallReturnType = blk: {
@@ -78,7 +81,7 @@ pub const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ServiceID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.blocking)] = []u8;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *Framebuffer;
+    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *common.DrawingAreaDescriptor;
     ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };
@@ -98,7 +101,7 @@ pub const Submission = struct {
     arguments: [5]u64,
 
     comptime {
-        std.assert(@sizeOf(Submission) == 6 * @sizeOf(u64));
+        assert(@sizeOf(Submission) == 6 * @sizeOf(u64));
     }
 };
 
@@ -128,7 +131,7 @@ pub const SyscallID = enum(Input.IDIntType) {
     ask_syscall_manager = 0,
     flush_syscall_manager = 1,
 
-    pub const count = std.enum_count(@This());
+    pub const count = enum_count(@This());
 };
 
 pub const ServiceID = enum(Input.IDIntType) {
@@ -138,7 +141,7 @@ pub const ServiceID = enum(Input.IDIntType) {
     allocate_memory = 3,
     get_framebuffer = 4,
 
-    pub const count = std.enum_count(@This());
+    pub const count = enum_count(@This());
 };
 
 pub fn add_syscall_descriptor(comptime id: SyscallID, arr: []SyscallDescriptor) void {

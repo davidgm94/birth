@@ -1,9 +1,15 @@
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const is_aligned = common.is_aligned;
 
-const io = @import("io.zig");
-const Spinlock = @import("../../spinlock.zig");
+const RNU = @import("RNU");
+const Spinlock = RNU.Spinlock;
 
-var lock: Spinlock = undefined;
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const io = x86_64.io;
+
+var lock = Spinlock{};
 
 inline fn notify_config_op(bus: u8, slot: u8, function: u8, offset: u8) void {
     io.write(u32, io.Ports.PCI_config, 0x80000000 | (@as(u32, bus) << 16) | (@as(u32, slot) << 11) | (@as(u32, function) << 8) | offset);
@@ -13,8 +19,8 @@ pub fn read_config(comptime T: type, bus: u8, slot: u8, function: u8, offset: u8
     lock.acquire();
     defer lock.release();
 
-    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
+    const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+    comptime assert(IntType == u8 or IntType == u16 or IntType == u32);
 
     notify_config_op(bus, slot, function, offset);
     const result_int = io.read(IntType, io.Ports.PCI_data + @intCast(u16, offset % 4));
@@ -34,10 +40,10 @@ pub fn write_config(comptime T: type, value: T, bus: u8, slot: u8, function: u8,
     lock.acquire();
     defer lock.release();
 
-    const IntType = std.IntType(.unsigned, @bitSizeOf(T));
-    comptime std.assert(IntType == u8 or IntType == u16 or IntType == u32);
+    const IntType = common.IntType(.unsigned, @bitSizeOf(T));
+    comptime assert(IntType == u8 or IntType == u16 or IntType == u32);
 
-    std.assert(std.is_aligned(offset, 4));
+    assert(is_aligned(offset, 4));
     notify_config_op(bus, slot, function, offset);
 
     io.write(IntType, io.Ports.PCI_data + @intCast(u16, offset % 4), value);

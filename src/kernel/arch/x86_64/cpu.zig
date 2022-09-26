@@ -1,29 +1,33 @@
 const CPU = @This();
 
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.CPU);
 
-const CPUID = @import("../../../common/arch/x86_64/cpuid.zig");
-const GDT = @import("gdt.zig");
-const IDT = @import("idt.zig");
-const interrupts = @import("interrupts.zig");
-const io = @import("io.zig");
-const kernel = @import("../../kernel.zig");
-const LAPIC = @import("lapic.zig");
-const PhysicalAddress = @import("../../physical_address.zig");
-const PIC = @import("pic.zig");
-const Scheduler = @import("../../scheduler.zig");
-const Syscall = @import("syscall.zig");
-const registers = @import("registers.zig");
-const Thread = @import("../../thread.zig");
-const TLS = @import("tls.zig");
-const TSS = @import("tss.zig");
-const VirtualAddressSpace = @import("../../virtual_address_space.zig");
-const x86_64 = @import("common.zig");
+const kernel = @import("kernel");
 
+const RNU = @import("RNU");
+const PhysicalAddress = RNU.PhysicalAddress;
+const Scheduler = RNU.Scheduler;
+const Thread = RNU.Thread;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+
+const arch = @import("arch");
+const page_size = arch.page_size;
+const TLS = arch.TLS;
+const x86_64 = arch.x86_64;
+const CPUID = x86_64.CPUID;
+const GDT = x86_64.GDT;
+const IDT = x86_64.IDT;
+const interrupts = x86_64.interrupts;
+const io = x86_64.io;
+const LAPIC = x86_64.LAPIC;
+const PIC = x86_64.PIC;
+const registers = x86_64.registers;
 const cr0 = registers.cr0;
 const cr4 = registers.cr4;
-const log = std.log.scoped(.CPU);
-const page_size = x86_64.page_size;
+const Syscall = x86_64.Syscall;
+const TSS = x86_64.TSS;
 
 lapic: LAPIC,
 spinlock_count: u64 = 0,
@@ -86,8 +90,8 @@ pub fn enable_cpu_features() void {
         : [cw] "r" (&cw),
     );
 
-    std.assert(!cr0.get_bit(.CD));
-    std.assert(!cr0.get_bit(.NW));
+    assert(!cr0.get_bit(.CD));
+    assert(!cr0.get_bit(.NW));
 }
 
 pub fn init_interrupts(cpu: *CPU) void {
@@ -123,7 +127,7 @@ pub fn init_timer(cpu: *CPU) void {
     const times = 8;
     cpu.timestamp_ticks_per_ms = 0;
 
-    cpu.lapic.write(.TIMER_INITCNT, std.max_int(u32));
+    cpu.lapic.write(.TIMER_INITCNT, common.max_int(u32));
 
     while (times_i < times) : (times_i += 1) {
         io.write(u8, io.Ports.PIT_command, 0x30);
@@ -136,7 +140,7 @@ pub fn init_timer(cpu: *CPU) void {
         }
     }
 
-    cpu.lapic.ticks_per_ms = std.max_int(u32) - cpu.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
+    cpu.lapic.ticks_per_ms = common.max_int(u32) - cpu.lapic.read(.TIMER_CURRENT_COUNT) >> 4;
     const timer_calibration_end = read_timestamp();
     cpu.timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
     interrupts.enable();
@@ -177,14 +181,14 @@ pub fn init_apic(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
     // TODO: x2APIC
     const apic_physical_address = registers.get_apic_base();
     log.debug("APIC physical address: 0x{x}", .{apic_physical_address});
-    std.assert(apic_physical_address != 0);
+    assert(apic_physical_address != 0);
     const old_lapic_id = cpu.lapic.id;
     cpu.lapic = LAPIC.new(virtual_address_space, PhysicalAddress.new(apic_physical_address), old_lapic_id);
     cpu.lapic.write(.SPURIOUS, spurious_value);
     // TODO: getting the lapic id from a LAPIC register is not reporting good ids. Why?
     //const lapic_id = cpu.lapic.read(.LAPIC_ID);
     //log.debug("Old LAPIC id: {}. New LAPIC id: {}", .{ old_lapic_id, lapic_id });
-    //std.assert(lapic_id == cpu.lapic.id);
+    //assert(lapic_id == cpu.lapic.id);
     log.debug("APIC enabled", .{});
 }
 

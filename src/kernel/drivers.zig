@@ -1,5 +1,5 @@
-const std = @import("../common/std.zig");
-const Allocator = std.CustomAllocator;
+const common = @import("common");
+const Allocator = common.CustomAllocator;
 
 // This is only a definition file. Imports are forbidden
 

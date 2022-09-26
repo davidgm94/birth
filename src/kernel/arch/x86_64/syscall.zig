@@ -1,10 +1,15 @@
-const std = @import("../../../common/std.zig");
-const log = std.log.scoped(.Syscall_x86_64);
+const common = @import("common");
+const assert = common.assert;
+const log = common.log.scoped(.Syscall_x86_64);
 
-const GDT = @import("gdt.zig");
-const registers = @import("registers.zig");
-const Thread = @import("../../thread.zig");
-const Syscall = @import("../../syscall.zig");
+const RNU = @import("RNU");
+const Thread = RNU.Thread;
+const Syscall = RNU.Syscall;
+
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const GDT = x86_64.GDT;
+const registers = x86_64.registers;
 
 pub fn enable() void {
     // Enable syscall extensions
@@ -19,9 +24,9 @@ pub fn enable() void {
     const kernel64_code_selector = @offsetOf(GDT.Table, "code_64");
     const user32_code_selector: u32 = @offsetOf(GDT.Table, "user_code_32");
     comptime {
-        std.assert(@offsetOf(GDT.Table, "data_64") == kernel64_code_selector + 8);
-        std.assert(@offsetOf(GDT.Table, "user_data") == user32_code_selector + 8);
-        std.assert(@offsetOf(GDT.Table, "user_code_64") == user32_code_selector + 16);
+        assert(@offsetOf(GDT.Table, "data_64") == kernel64_code_selector + 8);
+        assert(@offsetOf(GDT.Table, "user_data") == user32_code_selector + 8);
+        assert(@offsetOf(GDT.Table, "user_code_64") == user32_code_selector + 16);
     }
     const high_32: u64 = kernel64_code_selector | user32_code_selector << 16;
     registers.IA32_STAR.write(high_32 << 32);

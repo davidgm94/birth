@@ -1,17 +1,18 @@
 const Context = @This();
 
-const std = @import("../../../common/std.zig");
+const common = @import("common");
 
-const crash = @import("../../crash.zig");
-const GDT = @import("gdt.zig");
-const registers = @import("registers.zig");
-const Thread = @import("../../thread.zig");
-const VirtualAddress = @import("../../virtual_address.zig");
+const RNU = @import("RNU");
+const panic = RNU.panic;
+const Thread = RNU.Thread;
+const TODO = RNU.TODO;
+const VirtualAddress = RNU.VirtualAddress;
 
-const log = std.log.scoped(.Context);
-const panic = crash.panic;
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const GDT = x86_64.GDT;
+const registers = x86_64.registers;
 const RFLAGS = registers.RFLAGS;
-const TODO = crash.TODO;
 
 cr8: u64,
 ds: u64,
@@ -90,22 +91,22 @@ pub fn from_thread(thread: *Thread) *Context {
     return from_kernel_stack(get_kernel_stack(thread));
 }
 
-pub fn format(context: *const Context, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+pub fn format(context: *const Context, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
     try writer.writeAll("\n");
-    inline for (std.fields(Context)) |field| {
+    inline for (common.fields(Context)) |field| {
         const name = field.name;
         const value = @field(context, field.name);
         const args = .{ name, value };
 
         switch (field.field_type) {
-            u64 => try std.internal_format(writer, "\t{s}: 0x{x}\n", args),
-            RFLAGS => try std.internal_format(writer, "\t{s}: {}\n", args),
+            u64 => try common.internal_format(writer, "\t{s}: 0x{x}\n", args),
+            RFLAGS => try common.internal_format(writer, "\t{s}: {}\n", args),
             else => @compileError("Type not supported"),
         }
     }
 }
 
-pub fn check(arch_context: *Context, src: std.SourceLocation) void {
+pub fn check(arch_context: *Context, src: common.SourceLocation) void {
     var failed = false;
     failed = failed or arch_context.cs > 0x100;
     failed = failed or arch_context.ss > 0x100;

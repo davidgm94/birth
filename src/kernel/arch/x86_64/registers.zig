@@ -1,7 +1,11 @@
-const std = @import("../../../common/std.zig");
-const x86_64 = @import("common.zig");
+const common = @import("common");
+const assert = common.assert;
 
-const PhysicalAddress = @import("../../physical_address.zig");
+const RNU = @import("RNU");
+const PhysicalAddress = RNU.PhysicalAddress;
+
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
 
 const SimpleRegister = enum {
     rax,
@@ -91,26 +95,26 @@ pub const cr3 = packed struct(u64) {
     reserved2: u24 = 0,
 
     comptime {
-        std.assert(@sizeOf(cr3) == @sizeOf(u64));
-        std.assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
+        assert(@sizeOf(cr3) == @sizeOf(u64));
+        assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
     }
 
     pub fn from_address(physical_address: PhysicalAddress) cr3 {
-        std.assert(x86_64.max_physical_address_bit == 40);
+        assert(x86_64.max_physical_address_bit == 40);
         return .{
             .address = @intCast(u28, physical_address.value >> x86_64.page_shifter),
         };
     }
 
     pub inline fn read() cr3 {
-        std.assert(x86_64.max_physical_address_bit == 40);
+        assert(x86_64.max_physical_address_bit == 40);
         return asm volatile ("mov %%cr3, %[result]"
             : [result] "=r" (-> cr3),
         );
     }
 
     pub inline fn write(value: cr3) void {
-        std.assert(x86_64.max_physical_address_bit == 40);
+        assert(x86_64.max_physical_address_bit == 40);
         asm volatile ("mov %[in], %%cr3"
             :
             : [in] "r" (value),
@@ -118,7 +122,7 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn equal(self: cr3, other: cr3) bool {
-        std.assert(x86_64.max_physical_address_bit == 40);
+        assert(x86_64.max_physical_address_bit == 40);
 
         const self_int = @bitCast(u64, self);
         const other_int = @bitCast(u64, other);
@@ -126,7 +130,7 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn get_address(self: cr3) PhysicalAddress {
-        std.assert(x86_64.max_physical_address_bit == 40);
+        assert(x86_64.max_physical_address_bit == 40);
 
         return PhysicalAddress.new(@as(u64, self.address) << x86_64.page_shifter);
     }
@@ -169,8 +173,8 @@ pub const RFLAGS = packed struct(u64) {
     reserved5: u32 = 0,
 
     comptime {
-        std.assert(@sizeOf(RFLAGS) == @sizeOf(u64));
-        std.assert(@bitSizeOf(RFLAGS) == @bitSizeOf(u64));
+        assert(@sizeOf(RFLAGS) == @sizeOf(u64));
+        assert(@bitSizeOf(RFLAGS) == @bitSizeOf(u64));
     }
 
     pub inline fn read() RFLAGS {
@@ -241,7 +245,7 @@ pub const IA32_EFER = packed struct(u64) {
     reserved2: u48 = 0,
 
     comptime {
-        std.assert(@sizeOf(u64) == @sizeOf(IA32_EFER));
+        assert(@sizeOf(u64) == @sizeOf(IA32_EFER));
     }
 
     pub const MSR = SimpleMSR(0xC0000080);

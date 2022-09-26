@@ -1,9 +1,8 @@
-const std = @import("src/common/std.zig");
+const common = @import("src/common.zig");
 const Build = @import("src/build/lib.zig");
 //const WriteOnlyRNUFS = @import("src/drivers/rnufs/write_only.zig");
-const RNU = @import("src/common/rnu.zig");
-const DiskDriverType = RNU.DiskDriverType;
-const FilesystemDriverType = RNU.FilesystemDriverType;
+const DiskDriverType = common.DiskDriverType;
+const FilesystemDriverType = common.FilesystemDriverType;
 
 const Arch = Build.Arch;
 
@@ -15,7 +14,6 @@ const user_programs = .{@import("src/user/programs/minimal/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
 pub fn build(b: *Build.Builder) void {
-    std.test_comptime_hack();
     const kernel = b.allocator.create(Kernel) catch unreachable;
     kernel.* = Kernel{
         .builder = b,
@@ -66,8 +64,8 @@ const Kernel = struct {
     disk_count: u64 = 0,
     disk_step: Build.Step = undefined,
     debug_step: Build.Step = undefined,
-    run_argument_list: std.ArrayListManaged([]const u8) = undefined,
-    debug_argument_list: std.ArrayListManaged([]const u8) = undefined,
+    run_argument_list: common.ArrayListManaged([]const u8) = undefined,
+    debug_argument_list: common.ArrayListManaged([]const u8) = undefined,
     gdb_script: *Build.WriteFileStep = undefined,
 
     fn create(kernel: *Kernel) void {
@@ -99,32 +97,40 @@ const Kernel = struct {
             else => unreachable,
         }
 
+        var common_package = Build.Package{
+            .name = "common",
+            .source = Build.FileSource.relative("src/common.zig"),
+        };
+
+        var bootloader_package = Build.Package{
+            .name = "bootloader",
+            .source = Build.FileSource.relative("src/bootloader.zig"),
+        };
+
+        var arch_package = Build.Package{
+            .name = "arch",
+            .source = Build.FileSource.relative("src/arch.zig"),
+        };
+
         var rnu_package = Build.Package{
             .name = "RNU",
-            .source = Build.FileSource.relative("src/kernel/rnu.zig"),
+            .source = Build.FileSource.relative("src/rnu.zig"),
         };
 
         var kernel_package = Build.Package{
             .name = "kernel",
             .source = Build.FileSource.relative("src/kernel.zig"),
-            .dependencies = &.{rnu_package},
         };
 
-        var x86_64_package = Build.Package{
-            .name = "x86_64",
-            .source = Build.FileSource.relative("src/kernel/arch/x86_64.zig"),
-            .dependencies = &.{kernel_package},
-        };
+        common_package.dependencies = &.{common_package};
+        arch_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package, bootloader_package };
+        rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
+        kernel_package.dependencies = &.{ common_package, rnu_package, arch_package };
 
-        var arch_package = Build.Package{
-            .name = "arch",
-            .source = Build.FileSource.relative("src/kernel/rnu.zig"),
-            .dependencies = &.{x86_64_package},
-        };
-
+        kernel.executable.addPackage(common_package);
+        kernel.executable.addPackage(bootloader_package);
         kernel.executable.addPackage(kernel_package);
         kernel.executable.addPackage(rnu_package);
-        kernel.executable.addPackage(x86_64_package);
         kernel.executable.addPackage(arch_package);
 
         kernel.executable.setMainPkgPath("src");
@@ -137,7 +143,7 @@ const Kernel = struct {
     }
 
     fn create_disassembly_step(kernel: *Kernel) void {
-        var arg_list = std.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        var arg_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         const main_args = &.{ "llvm-objdump", kernel_path };
         const common_flags = &.{ "-d", "-S" };
         arg_list.appendSlice(main_args) catch unreachable;
@@ -155,7 +161,7 @@ const Kernel = struct {
     fn create_userspace_programs(kernel: *Kernel) void {
         const linker_script_path = kernel.builder.fmt("src/user/arch/{s}/linker.ld", .{@tagName(kernel.options.arch)});
 
-        var libexeobj_steps = std.ArrayListManaged(*Build.LibExeObjStep).initCapacity(kernel.builder.allocator, user_programs.len) catch unreachable;
+        var libexeobj_steps = common.ArrayListManaged(*Build.LibExeObjStep).initCapacity(kernel.builder.allocator, user_programs.len) catch unreachable;
         inline for (user_programs) |user_program| {
             const unique_program = Build.UserProgram.make(kernel.builder.allocator, user_program);
             const out_filename = kernel.builder.fmt("{s}.elf", .{unique_program.name});
@@ -170,7 +176,7 @@ const Kernel = struct {
                             const path_to_cobject = cobjects.dependency.get_path_to_file(kernel.builder.allocator, object_name);
                             program.addObjectFile(path_to_cobject);
                         }
-                        std.assert(cobjects.dependency.dependencies.len == 0);
+                        common.assert(cobjects.dependency.dependencies.len == 0);
                     },
                     else => unreachable,
                 }
@@ -206,10 +212,10 @@ const Kernel = struct {
     }
 
     fn create_run_and_debug_steps(kernel: *Kernel) void {
-        kernel.run_argument_list = std.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        kernel.run_argument_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
-                const qemu_name = std.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
+                const qemu_name = common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
                 kernel.run_argument_list.append(qemu_name) catch unreachable;
 
                 kernel.run_argument_list.append("-trace") catch unreachable;
@@ -306,7 +312,7 @@ const Kernel = struct {
                         },
                         .ide => {
                             kernel.run_argument_list.append("-device") catch unreachable;
-                            std.assert(kernel.options.arch == .x86_64);
+                            common.assert(kernel.options.arch == .x86_64);
                             kernel.run_argument_list.append("piix3-ide,id=ide") catch unreachable;
 
                             kernel.run_argument_list.append("-drive") catch unreachable;
@@ -345,7 +351,7 @@ const Kernel = struct {
                     kernel.run_argument_list.append(machine) catch unreachable;
 
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
-                        var log_what = std.ArrayListManaged(u8).init(kernel.builder.allocator);
+                        var log_what = common.ArrayListManaged(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
                         if (log_options.cpu) log_what.appendSlice("cpu,") catch unreachable;
                         if (log_options.interrupts) log_what.appendSlice("int,") catch unreachable;
@@ -400,7 +406,7 @@ const Kernel = struct {
             else => unreachable,
         }
 
-        var gdb_script_buffer = std.ArrayListManaged(u8).init(kernel.builder.allocator);
+        var gdb_script_buffer = common.ArrayListManaged(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
             .x86_64 => gdb_script_buffer.appendSlice("set disassembly-flavor intel\n") catch unreachable,
             else => {},
@@ -441,7 +447,7 @@ const Kernel = struct {
 
                 fn build(step: *Build.Step) !void {
                     const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-                    std.assert(kernel.options.arch == .x86_64);
+                    common.assert(kernel.options.arch == .x86_64);
                     const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
                     const cwd = Build.cwd();
                     cwd.deleteFile(image_path) catch {};
@@ -465,7 +471,7 @@ const Kernel = struct {
                     try Build.Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
                     try Build.Dir.copyFile(cwd, kernel_path, img_dir, Build.path.basename(kernel_path), .{});
 
-                    const xorriso_executable = switch (std.os) {
+                    const xorriso_executable = switch (common.os) {
                         .windows => "tools/xorriso-windows/xorriso.exe",
                         else => "xorriso",
                     };
@@ -496,12 +502,12 @@ const Kernel = struct {
 
         fn make(step: *Build.Step) !void {
             const kernel = @fieldParentPtr(Kernel, "disk_step", step);
-            const max_file_length = std.max_int(usize);
+            const max_file_length = common.max_int(usize);
 
             // TODO:
             for (kernel.options.run.disks) |_, disk_i| {
                 const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024) catch unreachable;
-                var build_disk_buffer = std.ArrayListAligned(u8, 0x1000){
+                var build_disk_buffer = common.ArrayListAligned(u8, 0x1000){
                     .items = disk_memory,
                     .capacity = disk_memory.len,
                 };
@@ -509,7 +515,7 @@ const Kernel = struct {
                 var build_disk = Build.Disk.new(build_disk_buffer);
                 var build_fs = Build.Filesystem.new(&build_disk);
 
-                std.assert(resource_files.len > 0);
+                common.assert(resource_files.len > 0);
 
                 for (resource_files) |resource_file| {
                     const file = try Build.cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{resource_file}), max_file_length);
@@ -518,14 +524,14 @@ const Kernel = struct {
                     //build_fs.write_file(Build.get_allocator(kernel.builder), resource_file, file, null) catch unreachable;
                 }
 
-                std.assert(kernel.userspace_programs.len > 0);
+                common.assert(kernel.userspace_programs.len > 0);
 
                 for (kernel.userspace_programs) |program| {
                     const exe_name = program.out_filename;
-                    std.log.debug("Exe name: {s}", .{exe_name});
+                    common.log.debug("Exe name: {s}", .{exe_name});
                     const exe_path = program.output_path_source.getPath();
-                    std.log.debug("Exe path: {s}", .{exe_path});
-                    const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, std.max_int(usize));
+                    common.log.debug("Exe path: {s}", .{exe_path});
+                    const exe_file_content = try Build.cwd().readFileAlloc(kernel.builder.allocator, exe_path, common.max_int(usize));
                     build_fs.write_file(exe_file_content);
                     // TODO:
                     //build_fs.write_file(Build.get_allocator(kernel.builder), exe_name, exe_file_content, null) catch unreachable;
@@ -542,9 +548,9 @@ const Kernel = struct {
         fn find_userspace_program(kernel: *Kernel, userspace_program_name: []const u8) ?*Build.LibExeObjStep {
             for (kernel.userspace_programs) |userspace_program| {
                 const ending = ".elf";
-                std.assert(std.ends_with(u8, userspace_program.out_filename, ending));
+                common.assert(common.ends_with(u8, userspace_program.out_filename, ending));
                 const name = userspace_program.out_filename[0 .. userspace_program.out_filename.len - ending.len];
-                if (std.equal(u8, name, userspace_program_name)) {
+                if (common.equal(u8, name, userspace_program_name)) {
                     return userspace_program;
                 }
             }

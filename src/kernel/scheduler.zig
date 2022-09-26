@@ -1,33 +1,31 @@
 const Scheduler = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
 
-const arch = @import("arch/common.zig");
-const common = @import("common.zig");
+const RNU = @import("RNU");
+const ELF = RNU.ELF;
+const Filesystem = RNU.Filesystem;
+const PhysicalAddress = RNU.PhysicalAddress;
+const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
+const PrivilegeLevel = RNU.PrivilegeLevel;
+const Spinlock = RNU.Spinlock;
+const Syscall = RNU.Syscall;
+const Thread = RNU.Thread;
+const TODO = RNU.TODO;
+const VirtualAddress = RNU.VirtualAddress;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const VirtualMemoryRegion = RNU.VirtualMemoryRegion;
+
+const kernel = @import("kernel");
+
+const arch = @import("arch");
 const Context = arch.Context;
-const context_switch = @import("arch/context_switch.zig");
+const context_switch = arch.context_switch;
 const CPU = arch.CPU;
-const crash = @import("crash.zig");
-const ELF = @import("elf.zig");
-const Filesystem = @import("../drivers/filesystem.zig");
-const interrupts = @import("arch/interrupts.zig");
-const kernel = @import("kernel.zig");
-const PhysicalAddress = @import("physical_address.zig");
-const PhysicalAddressSpace = @import("physical_address_space.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
-const Spinlock = @import("spinlock.zig");
-const Syscall = @import("syscall.zig");
-const Thread = @import("thread.zig");
-const TLS = @import("arch/tls.zig");
-const VirtualAddress = @import("virtual_address.zig");
-const VirtualAddressSpace = @import("virtual_address_space.zig");
-const VirtualMemoryRegion = @import("virtual_memory_region.zig");
+const interrupts = arch.interrupts;
+const TLS = arch.TLS;
 const VAS = arch.VAS;
-
-const TODO = crash.TODO;
-const log = std.log.scoped(.Scheduler);
-const Allocator = std.Allocator;
 
 lock: Spinlock,
 thread_buffer: Thread.Buffer,
@@ -39,6 +37,8 @@ current_threads: []*Thread,
 initialized_ap_cpu_count: u64,
 
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
+    // TODO @Warning @Error We are not supposed to log in performance-sensitive context
+    const log = common.log.scoped(.Yield);
     const current_thread = TLS.get_current();
     const current_cpu = current_thread.cpu.?;
     if (current_cpu.spinlock_count > 0) {
@@ -46,10 +46,10 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     }
     interrupts.disable();
     scheduler.lock.acquire();
-    std.log.scoped(.Yield).debug("Current thread: #{}", .{current_thread.id});
+    log.debug("Current thread: #{}", .{current_thread.id});
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
-    std.assert(current_thread.state == .active);
+    assert(current_thread.state == .active);
     current_thread.context = old_context;
     old_address_space = current_thread.address_space;
     if (current_thread.state == .active and current_thread.type != .idle) {
@@ -59,7 +59,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     new_thread.time_slices += 1;
     //current_thread.state = .paused;
     new_thread.state = .active;
-    if (new_thread.context.cs == 0x4b) std.assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
+    if (new_thread.context.cs == 0x4b) assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
 
     interrupts.disable_all();
     VAS.switch_address_spaces_if_necessary(new_thread.address_space);
@@ -110,9 +110,9 @@ pub fn spawn_kernel_thread(scheduler: *Scheduler, kernel_address_space: *Virtual
 }
 
 pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) !*Thread {
-    std.assert(kernel_address_space.privilege_level == .kernel);
-    std.assert(privilege_level == .user);
-    const executable_file = try drive.read_file(kernel_address_space, executable_filename);
+    assert(kernel_address_space.privilege_level == .kernel);
+    assert(privilege_level == .user);
+    const executable_file = try drive.read_file(kernel_address_space.heap.allocator, executable_filename, null);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space);
     const elf_result = ELF.load(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
@@ -160,7 +160,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         },
         .user => blk: {
             const user_stack_size = default_user_stack_size;
-            std.assert(std.is_aligned(user_stack_size, arch.page_size));
+            assert(common.is_aligned(user_stack_size, arch.page_size));
             const user_stack = thread_virtual_address_space.allocate(user_stack_size, null, .{ .write = true, .user = true }) catch @panic("user stack");
             break :blk ThreadStack{
                 .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
@@ -171,7 +171,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
 
     scheduler.initialize_thread(thread, thread_id, thread_virtual_address_space, privilege_level, .normal, entry_point, thread_stack);
 
-    log.debug("Spawning thread with id #{}", .{thread_id});
+    common.log.scoped(.SpawnThread).debug("Spawning thread with id #{}", .{thread_id});
 
     return thread;
 }
@@ -209,17 +209,18 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
 
         if (privilege_level == .user) {
             // TODO: be more careful about virtual and physical addresses
-            const primary_graphics = kernel.device_manager.get_primary_graphics();
-            const primary_framebuffer = primary_graphics.framebuffer;
-            const framebuffer_kernel_virtual_address = VirtualAddress.new(@ptrToInt(primary_framebuffer.bytes));
-            log.debug("Trying to find out framebuffer physical address out of this virtual address: {}", .{framebuffer_kernel_virtual_address});
-            const framebuffer_physical_address = thread_virtual_address_space.translate_address(framebuffer_kernel_virtual_address) orelse unreachable;
-            const framebuffer_virtual_address = VirtualAddress.new(framebuffer_physical_address.value);
-            thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, std.align_forward(primary_framebuffer.stride * primary_framebuffer.height, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
-            thread.framebuffer = thread_virtual_address_space.heap.allocator.create(common.Framebuffer) catch unreachable;
-            const framebuffer = PhysicalAddress.new(@ptrToInt(thread.framebuffer)).to_higher_half_virtual_address().access(*common.Framebuffer);
-            framebuffer.* = primary_framebuffer;
-            framebuffer.bytes = framebuffer_virtual_address.access([*]u8);
+            @panic("todo framebuffer scheduler");
+            //const primary_graphics = kernel.device_manager.get_primary_graphics();
+            //const primary_framebuffer = primary_graphics.framebuffer;
+            //const framebuffer_kernel_virtual_address = VirtualAddress.new(@ptrToInt(primary_framebuffer.bytes));
+            //common.log.scoped(.InitializeThread).debug("Trying to find out framebuffer physical address out of this virtual address: {}", .{framebuffer_kernel_virtual_address});
+            //const framebuffer_physical_address = thread_virtual_address_space.translate_address(framebuffer_kernel_virtual_address) orelse unreachable;
+            //const framebuffer_virtual_address = VirtualAddress.new(framebuffer_physical_address.value);
+            //thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, common.align_forward(primary_framebuffer.stride * primary_framebuffer.height, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
+            //thread.framebuffer = thread_virtual_address_space.heap.allocator.create(common.Framebuffer) catch unreachable;
+            //const framebuffer = PhysicalAddress.new(@ptrToInt(thread.framebuffer)).to_higher_half_virtual_address().access(*common.Framebuffer);
+            //framebuffer.* = primary_framebuffer;
+            //framebuffer.bytes = framebuffer_virtual_address.access([*]u8);
         } else {
             // Index out of bounds
             //const primary_graphics = kernel.device_manager.get_primary_graphics();

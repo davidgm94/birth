@@ -1,20 +1,30 @@
 const Disk = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
+const Allocator = common.CustomAllocator;
+const log = common.log.scoped(.Disk);
+pub const Type = common.DiskDriverType;
 
-const DeviceManager = @import("../kernel/device_manager.zig");
-const DiskInterface = @import("disk_interface.zig");
-const Drivers = @import("common.zig");
-const RNUFS = @import("rnufs/rnufs.zig");
-const VirtualAddressSpace = @import("../kernel/virtual_address_space.zig");
+const RNU = @import("RNU");
+const DeviceManager = RNU.DeviceManager;
+const DMA = RNU.Drivers.DMA;
+const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
-const log = std.log.scoped(.Disk);
+const RNUFS = @import("../drivers/rnufs/rnufs.zig");
 
-interface: DiskInterface,
+type: Type,
+sector_size: u64,
+callback_access: *const fn (disk: *Disk, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
+callback_get_dma_buffer: *const fn (disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer,
 
-pub const Type = DiskInterface.Type;
-pub const Work = DiskInterface.Work;
-pub const Operation = DiskInterface.Operation;
+pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64 {
+    return disk.callback_access(disk, buffer, disk_work, extra_context);
+}
+
+pub fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
+    return try disk.callback_get_dma_buffer(disk, allocator, sector_count);
+}
 
 pub const Filesystems = .{RNUFS};
 
@@ -28,3 +38,21 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
         Filesystem.init(device_manager, virtual_address_space, disk) catch |err| log.err("Failed to initialized filesystem {}: {}", .{ Filesystem, err });
     }
 }
+
+pub const Work = struct {
+    sector_offset: u64,
+    sector_count: u64,
+    operation: Operation,
+};
+
+pub const Operation = enum(u1) {
+    read = 0,
+    write = 1,
+
+    // This is used by NVMe and AHCI
+    comptime {
+        assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
+        assert(@enumToInt(Operation.read) == 0);
+        assert(@enumToInt(Operation.write) == 1);
+    }
+};

@@ -1,9 +1,10 @@
 const Timer = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
 
-const common = @import("./arch/common.zig");
-const CPU = common.CPU;
+const RNU = @import("RNU");
+const arch = @import("arch");
+const CPU = arch.CPU;
 
 timer_start: u64,
 timer_end: u64,
@@ -36,12 +37,12 @@ pub fn Scoped(comptime ID: @TypeOf(.EnumLiteral)) type {
 
         pub fn end_and_log(scoped_timer: *@This()) void {
             const cycles = scoped_timer.timer.end_and_get_metric();
-            std.log.scoped(ID).info("{} cycles", .{cycles});
+            common.log.scoped(ID).info("{} cycles", .{cycles});
         }
 
         pub fn end_and_custom_log(scoped_timer: *@This(), comptime format: []const u8, args: anytype) void {
             scoped_timer.end_and_log();
-            std.log.scoped(ID).debug(format, args);
+            common.log.scoped(ID).debug(format, args);
         }
     };
 }
@@ -71,10 +72,10 @@ pub fn Accumulator(comptime ID: @TypeOf(.EnumLiteral), comptime array_size: comp
             var last = timer_accumulator.base_timestamp;
             for (timer_accumulator.timestamps[0..timer_accumulator.timestamp_count]) |timestamp, i| {
                 defer last = timestamp;
-                std.log.scoped(ID).info("Timestamp #{}: {} cycles", .{ i, timestamp - last });
+                common.log.scoped(ID).info("Timestamp #{}: {} cycles", .{ i, timestamp - last });
             }
 
-            std.log.scoped(ID).info("Total took {} cycles", .{timer_accumulator.timestamps[timer_accumulator.timestamp_count - 1] - timer_accumulator.base_timestamp});
+            common.log.scoped(ID).info("Total took {} cycles", .{timer_accumulator.timestamps[timer_accumulator.timestamp_count - 1] - timer_accumulator.base_timestamp});
         }
     };
 }

@@ -1,30 +1,32 @@
 const VirtualAddressSpace = @This();
 
-const std = @import("../common/std.zig");
+const common = @import("common");
+const Allocator = common.CustomAllocator;
+const ArrayList = common.ArrayList;
+const assert = common.assert;
+const is_aligned = common.is_aligned;
+const log = common.log.scoped(.VirtualAddressSpace);
+const zeroes = common.zeroes;
 
-const arch = @import("arch/common.zig");
-const crash = @import("crash.zig");
-const Heap = @import("heap.zig");
-const kernel = @import("kernel.zig");
-const log = std.log.scoped(.VirtualAddressSpace);
-const PhysicalAddress = @import("physical_address.zig");
-const PhysicalAddressSpace = @import("physical_address_space.zig");
-const PhysicalMemoryRegion = @import("physical_memory_region.zig");
-const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
-const Spinlock = @import("spinlock.zig");
+const RNU = @import("RNU");
+const Heap = RNU.Heap;
+const panic = RNU.panic;
+const PhysicalAddress = RNU.PhysicalAddress;
+const PrivilegeLevel = RNU.PrivilegeLevel;
+const Spinlock = RNU.Spinlock;
+const VirtualAddress = RNU.VirtualAddress;
+
+const kernel = @import("kernel");
+
+const arch = @import("arch");
 const VAS = arch.VAS;
-const VirtualAddress = @import("virtual_address.zig");
-const VirtualMemoryRegion = @import("virtual_memory_region.zig");
-
-// TODO: Make this safe
-var tree_buffer: [1024 * 1024 * 50]u8 = undefined;
 
 arch: VAS.Specific,
 privilege_level: PrivilegeLevel,
 heap: Heap,
 lock: Spinlock,
-free_regions: std.ArrayList(Region) = .{},
-used_regions: std.ArrayList(Region) = .{},
+free_regions: ArrayList(Region) = .{},
+used_regions: ArrayList(Region) = .{},
 
 pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     VAS.from_current(virtual_address_space);
@@ -52,7 +54,7 @@ pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
     if (kernel.config.safe_slow) {
-        std.assert(kernel.memory_initialized);
+        assert(kernel.memory_initialized);
     }
     const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no);
     return result.virtual_address;
@@ -75,11 +77,11 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
 
     const page_count = @divFloor(byte_count, arch.page_size);
     const page_aligned_size = page_count * arch.page_size;
-    const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return std.Allocator.Error.OutOfMemory;
+    const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            std.assert(flags.user == (specific_address.value < kernel.higher_half_direct_map.value));
+            assert(flags.user == (specific_address.value < kernel.higher_half_direct_map.value));
             break :blk specific_address;
         } else {
             if (flags.user) {
@@ -91,7 +93,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     };
 
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
-    if (flags.user) std.assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
+    if (flags.user) assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
 
     // Only map in user space
     if (flags.user) {
@@ -109,7 +111,7 @@ pub const MapError = error{
 };
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags) MapError!void {
-    std.assert(kernel.memory_initialized);
+    assert(kernel.memory_initialized);
     try map_extended(virtual_address_space, base_physical_address, base_virtual_address, size, flags, AlreadyLocked.no);
 }
 
@@ -120,7 +122,7 @@ pub const AlreadyLocked = enum {
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
     if (already_locked == .yes) {
-        std.assert(virtual_address_space.lock.status != 0);
+        assert(virtual_address_space.lock.status != 0);
     } else {
         virtual_address_space.lock.acquire();
     }
@@ -130,8 +132,8 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
         }
     }
 
-    if (!std.is_aligned(size, arch.page_size)) {
-        crash.panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
+    if (!is_aligned(size, arch.page_size)) {
+        panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
     }
 
     if (!kernel.memory_initialized) {
@@ -154,7 +156,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     //if (free_region.contains(region)) {
     //log.debug("Contained", .{});
     //if (region.address.value == free_region.address.value) {
-    //std.assert(free_region.size >= region.size);
+    //assert(free_region.size >= region.size);
     //if (free_region.size > region.size) {
     //free_region.address.value += region.size;
     //free_region.size -= region.size;
@@ -219,7 +221,7 @@ pub const TranslationResult = struct {
 
 pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {
     if (already_locked == .yes) {
-        std.assert(virtual_address_space.lock.status != 0);
+        assert(virtual_address_space.lock.status != 0);
     } else {
         virtual_address_space.lock.acquire();
     }
@@ -250,7 +252,7 @@ pub const Flags = packed struct {
     user: bool = false,
 
     pub inline fn empty() Flags {
-        return std.zeroes(Flags);
+        return common.zeroes(Flags);
     }
 
     pub inline fn to_arch_specific(flags: Flags) VAS.MemoryFlags {
@@ -351,7 +353,7 @@ pub const Region = struct {
 };
 
 pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, size: u64, flags: Flags) void {
-    std.assert(virtual_address_space == &kernel.virtual_address_space);
+    assert(virtual_address_space == &kernel.virtual_address_space);
     // Fake a free region
     virtual_address_space.free_regions.append(virtual_address_space.heap.allocator.get_allocator(), VirtualAddressSpace.Region{
         .address = virtual_address,
@@ -361,6 +363,6 @@ pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical
     kernel.virtual_address_space.map(physical_address, virtual_address, size, flags) catch @panic("Unable to map reserved region");
 }
 
-pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: std.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try std.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
+pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
 }

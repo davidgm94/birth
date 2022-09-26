@@ -1,12 +1,12 @@
 //! This is a custom variation of the USTAR filesystem just to get started with
 const RNUFS = @This();
 
-const std = @import("std.zig");
+const common = @import("../common.zig");
 
-const FilesystemInterface = @import("../drivers/filesystem_interface.zig");
+//const Allocator = std.CustomAllocator;
+//const log = std.log.scoped(.RNUFS);
 
-const Allocator = std.CustomAllocator;
-const log = std.log.scoped(.RNUFS);
+pub const presupposed_sector_size = 0x200;
 
 pub const Superblock = struct {
     signature: [5]u8 = default_signature,
@@ -29,74 +29,72 @@ pub const NodeType = enum(u64) {
     directory = 2,
 };
 
-pub const presupposed_sector_size = 0x200;
+//pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) FilesystemInterface.WriteError!void {
+//log.debug("Writing new file: {s}. Size: {}", .{ filename, file_content.len });
 
-pub fn write_file(fs_driver: *FilesystemInterface, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) FilesystemInterface.WriteError!void {
-    log.debug("Writing new file: {s}. Size: {}", .{ filename, file_content.len });
+//const sector_size = fs_driver.disk.sector_size;
+//std.assert(presupposed_sector_size == sector_size);
+//var sector: u64 = @divExact(@sizeOf(Superblock), sector_size);
+//{
+//log.debug("Seeking file {s}", .{filename});
+//const sectors_to_read_at_time = 1;
+//var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sectors_to_read_at_time) catch {
+//log.err("Unable to allocate search buffer", .{});
+//@panic("lol");
+//};
 
-    const sector_size = fs_driver.disk.sector_size;
-    std.assert(presupposed_sector_size == sector_size);
-    var sector: u64 = @divExact(@sizeOf(Superblock), sector_size);
-    {
-        log.debug("Seeking file {s}", .{filename});
-        const sectors_to_read_at_time = 1;
-        var search_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sectors_to_read_at_time) catch {
-            log.err("Unable to allocate search buffer", .{});
-            @panic("lol");
-        };
+//log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
 
-        log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
+//while (true) {
+//log.debug("FS driver asking read at sector {}", .{sector});
+//const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, .{
+//.sector_offset = sector,
+//.sector_count = sectors_to_read_at_time,
+//.operation = .read,
+//}, extra_context);
+//if (sectors_read != sectors_to_read_at_time) @panic("Driver internal error: cannot seek file");
+////for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
+////if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
+////}
+//log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
+////log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)}); TODO: this crashes stage2 https://github.com/ziglang/zig/issues/12488
+//var node = @intToPtr(*RNUFS.Node, search_buffer.virtual_address);
+//log.debug("Node type: {}", .{node.type});
+//if (node.type == .empty) break;
+//const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
+//const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
+//if (node_name.len == 0) break;
 
-        while (true) {
-            log.debug("FS driver asking read at sector {}", .{sector});
-            const sectors_read = fs_driver.disk.access(fs_driver.disk, &search_buffer, .{
-                .sector_offset = sector,
-                .sector_count = sectors_to_read_at_time,
-                .operation = .read,
-            }, extra_context);
-            if (sectors_read != sectors_to_read_at_time) @panic("Driver internal error: cannot seek file");
-            //for (search_buffer.address.access([*]const u8)[0..sector_size]) |byte, i| {
-            //if (byte != 0) log.debug("[{}] 0x{x}", .{ i, byte });
-            //}
-            log.debug("Search buffer address: 0x{x}", .{search_buffer.virtual_address});
-            //log.debug("Alignment of node: 0x{x}", .{@alignOf(RNUFS.Node)}); TODO: this crashes stage2 https://github.com/ziglang/zig/issues/12488
-            var node = @intToPtr(*RNUFS.Node, search_buffer.virtual_address);
-            log.debug("Node type: {}", .{node.type});
-            if (node.type == .empty) break;
-            const node_name_cstr = @ptrCast([*:0]const u8, &node.name);
-            const node_name = node_name_cstr[0..std.cstr_len(node_name_cstr)];
-            if (node_name.len == 0) break;
+//const sectors_to_add = 1 + (std.div_ceil(u64, node.size, sector_size) catch unreachable);
+//log.debug("Found file with name: {s} and size: {}. Need to skip {} sectors", .{ node_name, node.size, sectors_to_add });
+//sector += sectors_to_add;
+//}
+//}
 
-            const sectors_to_add = 1 + (std.div_ceil(u64, node.size, sector_size) catch unreachable);
-            log.debug("Found file with name: {s} and size: {}. Need to skip {} sectors", .{ node_name, node.size, sectors_to_add });
-            sector += sectors_to_add;
-        }
-    }
+//const sector_count = 1 + (std.div_ceil(u64, file_content.len, fs_driver.disk.sector_size) catch unreachable);
+//log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
+//var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
+//log.err("Unable to allocate write buffer", .{});
+//@panic("lol");
+//};
 
-    const sector_count = 1 + (std.div_ceil(u64, file_content.len, fs_driver.disk.sector_size) catch unreachable);
-    log.debug("Started writing {} sectors at sector offset {}", .{ sector_count, sector });
-    var write_buffer = fs_driver.disk.get_dma_buffer(fs_driver.disk, allocator, sector_count) catch {
-        log.err("Unable to allocate write buffer", .{});
-        @panic("lol");
-    };
+//// Copy file metadata
+//var node = @intToPtr(*RNUFS.Node, write_buffer.virtual_address);
+//node.size = file_content.len;
+//std.assert(filename.len < node.name.len);
+//std.copy(u8, &node.name, filename);
+//node.name[filename.len] = 0;
+//node.type = .file;
+//node.parent = std.zeroes([100]u8);
+//node.last_modification = 0;
 
-    // Copy file metadata
-    var node = @intToPtr(*RNUFS.Node, write_buffer.virtual_address);
-    node.size = file_content.len;
-    std.assert(filename.len < node.name.len);
-    std.copy(u8, &node.name, filename);
-    node.name[filename.len] = 0;
-    node.type = .file;
-    node.parent = std.zeroes([100]u8);
-    node.last_modification = 0;
+//// Copy the actual file content
+//std.copy(u8, @intToPtr([*]u8, write_buffer.virtual_address)[sector_size..write_buffer.total_size], file_content);
 
-    // Copy the actual file content
-    std.copy(u8, @intToPtr([*]u8, write_buffer.virtual_address)[sector_size..write_buffer.total_size], file_content);
-
-    const bytes = fs_driver.disk.access(fs_driver.disk, &write_buffer, .{
-        .sector_offset = sector,
-        .sector_count = sector_count,
-        .operation = .write,
-    }, extra_context);
-    log.debug("Wrote {} bytes", .{bytes});
-}
+//const bytes = fs_driver.disk.access(fs_driver.disk, &write_buffer, .{
+//.sector_offset = sector,
+//.sector_count = sector_count,
+//.operation = .write,
+//}, extra_context);
+//log.debug("Wrote {} bytes", .{bytes});
+//}

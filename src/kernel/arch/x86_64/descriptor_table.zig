@@ -1,10 +1,11 @@
-const std = @import("../../../common/std.zig");
+const common = @import("common");
+const assert = common.assert;
 
 pub const Register = extern struct {
     limit: u16,
     address: u64 align(2),
 
     comptime {
-        std.assert(@sizeOf(Register) == 10);
+        assert(@sizeOf(Register) == 10);
     }
 };

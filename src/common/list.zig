@@ -1,7 +1,9 @@
-const std = @import("std.zig");
-const Allocator = std.CustomAllocator;
-
-const log = std.log.scoped(.List);
+const common = @import("common");
+const Allocator = common.CustomAllocator;
+const assert = common.assert;
+const div_ceil = common.div_ceil;
+const log = common.log.scoped(.List);
+const zeroes = common.zeroes;
 
 /// This list works when you are having multiple lists of the same type
 pub fn ListItem(comptime T: type) type {
@@ -9,7 +11,7 @@ pub fn ListItem(comptime T: type) type {
         previous: ?*@This() = null,
         next: ?*@This() = null,
         list: ?*List(T) = null,
-        data: T, // = std.zeroes(T), This trips a bug in stage 1
+        data: T, // = zeroes(T), This trips a bug in stage 1
 
         pub fn new(data: T) @This() {
             return @This(){
@@ -26,20 +28,20 @@ pub fn List(comptime T: type) type {
         count: u64 = 0,
 
         pub fn append(list: *@This(), list_item: *ListItem(T), item: T) !void {
-            std.assert(list_item.previous == null);
-            std.assert(list_item.next == null);
-            std.assert(list_item.list == null);
+            assert(list_item.previous == null);
+            assert(list_item.next == null);
+            assert(list_item.list == null);
             list_item.data = item;
 
             if (list.last) |last| {
-                std.assert(list.first != null);
-                std.assert(list.count > 0);
+                assert(list.first != null);
+                assert(list.count > 0);
                 last.next = list_item;
                 list_item.previous = last;
                 list.last = list_item;
             } else {
-                std.assert(list.first == null);
-                std.assert(list.count == 0);
+                assert(list.first == null);
+                assert(list.count == 0);
                 list.first = list_item;
                 list.last = list_item;
             }
@@ -49,7 +51,7 @@ pub fn List(comptime T: type) type {
         }
 
         pub fn remove(list: *@This(), list_item: *ListItem(T)) void {
-            std.assert(list_item.list == list);
+            assert(list_item.list == list);
             if (list_item.previous) |previous| {
                 previous.next = list_item.next;
             } else {
@@ -65,17 +67,17 @@ pub fn List(comptime T: type) type {
 
             list.count -= 1;
             list_item.list = null;
-            std.assert(list.count == 0 or (list.first != null and list.last != null));
+            assert(list.count == 0 or (list.first != null and list.last != null));
         }
     };
 }
 
 pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
-    //const IntShifterType = std.IntType(.unsigned, @ctz(@bitSizeOf(IntType)));
+    //const IntShifterType = IntType(.unsigned, @ctz(@bitSizeOf(IntType)));
 
     //const bitset_size = bucket_size / @bitSizeOf(IntType);
-    //std.assert(bucket_size % @bitSizeOf(IntType) == 0);
+    //assert(bucket_size % @bitSizeOf(IntType) == 0);
 
     return struct {
         first: ?*Bucket = null,
@@ -93,7 +95,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
             // TODO: make this good
             pub fn allocate_indices(bucket: *Bucket, count: u64) u64 {
-                std.assert(count == 1);
+                assert(count == 1);
                 if (bucket.count + count <= bucket_size) {
                     const result = bucket.count;
                     bucket.count += count;
@@ -104,10 +106,10 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             }
         };
 
-        pub fn add_one(stable_buffer: *@This(), allocator: Allocator) std.Allocator.Error!*T {
+        pub fn add_one(stable_buffer: *@This(), allocator: Allocator) Allocator.Error!*T {
             if (stable_buffer.first == null) {
                 const first_bucket = try allocator.create(Bucket);
-                first_bucket.* = Bucket{ .data = std.zeroes([bucket_size]T) };
+                first_bucket.* = Bucket{ .data = zeroes([bucket_size]T) };
                 const index = first_bucket.allocate_indices(1);
                 stable_buffer.first = first_bucket;
                 stable_buffer.bucket_count += 1;
@@ -133,10 +135,10 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             }
         }
 
-        pub fn add_many(stable_buffer: *@This(), allocator: Allocator, count: u64) std.Allocator.Error![]T {
+        pub fn add_many(stable_buffer: *@This(), allocator: Allocator, count: u64) Allocator.Error![]T {
             if (stable_buffer.first == null) {
-                const bucket_count = std.div_ceil(u64, count, Bucket.size) catch unreachable;
-                //std.assert(bucket_count == 1);
+                const bucket_count = div_ceil(u64, count, Bucket.size) catch unreachable;
+                //assert(bucket_count == 1);
                 const buckets = try allocator.allocate_many(Bucket, bucket_count);
 
                 var elements_allocated: u64 = count;
@@ -155,11 +157,11 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                         maybe_previous = bucket;
                     }
 
-                    bucket.* = Bucket{ .count = Bucket.size, .previous = maybe_previous, .data = std.zeroes([bucket_size]T) };
+                    bucket.* = Bucket{ .count = Bucket.size, .previous = maybe_previous, .data = zeroes([bucket_size]T) };
                 }
 
                 const last_bucket = &buckets[i];
-                last_bucket.* = Bucket{ .count = elements_allocated, .previous = maybe_previous, .data = std.zeroes([bucket_size]T) };
+                last_bucket.* = Bucket{ .count = elements_allocated, .previous = maybe_previous, .data = zeroes([bucket_size]T) };
 
                 stable_buffer.bucket_count += buckets.len;
                 stable_buffer.element_count += count;

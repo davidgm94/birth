@@ -1,9 +1,14 @@
-const std = @import("../../../common/std.zig");
-const CPU = @import("cpu.zig");
-const Thread = @import("../../thread.zig");
-const VirtualAddressSpace = @import("../../virtual_address_space.zig");
-const Scheduler = @import("../../scheduler.zig");
-const registers = @import("registers.zig");
+const common = @import("common");
+const log = common.log.scoped(.TLS);
+
+const RNU = @import("RNU");
+const Scheduler = RNU.Scheduler;
+const Thread = RNU.Thread;
+
+const arch = @import("arch");
+const x86_64 = arch.x86_64;
+const CPU = x86_64.CPU;
+const registers = x86_64.registers;
 
 var my_current_thread: *Thread = undefined;
 
@@ -23,7 +28,7 @@ pub inline fn preset(scheduler: *Scheduler, cpu: *CPU) void {
 pub inline fn set_current(scheduler: *Scheduler, thread: *Thread, cpu: *CPU) void {
     scheduler.current_threads[cpu.id] = thread;
     thread.cpu = cpu;
-    std.log.scoped(.TLS).debug("Setting current thread #{}", .{thread.id});
+    log.debug("Setting current thread #{}", .{thread.id});
 }
 
 pub inline fn get_current() *Thread {
