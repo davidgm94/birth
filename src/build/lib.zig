@@ -78,7 +78,7 @@ pub const path = zig_std.fs.path;
 pub const basename = zig_std.fs.path.basename;
 pub const dirname = zig_std.fs.path.dirname;
 
-pub const QEMU = @import("../common/qemu/common.zig");
+pub const QEMU = std.QEMU;
 
 pub fn add_qemu_debug_isa_exit(builder: *Builder, list: *std.ArrayListManaged([]const u8), qemu_debug_isa_exit: QEMU.ISADebugExit) !void {
     try list.append("-device");
