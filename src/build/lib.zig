@@ -28,6 +28,7 @@ pub const fork = zig_std.os.fork;
 pub const ChildProcess = zig_std.ChildProcess;
 pub const waitpid = zig_std.os.waitpid;
 
+const Allocator = std.Allocator;
 const CustomAllocator = std.CustomAllocator;
 
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
@@ -51,7 +52,8 @@ pub fn get_allocator(builder: *Builder) CustomAllocator {
         .context = builder,
     };
 }
-pub const zero_allocator = CustomAllocator{ .allocate = zero_allocate, .context = null };
+
+pub const zero_allocator = CustomAllocator{ .callback_allocate = zero_allocate, .context = null };
 
 fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     const builder = @ptrCast(*Builder, @alignCast(@alignOf(Builder), allocator.context));
@@ -62,13 +64,13 @@ fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocat
     };
 }
 
-fn zero_allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Result {
+fn zero_allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     _ = allocator;
     std.assert(alignment <= 0x1000);
     const result = allocate_zero_memory(size) catch unreachable;
     return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
-        .size = result.size,
+        .size = result.len,
     };
 }
 
@@ -131,18 +133,10 @@ pub const Disk = struct {
     //return DMA.Buffer.new(allocator, allocation_size, alignment);
     //}
 
-    pub fn new(buffer: BufferType) Disk {
-        _ = buffer;
-        @panic("todo disk dma buffer");
-        //return Disk{
-        //.disk = DiskInterface{
-        //.sector_size = 0x200,
-        //.access = access,
-        //.get_dma_buffer = get_dma_buffer,
-        //.type = .memory,
-        //},
-        //.buffer = buffer,
-        //};
+    pub fn new(allocator: CustomAllocator, capacity: u64) Disk {
+        return Disk{
+            .buffer = BufferType.initCapacity(allocator.get_allocator(), capacity) catch unreachable,
+        };
     }
 };
 

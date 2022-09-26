@@ -519,13 +519,7 @@ const Kernel = struct {
 
             // TODO:
             for (kernel.options.run.disks) |_, disk_i| {
-                const disk_memory = Build.allocate_zero_memory(1024 * 1024 * 1024) catch unreachable;
-                var build_disk_buffer = common.ArrayListAligned(u8, 0x1000){
-                    .items = disk_memory,
-                    .capacity = disk_memory.len,
-                };
-                build_disk_buffer.items.len = 0;
-                var build_disk = Build.Disk.new(build_disk_buffer);
+                var build_disk = Build.Disk.new(Build.zero_allocator, 1024 * 1024 * 1024);
                 var build_fs = Build.Filesystem.new(&build_disk);
 
                 common.assert(resource_files.len > 0);

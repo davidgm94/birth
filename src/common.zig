@@ -188,9 +188,9 @@ pub const CustomAllocator = struct {
         return @intToPtr(*T, result.address);
     }
 
-    pub fn get_allocator(allocator: *CustomAllocator) Allocator {
+    pub fn get_allocator(allocator: *const CustomAllocator) Allocator {
         return Allocator{
-            .ptr = @ptrCast(*anyopaque, allocator),
+            .ptr = @intToPtr(*anyopaque, @ptrToInt(allocator)),
             .vtable = &vtable,
         };
     }
