@@ -1,5 +1,8 @@
 const Driver = @This();
 
+const common = @import("common");
+const log = common.log.scoped(.LimineGraphics);
+
 const RNU = @import("RNU");
 const Graphics = RNU.Graphics;
 
@@ -41,6 +44,7 @@ const ColorMask = struct {
 
 pub fn init(framebuffer: Limine.Framebuffer) !void {
     const driver = try kernel.virtual_address_space.heap.allocator.create(Driver);
+    log.debug("Receiving Limine framebuffer: {}", .{framebuffer});
     driver.* = Driver{
         .graphics = Graphics{
             .type = .limine,
@@ -49,10 +53,13 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
                     .bytes = @intToPtr([*]u8, framebuffer.address),
                     .width = @intCast(u32, framebuffer.width),
                     .height = @intCast(u32, framebuffer.height),
-                    .stride = @intCast(u32, framebuffer.bpp * framebuffer.width),
+                    .stride = @intCast(u32, framebuffer.pitch),
                 },
             },
-            .callback_update_screen = update_screen,
+            .callback_update_screen = switch (framebuffer.bpp) {
+                @bitSizeOf(u32) => update_screen_32,
+                else => unreachable,
+            },
         },
         .memory_model = framebuffer.memory_model,
         .red_mask = .{ .size = framebuffer.red_mask_size, .shift = framebuffer.red_mask_shift },
@@ -66,13 +73,6 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
     try Graphics.init(&driver.graphics);
 }
 
-fn update_screen(driver: *Graphics, source_buffer: [*]const u8, source_width: u32, source_height: u32, source_stride: u32, destination_x: u32, destination_y: u32) void {
-    _ = driver;
-    _ = source_buffer;
-    _ = source_width;
-    _ = source_height;
-    _ = source_stride;
-    _ = destination_x;
-    _ = destination_y;
-    @panic("todo update_screen");
+fn update_screen_32(driver: *Graphics, source: Graphics.DrawingArea, destination_point: Graphics.Point) void {
+    Graphics.update_screen_32(driver.framebuffer.area, source, destination_point);
 }

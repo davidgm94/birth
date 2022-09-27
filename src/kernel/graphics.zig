@@ -1,7 +1,8 @@
 const Driver = @This();
 
 const common = @import("common");
-const DrawingArea = common.DrawingArea;
+pub const DrawingArea = common.DrawingArea;
+const log = common.log.scoped(.Graphics);
 const zeroes = common.zeroes;
 
 const kernel = @import("kernel");
@@ -11,7 +12,7 @@ const Type = enum(u64) {
     virtio = 1,
 };
 
-const UpdateScreenFunction = fn (*Driver, source_buffer: [*]const u8, source_width: u32, source_height: u32, source_stride: u32, destination_x: u32, destination_y: u32) void;
+const UpdateScreenFunction = fn (graphics: *Driver, drawing_area: DrawingArea, destination: Point) void;
 
 type: Type,
 framebuffer: Framebuffer,
@@ -22,6 +23,7 @@ pub fn init(driver: *Driver) !void {
 }
 
 fn register(driver: *Driver) !void {
+    log.debug("Registering {}", .{driver.framebuffer.area});
     try kernel.device_manager.register(Driver, kernel.virtual_address_space.heap.allocator.get_allocator(), driver);
 
     // TODO: resize surface. Allocate a copy
@@ -36,15 +38,26 @@ pub const Point = struct {
 };
 
 pub const Rectangle = struct {
-    left: u64,
-    right: u64,
-    top: u64,
-    bottom: u64,
+    const Int = u32;
+
+    left: Int = 0,
+    right: Int = 0,
+    top: Int = 0,
+    bottom: Int = 0,
 
     pub const ClipResult = struct {
         rectangle: Rectangle,
         result: bool,
     };
+
+    pub fn from_width_and_height(asked_width: Int, asked_height: Int) Rectangle {
+        return Rectangle{
+            .left = 0,
+            .right = asked_width,
+            .top = 0,
+            .bottom = asked_height,
+        };
+    }
 
     pub fn clip(rectangle: Rectangle, current: Rectangle) ClipResult {
         const intersection = blk: {
@@ -66,12 +79,21 @@ pub const Rectangle = struct {
         };
     }
 
-    pub fn get_width(rectangle: Rectangle) u64 {
+    pub fn width(rectangle: Rectangle) Int {
         return rectangle.right - rectangle.left;
     }
 
-    pub fn get_height(rectangle: Rectangle) u64 {
+    pub fn height(rectangle: Rectangle) Int {
         return rectangle.bottom - rectangle.top;
+    }
+
+    pub fn bounding(rectangle: Rectangle, other: Rectangle) Rectangle {
+        return Rectangle{
+            .left = if (rectangle.left > other.left) other.left else rectangle.left,
+            .right = if (rectangle.right < other.right) other.right else rectangle.right,
+            .top = if (rectangle.top > other.top) other.top else rectangle.top,
+            .bottom = if (rectangle.bottom < other.bottom) other.bottom else rectangle.bottom,
+        };
     }
 };
 
@@ -179,18 +201,113 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 //
 pub const Framebuffer = struct {
     area: DrawingArea = .{},
+    modified_region: Rectangle = .{},
 
     pub fn get_pixel_count(framebuffer: Framebuffer) u32 {
         return framebuffer.area.width * framebuffer.area.height;
     }
 
     pub fn copy(framebuffer: *Framebuffer, source: *Framebuffer, destination_point: Point, source_region: Rectangle, add_to_modified_region: bool) void {
-        _ = framebuffer;
-        _ = source;
-        _ = destination_point;
-        _ = source_region;
-        _ = add_to_modified_region;
+        const destination_region = Rectangle{
+            .left = destination_point.x,
+            .right = destination_point.x + source_region.width(),
+            .top = destination_point.y,
+            .bottom = destination_point.y + source_region.height(),
+        };
 
-        @panic("todo copy");
+        if (add_to_modified_region) {
+            framebuffer.modified_region = destination_region.bounding(framebuffer.modified_region);
+            framebuffer.modified_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height).clip(framebuffer.modified_region).rectangle;
+        }
+
+        const clip_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height);
+        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_region.top + 4 * source_region.left));
+        draw_bitmap(framebuffer, clip_region, destination_region, source_ptr, source.area.stride, .opaque_mode);
+    }
+
+    pub fn draw(framebuffer: *Framebuffer, source: *Framebuffer, destination_region: Rectangle, source_x: u32, source_y: u32, alpha: DrawBitmapMode) void {
+        const clip_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height);
+        framebuffer.modified_region = destination_region.bounding(framebuffer.modified_region);
+        framebuffer.modified_region = clip_region.clip(framebuffer.modified_region).rectangle;
+        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_y + @sizeOf(u32) * source_x));
+        draw_bitmap(framebuffer, clip_region, destination_region, source_ptr, source.area.stride, alpha);
     }
 };
+
+pub fn update_screen_32(destination: DrawingArea, source: DrawingArea, destination_point: Point) void {
+    if (destination_point.x > destination.width or source.width > destination.width - destination_point.y or destination_point.y > destination.height or source.height > destination.height - destination_point.y) {
+        @panic("out of bounds");
+    }
+
+    var destination_row_start = @ptrCast([*]u32, @alignCast(@alignOf(u32), destination.bytes + destination_point.x * @sizeOf(u32) + destination_point.y * destination.stride));
+    var source_row_start = @ptrCast([*]const u32, @alignCast(@alignOf(u32), source.bytes));
+
+    var y: u32 = 0;
+    while (y < source.height) : ({
+        y += 1;
+        destination_row_start += destination.stride / @sizeOf(u32);
+        source_row_start += source.stride / @sizeOf(u32);
+    }) {
+        var dst = destination_row_start;
+        var src = source_row_start;
+
+        var x: u32 = 0;
+        while (x < source.width) : ({
+            x += 1;
+            dst += 1;
+            src += 1;
+        }) {
+            dst[0] = src[0];
+        }
+    }
+}
+
+pub const DrawBitmapMode = enum(u16) {
+    blend = 0,
+    xor = 0xfffe,
+    opaque_mode = 0xffff,
+    _,
+};
+
+pub fn draw_bitmap(framebuffer: *Framebuffer, clip_area: Rectangle, region: Rectangle, source_ptr: [*]const u32, asked_source_stride: u32, mode: DrawBitmapMode) void {
+    const clip_result = clip_area.clip(region);
+    if (!clip_result.result) {
+        return;
+    }
+    const bounds = clip_result.rectangle;
+
+    const source_stride = asked_source_stride / @sizeOf(u32);
+    const stride = framebuffer.area.stride / @sizeOf(u32);
+    const line_start_index = bounds.top * stride + bounds.left;
+    var line_start = @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes)) + line_start_index;
+    const source_line_start_index = bounds.left - region.left + source_stride * (bounds.top - region.top);
+    var source_line_start = source_ptr + source_line_start_index;
+
+    var i: u64 = 0;
+    while (i < bounds.bottom - bounds.top) : ({
+        i += 1;
+        line_start += stride;
+        source_line_start += source_stride;
+    }) {
+        var destination = line_start;
+        var source = source_line_start;
+
+        var j = bounds.right - bounds.left;
+        if (@enumToInt(mode) == 0xff) {
+            @panic("todo");
+        } else if (@enumToInt(mode) <= 0xff) {
+            @panic("todo");
+        } else if (mode == .xor) {
+            @panic("todo");
+        } else if (mode == .opaque_mode) {
+            // todo: refactor
+            while (j > 0) : ({
+                destination += 1;
+                source += 1;
+                j -= 1;
+            }) {
+                destination[0] = 0xff_00_00_00 | source[0];
+            }
+        }
+    }
+}
