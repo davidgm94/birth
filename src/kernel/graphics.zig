@@ -15,7 +15,8 @@ const Type = enum(u64) {
 const UpdateScreenFunction = fn (graphics: *Driver, drawing_area: DrawingArea, destination: Point) void;
 
 type: Type,
-framebuffer: Framebuffer,
+frontbuffer: Framebuffer,
+backbuffer: DrawingArea,
 callback_update_screen: *const UpdateScreenFunction,
 
 pub fn init(driver: *Driver) !void {
@@ -23,8 +24,10 @@ pub fn init(driver: *Driver) !void {
 }
 
 fn register(driver: *Driver) !void {
-    log.debug("Registering {}", .{driver.framebuffer.area});
+    log.debug("Registering {}", .{driver.backbuffer});
     try kernel.device_manager.register(Driver, kernel.virtual_address_space.heap.allocator.get_allocator(), driver);
+
+    _ = driver.frontbuffer.resize(driver.backbuffer.width, driver.backbuffer.height);
 
     // TODO: resize surface. Allocate a copy
     kernel.window_manager.initialize(driver);
@@ -198,7 +201,6 @@ pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {
 //};
 //}
 //};
-//
 pub const Framebuffer = struct {
     area: DrawingArea = .{},
     modified_region: Rectangle = .{},
@@ -231,6 +233,24 @@ pub const Framebuffer = struct {
         framebuffer.modified_region = clip_region.clip(framebuffer.modified_region).rectangle;
         const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_y + @sizeOf(u32) * source_x));
         draw_bitmap(framebuffer, clip_region, destination_region, source_ptr, source.area.stride, alpha);
+    }
+
+    pub fn resize(framebuffer: *Framebuffer, width: u32, height: u32) bool {
+        // TODO: copy old bytes
+        // TODO: free old bytes
+        if (width == 0 or height == 0) return false;
+        if (width == framebuffer.area.width and height == framebuffer.area.height) return true;
+
+        // TODO: stop hardcoding the 4
+        const new_buffer_memory = kernel.virtual_address_space.heap.allocator.allocate_bytes(width * height * 4, 0x1000) catch unreachable;
+        framebuffer.area = DrawingArea{
+            .bytes = @intToPtr([*]u8, new_buffer_memory.address),
+            .width = width,
+            .height = height,
+            .stride = width * 4,
+        };
+
+        return true;
     }
 };
 

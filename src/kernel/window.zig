@@ -46,7 +46,7 @@ pub fn initialize(manager: *Manager, graphics: *Graphics) void {
     }
 
     // Move cursor already updates the screen
-    manager.move_cursor(graphics, @intCast(i32, graphics.framebuffer.area.width / 2 * Cursor.movement_scale), @intCast(i32, graphics.framebuffer.area.height / 2 * Cursor.movement_scale));
+    manager.move_cursor(graphics, @intCast(i32, graphics.frontbuffer.area.width / 2 * Cursor.movement_scale), @intCast(i32, graphics.frontbuffer.area.height / 2 * Cursor.movement_scale));
 }
 
 pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32, asked_y_movement: i32) void {
@@ -59,8 +59,8 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32
 
     // TODO: modifiers
     // TODO: divTrunc?
-    manager.cursor.precise_position.x = clamp(@intCast(u32, @intCast(i32, manager.cursor.precise_position.x) + @divTrunc(x_movement, Cursor.movement_scale)), 0, graphics.framebuffer.area.width * Cursor.movement_scale - 1);
-    manager.cursor.precise_position.y = clamp(@intCast(u32, @intCast(i32, manager.cursor.precise_position.y) + @divTrunc(y_movement, Cursor.movement_scale)), 0, graphics.framebuffer.area.height * Cursor.movement_scale - 1);
+    manager.cursor.precise_position.x = clamp(@intCast(u32, @intCast(i32, manager.cursor.precise_position.x) + @divTrunc(x_movement, Cursor.movement_scale)), 0, graphics.frontbuffer.area.width * Cursor.movement_scale - 1);
+    manager.cursor.precise_position.y = clamp(@intCast(u32, @intCast(i32, manager.cursor.precise_position.y) + @divTrunc(y_movement, Cursor.movement_scale)), 0, graphics.frontbuffer.area.height * Cursor.movement_scale - 1);
     // TODO: divTrunc?
     manager.cursor.position.x = @divTrunc(manager.cursor.precise_position.x, Cursor.movement_scale);
     manager.cursor.position.y = @divTrunc(manager.cursor.precise_position.y, Cursor.movement_scale);
@@ -77,7 +77,7 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
 
     const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
     const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
-    const bounds = Rectangle.from_width_and_height(graphics.framebuffer.area.width, graphics.framebuffer.area.height);
+    const bounds = Rectangle.from_width_and_height(graphics.frontbuffer.area.width, graphics.frontbuffer.area.height);
 
     const cursor_bounds = blk: {
         var result = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap.area.width, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.swap.area.height };
@@ -86,41 +86,38 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
     };
 
     manager.cursor.surface.swap.copy(
-        &graphics.framebuffer,
+        &graphics.frontbuffer,
         Point{ .x = 0, .y = 0 },
         cursor_bounds,
         true,
     );
     manager.cursor.changed_image = false;
 
-    graphics.framebuffer.draw(&manager.cursor.surface.current, Rectangle{
+    graphics.frontbuffer.draw(&manager.cursor.surface.current, Rectangle{
         .left = cursor_x,
         .right = cursor_x + manager.cursor.surface.current.area.width,
         .top = cursor_y,
         .bottom = cursor_y + manager.cursor.surface.current.area.height,
     }, 0, 0, @intToEnum(Graphics.DrawBitmapMode, 0xff));
 
-    if (graphics.framebuffer.modified_region.width() > 0 and graphics.framebuffer.modified_region.height() > 0) {
-        log.debug("Modified region: {}", .{graphics.framebuffer.modified_region});
-        const ptr = graphics.framebuffer.area.bytes + graphics.framebuffer.modified_region.left * @sizeOf(u32) + graphics.framebuffer.modified_region.top * graphics.framebuffer.area.stride;
+    if (graphics.frontbuffer.modified_region.width() > 0 and graphics.frontbuffer.modified_region.height() > 0) {
+        log.debug("Modified region: {}", .{graphics.frontbuffer.modified_region});
         const source_area = Graphics.DrawingArea{
-            .bytes = ptr,
-            .width = graphics.framebuffer.modified_region.width(),
-            .height = graphics.framebuffer.modified_region.height(),
-            .stride = graphics.framebuffer.area.width * @sizeOf(u32),
+            .bytes = graphics.frontbuffer.area.bytes + graphics.frontbuffer.modified_region.left * @sizeOf(u32) + graphics.frontbuffer.modified_region.top * graphics.frontbuffer.area.stride,
+            .width = graphics.frontbuffer.modified_region.width(),
+            .height = graphics.frontbuffer.modified_region.height(),
+            .stride = graphics.frontbuffer.area.width * @sizeOf(u32),
         };
-        const destination_point = Point{ .x = graphics.framebuffer.modified_region.left, .y = graphics.framebuffer.modified_region.right };
+        const destination_point = Point{ .x = graphics.frontbuffer.modified_region.left, .y = graphics.frontbuffer.modified_region.right };
         graphics.callback_update_screen(graphics, source_area, destination_point);
-        graphics.framebuffer.modified_region = .{ .left = graphics.framebuffer.area.width, .right = 0, .top = graphics.framebuffer.area.height, .bottom = 0 };
-        log.debug("Stride: {}", .{graphics.framebuffer.area.stride});
-        const fb_top = graphics.framebuffer.area.height * graphics.framebuffer.area.stride;
-        log.debug("FB top: {}", .{fb_top});
-        for (graphics.framebuffer.area.bytes[0..fb_top]) |fb_byte| {
+        graphics.frontbuffer.modified_region = .{ .left = graphics.frontbuffer.area.width, .right = 0, .top = graphics.frontbuffer.area.height, .bottom = 0 };
+        const fb_top = graphics.backbuffer.height * graphics.backbuffer.stride;
+        for (graphics.backbuffer.bytes[0..fb_top]) |fb_byte| {
             if (fb_byte != 0) {
                 log.debug("NZ: 0x{x}", .{fb_byte});
             }
         }
     }
 
-    graphics.framebuffer.copy(&manager.cursor.surface.swap, Point{ .x = cursor_bounds.left, .y = cursor_bounds.top }, Rectangle.from_width_and_height(cursor_bounds.width(), cursor_bounds.height()), true);
+    graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = cursor_bounds.left, .y = cursor_bounds.top }, Rectangle.from_width_and_height(cursor_bounds.width(), cursor_bounds.height()), true);
 }

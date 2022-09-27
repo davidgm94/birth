@@ -45,17 +45,17 @@ const ColorMask = struct {
 pub fn init(framebuffer: Limine.Framebuffer) !void {
     const driver = try kernel.virtual_address_space.heap.allocator.create(Driver);
     log.debug("Receiving Limine framebuffer: {}", .{framebuffer});
+
     driver.* = Driver{
         .graphics = Graphics{
             .type = .limine,
-            .framebuffer = Graphics.Framebuffer{
-                .area = .{
-                    .bytes = @intToPtr([*]u8, framebuffer.address),
-                    .width = @intCast(u32, framebuffer.width),
-                    .height = @intCast(u32, framebuffer.height),
-                    .stride = @intCast(u32, framebuffer.pitch),
-                },
+            .backbuffer = Graphics.DrawingArea{
+                .bytes = @intToPtr([*]u8, framebuffer.address),
+                .width = @intCast(u32, framebuffer.width),
+                .height = @intCast(u32, framebuffer.height),
+                .stride = @intCast(u32, framebuffer.pitch),
             },
+            .frontbuffer = Graphics.Framebuffer{},
             .callback_update_screen = switch (framebuffer.bpp) {
                 @bitSizeOf(u32) => update_screen_32,
                 else => unreachable,
@@ -74,5 +74,5 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
 }
 
 fn update_screen_32(driver: *Graphics, source: Graphics.DrawingArea, destination_point: Graphics.Point) void {
-    Graphics.update_screen_32(driver.framebuffer.area, source, destination_point);
+    Graphics.update_screen_32(driver.backbuffer, source, destination_point);
 }
