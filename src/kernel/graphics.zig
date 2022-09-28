@@ -1,6 +1,7 @@
 const Driver = @This();
 
 const common = @import("common");
+const assert = common.assert;
 pub const DrawingArea = common.DrawingArea;
 const log = common.log.scoped(.Graphics);
 const zeroes = common.zeroes;
@@ -42,6 +43,7 @@ pub const Point = struct {
 
 pub const Rectangle = struct {
     const Int = u32;
+    const Vector = @Vector(4, Int);
 
     left: Int = 0,
     right: Int = 0,
@@ -62,23 +64,20 @@ pub const Rectangle = struct {
         };
     }
 
-    pub fn clip(rectangle: Rectangle, current: Rectangle) ClipResult {
-        const intersection = blk: {
-            if (!((current.left > rectangle.right and current.right > rectangle.left) or (current.top > rectangle.bottom and current.bottom > rectangle.top))) {
-                break :blk Rectangle{
-                    .left = if (current.left > rectangle.left) current.left else rectangle.left,
-                    .right = if (current.right < rectangle.right) current.right else rectangle.right,
-                    .top = if (current.top > rectangle.top) current.top else rectangle.top,
-                    .bottom = if (current.bottom < rectangle.bottom) current.bottom else rectangle.bottom,
-                };
-            } else {
-                break :blk zeroes(Rectangle);
-            }
-        };
+    pub fn clip_fast(rectangle: Rectangle, other: Rectangle) Rectangle {
+        const r1 = Vector{ rectangle.left, rectangle.right, rectangle.top, rectangle.bottom };
+        const r2 = Vector{ other.left, other.right, other.top, other.bottom };
 
-        return ClipResult{
-            .rectangle = intersection,
-            .result = intersection.left < intersection.right and intersection.top < intersection.bottom,
+        const max = @maximum(r1, r2);
+        const min = @minimum(r1, r2);
+        const selector_mask = @Vector(4, bool){ true, false, true, false };
+        const result = @select(Int, selector_mask, max, min);
+
+        return Rectangle{
+            .left = result[0],
+            .right = result[1],
+            .top = result[2],
+            .bottom = result[3],
         };
     }
 
@@ -209,41 +208,6 @@ pub const Framebuffer = struct {
         return framebuffer.area.width * framebuffer.area.height;
     }
 
-    pub fn copy(framebuffer: *Framebuffer, source: *Framebuffer, destination_point: Point, source_region: Rectangle, add_to_modified_region: bool) void {
-        const destination_region = Rectangle{
-            .left = destination_point.x,
-            .right = destination_point.x + source_region.width(),
-            .top = destination_point.y,
-            .bottom = destination_point.y + source_region.height(),
-        };
-        log.debug("COPY: Destination region: {}", .{destination_region});
-
-        if (add_to_modified_region) {
-            log.debug("COPY: Modified region before change: {}", .{framebuffer.modified_region});
-            defer log.debug("COPY: Modified region after change: {}", .{framebuffer.modified_region});
-            framebuffer.modified_region = destination_region.bounding(framebuffer.modified_region);
-            log.debug("DRAW: Modified region after bounding: {}", .{framebuffer.modified_region});
-            framebuffer.modified_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height).clip(framebuffer.modified_region).rectangle;
-        }
-
-        const clip_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height);
-        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_region.top + 4 * source_region.left));
-        draw_bitmap(framebuffer, clip_region, destination_region, source_ptr, source.area.stride, .opaque_mode);
-    }
-
-    pub fn draw(framebuffer: *Framebuffer, source: *Framebuffer, destination_region: Rectangle, source_x: u32, source_y: u32, alpha: DrawBitmapMode) void {
-        const clip_region = Rectangle.from_width_and_height(framebuffer.area.width, framebuffer.area.height);
-        {
-            log.debug("DRAW: Modified region before change: {}", .{framebuffer.modified_region});
-            defer log.debug("DRAW: Modified region after change: {}", .{framebuffer.modified_region});
-            framebuffer.modified_region = destination_region.bounding(framebuffer.modified_region);
-            log.debug("DRAW: Modified region after bounding: {}", .{framebuffer.modified_region});
-            framebuffer.modified_region = clip_region.clip(framebuffer.modified_region).rectangle;
-        }
-        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_y + @sizeOf(u32) * source_x));
-        draw_bitmap(framebuffer, clip_region, destination_region, source_ptr, source.area.stride, alpha);
-    }
-
     pub fn resize(framebuffer: *Framebuffer, width: u32, height: u32) bool {
         // TODO: copy old bytes
         // TODO: free old bytes
@@ -264,43 +228,16 @@ pub const Framebuffer = struct {
         };
 
         // Clear it with white to debug it
-        const clip_region = Rectangle.from_width_and_height(width, height);
-        framebuffer.draw_block(clip_region, Rectangle{ .left = old_width, .right = width, .top = 0, .bottom = height }, 0xff_ff_ff_ff);
-        framebuffer.draw_block(clip_region, Rectangle{ .left = 0, .right = old_width, .top = old_height, .bottom = height }, 0xff_ff_ff_ff);
+        framebuffer.fill(0xff_ff_ff_ff);
 
         return true;
     }
 
-    pub fn draw_block(framebuffer: *Framebuffer, clip_region: Rectangle, bounds: Rectangle, color: u32) void {
-        if (color & 0xff_00_00_00 == 0) return;
+    pub fn fill(framebuffer: *Framebuffer, color: u32) void {
+        assert(@divExact(framebuffer.area.stride, framebuffer.area.width) == @sizeOf(u32));
 
-        const clip_result = clip_region.clip(bounds);
-        if (!clip_result.result) return;
-        const new_bounds = clip_result.rectangle;
-
-        draw_block_extended(framebuffer, new_bounds, color);
-    }
-
-    pub fn draw_block_extended(framebuffer: *Framebuffer, bounds: Rectangle, color: u32) void {
-        const stride = framebuffer.area.stride / @sizeOf(u32);
-        var line_start = @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes)) + bounds.top * stride + bounds.left;
-
-        var i: u32 = 0;
-        while (i < bounds.bottom - bounds.top) : ({
-            i += 1;
-            line_start += stride;
-        }) {
-            var destination = line_start;
-            var j = bounds.right - bounds.left;
-
-            if (color & 0xff_00_00_00 != 0xff_00_00_00) @panic("wtf") else {
-                while (j > 0) : ({
-                    destination += 1;
-                    j -= 1;
-                }) {
-                    destination[0] = color;
-                }
-            }
+        for (@ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes))[0..framebuffer.get_pixel_count()]) |*pixel| {
+            pixel.* = color;
         }
     }
 };
