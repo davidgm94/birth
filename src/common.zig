@@ -233,16 +233,10 @@ pub const CustomAllocator = struct {
     pub const Error = error{OutOfMemory};
 };
 
-pub const DrawingArea = struct {
-    bytes: [*]u8 = undefined,
-    width: u32 = 0,
-    height: u32 = 0,
-    stride: u32 = 0,
-};
-
 pub const Disk = @import("common/disk.zig");
 pub const Filesystem = @import("common/filesystem.zig");
 pub const List = @import("common/list.zig");
 pub const QEMU = @import("common/qemu.zig");
 pub const RNUFS = @import("common/rnufs.zig");
 pub const Syscall = @import("common/syscall.zig");
+pub const Graphics = @import("common/graphics.zig");

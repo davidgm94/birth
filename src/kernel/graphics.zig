@@ -1,8 +1,12 @@
 const Driver = @This();
 
 const common = @import("common");
+
+pub const DrawingArea = common.Graphics.DrawingArea;
+pub const Rectangle = common.Graphics.Rectangle;
+pub const Rect = common.Graphics.Rect;
+
 const assert = common.assert;
-pub const DrawingArea = common.DrawingArea;
 const log = common.log.scoped(.Graphics);
 const zeroes = common.zeroes;
 
@@ -39,64 +43,6 @@ fn register(driver: *Driver) !void {
 pub const Point = struct {
     x: u32,
     y: u32,
-};
-
-pub const Rectangle = struct {
-    const Int = u32;
-    const Vector = @Vector(4, Int);
-
-    left: Int = 0,
-    right: Int = 0,
-    top: Int = 0,
-    bottom: Int = 0,
-
-    pub const ClipResult = struct {
-        rectangle: Rectangle,
-        result: bool,
-    };
-
-    pub fn from_width_and_height(asked_width: Int, asked_height: Int) Rectangle {
-        return Rectangle{
-            .left = 0,
-            .right = asked_width,
-            .top = 0,
-            .bottom = asked_height,
-        };
-    }
-
-    pub fn clip_fast(rectangle: Rectangle, other: Rectangle) Rectangle {
-        const r1 = Vector{ rectangle.left, rectangle.right, rectangle.top, rectangle.bottom };
-        const r2 = Vector{ other.left, other.right, other.top, other.bottom };
-
-        const max = @maximum(r1, r2);
-        const min = @minimum(r1, r2);
-        const selector_mask = @Vector(4, bool){ true, false, true, false };
-        const result = @select(Int, selector_mask, max, min);
-
-        return Rectangle{
-            .left = result[0],
-            .right = result[1],
-            .top = result[2],
-            .bottom = result[3],
-        };
-    }
-
-    pub fn width(rectangle: Rectangle) Int {
-        return rectangle.right - rectangle.left;
-    }
-
-    pub fn height(rectangle: Rectangle) Int {
-        return rectangle.bottom - rectangle.top;
-    }
-
-    pub fn bounding(rectangle: Rectangle, other: Rectangle) Rectangle {
-        return Rectangle{
-            .left = if (rectangle.left > other.left) other.left else rectangle.left,
-            .right = if (rectangle.right < other.right) other.right else rectangle.right,
-            .top = if (rectangle.top > other.top) other.top else rectangle.top,
-            .bottom = if (rectangle.bottom < other.bottom) other.bottom else rectangle.bottom,
-        };
-    }
 };
 
 pub fn update_screen(user_buffer: [*]u8, bounds: *Rectangle, stride: u64) void {

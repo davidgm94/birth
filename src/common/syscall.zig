@@ -81,7 +81,7 @@ pub const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ServiceID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.blocking)] = []u8;
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *common.DrawingArea;
+    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *common.Graphics.DrawingArea;
     ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };

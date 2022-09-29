@@ -8,6 +8,7 @@ const RNU = @import("RNU");
 const Graphics = RNU.Graphics;
 const Point = Graphics.Point;
 const Spinlock = RNU.Spinlock;
+const Rect = Graphics.Rect;
 const Rectangle = Graphics.Rectangle;
 
 lock: Spinlock = .{},
@@ -18,7 +19,6 @@ const Cursor = struct {
     position: Position = .{},
     precise_position: Position = .{},
     image_offset: Position = .{},
-    properties: Properties = .{},
     surface: struct {
         current: Graphics.Framebuffer = .{},
         swap: Graphics.Framebuffer = .{},
@@ -27,10 +27,6 @@ const Cursor = struct {
     changed_image: bool = false,
 
     pub const movement_scale = 0x100;
-
-    const Properties = packed struct {
-        speed: u8 = 1,
-    };
 
     const Position = struct {
         x: u32 = 0,
@@ -55,8 +51,8 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32
 
     // TODO: cursor acceleration
 
-    const x_movement = asked_x_movement * manager.cursor.properties.speed;
-    const y_movement = asked_y_movement * manager.cursor.properties.speed;
+    const x_movement = asked_x_movement * Cursor.movement_scale;
+    const y_movement = asked_y_movement * Cursor.movement_scale;
     log.debug("Computed movement: X: {}. Y: {}", .{ x_movement, y_movement });
 
     // TODO: modifiers
@@ -90,9 +86,10 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
     log.debug("Cursor image offset: {}", .{manager.cursor.image_offset});
     const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
     const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
-    const cursor_area = Rectangle{ .left = cursor_x, .right = cursor_x + manager.cursor.surface.swap.area.width, .top = cursor_y, .bottom = cursor_y + manager.cursor.surface.swap.area.height };
+    const cursor_area = Rect{ cursor_x, cursor_x + manager.cursor.surface.swap.area.width, cursor_y, cursor_y + manager.cursor.surface.swap.area.height };
+    log.debug("Cursor area: {}", .{cursor_area});
     const bounds = Rectangle.from_width_and_height(graphics.frontbuffer.area.width, graphics.frontbuffer.area.height);
-    const cursor_intersection = cursor_area.clip_fast(bounds);
+    const cursor_intersection = Rectangle.compute_intersection(cursor_area, bounds);
     log.debug("Cursor intersection: {}", .{cursor_intersection});
     @panic("todo update screen");
     // TODO: check for resizing
