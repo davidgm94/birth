@@ -12,15 +12,17 @@ pub const side_count = 4;
 pub const Rectangle = @Vector(side_count, Int);
 pub const Mask = @Vector(side_count, bool);
 
-pub const Component = enum(u3) {
-    left = 0,
-    right = 1,
-    top = 2,
-    bottom = 3,
-};
-
-pub inline fn component(rectangle: Rectangle, comptime c: Component) Int {
-    return rectangle[@enumToInt(c)];
+pub inline fn left(rectangle: Rectangle) Int {
+    return rectangle[0];
+}
+pub inline fn right(rectangle: Rectangle) Int {
+    return rectangle[1];
+}
+pub inline fn top(rectangle: Rectangle) Int {
+    return rectangle[2];
+}
+pub inline fn bottom(rectangle: Rectangle) Int {
+    return rectangle[3];
 }
 
 pub fn zero() Rectangle {
@@ -28,11 +30,12 @@ pub fn zero() Rectangle {
 }
 
 pub fn width(rectangle: Rectangle) Int {
-    return component(rectangle, .right) - component(rectangle, .left);
+    log.debug("R: {}", .{rectangle});
+    return right(rectangle) - left(rectangle);
 }
 
 pub fn height(rectangle: Rectangle) Int {
-    return component(rectangle, .bottom) - component(rectangle, .top);
+    return bottom(rectangle) - top(rectangle);
 }
 
 pub fn from_area(area: DrawingArea) Rectangle {
@@ -86,7 +89,7 @@ pub fn intersection(a: Rectangle, b: Rectangle) Rectangle {
 
 pub fn intersect(a: Rectangle, b: Rectangle) bool {
     const a_comparison = a;
-    const b_comparison = Rectangle{ component(b, .right), component(b, .left), component(b, .bottom), component(b, .top) };
+    const b_comparison = Rectangle{ right(b), left(b), bottom(b), top(b) };
     const result = a_comparison > b_comparison;
     const first_comp = result[0] and result[1];
     const second_comp = result[2] and result[3];

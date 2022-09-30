@@ -39,7 +39,7 @@ pub const Framebuffer = struct {
             source.modified_region = Rectangle.intersection(source.modified_region, surface_clip);
         }
 
-        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * Rectangle.component(source_region, .top) + 4 * Rectangle.component(source_region, .left)));
+        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * Rectangle.top(source_region) + 4 * Rectangle.left(source_region)));
         source.draw_bitmap(surface_clip, destination_region, source_ptr, source.area.stride, .opaque_mode);
     }
 
@@ -56,9 +56,9 @@ pub const Framebuffer = struct {
             const bounds = Rectangle.intersection_assume_intersects(region, clip_area);
             const source_stride = asked_source_stride / @sizeOf(u32);
             const stride = framebuffer.area.stride / @sizeOf(u32);
-            const line_start_index = Rectangle.component(bounds, .top) * stride + Rectangle.component(bounds, .left);
+            const line_start_index = Rectangle.top(bounds) * stride + Rectangle.left(bounds);
             var line_start = @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes)) + line_start_index;
-            const source_line_start_index = Rectangle.component(bounds, .left) - Rectangle.component(region, .left) + source_stride * (Rectangle.component(bounds, .top) - Rectangle.component(region, .top));
+            const source_line_start_index = Rectangle.left(bounds) - Rectangle.left(region) + source_stride * (Rectangle.top(bounds) - Rectangle.top(region));
             var source_line_start = source_ptr + source_line_start_index;
 
             var i: u64 = 0;

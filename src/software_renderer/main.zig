@@ -116,25 +116,28 @@ const WindowManager = struct {
 
         framebuffer.draw(&manager.cursor.surface.current, Rectangle.from_point_and_area(cursor_position, manager.cursor.surface.current.area), Point{ .x = 0, .y = 0 }, @intToEnum(Graphics.DrawBitmapMode, 0xff));
 
+        if (Rectangle.width(framebuffer.modified_region) > 0 and Rectangle.height(framebuffer.modified_region) > 0) {
+            const source_area = Graphics.DrawingArea{
+                .bytes = framebuffer.area.bytes + Rectangle.left(framebuffer.modified_region) * @sizeOf(u32) + Rectangle.top(framebuffer.modified_region) * framebuffer.area.stride,
+                .width = Rectangle.width(framebuffer.modified_region),
+                .height = Rectangle.height(framebuffer.modified_region),
+                .stride = framebuffer.area.width * @sizeOf(u32),
+            };
+            const destination_point = Point{ .x = Rectangle.left(framebuffer.modified_region), .y = Rectangle.right(framebuffer.modified_region) };
+            _ = source_area;
+            _ = destination_point;
+            //graphics.callback_update_screen(graphics, source_area, destination_point);
+            //graphics.frontbuffer.modified_region = .{ .left = graphics.frontbuffer.area.width, .right = 0, .top = graphics.frontbuffer.area.height, .bottom = 0 };
+            //const fb_top = graphics.backbuffer.height * graphics.backbuffer.stride;
+            //for (graphics.backbuffer.bytes[0..fb_top]) |fb_byte| {
+            //if (fb_byte != 0) {
+            //log.debug("NZ: 0x{x}", .{fb_byte});
+            //}
+            //}
+        }
         @panic("todo update screen");
 
         //if (graphics.frontbuffer.modified_region.width() > 0 and graphics.frontbuffer.modified_region.height() > 0) {
-        //log.debug("Modified region: {}", .{graphics.frontbuffer.modified_region});
-        //const source_area = Graphics.DrawingArea{
-        //.bytes = graphics.frontbuffer.area.bytes + graphics.frontbuffer.modified_region.left * @sizeOf(u32) + graphics.frontbuffer.modified_region.top * graphics.frontbuffer.area.stride,
-        //.width = graphics.frontbuffer.modified_region.width(),
-        //.height = graphics.frontbuffer.modified_region.height(),
-        //.stride = graphics.frontbuffer.area.width * @sizeOf(u32),
-        //};
-        //const destination_point = Point{ .x = graphics.frontbuffer.modified_region.left, .y = graphics.frontbuffer.modified_region.right };
-        //graphics.callback_update_screen(graphics, source_area, destination_point);
-        //graphics.frontbuffer.modified_region = .{ .left = graphics.frontbuffer.area.width, .right = 0, .top = graphics.frontbuffer.area.height, .bottom = 0 };
-        //const fb_top = graphics.backbuffer.height * graphics.backbuffer.stride;
-        //for (graphics.backbuffer.bytes[0..fb_top]) |fb_byte| {
-        //if (fb_byte != 0) {
-        //log.debug("NZ: 0x{x}", .{fb_byte});
-        //}
-        //}
         //}
 
         //graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = cursor_bounds.left, .y = cursor_bounds.top }, Rectangle.from_width_and_height(cursor_bounds.width(), cursor_bounds.height()), true);
