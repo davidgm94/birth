@@ -4,6 +4,7 @@ const Graphics = common.Graphics;
 const DrawingArea = Graphics.DrawingArea;
 const Point = Graphics.Point;
 
+const assert = common.assert;
 const log = common.log.scoped(.Rectangle);
 
 pub const Int = u32;
@@ -75,15 +76,25 @@ test "bounding" {
 pub fn intersection(a: Rectangle, b: Rectangle) Rectangle {
     const zero_rectangle = zero();
 
+    const mask = @splat(side_count, intersect(a, b));
+
+    const intersection_if_false = bounding(a, b);
+
+    const final_result = @select(Int, mask, zero_rectangle, intersection_if_false);
+    return final_result;
+}
+
+pub fn intersect(a: Rectangle, b: Rectangle) bool {
     const a_comparison = a;
     const b_comparison = Rectangle{ component(b, .right), component(b, .left), component(b, .bottom), component(b, .top) };
     const result = a_comparison > b_comparison;
     const first_comp = result[0] and result[1];
     const second_comp = result[2] and result[3];
-    const mask = @splat(side_count, first_comp or second_comp);
 
-    const if_false_vector = bounding(a, b);
+    return first_comp or second_comp;
+}
 
-    const final_result = @select(Int, mask, zero_rectangle, if_false_vector);
-    return final_result;
+pub fn intersection_assume_intersects(a: Rectangle, b: Rectangle) Rectangle {
+    assert(intersect(a, b));
+    return bounding(a, b);
 }

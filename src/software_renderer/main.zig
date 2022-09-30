@@ -95,11 +95,13 @@ const WindowManager = struct {
     pub fn update_screen(manager: *WindowManager, framebuffer: *Framebuffer) void {
         log.debug("update_screen", .{});
         log.debug("Cursor image offset: {}", .{manager.cursor.image_offset});
-        const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
-        const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
-        log.debug("Cursor x: {}, y: {}", .{ cursor_x, cursor_y });
+        const cursor_position = Point{
+            .x = manager.cursor.position.x + manager.cursor.image_offset.x,
+            .y = manager.cursor.position.y + manager.cursor.image_offset.y,
+        };
+        log.debug("Cursor position: {}", .{cursor_position});
         const surface_clip = Rectangle.from_area(framebuffer.area);
-        const cursor_area = Rectangle.from_point_and_area(Point{ .x = cursor_x, .y = cursor_y }, window_manager.cursor.surface.swap.area);
+        const cursor_area = Rectangle.from_point_and_area(cursor_position, window_manager.cursor.surface.swap.area);
         log.debug("Cursor area: {}", .{cursor_area});
         const cursor_bounds = Rectangle.intersection(surface_clip, cursor_area);
         log.debug("Cursor bounds: {}", .{cursor_bounds});
@@ -110,16 +112,11 @@ const WindowManager = struct {
             cursor_bounds,
             true,
         );
+        manager.cursor.changed_image = false;
+
+        framebuffer.draw(&manager.cursor.surface.current, Rectangle.from_point_and_area(cursor_position, manager.cursor.surface.current.area), Point{ .x = 0, .y = 0 }, @intToEnum(Graphics.DrawBitmapMode, 0xff));
 
         @panic("todo update screen");
-        //manager.cursor.changed_image = false;
-
-        //graphics.frontbuffer.draw(&manager.cursor.surface.current, Rectangle{
-        //.left = cursor_x,
-        //.right = cursor_x + manager.cursor.surface.current.area.width,
-        //.top = cursor_y,
-        //.bottom = cursor_y + manager.cursor.surface.current.area.height,
-        //}, 0, 0, @intToEnum(Graphics.DrawBitmapMode, 0xff));
 
         //if (graphics.frontbuffer.modified_region.width() > 0 and graphics.frontbuffer.modified_region.height() > 0) {
         //log.debug("Modified region: {}", .{graphics.frontbuffer.modified_region});
