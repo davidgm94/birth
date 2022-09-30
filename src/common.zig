@@ -68,6 +68,9 @@ pub const internal_read_int_big = std.mem.readIntBig;
 pub const read_int_slice_big_endian = std.mem.readIntSliceBig;
 pub const concatenate = std.mem.concat;
 
+// TEST
+pub const expect = std.testing.expect;
+
 // INTERNAL
 pub const internal_format = std.fmt.format;
 pub const InternalFormatOptions = std.fmt.FormatOptions;

@@ -73,7 +73,8 @@ pub fn build(b: *Build.Builder) void {
             const SDL = @import("./src/software_renderer/dependencies/sdl/Sdk.zig");
             const sdl = SDL.init(b);
             const software_renderer_root_dir = "src/software_renderer/";
-            const exe = b.addExecutable("software-renderer", software_renderer_root_dir ++ "main.zig");
+            const exe_source_path = software_renderer_root_dir ++ "main.zig";
+            const exe = b.addExecutable("software-renderer", exe_source_path);
             const target = b.standardTargetOptions(.{});
             const build_mode = b.standardReleaseOptions();
 
@@ -82,6 +83,7 @@ pub fn build(b: *Build.Builder) void {
             //exe.defineCMacroRaw("USE_WAYLAND_API=OFF");
             exe.setTarget(target);
             exe.setBuildMode(build_mode);
+            exe.setMainPkgPath("src");
             exe.install();
 
             const run_cmd = exe.run();
@@ -93,7 +95,8 @@ pub fn build(b: *Build.Builder) void {
             const run_step = b.step("run", "Run the app");
             run_step.dependOn(&run_cmd.step);
 
-            const exe_tests = b.addTest("src/main.zig");
+            const exe_tests = b.addTest(exe_source_path);
+            exe_tests.setMainPkgPath("src");
             exe_tests.setTarget(target);
             exe_tests.setBuildMode(build_mode);
 
