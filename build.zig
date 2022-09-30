@@ -20,46 +20,87 @@ const common_package_dummy = Build.Package{
     .source = Build.FileSource.relative("src/common.zig"),
 };
 
-pub fn build(b: *Build.Builder) void {
-    const kernel = b.allocator.create(Kernel) catch unreachable;
-    kernel.* = Kernel{
-        .builder = b,
-        .options = .{
-            .arch = Kernel.Options.x86_64.new(.{
-                .bootloader = .limine,
-                .protocol = .limine,
-            }),
-            .run = .{
-                .disks = &.{
-                    .{
-                        .interface = .ahci,
-                        .filesystem = .RNU,
-                    },
-                },
-                .memory = .{
-                    .amount = 4,
-                    .unit = .G,
-                },
-                .emulator = .{
-                    .qemu = .{
-                        .vga = .std,
-                        .smp = null,
-                        .log = .{
-                            .file = null,
-                            .guest_errors = true,
-                            .cpu = false,
-                            .assembly = false,
-                            .interrupts = true,
-                        },
-                        .run_for_debug = true,
-                        .print_command = false,
-                    },
-                },
-            },
-        },
-    };
+const ExecutionEnvironment = enum {
+    os,
+    software_renderer,
+};
+const execution_environment = ExecutionEnvironment.software_renderer;
 
-    kernel.create();
+pub fn build(b: *Build.Builder) void {
+    switch (execution_environment) {
+        .os => {
+            const kernel = b.allocator.create(Kernel) catch unreachable;
+            kernel.* = Kernel{
+                .builder = b,
+                .options = .{
+                    .arch = Kernel.Options.x86_64.new(.{
+                        .bootloader = .limine,
+                        .protocol = .limine,
+                    }),
+                    .run = .{
+                        .disks = &.{
+                            .{
+                                .interface = .ahci,
+                                .filesystem = .RNU,
+                            },
+                        },
+                        .memory = .{
+                            .amount = 4,
+                            .unit = .G,
+                        },
+                        .emulator = .{
+                            .qemu = .{
+                                .vga = .std,
+                                .smp = null,
+                                .log = .{
+                                    .file = null,
+                                    .guest_errors = true,
+                                    .cpu = false,
+                                    .assembly = false,
+                                    .interrupts = true,
+                                },
+                                .run_for_debug = true,
+                                .print_command = false,
+                            },
+                        },
+                    },
+                },
+            };
+
+            kernel.create();
+        },
+        .software_renderer => {
+            const SDL = @import("./src/software_renderer/dependencies/sdl/Sdk.zig");
+            const sdl = SDL.init(b);
+            const software_renderer_root_dir = "src/software_renderer/";
+            const exe = b.addExecutable("software-renderer", software_renderer_root_dir ++ "main.zig");
+            const target = b.standardTargetOptions(.{});
+            const build_mode = b.standardReleaseOptions();
+
+            sdl.link(exe, .dynamic);
+            exe.addPackage(sdl.getWrapperPackage("sdl"));
+            //exe.defineCMacroRaw("USE_WAYLAND_API=OFF");
+            exe.setTarget(target);
+            exe.setBuildMode(build_mode);
+            exe.install();
+
+            const run_cmd = exe.run();
+            run_cmd.step.dependOn(b.getInstallStep());
+            if (b.args) |args| {
+                run_cmd.addArgs(args);
+            }
+
+            const run_step = b.step("run", "Run the app");
+            run_step.dependOn(&run_cmd.step);
+
+            const exe_tests = b.addTest("src/main.zig");
+            exe_tests.setTarget(target);
+            exe_tests.setBuildMode(build_mode);
+
+            const test_step = b.step("test", "Run unit tests");
+            test_step.dependOn(&exe_tests.step);
+        },
+    }
 }
 
 const Kernel = struct {
