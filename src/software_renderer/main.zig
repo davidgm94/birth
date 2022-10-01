@@ -132,12 +132,6 @@ const WindowManager = struct {
     }
 };
 
-//pub const SDL_Rect = extern struct {
-//x: c_int,
-//y: c_int,
-//w: c_int,
-//h: c_int,
-//};
 fn update_backbuffer(source_area: Graphics.DrawingArea, destination_point: Graphics.Point) void {
     const rect = SDL.c.SDL_Rect{
         .x = @intCast(c_int, destination_point.x),
