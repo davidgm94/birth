@@ -2,9 +2,9 @@ const common = @import("src/common.zig");
 const Build = @import("src/build/lib.zig");
 const Arch = Build.Arch;
 
-const cache_dir = "zig-cache";
+const cache_dir = "zig-cache/";
 const kernel_name = "kernel.elf";
-const kernel_path = cache_dir ++ "/" ++ kernel_name;
+const kernel_path = cache_dir ++ kernel_name;
 
 const user_programs = .{@import("src/user/programs/minimal/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
@@ -74,7 +74,8 @@ pub fn build(b: *Build.Builder) void {
             const sdl = SDL.init(b);
             const software_renderer_root_dir = "src/software_renderer/";
             const exe_source_path = software_renderer_root_dir ++ "main.zig";
-            const exe = b.addExecutable("software-renderer", exe_source_path);
+            const exe_name = "software-renderer";
+            const exe = b.addExecutable(exe_name, exe_source_path);
             const target = b.standardTargetOptions(.{});
             const build_mode = b.standardReleaseOptions();
 
@@ -84,7 +85,9 @@ pub fn build(b: *Build.Builder) void {
             exe.setTarget(target);
             exe.setBuildMode(build_mode);
             exe.setMainPkgPath("src");
-            exe.install();
+            exe.setOutputDir(cache_dir);
+
+            b.default_step.dependOn(&exe.step);
 
             const run_cmd = exe.run();
             run_cmd.step.dependOn(b.getInstallStep());
@@ -102,6 +105,12 @@ pub fn build(b: *Build.Builder) void {
 
             const test_step = b.step("test", "Run unit tests");
             test_step.dependOn(&exe_tests.step);
+
+            const debug_cmd = b.addSystemCommand(&.{ "gf2", cache_dir ++ exe_name });
+            debug_cmd.step.dependOn(&exe.step);
+
+            const debug_step = b.step("debug", "Debug the app");
+            debug_step.dependOn(&debug_cmd.step);
         },
     }
 }
@@ -182,7 +191,7 @@ const Kernel = struct {
         kernel.executable.setTarget(target);
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
-        kernel.executable.emit_llvm_ir = .{ .emit_to = cache_dir ++ "/kernel_llvm.ir" };
+        kernel.executable.emit_llvm_ir = .{ .emit_to = cache_dir ++ "kernel_llvm.ir" };
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
@@ -339,7 +348,7 @@ const Kernel = struct {
 
                 for (kernel.options.run.disks) |disk, disk_i| {
                     const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
-                    const disk_path = kernel.builder.fmt("{s}/{s}.bin", .{ cache_dir, disk_id });
+                    const disk_path = kernel.builder.fmt("{s}{s}.bin", .{ cache_dir, disk_id });
 
                     switch (disk.interface) {
                         .nvme => {
@@ -490,7 +499,7 @@ const Kernel = struct {
                 const installer = @import("src/bootloader/limine/installer.zig");
                 const base_path = "src/bootloader/limine";
                 const installables_path = base_path ++ "/installables";
-                const image_path = cache_dir ++ "/universal.iso";
+                const image_path = cache_dir ++ "universal.iso";
 
                 fn new(kernel: *Kernel) Build.Step {
                     var step = Build.Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build);
@@ -584,7 +593,7 @@ const Kernel = struct {
                 //const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
                 //Build.log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
 
-                try Build.cwd().writeFile(kernel.builder.fmt("{s}/disk{}.bin", .{ cache_dir, disk_i }), filesystem.disk.buffer.items);
+                try Build.cwd().writeFile(kernel.builder.fmt("{s}disk{}.bin", .{ cache_dir, disk_i }), filesystem.disk.buffer.items);
             }
         }
 

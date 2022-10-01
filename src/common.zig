@@ -70,6 +70,7 @@ pub const concatenate = std.mem.concat;
 
 // TEST
 pub const expect = std.testing.expect;
+pub const expect_equal = std.testing.expectEqual;
 
 // INTERNAL
 pub const internal_format = std.fmt.format;
