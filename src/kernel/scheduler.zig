@@ -9,6 +9,7 @@ const Filesystem = RNU.Filesystem;
 const PhysicalAddress = RNU.PhysicalAddress;
 const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
 const PrivilegeLevel = RNU.PrivilegeLevel;
+const Process = RNU.Process;
 const Spinlock = RNU.Spinlock;
 const Syscall = RNU.Syscall;
 const Thread = RNU.Thread;
@@ -28,13 +29,10 @@ const TLS = arch.TLS;
 const VAS = arch.VAS;
 
 lock: Spinlock,
-thread_buffer: Thread.Buffer,
 all_threads: Thread.List,
 active_threads: Thread.List,
 paused_threads: Thread.List,
 cpus: []CPU,
-current_threads: []*Thread,
-initialized_ap_cpu_count: u64,
 
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     // TODO @Warning @Error We are not supposed to log in performance-sensitive context

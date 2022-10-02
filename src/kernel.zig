@@ -7,6 +7,7 @@ const FileInMemory = RNU.FileInMemory;
 const Framebuffer = Graphics.Framebuffer;
 const Graphics = RNU.Graphics;
 const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
+const Process = RNU.Process;
 const Scheduler = RNU.Scheduler;
 const Spinlock = RNU.Spinlock;
 const Thread = RNU.Thread;
@@ -23,23 +24,14 @@ const TLS = arch.TLS;
 
 pub var scheduler = Scheduler{
     .lock = Spinlock{},
-    .thread_buffer = Thread.Buffer{},
     .all_threads = Thread.List{},
     .active_threads = Thread.List{},
     .paused_threads = Thread.List{},
     .cpus = &.{},
-    .current_threads = &.{},
-    .initialized_ap_cpu_count = 0,
 };
 
 pub var physical_address_space = PhysicalAddressSpace{};
-
-pub var virtual_address_space = VirtualAddressSpace{
-    .arch = .{},
-    .privilege_level = .kernel,
-    .heap = .{},
-    .lock = .{},
-};
+pub var virtual_address_space: *VirtualAddressSpace = undefined;
 
 pub var memory_initialized = false;
 
@@ -50,7 +42,7 @@ pub var file = FileInMemory{
 };
 
 pub var bootloader_framebuffer: Framebuffer = undefined;
-pub var bootstrap_virtual_address_space: *VirtualAddressSpace = undefined;
+pub var bootloader_virtual_address_space: *VirtualAddressSpace = undefined;
 var bootstrap_memory: [0x1000 * 30]u8 = undefined;
 pub var bootstrap_allocator = common.FixedBufferAllocator.init(&bootstrap_memory);
 
@@ -62,8 +54,11 @@ pub var drivers_ready: bool = false;
 pub const BootstrapContext = struct {
     cpu: CPU,
     thread: Thread,
+    process: Process,
     context: Context,
+    virtual_address_space: VirtualAddressSpace,
 };
+
 pub var bootstrap_context: BootstrapContext = undefined;
 
 pub var window_manager = Window.Manager{};
@@ -72,7 +67,7 @@ pub const config = struct {
     safe_slow: bool = false,
 }{};
 
-const start = @extern(*u8, .{ .name = "kernel_start" });
-const end = @extern(*u8, .{ .name = "kernel_end" });
+pub const start = @extern(*u8, .{ .name = "kernel_start" });
+pub const end = @extern(*u8, .{ .name = "kernel_end" });
 
 pub const main = @import("kernel/main.zig").main;

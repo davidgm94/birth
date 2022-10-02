@@ -5,6 +5,7 @@ const Allocator = common.CustomAllocator;
 const ArrayList = common.ArrayList;
 const assert = common.assert;
 const is_aligned = common.is_aligned;
+const ListFile = common.List;
 const log = common.log.scoped(.VirtualAddressSpace);
 const zeroes = common.zeroes;
 
@@ -366,3 +367,5 @@ pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical
 pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
     try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
 }
+
+pub const Buffer = ListFile.StableBuffer(VirtualAddressSpace, 64);

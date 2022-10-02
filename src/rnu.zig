@@ -17,6 +17,7 @@ pub const Heap = @import("kernel/heap.zig");
 pub const PhysicalAddress = @import("kernel/physical_address.zig");
 pub const PhysicalAddressSpace = @import("kernel/physical_address_space.zig");
 pub const PhysicalMemoryRegion = @import("kernel/physical_memory_region.zig");
+pub const Process = @import("kernel/process.zig");
 pub const Scheduler = @import("kernel/scheduler.zig");
 pub const Spinlock = @import("kernel/spinlock.zig");
 pub const Syscall = @import("kernel/syscall.zig");

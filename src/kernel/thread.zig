@@ -7,6 +7,7 @@ const RNU = @import("RNU");
 const Graphics = RNU.Graphics;
 const Framebuffer = Graphics.Framebuffer;
 const PrivilegeLevel = RNU.PrivilegeLevel;
+const Process = RNU.Process;
 const Syscall = RNU.Syscall;
 const VirtualAddress = RNU.VirtualAddress;
 const VirtualAddressSpace = RNU.VirtualAddressSpace;
@@ -41,6 +42,7 @@ context: *Context,
 time_slices: u64,
 address_space: *VirtualAddressSpace,
 cpu: ?*CPU,
+process: *Process,
 syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,

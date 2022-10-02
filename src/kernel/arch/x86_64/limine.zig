@@ -99,7 +99,7 @@ pub export fn kernel_entry_point() noreturn {
     // Init paging
     {
         // Kernel address space initialization
-        kernel.bootstrap_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
+        kernel.bootloader_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
         VirtualAddressSpace.from_current(kernel.bootstrap_virtual_address_space);
 
         kernel.virtual_address_space = VirtualAddressSpace{
