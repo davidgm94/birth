@@ -47,19 +47,35 @@ pub fn initialize(manager: *Manager, graphics: *Graphics) void {
 
 pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32, asked_y_movement: i32) void {
     manager.lock.assert_locked();
+    log.debug("Asked movement: X: {}. Y: {}", .{ asked_x_movement, asked_y_movement });
+
+    // TODO: cursor acceleration
 
     const x_movement = asked_x_movement * Cursor.movement_scale;
     const y_movement = asked_y_movement * Cursor.movement_scale;
-    manager.cursor.precise_position = .{
-        .x = @intCast(u32, clamp(@intCast(i32, manager.cursor.precise_position.x) + @divTrunc(x_movement, Cursor.movement_scale), 0, graphics.frontbuffer.area.width * Cursor.movement_scale - 1)),
-        .y = @intCast(u32, clamp(@intCast(i32, manager.cursor.precise_position.y) + @divTrunc(y_movement, Cursor.movement_scale), 0, graphics.frontbuffer.area.height * Cursor.movement_scale - 1)),
+    log.debug("Computed movement: X: {}. Y: {}", .{ x_movement, y_movement });
+
+    // TODO: modifiers
+    // TODO: divTrunc?
+    manager.cursor.precise_position.x = blk: {
+        const value_to_clamp = @intCast(u32, @intCast(i64, manager.cursor.precise_position.x) + @divTrunc(x_movement, Cursor.movement_scale));
+        const clamp_top = graphics.frontbuffer.area.width * Cursor.movement_scale - 1;
+        log.debug("value to clamp: {}. Clamp top: {}", .{ value_to_clamp, clamp_top });
+        break :blk clamp(value_to_clamp, 0, clamp_top);
     };
-    manager.cursor.position = .{
-        .x = manager.cursor.precise_position.x / Cursor.movement_scale,
-        .y = manager.cursor.precise_position.y / Cursor.movement_scale,
+    manager.cursor.precise_position.y = blk: {
+        const value_to_clamp = @intCast(u32, @intCast(i64, manager.cursor.precise_position.y) + @divTrunc(y_movement, Cursor.movement_scale));
+        const clamp_top = graphics.frontbuffer.area.height * Cursor.movement_scale - 1;
+        log.debug("value to clamp: {}. Clamp top: {}", .{ value_to_clamp, clamp_top });
+        break :blk clamp(value_to_clamp, 0, clamp_top);
     };
-    log.debug("Precise: {}", .{manager.cursor.precise_position});
-    log.debug("Position: {}", .{manager.cursor.position});
+    // TODO: divTrunc?
+    manager.cursor.position.x = @divTrunc(manager.cursor.precise_position.x, Cursor.movement_scale);
+    manager.cursor.position.y = @divTrunc(manager.cursor.precise_position.y, Cursor.movement_scale);
+
+    log.debug("move_cursor: Precise position: {}. Position: {}", .{ manager.cursor.precise_position, manager.cursor.position });
+
+    // TODO: eyedropping else if window
 
     manager.update_screen(graphics);
 }
@@ -67,16 +83,21 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32
 pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
     manager.lock.assert_locked();
 
-    const cursor_position = Point{
-        .x = manager.cursor.position.x + manager.cursor.image_offset.x,
-        .y = manager.cursor.position.y + manager.cursor.image_offset.y,
-    };
-    const surface_clip = Rectangle.from_area(graphics.framebuffer.area);
-    const cursor_area = Rectangle.from_point_and_area(cursor_position, manager.cursor.surface.swap.area);
-    const cursor_bounds = Rectangle.clip(surface_clip, cursor_area).intersection;
-    _ = cursor_bounds;
+    log.debug("Cursor image offset: {}", .{manager.cursor.image_offset});
+    const cursor_x = manager.cursor.position.x + manager.cursor.image_offset.x;
+    const cursor_y = manager.cursor.position.y + manager.cursor.image_offset.y;
+    const cursor_area = Rect{ cursor_x, cursor_x + manager.cursor.surface.swap.area.width, cursor_y, cursor_y + manager.cursor.surface.swap.area.height };
+    log.debug("Cursor area: {}", .{cursor_area});
+    const bounds = Rectangle.from_width_and_height(graphics.frontbuffer.area.width, graphics.frontbuffer.area.height);
+    const cursor_intersection = Rectangle.compute_intersection(cursor_area, bounds);
+    log.debug("Cursor intersection: {}", .{cursor_intersection});
+    @panic("todo update screen");
+    // TODO: check for resizing
 
-    @panic("todo");
+    //const cursor_bounds = blk: {
+    //result = result.clip(Rectangle.from_width_and_height(bounds.width(), bounds.height())).rectangle;
+    //break :blk result;
+    //};
 
     //manager.cursor.surface.swap.copy(
     //&graphics.frontbuffer,

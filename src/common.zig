@@ -244,3 +244,4 @@ pub const QEMU = @import("common/qemu.zig");
 pub const RNUFS = @import("common/rnufs.zig");
 pub const Syscall = @import("common/syscall.zig");
 pub const Graphics = @import("common/graphics.zig");
+pub const Window = @import("common/window.zig");

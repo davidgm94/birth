@@ -1,9 +1,24 @@
+pub const Driver = @This();
+
 const common = @import("../common.zig");
 const assert = common.assert;
 const log = common.log.scoped(.Graphics);
 
 pub const Rectangle = @import("graphics/rectangle.zig");
 pub const Rect = Rectangle.Rectangle;
+
+const Type = enum(u64) {
+    limine = 0,
+    virtio = 1,
+    sdl_software_renderer_prototype = 2,
+};
+
+const UpdateScreenFunction = fn (graphics: *Driver, drawing_area: DrawingArea, destination: Point) void;
+
+type: Type,
+frontbuffer: Framebuffer,
+backbuffer: DrawingArea,
+callback_update_screen: *const UpdateScreenFunction,
 
 pub const DrawingArea = struct {
     bytes: [*]u8 = undefined,

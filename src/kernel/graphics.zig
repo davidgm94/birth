@@ -13,19 +13,6 @@ const zeroes = common.zeroes;
 
 const kernel = @import("kernel");
 
-const Type = enum(u64) {
-    limine = 0,
-    virtio = 1,
-    sdl_software_renderer_prototype = 2,
-};
-
-const UpdateScreenFunction = fn (graphics: *Driver, drawing_area: DrawingArea, destination: Point) void;
-
-type: Type,
-frontbuffer: Framebuffer,
-backbuffer: DrawingArea,
-callback_update_screen: *const UpdateScreenFunction,
-
 pub fn init(driver: *Driver) !void {
     try driver.register();
 }
