@@ -173,6 +173,11 @@ pub fn enum_count(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
 }
 
+pub fn field_size(comptime T: type, field_name: []const u8) comptime_int {
+    var foo: T = undefined;
+    return @sizeOf(@TypeOf(@field(foo, field_name)));
+}
+
 /// This is done so the allocator can respect allocating from different address spaces
 pub const CustomAllocator = struct {
     callback_allocate: *const AllocateFunction,
@@ -240,6 +245,7 @@ pub const CustomAllocator = struct {
 pub const Disk = @import("common/disk.zig");
 pub const Filesystem = @import("common/filesystem.zig");
 pub const List = @import("common/list.zig");
+pub const Message = @import("common/message.zig");
 pub const QEMU = @import("common/qemu.zig");
 pub const RNUFS = @import("common/rnufs.zig");
 pub const Syscall = @import("common/syscall.zig");

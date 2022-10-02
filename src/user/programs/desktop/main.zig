@@ -1,5 +1,8 @@
 const common = @import("common");
+const assert = common.assert;
+const field_size = common.field_size;
 pub const logger = common.log.scoped(.main);
+const Message = common.Message;
 
 const user = @import("user");
 pub const panic = user.panic;
@@ -10,9 +13,20 @@ const Syscall = user.Syscall;
 
 pub var syscall_manager: *Syscall.Manager = undefined;
 
+fn send_message(id: Message.ID, context: ?*anyopaque) void {
+    _ = syscall_manager.syscall(.send_message, .blocking, .{ .id = id, .context = context });
+}
+
+fn receive_message() Message {
+    const message = syscall_manager.syscall(.receive_message, .blocking, .{});
+    return message;
+}
+
 export fn user_entry_point() callconv(.C) void {
     syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
-    logger.debug("Hello world from userspace", .{});
+
+    send_message(.desktop_setup_ui, null);
+
     //const file = syscall_manager.syscall(.read_file, .blocking, .{ .name = "FiraSans-Regular.otf" });
     //const font = text.load_font_from_file(file) catch unreachable;
     //const bitmap = font.create_bitmap_for_text("Zig", 64.0, 512, 128);

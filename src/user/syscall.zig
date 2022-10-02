@@ -57,6 +57,17 @@ pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
     return new_submission(.thread_exit, thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0);
 }
 
+/// @Syscall
+pub fn send_message(message: common.Message) Submission {
+    return new_submission(.send_message, @enumToInt(message.id), @ptrToInt(message.context), 0, 0, 0);
+}
+const ReceiveMessageParameters = void;
+/// @Syscall
+pub fn receive_message(receive_message_parameters: ReceiveMessageParameters) Submission {
+    _ = receive_message_parameters;
+    return new_submission(.receive_message, 0, 0, 0, 0, 0);
+}
+
 pub fn new_submission(id: ServiceID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {
     const input = Input{
         .id = @enumToInt(id),
@@ -87,6 +98,8 @@ pub const Manager = struct {
             .read_file => read_file(parameters),
             .allocate_memory => allocate_memory(parameters),
             .get_framebuffer => get_framebuffer(parameters),
+            .send_message => send_message(parameters),
+            .receive_message => receive_message(parameters),
         };
 
         switch (execution_mode) {

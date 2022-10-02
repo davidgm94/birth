@@ -83,6 +83,10 @@ pub const SyscallReturnType = blk: {
     ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
     ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *common.Graphics.DrawingArea;
     ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ServiceID.send_message)][@enumToInt(ExecutionMode.blocking)] = void;
+    ReturnTypes[@enumToInt(ServiceID.send_message)][@enumToInt(ExecutionMode.non_blocking)] = void;
+    ReturnTypes[@enumToInt(ServiceID.receive_message)][@enumToInt(ExecutionMode.blocking)] = common.Message;
+    ReturnTypes[@enumToInt(ServiceID.receive_message)][@enumToInt(ExecutionMode.non_blocking)] = void;
     break :blk ReturnTypes;
 };
 
@@ -93,6 +97,8 @@ pub const SyscallParameters = blk: {
     ParameterTypes[@enumToInt(ServiceID.read_file)] = ReadFileParameters;
     ParameterTypes[@enumToInt(ServiceID.allocate_memory)] = AllocateMemoryParameters;
     ParameterTypes[@enumToInt(ServiceID.get_framebuffer)] = GetFramebufferParameters;
+    ParameterTypes[@enumToInt(ServiceID.send_message)] = common.Message;
+    ParameterTypes[@enumToInt(ServiceID.receive_message)] = void;
     break :blk ParameterTypes;
 };
 
@@ -140,6 +146,8 @@ pub const ServiceID = enum(Input.IDIntType) {
     read_file = 2,
     allocate_memory = 3,
     get_framebuffer = 4,
+    receive_message = 5,
+    send_message = 6,
 
     pub const count = enum_count(@This());
 };

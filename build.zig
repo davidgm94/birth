@@ -6,7 +6,7 @@ const cache_dir = "zig-cache/";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ kernel_name;
 
-const user_programs = .{@import("src/user/programs/minimal/dependency.zig")};
+const user_programs = .{@import("src/user/programs/desktop/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
 const common_package = Build.Package{
@@ -179,7 +179,7 @@ const Kernel = struct {
 
         arch_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package, bootloader_package };
         rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
-        kernel_package.dependencies = &.{ common_package, rnu_package, arch_package };
+        kernel_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package };
 
         kernel.executable.addPackage(common_package);
         kernel.executable.addPackage(bootloader_package);

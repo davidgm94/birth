@@ -87,6 +87,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                 .software => {
                     if (submission.input.id < Syscall.ServiceID.count) {
                         const id = @intToEnum(Syscall.ServiceID, submission.input.id);
+
                         switch (id) {
                             .thread_exit => {
                                 const exit_code = argument1;
@@ -150,6 +151,12 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                     .a = @ptrToInt(framebuffer),
                                     .b = 0,
                                 };
+                            },
+                            .send_message => {
+                                @panic("todo kernel send_message");
+                            },
+                            .receive_message => {
+                                @panic("todo kernel receive_message");
                             },
                         }
                     } else {
