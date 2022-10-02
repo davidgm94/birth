@@ -43,6 +43,38 @@ pub const Framebuffer = struct {
     pub fn get_pointer(framebuffer: Framebuffer) [*]u32 {
         return @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes));
     }
+    pub fn resize(framebuffer: *Framebuffer, allocator: common.CustomAllocator, width: u32, height: u32) bool {
+        // TODO: copy old bytes
+        // TODO: free old bytes
+        if (width == 0 or height == 0) return false;
+
+        const old_width = framebuffer.area.width;
+        const old_height = framebuffer.area.height;
+
+        if (width == old_width and height == old_height) return true;
+
+        // TODO: stop hardcoding the 4
+        const new_buffer_memory = allocator.allocate_bytes(width * height * 4, 0x1000) catch unreachable;
+        framebuffer.area = DrawingArea{
+            .bytes = @intToPtr([*]u8, new_buffer_memory.address),
+            .width = width,
+            .height = height,
+            .stride = width * 4,
+        };
+
+        // Clear it with white to debug it
+        framebuffer.fill(0);
+
+        return true;
+    }
+
+    pub fn fill(framebuffer: *Framebuffer, color: u32) void {
+        assert(@divExact(framebuffer.area.stride, framebuffer.area.width) == @sizeOf(u32));
+
+        for (@ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes))[0..framebuffer.get_pixel_count()]) |*pixel| {
+            pixel.* = color;
+        }
+    }
 
     pub fn copy(framebuffer: *Framebuffer, source: *Framebuffer, destination_point: Point, source_region: Rect, add_to_modified_region: bool) void {
         const destination_region = Rectangle.from_point_and_rectangle(destination_point, source_region);

@@ -34,7 +34,7 @@ const Cursor = struct {
     };
 };
 
-pub fn initialize(manager: *Manager, graphics: *Graphics) void {
+pub fn initialize(manager: *Manager, graphics: *Graphics.Driver) void {
     manager.lock.acquire();
     defer {
         manager.initialized = true;
@@ -45,7 +45,7 @@ pub fn initialize(manager: *Manager, graphics: *Graphics) void {
     manager.move_cursor(graphics, @intCast(i32, graphics.frontbuffer.area.width / 2 * Cursor.movement_scale), @intCast(i32, graphics.frontbuffer.area.height / 2 * Cursor.movement_scale));
 }
 
-pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32, asked_y_movement: i32) void {
+pub fn move_cursor(manager: *Manager, graphics: *Graphics.Driver, asked_x_movement: i32, asked_y_movement: i32) void {
     manager.lock.assert_locked();
 
     const x_movement = asked_x_movement * Cursor.movement_scale;
@@ -64,53 +64,34 @@ pub fn move_cursor(manager: *Manager, graphics: *Graphics, asked_x_movement: i32
     manager.update_screen(graphics);
 }
 
-pub fn update_screen(manager: *Manager, graphics: *Graphics) void {
+pub fn update_screen(manager: *Manager, graphics: *Graphics.Driver) void {
     manager.lock.assert_locked();
 
     const cursor_position = Point{
         .x = manager.cursor.position.x + manager.cursor.image_offset.x,
         .y = manager.cursor.position.y + manager.cursor.image_offset.y,
     };
-    const surface_clip = Rectangle.from_area(graphics.framebuffer.area);
+    const surface_clip = Rectangle.from_area(graphics.frontbuffer.area);
     const cursor_area = Rectangle.from_point_and_area(cursor_position, manager.cursor.surface.swap.area);
     const cursor_bounds = Rectangle.clip(surface_clip, cursor_area).intersection;
-    _ = cursor_bounds;
 
-    @panic("todo");
+    manager.cursor.surface.swap.copy(&graphics.frontbuffer, Point{ .x = 0, .y = 0 }, cursor_bounds, true);
+    manager.cursor.changed_image = false;
 
-    //manager.cursor.surface.swap.copy(
-    //&graphics.frontbuffer,
-    //Point{ .x = 0, .y = 0 },
-    //cursor_bounds,
-    //true,
-    //);
-    //manager.cursor.changed_image = false;
+    // todo: alpha mode should be 0xff
+    graphics.frontbuffer.draw(&manager.cursor.surface.current, Rectangle.from_point_and_area(cursor_position, manager.cursor.surface.current.area), Point{ .x = 0, .y = 0 }, @intToEnum(Graphics.DrawBitmapMode, 0xff));
 
-    //graphics.frontbuffer.draw(&manager.cursor.surface.current, Rectangle{
-    //.left = cursor_x,
-    //.right = cursor_x + manager.cursor.surface.current.area.width,
-    //.top = cursor_y,
-    //.bottom = cursor_y + manager.cursor.surface.current.area.height,
-    //}, 0, 0, @intToEnum(Graphics.DrawBitmapMode, 0xff));
+    if (Rectangle.width(graphics.frontbuffer.modified_region) > 0 and Rectangle.height(graphics.frontbuffer.modified_region) > 0) {
+        const source_area = Graphics.DrawingArea{
+            .bytes = graphics.frontbuffer.area.bytes + Rectangle.left(graphics.frontbuffer.modified_region) * @sizeOf(u32) + Rectangle.top(graphics.frontbuffer.modified_region) * graphics.frontbuffer.area.stride,
+            .width = Rectangle.width(graphics.frontbuffer.modified_region),
+            .height = Rectangle.height(graphics.frontbuffer.modified_region),
+            .stride = graphics.frontbuffer.area.width * @sizeOf(u32),
+        };
+        const destination_point = Point{ .x = Rectangle.left(graphics.frontbuffer.modified_region), .y = Rectangle.top(graphics.frontbuffer.modified_region) };
+        graphics.callback_update_screen(graphics, source_area, destination_point);
+        graphics.frontbuffer.modified_region = .{ graphics.frontbuffer.area.width, 0, graphics.frontbuffer.area.height, 0 };
+    }
 
-    //if (graphics.frontbuffer.modified_region.width() > 0 and graphics.frontbuffer.modified_region.height() > 0) {
-    //log.debug("Modified region: {}", .{graphics.frontbuffer.modified_region});
-    //const source_area = Graphics.DrawingArea{
-    //.bytes = graphics.frontbuffer.area.bytes + graphics.frontbuffer.modified_region.left * @sizeOf(u32) + graphics.frontbuffer.modified_region.top * graphics.frontbuffer.area.stride,
-    //.width = graphics.frontbuffer.modified_region.width(),
-    //.height = graphics.frontbuffer.modified_region.height(),
-    //.stride = graphics.frontbuffer.area.width * @sizeOf(u32),
-    //};
-    //const destination_point = Point{ .x = graphics.frontbuffer.modified_region.left, .y = graphics.frontbuffer.modified_region.right };
-    //graphics.callback_update_screen(graphics, source_area, destination_point);
-    //graphics.frontbuffer.modified_region = .{ .left = graphics.frontbuffer.area.width, .right = 0, .top = graphics.frontbuffer.area.height, .bottom = 0 };
-    //const fb_top = graphics.backbuffer.height * graphics.backbuffer.stride;
-    //for (graphics.backbuffer.bytes[0..fb_top]) |fb_byte| {
-    //if (fb_byte != 0) {
-    //log.debug("NZ: 0x{x}", .{fb_byte});
-    //}
-    //}
-    //}
-
-    //graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = cursor_bounds.left, .y = cursor_bounds.top }, Rectangle.from_width_and_height(cursor_bounds.width(), cursor_bounds.height()), true);
+    graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = Rectangle.left(cursor_bounds), .y = Rectangle.top(cursor_bounds) }, Rectangle.from_width_and_height(Rectangle.width(cursor_bounds), Rectangle.height(cursor_bounds)), true);
 }

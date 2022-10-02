@@ -11,7 +11,7 @@ const kernel = @import("kernel");
 const bootloader = @import("bootloader");
 const Limine = bootloader.Limine;
 
-graphics: Graphics,
+graphics: Graphics.Driver,
 memory_model: u8,
 red_mask: ColorMask,
 green_mask: ColorMask,
@@ -25,29 +25,12 @@ const ColorMask = struct {
     shift: u8,
 };
 
-//pub const Framebuffer = extern struct {
-//address: u64,
-//width: u64,
-//height: u64,
-//pitch: u64,
-//bpp: u16,
-//memory_model: u8,
-//red_mask_size: u8,
-//red_mask_shift: u8,
-//green_mask_size: u8,
-//green_mask_shift: u8,
-//blue_mask_size: u8,
-//blue_mask_shift: u8,
-//unused: [7]u8,
-//edid_size: u64,
-//edid: u64,
-
 pub fn init(framebuffer: Limine.Framebuffer) !void {
     const driver = try kernel.virtual_address_space.heap.allocator.create(Driver);
     log.debug("Receiving Limine framebuffer: {}", .{framebuffer});
 
     driver.* = Driver{
-        .graphics = Graphics{
+        .graphics = Graphics.Driver{
             .type = .limine,
             .backbuffer = Graphics.DrawingArea{
                 .bytes = @intToPtr([*]u8, framebuffer.address),
@@ -73,6 +56,6 @@ pub fn init(framebuffer: Limine.Framebuffer) !void {
     try Graphics.init(&driver.graphics);
 }
 
-fn update_screen_32(driver: *Graphics, source: Graphics.DrawingArea, destination_point: Graphics.Point) void {
+fn update_screen_32(driver: *Graphics.Driver, source: Graphics.DrawingArea, destination_point: Graphics.Point) void {
     Graphics.update_screen_32(driver.backbuffer, source, destination_point);
 }

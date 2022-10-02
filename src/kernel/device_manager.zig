@@ -21,7 +21,7 @@ ready: bool = false,
 const Devices = struct {
     disk: Device(Disk) = .{},
     filesystem: Device(Filesystem) = .{},
-    graphics_adapter: Device(Graphics) = .{},
+    graphics_adapter: Device(Graphics.Driver) = .{},
 };
 
 fn Device(comptime T: type) type {
@@ -56,7 +56,7 @@ pub fn register(device_manager: *DeviceManager, comptime DeviceT: type, allocato
     switch (DeviceT) {
         Filesystem => try device_manager.devices.filesystem.list.append(allocator, new_device),
         Disk => try device_manager.devices.disk.list.append(allocator, new_device),
-        Graphics => try device_manager.devices.graphics_adapter.list.append(allocator, new_device),
+        Graphics.Driver => try device_manager.devices.graphics_adapter.list.append(allocator, new_device),
         else => @compileError("Unknown device type"),
     }
 }

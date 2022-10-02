@@ -27,7 +27,7 @@ const InitError = error{
 
 // TODO: free
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, disk: *Disk) !void {
-    var dma_buffer = try disk.get_dma_buffer(virtual_address_space.heap.allocator, 1);
+    var dma_buffer = try disk.get_dma_buffer(virtual_address_space, 1);
     const result = disk.access(&dma_buffer, .{
         .sector_offset = 0,
         .sector_count = 1,
@@ -52,13 +52,12 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     try Filesystem.init(device_manager, virtual_address_space, &rnufs.fs);
 }
 
-pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) ?SeekResult {
-    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
+pub fn seek_file(fs_driver: *Filesystem, virtual_address_space: *VirtualAddressSpace, name: []const u8) ?SeekResult {
     log.debug("Seeking file {s}", .{name});
     const sectors_to_read_at_time = 1;
     const sector_size = fs_driver.disk.sector_size;
     var sector: u64 = @divExact(@sizeOf(Superblock), sector_size);
-    var search_buffer = fs_driver.disk.get_dma_buffer(allocator, sectors_to_read_at_time) catch {
+    var search_buffer = fs_driver.disk.get_dma_buffer(virtual_address_space, sectors_to_read_at_time) catch {
         log.err("Unable to allocate search buffer", .{});
         return null;
     };
@@ -104,15 +103,14 @@ pub fn seek_file(fs_driver: *Filesystem, allocator: Allocator, name: []const u8,
     @panic("not found");
 }
 
-pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) Filesystem.ReadError![]const u8 {
-    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
+pub fn read_file(fs_driver: *Filesystem, virtual_address_space: *VirtualAddressSpace, name: []const u8) Filesystem.ReadError![]const u8 {
     log.debug("About to read file {s}...", .{name});
-    if (seek_file(fs_driver, allocator, name, extra_context)) |seek_result| {
+    if (seek_file(fs_driver, virtual_address_space, name)) |seek_result| {
         const sector_size = fs_driver.disk.sector_size;
         const node_size = seek_result.node.size;
         log.debug("File size: {}", .{node_size});
         const sector_count = div_ceil(u64, node_size, sector_size) catch unreachable;
-        var buffer = fs_driver.disk.get_dma_buffer(allocator, sector_count) catch {
+        var buffer = fs_driver.disk.get_dma_buffer(virtual_address_space, sector_count) catch {
             @panic("Unable to allocate read buffer");
         };
         const sector_offset = seek_result.sector + 1;
@@ -132,12 +130,11 @@ pub fn read_file(fs_driver: *Filesystem, allocator: Allocator, name: []const u8,
     }
 }
 
-pub fn write_file(filesystem: *Filesystem, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) Filesystem.WriteError!void {
+pub fn write_file(filesystem: *Filesystem, virtual_address_space: *VirtualAddressSpace, filename: []const u8, file_content: []const u8) Filesystem.WriteError!void {
     _ = filesystem;
-    _ = allocator;
+    _ = virtual_address_space;
     _ = filename;
     _ = file_content;
-    _ = extra_context;
 
     @panic("todo write file");
 }

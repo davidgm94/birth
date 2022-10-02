@@ -383,12 +383,12 @@ pub const Drive = struct {
         return disk_work.sector_count;
     }
 
-    fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
+    fn get_dma_buffer(disk: *Disk, virtual_address_space: *VirtualAddressSpace, sector_count: u64) Allocator.Error!DMA.Buffer {
         const sector_size = disk.sector_size;
         const byte_size = sector_count * sector_size;
         const size = align_forward(byte_size, arch.page_size);
         const alignment = align_forward(sector_size, arch.page_size);
-        return DMA.Buffer.new(allocator, size, alignment) catch @panic("unable to initialize buffer");
+        return DMA.Buffer.new(virtual_address_space.heap.allocator, size, alignment) catch @panic("unable to initialize buffer");
     }
 
     fn start_command(drive: *Drive) void {

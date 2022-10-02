@@ -112,7 +112,7 @@ pub fn spawn_kernel_thread(scheduler: *Scheduler, kernel_address_space: *Virtual
 pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) !*Thread {
     assert(kernel_address_space.privilege_level == .kernel);
     assert(privilege_level == .user);
-    const executable_file = try drive.read_file(kernel_address_space.heap.allocator, executable_filename, null);
+    const executable_file = try drive.read_file(kernel_address_space, executable_filename);
     const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
     VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space);
     const elf_result = ELF.load(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
@@ -209,7 +209,6 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
 
         if (privilege_level == .user) {
             // TODO: be more careful about virtual and physical addresses
-            @panic("todo framebuffer scheduler");
             //const primary_graphics = kernel.device_manager.get_primary_graphics();
             //const primary_framebuffer = primary_graphics.framebuffer;
             //const framebuffer_kernel_virtual_address = VirtualAddress.new(@ptrToInt(primary_framebuffer.bytes));

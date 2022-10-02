@@ -21,20 +21,20 @@ pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddre
     try device_manager.register(Driver, virtual_address_space.heap.allocator.get_allocator(), filesystem);
 }
 
-pub fn read_file(driver: *Driver, allocator: Allocator, filename: []const u8, extra_context: ?*anyopaque) ReadError![]const u8 {
-    return try driver.callback_read_file(driver, allocator, filename, extra_context);
+pub fn read_file(driver: *Driver, virtual_address_space: *VirtualAddressSpace, filename: []const u8) ReadError![]const u8 {
+    return try driver.callback_read_file(driver, virtual_address_space, filename);
 }
 
-pub fn write_file(driver: *Driver, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) WriteError!void {
+pub fn write_file(driver: *Driver, virtual_address_space: *VirtualAddressSpace, filename: []const u8, file_content: []const u8) WriteError!void {
     if (driver.callback_write_file) |write_file_callback| {
-        return try write_file_callback(driver, allocator, filename, file_content, extra_context);
+        return try write_file_callback(driver, virtual_address_space, filename, file_content);
     } else {
         return WriteError.unsupported;
     }
 }
 
-const ReadFile = fn (driver: *Driver, allocator: Allocator, name: []const u8, extra_context: ?*anyopaque) ReadError![]const u8;
-const WriteFile = fn (driver: *Driver, allocator: Allocator, filename: []const u8, file_content: []const u8, extra_context: ?*anyopaque) WriteError!void;
+const ReadFile = fn (driver: *Driver, virtual_address_space: *VirtualAddressSpace, name: []const u8) ReadError![]const u8;
+const WriteFile = fn (driver: *Driver, virtual_address_space: *VirtualAddressSpace, filename: []const u8, file_content: []const u8) WriteError!void;
 
 pub const InitializationParameters = struct {
     filesystem_type: Type,

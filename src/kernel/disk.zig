@@ -18,14 +18,14 @@ const RNUFS = @import("../drivers/rnufs/rnufs.zig");
 type: Type,
 sector_size: u64,
 callback_access: *const fn (disk: *Disk, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64,
-callback_get_dma_buffer: *const fn (disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer,
+callback_get_dma_buffer: *const fn (disk: *Disk, virtual_address_space: *VirtualAddressSpace, sector_count: u64) Allocator.Error!DMA.Buffer,
 
 pub fn access(disk: *Disk, buffer: *DMA.Buffer, disk_work: Work, extra_context: ?*anyopaque) u64 {
     return disk.callback_access(disk, buffer, disk_work, extra_context);
 }
 
-pub fn get_dma_buffer(disk: *Disk, allocator: Allocator, sector_count: u64) Allocator.Error!DMA.Buffer {
-    return try disk.callback_get_dma_buffer(disk, allocator, sector_count);
+pub fn get_dma_buffer(disk: *Disk, virtual_address_space: *VirtualAddressSpace, sector_count: u64) Allocator.Error!DMA.Buffer {
+    return try disk.callback_get_dma_buffer(disk, virtual_address_space, sector_count);
 }
 
 pub const Filesystems = .{RNUFS};

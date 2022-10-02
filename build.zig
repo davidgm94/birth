@@ -24,7 +24,7 @@ const ExecutionEnvironment = enum {
     os,
     software_renderer,
 };
-const execution_environment = ExecutionEnvironment.software_renderer;
+const execution_environment = ExecutionEnvironment.os;
 
 pub fn build(b: *Build.Builder) void {
     switch (execution_environment) {
