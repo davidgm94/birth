@@ -100,16 +100,17 @@ pub export fn kernel_entry_point() noreturn {
     {
         // Kernel address space initialization
         kernel.bootloader_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
-        VirtualAddressSpace.from_current(kernel.bootstrap_virtual_address_space);
+        kernel.virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
+        VirtualAddressSpace.from_current(kernel.bootloader_virtual_address_space);
 
-        kernel.virtual_address_space = VirtualAddressSpace{
+        kernel.virtual_address_space.* = VirtualAddressSpace{
             .arch = .{},
             .privilege_level = .kernel,
-            .heap = Heap.new(&kernel.virtual_address_space),
+            .heap = Heap.new(kernel.virtual_address_space),
             .lock = Spinlock{},
         };
 
-        VAS.init_kernel(&kernel.virtual_address_space, &kernel.physical_address_space);
+        VAS.init_kernel(kernel.virtual_address_space, &kernel.physical_address_space);
         logger.debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
 
         // Map the kernel and do some tests
@@ -273,7 +274,7 @@ pub export fn kernel_entry_point() noreturn {
         kernel.bootstrap_context.cpu.idle_thread = &foo;
         kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
         kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
-        kernel.bootstrap_context.cpu.idle_thread.address_space = &kernel.virtual_address_space;
+        kernel.bootstrap_context.cpu.idle_thread.address_space = kernel.virtual_address_space;
         kernel.bootstrap_context.thread.context = &foo2;
         kernel.bootstrap_context.thread.address_space = &kernel.virtual_address_space;
 
