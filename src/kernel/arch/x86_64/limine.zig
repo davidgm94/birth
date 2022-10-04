@@ -276,10 +276,10 @@ pub export fn kernel_entry_point() noreturn {
         kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
         kernel.bootstrap_context.cpu.idle_thread.address_space = kernel.virtual_address_space;
         kernel.bootstrap_context.thread.context = &foo2;
-        kernel.bootstrap_context.thread.address_space = &kernel.virtual_address_space;
+        kernel.bootstrap_context.thread.address_space = kernel.virtual_address_space;
 
-        const threads = kernel.scheduler.thread_buffer.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
-        kernel.scheduler.current_threads = kernel.virtual_address_space.heap.allocator.allocate_many(*Thread, threads.len) catch @panic("wtf");
+        const threads = kernel.memory.threads.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
+        kernel.memory.current_threads = kernel.virtual_address_space.heap.allocator.allocate_many(*Thread, threads.len) catch @panic("wtf");
         const thread_stack_size = Scheduler.default_kernel_stack_size;
         const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
         const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
@@ -288,8 +288,8 @@ pub export fn kernel_entry_point() noreturn {
         logger.debug("[1] Spinlock count: {}", .{kernel.scheduler.cpus[0].spinlock_count});
 
         // Dummy context
-        TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[0]);
-        TLS.set_current(&kernel.scheduler, &threads[0], &kernel.scheduler.cpus[0]);
+        TLS.preset(&kernel.scheduler.cpus[0]);
+        TLS.set_current(&threads[0], &kernel.scheduler.cpus[0]);
         // Map LAPIC address on just one CPU (since it's global)
         CPU.map_lapic();
 
@@ -298,9 +298,8 @@ pub export fn kernel_entry_point() noreturn {
         // TODO: figure out stacks
         // TODO: ignore BSP cpu when AP initialization?
         for (threads) |*thread, thread_i| {
-            kernel.scheduler.current_threads[thread_i] = thread;
-            const cpu = &kernel.scheduler.cpus[thread_i];
             const smp = &cpus[thread_i];
+            const cpu = &kernel.scheduler.cpus[thread_i];
 
             const stack_allocation_offset = thread_i * thread_stack_size;
             const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
@@ -310,11 +309,12 @@ pub export fn kernel_entry_point() noreturn {
             };
 
             const entry_point = &kernel_smp_entry;
-            kernel.scheduler.initialize_thread(thread, thread_i, &kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
-            thread.cpu = cpu;
-            cpu.idle_thread = thread;
+            kernel.scheduler.initialize_thread(thread, thread_i, kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
+
             cpu.id = smp.processor_id;
+            cpu.idle_thread = thread;
             cpu.lapic.id = smp.lapic_id;
+            TLS.set_current(thread, cpu);
             smp.goto_address = entry_point;
         }
 
@@ -329,9 +329,9 @@ pub export fn kernel_entry_point() noreturn {
 
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
-    cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
+    cpu.start();
 
-    _ = kernel.scheduler.spawn_kernel_thread(&kernel.virtual_address_space, .{
+    _ = kernel.scheduler.spawn_kernel_thread(kernel.virtual_address_space, .{
         .address = @ptrToInt(&kernel.main),
     });
 
@@ -343,11 +343,11 @@ pub export fn kernel_entry_point() noreturn {
 export fn kernel_smp_entry(smp_info: *Limine.SMPInfo) callconv(.C) noreturn {
     const cpu_index = smp_info.processor_id;
     // Current thread is already set in the process_smp function
-    TLS.preset(&kernel.scheduler, &kernel.scheduler.cpus[cpu_index]);
+    TLS.preset(&kernel.scheduler.cpus[cpu_index]);
     kernel.virtual_address_space.make_current();
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
-    cpu.start(&kernel.scheduler, &kernel.virtual_address_space);
+    cpu.start();
     logger.debug("CPU started", .{});
 
     while (!cpu.ready) {

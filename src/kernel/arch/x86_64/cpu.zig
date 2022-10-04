@@ -42,23 +42,23 @@ ready: bool,
 pub fn early_bsp_bootstrap() void {
     arch.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
-    TLS.preset_bsp(&kernel.scheduler, &kernel.bootstrap_context.thread, &kernel.bootstrap_context.process, &kernel.bootstrap_context.cpu);
+    TLS.preset_bsp(&kernel.bootstrap_context.thread, &kernel.bootstrap_context.process, &kernel.bootstrap_context.cpu);
     kernel.bootstrap_context.thread.context = &kernel.bootstrap_context.context;
 
     // @ZigBug: @ptrCast here crashes the compiler
     kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&kernel.bootstrap_context.cpu))[0..1];
 }
 
-pub fn start(cpu: *CPU, scheduler: *Scheduler, virtual_address_space: *VirtualAddressSpace) void {
+pub fn start(cpu: *CPU) void {
     cpu.ready = false;
     cpu.spinlock_count = 0;
     enable_cpu_features();
     // This assumes the CPU processor local storage is already properly setup here
     cpu.gdt.setup();
     // Reload GS after loading GDT (it resets it)
-    TLS.preset(scheduler, cpu);
+    TLS.preset(cpu);
     cpu.init_interrupts();
-    cpu.init_apic(virtual_address_space);
+    cpu.init_apic(kernel.virtual_address_space);
     Syscall.enable();
 
     cpu.tss = TSS.Struct{};

@@ -14,6 +14,7 @@ pub const ELF = @import("kernel/elf.zig");
 pub const Filesystem = @import("kernel/filesystem.zig");
 pub const Graphics = @import("kernel/graphics.zig");
 pub const Heap = @import("kernel/heap.zig");
+pub const Memory = @import("kernel/memory.zig");
 pub const PhysicalAddress = @import("kernel/physical_address.zig");
 pub const PhysicalAddressSpace = @import("kernel/physical_address_space.zig");
 pub const PhysicalMemoryRegion = @import("kernel/physical_memory_region.zig");

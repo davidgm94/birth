@@ -6,6 +6,7 @@ const DeviceManager = RNU.DeviceManager;
 const FileInMemory = RNU.FileInMemory;
 const Framebuffer = Graphics.Framebuffer;
 const Graphics = RNU.Graphics;
+const Memory = RNU.Memory;
 const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
 const Process = RNU.Process;
 const Scheduler = RNU.Scheduler;
@@ -33,6 +34,7 @@ pub var scheduler = Scheduler{
 pub var physical_address_space = PhysicalAddressSpace{};
 pub var virtual_address_space: *VirtualAddressSpace = undefined;
 
+pub var memory: Memory = .{};
 pub var memory_initialized = false;
 
 pub var sections_in_memory: []VirtualMemoryRegion = &.{};

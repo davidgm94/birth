@@ -354,7 +354,7 @@ pub const Region = struct {
 };
 
 pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, size: u64, flags: Flags) void {
-    assert(virtual_address_space == &kernel.virtual_address_space);
+    assert(virtual_address_space == kernel.virtual_address_space);
     // Fake a free region
     virtual_address_space.free_regions.append(virtual_address_space.heap.allocator.get_allocator(), VirtualAddressSpace.Region{
         .address = virtual_address,

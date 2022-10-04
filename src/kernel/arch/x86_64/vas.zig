@@ -203,7 +203,7 @@ pub fn bootstrap_map(asked_physical_address: PhysicalAddress, asked_virtual_addr
     var virtual_address = asked_virtual_address;
     var physical_address = asked_physical_address;
     const top_virtual_address = asked_virtual_address.offset(page_count * page_size);
-    const virtual_address_space = &kernel.virtual_address_space;
+    const virtual_address_space = kernel.virtual_address_space;
 
     while (virtual_address.value < top_virtual_address.value) : ({
         physical_address.value += page_size;
@@ -441,7 +441,7 @@ pub fn init_user(virtual_address_space: *VirtualAddressSpace) void {
         assert(higher_half_pml4.len == half_entry_count);
     }
 
-    map_kernel_address_space_higher_half(virtual_address_space, &kernel.virtual_address_space);
+    map_kernel_address_space_higher_half(virtual_address_space, kernel.virtual_address_space);
 }
 
 const time_map = false;

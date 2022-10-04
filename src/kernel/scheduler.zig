@@ -66,7 +66,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
         @panic("interrupts were enabled");
     }
     //old_context.check(@src());
-    TLS.set_current(scheduler, new_thread, current_cpu);
+    TLS.set_current(new_thread, current_cpu);
     scheduler.lock.release();
 
     // TODO: checks
@@ -146,8 +146,8 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         scheduler.lock.release();
     }
 
-    const thread_id = scheduler.thread_buffer.element_count;
-    const thread = scheduler.thread_buffer.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
+    const thread_id = kernel.memory.threads.element_count;
+    const thread = kernel.memory.threads.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
 
     const kernel_stack_size = default_kernel_stack_size;
     const kernel_stack = thread_virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
