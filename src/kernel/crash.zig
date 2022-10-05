@@ -17,7 +17,7 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
 pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_address: usize, frame_pointer: usize) noreturn {
     @setCold(true);
     interrupts.disable();
-    if (kernel.scheduler.cpus.len > 1) {
+    if (kernel.memory.cpus.items.len > 1) {
         log.err("Panic happened. Stopping all cores...", .{});
         interrupts.send_panic_interrupt_to_all_cpus();
     }

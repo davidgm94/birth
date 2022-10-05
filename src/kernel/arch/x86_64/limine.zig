@@ -27,6 +27,17 @@ const VAS = arch.VAS;
 
 const x86_64 = arch.x86_64;
 
+pub fn get_rsdp_physical_address() PhysicalAddress {
+    switch (common.cpu.arch) {
+        .x86_64 => {
+            const response = bootloader_rsdp.response orelse @panic("RSDP response not present");
+            if (response.address == 0) @panic("RSDP address is null");
+            return PhysicalAddress.new(response.address - kernel.higher_half_direct_map.value);
+        },
+        else => @compileError("not supported"),
+    }
+}
+
 pub export fn kernel_entry_point() noreturn {
     CPU.early_bsp_bootstrap();
 
@@ -38,15 +49,6 @@ pub export fn kernel_entry_point() noreturn {
         break :blk VirtualAddress.new(response.offset);
     };
     logger.debug("HHDM: {}", .{kernel.higher_half_direct_map});
-
-    switch (common.cpu.arch) {
-        .x86_64 => {
-            const response = bootloader_rsdp.response orelse @panic("RSDP response not present");
-            if (response.address == 0) @panic("RSDP address is null");
-            x86_64.rsdp_physical_address = PhysicalAddress.new(response.address - kernel.higher_half_direct_map.value);
-        },
-        else => {},
-    }
 
     const memory_map_response = bootloader_memory_map.response orelse @panic("Memory map response not present");
     const memory_map_entry_count = memory_map_response.entry_count;
@@ -255,77 +257,81 @@ pub export fn kernel_entry_point() noreturn {
         logger.debug("Processed framebuffer", .{});
     }
 
-    {
-        const current_thread = TLS.get_current();
-        const current_cpu = @ptrCast(*volatile CPU, current_thread.cpu orelse unreachable);
-        logger.debug("[0] Spinlock count: {}", .{current_cpu.spinlock_count});
-        const response = bootloader_smp.response orelse @panic("SMP response not found");
-        const cpu_count = response.cpu_count;
-        if (cpu_count == 0) @panic("SMP response has no CPU information");
-        const ptr_cpu_ptr = response.cpus orelse @panic("SMP response has an invalid pointer to CPU data structures");
-        const cpu_ptr = ptr_cpu_ptr.*;
-        const cpus = cpu_ptr[0..cpu_count];
+    if (true) @panic("refactor cpu");
 
-        for (cpus) |cpu| {
-            logger.debug("CPU {}", .{cpu});
-        }
-        assert(cpus[0].lapic_id == response.bsp_lapic_id);
-        // @Allocation
-        kernel.bootstrap_context.cpu.idle_thread = &foo;
-        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
-        kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
-        kernel.bootstrap_context.cpu.idle_thread.address_space = kernel.virtual_address_space;
-        kernel.bootstrap_context.thread.context = &foo2;
-        kernel.bootstrap_context.thread.address_space = kernel.virtual_address_space;
+    // Refactor cpu
+    //{
+    //const current_thread = TLS.get_current();
+    //const current_cpu = @ptrCast(*volatile CPU, current_thread.cpu orelse unreachable);
+    //logger.debug("[0] Spinlock count: {}", .{current_cpu.spinlock_count});
+    //const response = bootloader_smp.response orelse @panic("SMP response not found");
+    //const cpu_count = response.cpu_count;
+    //if (cpu_count == 0) @panic("SMP response has no CPU information");
+    //const ptr_cpu_ptr = response.cpus orelse @panic("SMP response has an invalid pointer to CPU data structures");
+    //const cpu_ptr = ptr_cpu_ptr.*;
+    //const cpus = cpu_ptr[0..cpu_count];
 
-        const threads = kernel.memory.threads.add_many(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
-        kernel.memory.current_threads = kernel.virtual_address_space.heap.allocator.allocate_many(*Thread, threads.len) catch @panic("wtf");
-        const thread_stack_size = Scheduler.default_kernel_stack_size;
-        const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
-        const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
-        kernel.scheduler.cpus = kernel.virtual_address_space.heap.allocator.allocate_many(CPU, cpu_count) catch @panic("wtF");
-        kernel.scheduler.cpus[0].id = cpus[0].processor_id;
-        logger.debug("[1] Spinlock count: {}", .{kernel.scheduler.cpus[0].spinlock_count});
+    //for (cpus) |cpu| {
+    //logger.debug("CPU {}", .{cpu});
+    //}
+    //assert(cpus[0].lapic_id == response.bsp_lapic_id);
+    //// @Allocation
+    //kernel.bootstrap_context.cpu.idle_thread = &foo;
+    //kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+    //kernel.bootstrap_context.cpu.idle_thread.context = &foo2;
+    //kernel.bootstrap_context.cpu.idle_thread.address_space = kernel.virtual_address_space;
+    //kernel.bootstrap_context.thread.context = &foo2;
+    //kernel.bootstrap_context.thread.address_space = kernel.virtual_address_space;
 
-        // Dummy context
-        TLS.preset(&kernel.scheduler.cpus[0]);
-        TLS.set_current(&threads[0], &kernel.scheduler.cpus[0]);
-        // Map LAPIC address on just one CPU (since it's global)
-        CPU.map_lapic();
+    //const threads = kernel.memory.threads.allocate_contiguously(kernel.virtual_address_space.heap.allocator, cpu_count) catch @panic("wtf");
 
-        kernel.scheduler.lock.acquire();
+    //kernel.memory.current_threads = kernel.virtual_address_space.heap.allocator.allocate_many(*Thread, threads.len) catch @panic("wtf");
+    //const thread_stack_size = Scheduler.default_kernel_stack_size;
+    //const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
+    //const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+    //kernel.memory.cpus = kernel.virtual_address_space.heap.allocator.allocate_many(CPU, cpu_count) catch @panic("wtF");
+    //kernel.memory.cpus[0].id = cpus[0].processor_id;
+    //logger.debug("[1] Spinlock count: {}", .{kernel.memory.cpus[0].spinlock_count});
 
-        // TODO: figure out stacks
-        // TODO: ignore BSP cpu when AP initialization?
-        for (threads) |*thread, thread_i| {
-            const smp = &cpus[thread_i];
-            const cpu = &kernel.scheduler.cpus[thread_i];
+    //// Dummy context
+    //TLS.preset(&kernel.memory.cpus[0]);
+    //TLS.set_current(&threads[0], &kernel.memory.cpus[0]);
+    //// Map LAPIC address on just one CPU (since it's global)
+    //CPU.map_lapic();
 
-            const stack_allocation_offset = thread_i * thread_stack_size;
-            const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
-            const thread_stack = Scheduler.ThreadStack{
-                .kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
-                .user = .{ .address = kernel_stack_address, .size = thread_stack_size },
-            };
+    //kernel.scheduler.lock.acquire();
 
-            const entry_point = &kernel_smp_entry;
-            kernel.scheduler.initialize_thread(thread, thread_i, kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
+    //// TODO: figure out stacks
+    //// TODO: ignore BSP cpu when AP initialization?
+    //for (threads) |*thread, thread_i| {
+    //const smp = &cpus[thread_i];
+    //const cpu = &kernel.memory.cpus[thread_i];
 
-            cpu.id = smp.processor_id;
-            cpu.idle_thread = thread;
-            cpu.lapic.id = smp.lapic_id;
-            TLS.set_current(thread, cpu);
-            smp.goto_address = entry_point;
-        }
+    //const stack_allocation_offset = thread_i * thread_stack_size;
+    //const kernel_stack_address = thread_stacks.offset(stack_allocation_offset);
+    //const thread_stack = Scheduler.ThreadStack{
+    //.kernel = .{ .address = kernel_stack_address, .size = thread_stack_size },
+    //.user = .{ .address = kernel_stack_address, .size = thread_stack_size },
+    //};
 
-        // TODO: TSS
+    //const entry_point = &kernel_smp_entry;
+    //kernel.scheduler.initialize_thread(thread, thread_i, kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
 
-        // Update bsp CPU
-        // TODO: maybe this is necessary?
-        kernel.scheduler.lock.release();
+    //cpu.id = smp.processor_id;
+    //cpu.idle_thread = thread;
+    //cpu.lapic.id = smp.lapic_id;
+    //TLS.set_current(thread, cpu);
+    //smp.goto_address = entry_point;
+    //}
 
-        logger.debug("Processed SMP info", .{});
-    }
+    //// TODO: TSS
+
+    //// Update bsp CPU
+    //// TODO: maybe this is necessary?
+    //kernel.scheduler.lock.release();
+
+    //logger.debug("Processed SMP info", .{});
+    //}
 
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");
@@ -343,7 +349,7 @@ pub export fn kernel_entry_point() noreturn {
 export fn kernel_smp_entry(smp_info: *Limine.SMPInfo) callconv(.C) noreturn {
     const cpu_index = smp_info.processor_id;
     // Current thread is already set in the process_smp function
-    TLS.preset(&kernel.scheduler.cpus[cpu_index]);
+    TLS.preset(&kernel.memory.cpus.items[cpu_index]);
     kernel.virtual_address_space.make_current();
     const current_thread = TLS.get_current();
     const cpu = current_thread.cpu orelse @panic("cpu");

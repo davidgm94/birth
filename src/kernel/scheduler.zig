@@ -32,7 +32,6 @@ lock: Spinlock,
 all_threads: Thread.List,
 active_threads: Thread.List,
 paused_threads: Thread.List,
-cpus: []CPU,
 
 pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     // TODO @Warning @Error We are not supposed to log in performance-sensitive context
@@ -146,7 +145,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         scheduler.lock.release();
     }
 
-    const thread_id = kernel.memory.threads.element_count;
+    const thread_id = kernel.memory.threads.len;
     const thread = kernel.memory.threads.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
 
     const kernel_stack_size = default_kernel_stack_size;

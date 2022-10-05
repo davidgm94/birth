@@ -368,4 +368,4 @@ pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8
     try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
 }
 
-pub const Buffer = ListFile.StableBuffer(VirtualAddressSpace, 64);
+pub const Buffer = common.List.BufferList(VirtualAddressSpace, 64);

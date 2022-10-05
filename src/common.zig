@@ -14,13 +14,13 @@ pub const Type = std.builtin.Type;
 pub const fields = std.meta.fields;
 pub const enum_values = std.enums.values;
 pub const IntType = std.meta.Int;
-
 // MATH
 pub const max_int = std.math.maxInt;
 pub const max = std.math.max;
 pub const min = std.math.min;
 pub const div_ceil = std.math.divCeil;
 pub const clamp = std.math.clamp;
+pub const is_power_of_two = std.math.isPowerOfTwo;
 
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;
@@ -34,6 +34,7 @@ pub const ArrayList = std.ArrayListUnmanaged;
 pub const ArrayListAligned = std.ArrayListAlignedUnmanaged;
 pub const ArrayListManaged = std.ArrayList;
 pub const ArrayListAlignedManaged = std.ArrayListAligned;
+pub const Bitset = std.StaticBitSet;
 pub const MultiArrayList = std.MultiArrayList;
 pub const SegmentedList = std.SegmentedList;
 pub const SinglyLinkedList = std.SinglyLinkedList;

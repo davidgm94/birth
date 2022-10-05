@@ -177,8 +177,8 @@ const Kernel = struct {
             .source = Build.FileSource.relative("src/kernel.zig"),
         };
 
-        arch_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package, bootloader_package };
         rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
+        arch_package.dependencies = &.{ common_package, rnu_package, kernel_package, bootloader_package, arch_package };
         kernel_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package };
 
         kernel.executable.addPackage(common_package);

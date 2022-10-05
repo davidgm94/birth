@@ -73,7 +73,6 @@ pub fn List(comptime T: type) type {
 }
 
 pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
-
     //const IntShifterType = IntType(.unsigned, @ctz(@bitSizeOf(IntType)));
 
     //const bitset_size = bucket_size / @bitSizeOf(IntType);
@@ -187,6 +186,88 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
                 //@panic("buffer end");
             }
+        }
+    };
+}
+
+pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) type {
+    assert(preset_buffer_size % @bitSizeOf(u8) == 0);
+    const Bitset = common.Bitset(preset_buffer_size / @bitSizeOf(u8));
+
+    return struct {
+        len: u64 = 0,
+        static: Buffer = .{},
+        dynamic: []*Buffer = &.{},
+
+        pub const Buffer = struct {
+            bitset: Bitset = Bitset.initEmpty(),
+            array: [preset_buffer_size]T = undefined,
+
+            fn count(buffer: *const Buffer) usize {
+                return buffer.bitset.count();
+            }
+
+            fn add_one(buffer: *Buffer) Allocator.Error!*T {
+                _ = buffer;
+                @panic("todo add one buffer");
+            }
+
+            //fn get_bitset_iterator(buffer: *const Buffer)
+        };
+
+        pub fn add_one(buffer_list: *@This(), allocator: Allocator) Allocator.Error!*T {
+            _ = allocator;
+            if (buffer_list.static.count() < preset_buffer_size) {
+                return try buffer_list.add_one_statically();
+            } else {
+                @panic("todo dynamic");
+            }
+        }
+
+        pub fn add_one_statically(buffer_list: *@This()) Allocator.Error!*T {
+            if (buffer_list.static.count() < preset_buffer_size) {
+                return try buffer_list.static.add_one();
+            } else return Allocator.Error.OutOfMemory;
+        }
+
+        pub fn allocate_contiguously(buffer_list: *@This(), allocator: Allocator, count: usize) Allocator.Error![]T {
+            if (count > preset_buffer_size) {
+                return Allocator.Error.OutOfMemory;
+            }
+
+            const buffer = try allocator.create(Buffer);
+            allocator.resize(buffer_list.dynamic, buffer_list.dynamic.len + 1);
+            _ = buffer;
+            @panic("todo");
+        }
+    };
+}
+
+pub fn GlobalStaticBuffer(comptime T: type, comptime buffer_size: comptime_int) type {
+    return struct {
+        items: []T = &.{},
+
+        pub const Error = error{
+            OutOfMemory,
+        };
+
+        pub var global_static_buffer: [buffer_size]T = undefined;
+
+        pub fn max(_: @This()) usize {
+            return buffer_size;
+        }
+
+        pub fn add_one(buffer: *@This()) Error!*T {
+            const result = try buffer.add_many(1);
+            return &result[0];
+        }
+
+        pub fn add_many(buffer: *@This(), count: usize) Error![]T {
+            const candidate_index = buffer.items.len;
+            if (candidate_index + count < buffer_size) {
+                if (candidate_index == 0) buffer.items = global_static_buffer[0..count] else buffer.items.len += count;
+                return buffer.items[candidate_index .. candidate_index + count];
+            } else return Error.OutOfMemory;
         }
     };
 }

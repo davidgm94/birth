@@ -66,4 +66,4 @@ pub const State = enum {
 
 pub const ListItem = ListFile.ListItem(*Thread);
 pub const List = ListFile.List(*Thread);
-pub const Buffer = ListFile.StableBuffer(Thread, 64);
+pub const Buffer = ListFile.BufferList(Thread, 256);

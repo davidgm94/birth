@@ -36,17 +36,14 @@ gdt: GDT.Table,
 tss: TSS.Struct,
 idt: IDT,
 idle_thread: *Thread,
+current_thread: *Thread,
 timestamp_ticks_per_ms: u64 = 0,
 ready: bool,
 
 pub fn early_bsp_bootstrap() void {
     arch.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
-    TLS.preset_bsp(&kernel.bootstrap_context.thread, &kernel.bootstrap_context.process, &kernel.bootstrap_context.cpu);
-    kernel.bootstrap_context.thread.context = &kernel.bootstrap_context.context;
-
-    // @ZigBug: @ptrCast here crashes the compiler
-    kernel.scheduler.cpus = @intToPtr([*]CPU, @ptrToInt(&kernel.bootstrap_context.cpu))[0..1];
+    TLS.preset_bsp(kernel.memory.threads.add_one_statically() catch unreachable, kernel.memory.processes.add_one_statically() catch unreachable, kernel.memory.cpus.add_one() catch unreachable);
 }
 
 pub fn start(cpu: *CPU) void {

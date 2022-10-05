@@ -609,8 +609,8 @@ fn setup_interrupt_redirection_entry(asked_line: u64) bool {
         if (level_triggered) redirection_entry |= (1 << 15);
 
         ioapic.write(redirection_table_index, 1 << 16);
-        assert(TLS.get_current().cpu.? == &kernel.scheduler.cpus[0]);
-        ioapic.write(redirection_table_index + 1, kernel.scheduler.cpus[0].lapic.id << 24);
+        assert(TLS.get_current().cpu.? == &kernel.memory.cpus[0]);
+        ioapic.write(redirection_table_index + 1, kernel.memory.cpus[0].lapic.id << 24);
         ioapic.write(redirection_table_index, redirection_entry);
 
         already_setup |= @as(u32, 1) << @intCast(u5, asked_line);
@@ -646,9 +646,9 @@ pub fn send_panic_interrupt_to_all_cpus() void {
     };
 
     var bitset: u2048 = 0;
-    assert(kernel.scheduler.cpus.len <= @bitSizeOf(@TypeOf(bitset)));
+    assert(kernel.memory.cpus.items.len <= @bitSizeOf(@TypeOf(bitset)));
 
-    for (kernel.scheduler.cpus) |*cpu| {
+    for (kernel.memory.cpus.items) |*cpu| {
         if (cpu.id == panicked_cpu.id) continue;
         if (!cpu.ready) {
             bitset |= (@as(@TypeOf(bitset), 1) << @intCast(u11, cpu.id));
@@ -669,7 +669,7 @@ pub fn send_panic_interrupt_to_all_cpus() void {
         var i: u64 = 0;
         while (i < @bitSizeOf(@TypeOf(bitset))) : (i += 1) {
             if (bitset & (@as(@TypeOf(bitset), 1) << @intCast(u11, i)) != 0) {
-                common.log.scoped(.PANIC).err("{}", .{kernel.scheduler.cpus[i].id});
+                common.log.scoped(.PANIC).err("{}", .{kernel.memory.cpus.items[i].id});
             }
         }
     }

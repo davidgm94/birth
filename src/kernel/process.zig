@@ -20,4 +20,4 @@ pub fn create(process_type: Type) ?*Process {
 
 pub const ListItem = ListFile.ListItem(*Process);
 pub const List = ListFile.List(*Process);
-pub const Buffer = ListFile.StableBuffer(Process, 64);
+pub const Buffer = ListFile.BufferList(Process, 64);

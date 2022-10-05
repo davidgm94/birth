@@ -28,7 +28,6 @@ pub var scheduler = Scheduler{
     .all_threads = Thread.List{},
     .active_threads = Thread.List{},
     .paused_threads = Thread.List{},
-    .cpus = &.{},
 };
 
 pub var physical_address_space = PhysicalAddressSpace{};
@@ -49,7 +48,6 @@ var bootstrap_memory: [0x1000 * 30]u8 = undefined;
 pub var bootstrap_allocator = common.FixedBufferAllocator.init(&bootstrap_memory);
 
 pub var higher_half_direct_map = VirtualAddress.invalid();
-
 pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;
 

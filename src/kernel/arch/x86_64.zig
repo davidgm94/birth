@@ -25,5 +25,3 @@ pub const registers = @import("x86_64/registers.zig");
 pub const valid_page_sizes = [3]comptime_int{ 0x1000, 0x1000 * 0x200, 0x1000 * 0x200 * 0x200 };
 pub const page_size = valid_page_sizes[0];
 pub const page_shifter = @ctz(@as(u32, page_size));
-
-pub var rsdp_physical_address = PhysicalAddress.temporary_invalid();

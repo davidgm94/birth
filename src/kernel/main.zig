@@ -8,9 +8,9 @@ const kernel = @import("kernel");
 
 pub export fn main() callconv(.C) noreturn {
     var timer = Timer.new();
-    if (kernel.scheduler.cpus.len != 1) @panic("WTF");
+    if (kernel.memory.cpus.items.len != 1) @panic("WTF");
     kernel.device_manager.init(kernel.virtual_address_space) catch @panic("Failed to initialize drivers");
-    for (kernel.scheduler.cpus) |*cpu| {
+    for (kernel.memory.cpus.items) |*cpu| {
         cpu.ready = true;
     }
 
