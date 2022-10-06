@@ -221,7 +221,13 @@ pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) t
                 return Allocator.Error.OutOfMemory;
             }
 
-            //fn get_bitset_iterator(buffer: *const Buffer)
+            // TODO: take into account holes
+            fn allocate_many(buffer: *Buffer, element_count: usize) []T {
+                const occupied = buffer.count();
+                assert(occupied + element_count <= preset_buffer_size);
+                buffer.bitset.setRangeValue(.{ .start = occupied, .end = occupied + element_count }, true);
+                return buffer.array[occupied .. occupied + element_count];
+            }
         };
 
         pub fn add_one(buffer_list: *@This(), allocator: Allocator) Allocator.Error!*T {
@@ -244,10 +250,16 @@ pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) t
                 return Allocator.Error.OutOfMemory;
             }
 
-            const buffer = try allocator.create(Buffer);
-            allocator.resize(buffer_list.dynamic, buffer_list.dynamic.len + 1);
-            _ = buffer;
-            @panic("todo");
+            if (buffer_list.static.count() + count <= preset_buffer_size) {
+                return buffer_list.static.allocate_many(count);
+            } else {
+                buffer_list.dynamic = try allocator.realloc(buffer_list.dynamic, buffer_list.dynamic.len + 1);
+                const buffer = try allocator.create(Buffer);
+                defer buffer_list.len += count;
+                //buffer_list.dynamic[buffer_list.dynamic.len - 1].bitset
+                buffer_list.dynamic[buffer_list.dynamic.len - 1] = buffer;
+                return buffer.allocate_many(count);
+            }
         }
     };
 }
@@ -274,7 +286,8 @@ pub fn GlobalStaticBuffer(comptime T: type, comptime buffer_size: comptime_int) 
         pub fn add_many(buffer: *@This(), count: usize) Error![]T {
             const candidate_index = buffer.items.len;
             if (candidate_index + count < buffer_size) {
-                if (candidate_index == 0) buffer.items = global_static_buffer[0..count] else buffer.items.len += count;
+                if (candidate_index == 0) buffer.items = global_static_buffer[0..count];
+                buffer.items.len += count;
                 return buffer.items[candidate_index .. candidate_index + count];
             } else return Error.OutOfMemory;
         }

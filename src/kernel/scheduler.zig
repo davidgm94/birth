@@ -46,6 +46,7 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     log.debug("Current thread: #{}", .{current_thread.id});
     var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
+    log.debug("Thread state: {}", .{current_thread.state});
     assert(current_thread.state == .active);
     current_thread.context = old_context;
     old_address_space = current_thread.address_space;

@@ -50,11 +50,18 @@ pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
 pub fn get_allocator(builder: *Builder) CustomAllocator {
     return CustomAllocator{
         .callback_allocate = allocate,
+        .callback_resize = resize,
+        .callback_free = free,
         .context = builder,
     };
 }
 
-pub const zero_allocator = CustomAllocator{ .callback_allocate = zero_allocate, .context = null };
+pub const zero_allocator = CustomAllocator{
+    .callback_allocate = zero_allocate,
+    .callback_resize = resize,
+    .callback_free = free,
+    .context = null,
+};
 
 fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     const builder = @ptrCast(*Builder, @alignCast(@alignOf(Builder), allocator.context));
@@ -63,6 +70,21 @@ fn allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocat
         .address = @ptrToInt(result.ptr),
         .size = result.len,
     };
+}
+
+fn resize(allocator: CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
+    _ = allocator;
+    _ = old_memory;
+    _ = old_alignment;
+    _ = new_size;
+    unreachable;
+}
+
+fn free(allocator: CustomAllocator, memory: []u8, alignment: u29) void {
+    _ = allocator;
+    _ = memory;
+    _ = alignment;
+    unreachable;
 }
 
 fn zero_allocate(allocator: CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {

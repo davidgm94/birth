@@ -37,6 +37,8 @@ pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
         .allocator = Allocator{
             .context = virtual_address_space,
             .callback_allocate = allocate_function,
+            .callback_resize = resize_function,
+            .callback_free = free_function,
         },
         .regions = zeroes([region_count]Region),
         .lock = Spinlock{},
@@ -113,20 +115,17 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
     }
 }
 
-fn resize(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize {
-    _ = virtual_address_space;
+fn resize_function(allocator: Allocator, old_mem: []u8, old_align: u29, new_size: usize) ?usize {
+    _ = allocator;
     _ = old_mem;
     _ = old_align;
     _ = new_size;
-    _ = len_align;
-    _ = return_address;
     TODO();
 }
 
-fn free(virtual_address_space: *VirtualAddressSpace, old_mem: []u8, old_align: u29, return_address: usize) void {
-    _ = virtual_address_space;
+fn free_function(allocator: Allocator, old_mem: []u8, old_align: u29) void {
+    _ = allocator;
     _ = old_mem;
     _ = old_align;
-    _ = return_address;
     TODO();
 }

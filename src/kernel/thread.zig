@@ -16,18 +16,6 @@ const arch = @import("arch");
 const Context = arch.Context;
 const CPU = arch.CPU;
 
-//const std = @import("../common/std.zig");
-
-//const arch = @import("arch/common.zig");
-//const common = @import("common.zig");
-//const Context = arch.Context;
-//const CPU = arch.CPU;
-//const VirtualAddress = @import("virtual_address.zig");
-//const PrivilegeLevel = @import("scheduler_common.zig").PrivilegeLevel;
-//const VirtualAddressSpace = @import("virtual_address_space.zig");
-//const Syscall = @import("syscall.zig");
-//const ListFile = @import("../common/list.zig");
-
 kernel_stack: VirtualAddress,
 privilege_level: PrivilegeLevel,
 
