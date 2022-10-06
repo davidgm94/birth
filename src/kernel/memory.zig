@@ -9,7 +9,11 @@ const VirtualAddressSpace = RNU.VirtualAddressSpace;
 const arch = @import("arch");
 const CPU = arch.CPU;
 
-threads: Buffer(Thread, 256) = .{},
+const max_cpu_count = 256;
+
+threads: Buffer(Thread, max_cpu_count) = .{}, // This is just a preset value for thread buffer blocks, it is dynamic
 processes: Buffer(Process, 64) = .{},
 virtual_address_spaces: Buffer(VirtualAddressSpace, 64) = .{},
-cpus: common.List.GlobalStaticBuffer(CPU, 256) = .{},
+// Both these values are static
+cpus: common.List.GlobalStaticBuffer(CPU, max_cpu_count) = .{},
+current_threads: common.List.GlobalStaticBuffer(*Thread, max_cpu_count) = .{},

@@ -1,4 +1,5 @@
 const common = @import("common");
+const assert = common.assert;
 const log = common.log.scoped(.TLS);
 
 const RNU = @import("RNU");
@@ -16,6 +17,7 @@ const registers = x86_64.registers;
 pub inline fn preset_bsp(thread: *Thread, process: *Process, cpu: *CPU) void {
     process.type = .kernel;
     thread.process = process;
+    preset(cpu);
     set_current(thread, cpu);
 }
 

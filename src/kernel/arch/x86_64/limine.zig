@@ -443,12 +443,13 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
 
     const current_thread = TLS.get_current();
 
+    arch.writer.writeAll("[Kernel] ") catch unreachable;
     if (current_thread.cpu) |current_cpu| {
-        const processor_id = current_cpu.id;
-        arch.writer.print("[Kernel] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+        arch.writer.print("[Core #{}] ", .{current_cpu.id}) catch unreachable;
     } else {
-        arch.writer.print("[Kernel] [WARNING: unknown core] [Thread #{}] ", .{current_thread.id}) catch unreachable;
+        arch.writer.writeAll("[WARNING: unknown core] ") catch unreachable;
     }
+    arch.writer.print("[Process #{}] [Thread #{}] ", .{ current_thread.process.id, current_thread.id }) catch unreachable;
 
     arch.writer.writeAll(prefix) catch unreachable;
     arch.writer.print(format, args) catch unreachable;

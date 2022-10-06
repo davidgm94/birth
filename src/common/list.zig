@@ -208,8 +208,17 @@ pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) t
             }
 
             fn add_one(buffer: *Buffer) Allocator.Error!*T {
-                _ = buffer;
-                @panic("todo add one buffer");
+                // TODO: improve implementation
+                assert(buffer.count() < preset_buffer_size);
+                var i: u64 = 0;
+                while (i < preset_buffer_size) : (i += 1) {
+                    if (!buffer.bitset.isSet(i)) {
+                        buffer.bitset.set(i);
+                        return &buffer.array[i];
+                    }
+                }
+
+                return Allocator.Error.OutOfMemory;
             }
 
             //fn get_bitset_iterator(buffer: *const Buffer)

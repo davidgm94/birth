@@ -6,6 +6,7 @@ const ListFile = common.List;
 const RNU = @import("RNU");
 
 type: Type,
+id: u64,
 
 pub const Type = enum {
     kernel,
