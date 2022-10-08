@@ -630,7 +630,9 @@ const IRQHandler = struct {
 };
 
 pub inline fn end(cpu: *CPU) void {
-    assert(kernel.virtual_address_space.translate_address(cpu.lapic.address) != null);
+    if (kernel.config.safe_slow) {
+        assert(kernel.virtual_address_space.translate_address(cpu.lapic.address) != null);
+    }
     cpu.lapic.end_of_interrupt();
 }
 

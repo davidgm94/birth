@@ -7,10 +7,13 @@ const log = common.log.scoped(.ELF);
 const string_eq = common.string_eq;
 
 const RNU = @import("RNU");
+const Executable = RNU.Executable;
 const PhysicalAddressSpace = RNU.PhysicalAddressSpace;
 const TODO = RNU.TODO;
 const VirtualAddress = RNU.VirtualAddress;
 const VirtualAddressSpace = RNU.VirtualAddressSpace;
+
+const kernel = @import("kernel");
 
 const arch = @import("arch");
 
@@ -169,26 +172,41 @@ pub const ELFResult = struct {
     entry_point: u64,
 };
 
-pub const ElfAddressSpaces = struct {
-    kernel: *VirtualAddressSpace,
-    user: *VirtualAddressSpace,
-    physical: *PhysicalAddressSpace,
+pub fn is_elf(file: []const u8) bool {
+    const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
+    return is_elf_extended(file_header);
+}
+
+fn is_elf_extended(file_header: *const FileHeader) bool {
+    if (file_header.magic != FileHeader.magic) return false;
+    if (!string_eq(&file_header.elf_id, FileHeader.elf_signature)) return false;
+
+    return true;
+}
+
+const Error = error{
+    program_header_not_page_aligned,
+    program_header_offset_not_page_aligned,
+    no_sections,
 };
 
-pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
+pub fn load_into_kernel_memory(file: []const u8) !Executable.InKernelMemory {
     //for (file) |byte, byte_i| {
     //log.debug("[{}] = 0x{x}", .{ byte_i, byte });
     //}
     const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), file.ptr));
-    if (file_header.magic != FileHeader.magic) @panic("magic");
-    if (!string_eq(&file_header.elf_id, FileHeader.elf_signature)) @panic("signature");
+    if (!is_elf_extended(file_header)) @panic("Trying to load as ELF file a corrupted ELF file");
+
     assert(file_header.program_header_size == @sizeOf(ProgramHeader));
     assert(file_header.section_header_size == @sizeOf(SectionHeader));
-    const entry_point = file_header.entry;
     // TODO: further checking
     log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
     log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
     const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
+
+    var result = Executable.InKernelMemory{
+        .entry_point = file_header.entry,
+    };
 
     for (program_headers) |*ph| {
         switch (ph.type) {
@@ -201,35 +219,49 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                 const segment_size = align_forward(ph.size_in_memory + misalignment, page_size);
 
                 if (!ph.flags.writable) {
-                    log.debug("Segment virtual address: (0x{x}, 0x{x}) - {}", .{ ph.virtual_address, ph.virtual_address + ph.size_in_memory, ph.flags });
                     if (misalignment != 0) {
-                        @panic("ELF file with misaligned segments");
+                        return Error.program_header_not_page_aligned;
                     }
 
                     if (!is_aligned(ph.offset, page_size)) {
-                        @panic("ELF file with misaligned offset");
+                        return Error.program_header_offset_not_page_aligned;
                     }
 
-                    const page_count = @divExact(segment_size, page_size);
-                    const physical_region = address_spaces.physical.allocate_pages(page_size, page_count, .{ .zeroed = true }) orelse @panic("physical");
-                    assert(ph.flags.readable);
-                    assert(address_spaces.kernel.translate_address(base_virtual_address) == null);
-                    assert(address_spaces.user.translate_address(base_virtual_address) == null);
-                    assert(is_aligned(physical_region.size, arch.page_size));
-                    assert(ph.size_in_file <= ph.size_in_memory);
-                    assert(misalignment == 0);
+                    if (kernel.config.safe_slow) {
+                        assert(ph.flags.readable);
+                        assert(ph.size_in_file <= ph.size_in_memory);
+                        assert(misalignment == 0);
+                        assert(kernel.virtual_address_space.translate_address(base_virtual_address) == null);
+                    }
 
-                    const kernel_segment_virtual_address = physical_region.address.to_higher_half_virtual_address();
-                    // Giving executable permissions here to perform the copy
-                    // TODO: load segments and then take the right settings from the sections
-                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
-                    address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size, .{ .execute = ph.flags.executable, .write = true, .user = true }) catch unreachable;
-                    const translation_result = address_spaces.user.translate_address_extended(base_virtual_address, .no);
-                    log.debug("Translation result: {}", .{translation_result});
+                    const kernel_segment_virtual_address = try kernel.virtual_address_space.allocate(segment_size, null, .{ .write = true });
                     const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
                     const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
                     assert(dst_slice.len >= src_slice.len);
                     copy(u8, dst_slice, src_slice);
+
+                    if (result.section_count < result.sections.len) {
+                        const section = &result.sections[result.section_count];
+                        section.* = Executable.Section{
+                            .user_address = base_virtual_address,
+                            .kernel_address = kernel_segment_virtual_address,
+                            .size = segment_size,
+                            .flags = .{ .execute = ph.flags.executable, .write = true, .user = true },
+                        };
+
+                        log.debug("New section: {}", .{section});
+
+                        result.section_count += 1;
+                    } else {
+                        @panic("Can't load executable because section count exceeds the ones supported");
+                    }
+
+                    // Giving executable permissions here to perform the copy
+                    // TODO: load segments and then take the right settings from the sections
+                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
+                    //address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size, ) catch unreachable;
+                    //const translation_result = address_spaces.user.translate_address_extended(base_virtual_address, .no);
+                    //log.debug("Translation result: {}", .{translation_result});
                 } else {
                     TODO();
                 }
@@ -238,11 +270,11 @@ pub fn load(address_spaces: ElfAddressSpaces, file: []const u8) ELFResult {
                 log.debug("Unhandled PH type: {}", .{ph.type});
             },
         }
-        //if (ph.type == .load) {
-        //}
     }
 
-    return ELFResult{
-        .entry_point = entry_point,
-    };
+    if (result.section_count == 0) {
+        return Error.no_sections;
+    }
+
+    return result;
 }

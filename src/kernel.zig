@@ -32,6 +32,8 @@ pub var scheduler = Scheduler{
 
 pub var physical_address_space = PhysicalAddressSpace{};
 pub var virtual_address_space: *VirtualAddressSpace = undefined;
+pub var process: *Process = undefined;
+pub var desktop_process: *Process = undefined;
 
 pub var memory: Memory = .{};
 pub var memory_initialized = false;
@@ -50,16 +52,6 @@ pub var bootstrap_allocator = common.FixedBufferAllocator.init(&bootstrap_memory
 pub var higher_half_direct_map = VirtualAddress.invalid();
 pub var device_manager = DeviceManager{};
 pub var drivers_ready: bool = false;
-
-pub const BootstrapContext = struct {
-    cpu: CPU,
-    thread: Thread,
-    process: Process,
-    context: Context,
-    virtual_address_space: VirtualAddressSpace,
-};
-
-pub var bootstrap_context: BootstrapContext = undefined;
 
 pub var window_manager = Window.Manager{};
 

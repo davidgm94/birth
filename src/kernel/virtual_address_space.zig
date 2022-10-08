@@ -22,6 +22,7 @@ const kernel = @import("kernel");
 const arch = @import("arch");
 const VAS = arch.VAS;
 
+id: u64,
 arch: VAS.Specific,
 privilege_level: PrivilegeLevel,
 heap: Heap,
@@ -37,6 +38,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     // TODO: defer memory free when this produces an error
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
     virtual_address_space.* = VirtualAddressSpace{
+        .id = virtual_address_space.id,
         .arch = undefined,
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
@@ -365,7 +367,7 @@ pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical
 }
 
 pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {}, .valid = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock, virtual_address_space.valid });
+    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock });
 }
 
 pub const Buffer = common.List.BufferList(VirtualAddressSpace, 64);

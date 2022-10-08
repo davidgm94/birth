@@ -190,7 +190,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
     };
 }
 
-pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) type {
+pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int, comptime has_id: bool) type {
     assert(preset_buffer_size % @bitSizeOf(u8) == 0);
     const Bitset = common.Bitset(preset_buffer_size / @bitSizeOf(u8));
 
@@ -232,20 +232,32 @@ pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) t
 
         pub fn add_one(buffer_list: *@This(), allocator: Allocator) Allocator.Error!*T {
             _ = allocator;
-            if (buffer_list.static.count() < preset_buffer_size) {
-                return try buffer_list.add_one_statically();
-            } else {
-                @panic("todo dynamic");
+            const id = buffer_list.len;
+            var result = blk: {
+                if (buffer_list.static.count() < preset_buffer_size) {
+                    break :blk try buffer_list.add_one_statically();
+                } else {
+                    @panic("todo dynamic");
+                }
+            };
+
+            if (has_id) {
+                result.id = id;
             }
+
+            return result;
         }
 
         pub fn add_one_statically(buffer_list: *@This()) Allocator.Error!*T {
+            defer buffer_list.len += 1;
             if (buffer_list.static.count() < preset_buffer_size) {
                 return try buffer_list.static.add_one();
             } else return Allocator.Error.OutOfMemory;
         }
 
         pub fn allocate_contiguously(buffer_list: *@This(), allocator: Allocator, count: usize) Allocator.Error![]T {
+            defer buffer_list.len += count;
+
             if (count > preset_buffer_size) {
                 return Allocator.Error.OutOfMemory;
             }
@@ -255,7 +267,6 @@ pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int) t
             } else {
                 buffer_list.dynamic = try allocator.realloc(buffer_list.dynamic, buffer_list.dynamic.len + 1);
                 const buffer = try allocator.create(Buffer);
-                defer buffer_list.len += count;
                 //buffer_list.dynamic[buffer_list.dynamic.len - 1].bitset
                 buffer_list.dynamic[buffer_list.dynamic.len - 1] = buffer;
                 return buffer.allocate_many(count);
@@ -286,7 +297,7 @@ pub fn GlobalStaticBuffer(comptime T: type, comptime buffer_size: comptime_int) 
         pub fn add_many(buffer: *@This(), count: usize) Error![]T {
             const candidate_index = buffer.items.len;
             if (candidate_index + count < buffer_size) {
-                if (candidate_index == 0) buffer.items = global_static_buffer[0..count];
+                if (candidate_index == 0) buffer.items = global_static_buffer[0..0];
                 buffer.items.len += count;
                 return buffer.items[candidate_index .. candidate_index + count];
             } else return Error.OutOfMemory;

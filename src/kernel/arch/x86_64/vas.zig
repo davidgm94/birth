@@ -466,6 +466,7 @@ pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
 
 pub inline fn from_current(virtual_address_space: *VirtualAddressSpace) void {
     virtual_address_space.* = VirtualAddressSpace{
+        .id = virtual_address_space.id,
         .arch = Specific{
             .cr3 = cr3.read(),
         },

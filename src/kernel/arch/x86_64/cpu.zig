@@ -7,8 +7,10 @@ const log = common.log.scoped(.CPU);
 const kernel = @import("kernel");
 
 const RNU = @import("RNU");
+const Heap = RNU.Heap;
 const PhysicalAddress = RNU.PhysicalAddress;
 const Scheduler = RNU.Scheduler;
+const Spinlock = RNU.Spinlock;
 const Thread = RNU.Thread;
 const VirtualAddressSpace = RNU.VirtualAddressSpace;
 
@@ -43,7 +45,22 @@ ready: bool,
 pub fn early_bsp_bootstrap() void {
     arch.max_physical_address_bit = CPUID.get_max_physical_address_bit();
     // Generate enough bootstraping structures to make some early stuff work
-    TLS.preset_bsp(kernel.memory.threads.add_one_statically() catch unreachable, kernel.memory.processes.add_one_statically() catch unreachable, kernel.memory.cpus.add_one() catch unreachable);
+    kernel.process = kernel.memory.processes.add_one_statically() catch unreachable;
+    const bsp_thread = kernel.memory.threads.add_one_statically() catch unreachable;
+    const bsp_cpu = kernel.memory.cpus.add_one() catch unreachable;
+    TLS.preset_bsp(bsp_thread, kernel.process, bsp_cpu);
+    bsp_thread.state = .active;
+
+    kernel.bootloader_virtual_address_space = kernel.memory.virtual_address_spaces.add_one_statically() catch unreachable;
+    VirtualAddressSpace.from_current(kernel.bootloader_virtual_address_space);
+    kernel.virtual_address_space = kernel.memory.virtual_address_spaces.add_one_statically() catch unreachable;
+    kernel.virtual_address_space.* = VirtualAddressSpace{
+        .id = kernel.virtual_address_space.id,
+        .arch = .{},
+        .privilege_level = .kernel,
+        .heap = Heap.new(kernel.virtual_address_space),
+        .lock = Spinlock{},
+    };
 }
 
 pub fn start(cpu: *CPU) void {

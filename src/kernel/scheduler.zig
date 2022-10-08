@@ -44,12 +44,10 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     interrupts.disable();
     scheduler.lock.acquire();
     log.debug("Current thread: #{}", .{current_thread.id});
-    var old_address_space: *VirtualAddressSpace = undefined;
     if (scheduler.lock.were_interrupts_enabled != 0) @panic("ffff");
     log.debug("Thread state: {}", .{current_thread.state});
     assert(current_thread.state == .active);
     current_thread.context = old_context;
-    old_address_space = current_thread.address_space;
     if (current_thread.state == .active and current_thread.type != .idle) {
         scheduler.active_threads.append(&current_thread.queue_item, current_thread) catch @panic("Wtf");
     }
@@ -57,10 +55,10 @@ pub fn yield(scheduler: *Scheduler, old_context: *Context) void {
     new_thread.time_slices += 1;
     //current_thread.state = .paused;
     new_thread.state = .active;
-    if (new_thread.context.cs == 0x4b) assert(new_thread.context.ss == 0x43 and new_thread.context.ds == 0x43);
+    if (new_thread.get_context().cs == 0x4b) assert(new_thread.get_context().ss == 0x43 and new_thread.get_context().ds == 0x43);
 
     interrupts.disable_all();
-    VAS.switch_address_spaces_if_necessary(new_thread.address_space);
+    VAS.switch_address_spaces_if_necessary(new_thread.process.virtual_address_space);
 
     if (scheduler.lock.were_interrupts_enabled != 0) {
         @panic("interrupts were enabled");
@@ -103,20 +101,8 @@ pub const ThreadEntryPoint = struct {
 
 // TODO: take into account parameters
 // TODO: take into account thread type
-pub fn spawn_kernel_thread(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, thread_entry_point: ThreadEntryPoint) ?*Thread {
-    return scheduler.spawn_thread(kernel_address_space, kernel_address_space, .kernel, thread_entry_point.address);
-}
-
-pub fn load_executable(scheduler: *Scheduler, kernel_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, physical_address_space: *PhysicalAddressSpace, drive: *Filesystem, executable_filename: []const u8) !*Thread {
-    assert(kernel_address_space.privilege_level == .kernel);
-    assert(privilege_level == .user);
-    const executable_file = try drive.read_file(kernel_address_space, executable_filename);
-    const user_virtual_address_space = kernel_address_space.heap.allocator.create(VirtualAddressSpace) catch @panic("wtf");
-    VirtualAddressSpace.initialize_user_address_space(user_virtual_address_space);
-    const elf_result = ELF.load(.{ .user = user_virtual_address_space, .kernel = kernel_address_space, .physical = physical_address_space }, executable_file);
-    const thread = scheduler.spawn_thread(kernel_address_space, user_virtual_address_space, privilege_level, elf_result.entry_point);
-
-    return thread;
+pub fn spawn_kernel_thread(scheduler: *Scheduler, thread_entry_point: ThreadEntryPoint) !*Thread {
+    return scheduler.spawn_thread(.kernel, thread_entry_point.address, kernel.process);
 }
 
 pub fn terminate(thread: *Thread) void {
@@ -140,17 +126,20 @@ fn pick_thread(scheduler: *Scheduler, cpu: *CPU) *Thread {
     return cpu.idle_thread;
 }
 
-pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *VirtualAddressSpace, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, entry_point: u64) *Thread {
+pub fn spawn_thread(scheduler: *Scheduler, privilege_level: PrivilegeLevel, entry_point: u64, parent_process: *Process) !*Thread {
+    //const log = common.log.scoped(.SpawnThread);
     scheduler.lock.acquire();
     defer {
         scheduler.lock.release();
     }
 
-    const thread_id = kernel.memory.threads.len;
-    const thread = kernel.memory.threads.add_one(kernel_virtual_address_space.heap.allocator) catch @panic("thread buffer");
+    // @ZigBug We have take a pointer here because otherwise it copies the whole struct and kernel crashes
+    const memory = &kernel.memory;
+    const thread_id = memory.threads.len;
+    const thread = kernel.memory.threads.add_one(kernel.virtual_address_space.heap.allocator) catch @panic("thread buffer");
 
     const kernel_stack_size = default_kernel_stack_size;
-    const kernel_stack = thread_virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
+    const kernel_stack = kernel.virtual_address_space.allocate(kernel_stack_size, null, .{ .write = true }) catch @panic("unable to allocate the kernel stack");
     const thread_stack = switch (privilege_level) {
         .kernel => ThreadStack{
             .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
@@ -159,7 +148,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         .user => blk: {
             const user_stack_size = default_user_stack_size;
             assert(common.is_aligned(user_stack_size, arch.page_size));
-            const user_stack = thread_virtual_address_space.allocate(user_stack_size, null, .{ .write = true, .user = true }) catch @panic("user stack");
+            const user_stack = parent_process.virtual_address_space.allocate(user_stack_size, null, .{ .write = true, .user = true }) catch @panic("user stack");
             break :blk ThreadStack{
                 .kernel = .{ .address = kernel_stack, .size = kernel_stack_size },
                 .user = .{ .address = user_stack, .size = user_stack_size },
@@ -167,7 +156,7 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
         },
     };
 
-    scheduler.initialize_thread(thread, thread_id, thread_virtual_address_space, privilege_level, .normal, entry_point, thread_stack);
+    scheduler.initialize_thread(thread, thread_id, privilege_level, .normal, entry_point, thread_stack, parent_process);
 
     common.log.scoped(.SpawnThread).debug("Spawning thread with id #{}", .{thread_id});
 
@@ -175,55 +164,43 @@ pub fn spawn_thread(scheduler: *Scheduler, kernel_virtual_address_space: *Virtua
 }
 
 /// Can't log inside this function, early initialization migh crash
-pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, thread_virtual_address_space: *VirtualAddressSpace, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack) void {
+pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64, privilege_level: PrivilegeLevel, thread_type: Thread.Type, entry_point: u64, thread_stack: ThreadStack, parent_process: *Process) void {
     scheduler.lock.assert_locked();
-    //if (true) @panic("implement idle threads");
 
-    thread.all_item = Thread.ListItem.new(thread);
-    thread.queue_item = Thread.ListItem.new(thread);
-    scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
-
-    thread.address_space = thread_virtual_address_space;
-    thread.privilege_level = privilege_level;
-    thread.id = thread_id;
-    thread.type = thread_type;
-    thread.cpu = null;
-    thread.state = .active;
-    thread.executing = false;
-
-    thread.kernel_stack_base = thread_stack.kernel.address;
-    thread.kernel_stack_size = thread_stack.kernel.size;
-    thread.user_stack_base = thread_stack.user.address;
-    thread.user_stack_size = thread_stack.user.size;
+    thread.* = Thread{
+        .all_item = Thread.ListItem.new(thread),
+        .queue_item = Thread.ListItem.new(thread),
+        .privilege_level = privilege_level,
+        .id = thread_id,
+        .type = thread_type,
+        .cpu = null,
+        .state = .active,
+        .executing = false,
+        .time_slices = 0,
+        .process = parent_process,
+        // Defined in Context initialization
+        .kernel_stack = VirtualAddress.invalid(),
+        .kernel_stack_base = thread_stack.kernel.address,
+        .kernel_stack_size = thread_stack.kernel.size,
+        .user_stack_base = thread_stack.user.address,
+        .user_stack_size = thread_stack.user.size,
+        // Defined below
+        .context = undefined,
+        // Defined below for normal threads
+        .syscall_manager = undefined,
+    };
 
     thread.context = Context.new(thread, entry_point);
+
+    scheduler.all_threads.append(&thread.all_item, thread) catch @panic("wtf");
+
     if (thread.type == .normal) {
         // TODO: don't hardcode this
         const syscall_queue_entry_count = 256;
         thread.syscall_manager = switch (privilege_level) {
-            .user => Syscall.KernelManager.new(thread.address_space, syscall_queue_entry_count),
+            .user => Syscall.KernelManager.new(thread.process.virtual_address_space, syscall_queue_entry_count),
             .kernel => .{ .kernel = null, .user = null },
         };
-
-        if (privilege_level == .user) {
-            // TODO: be more careful about virtual and physical addresses
-            //const primary_graphics = kernel.device_manager.get_primary_graphics();
-            //const primary_framebuffer = primary_graphics.framebuffer;
-            //const framebuffer_kernel_virtual_address = VirtualAddress.new(@ptrToInt(primary_framebuffer.bytes));
-            //common.log.scoped(.InitializeThread).debug("Trying to find out framebuffer physical address out of this virtual address: {}", .{framebuffer_kernel_virtual_address});
-            //const framebuffer_physical_address = thread_virtual_address_space.translate_address(framebuffer_kernel_virtual_address) orelse unreachable;
-            //const framebuffer_virtual_address = VirtualAddress.new(framebuffer_physical_address.value);
-            //thread_virtual_address_space.map_extended(framebuffer_physical_address, framebuffer_virtual_address, common.align_forward(primary_framebuffer.stride * primary_framebuffer.height, arch.page_size), .{ .write = true, .user = true }, .no) catch unreachable;
-            //thread.framebuffer = thread_virtual_address_space.heap.allocator.create(common.Framebuffer) catch unreachable;
-            //const framebuffer = PhysicalAddress.new(@ptrToInt(thread.framebuffer)).to_higher_half_virtual_address().access(*common.Framebuffer);
-            //framebuffer.* = primary_framebuffer;
-            //framebuffer.bytes = framebuffer_virtual_address.access([*]u8);
-        } else {
-            // Index out of bounds
-            //const primary_graphics = kernel.device_manager.get_primary_graphics();
-            //const primary_framebuffer = primary_graphics.get_main_framebuffer();
-            //thread.framebuffer = primary_framebuffer;
-        }
 
         scheduler.active_threads.append(&thread.queue_item, thread) catch @panic("wtf");
     }

@@ -117,7 +117,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 };
 
                                 const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
-                                const file = main_storage.read_file(current_thread.address_space, filename) catch unreachable;
+                                const file = main_storage.read_file(current_thread.process.virtual_address_space, filename) catch unreachable;
                                 assert(file.len > 0);
                                 logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
                                 logger.debug("Len: {}", .{file.len});
@@ -135,7 +135,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 logger.debug("Submission: {}", .{submission});
                                 const size = submission.arguments[0];
                                 const alignment = submission.arguments[1];
-                                const allocation_result = current_thread.address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
+                                const allocation_result = current_thread.process.virtual_address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
                                 const result = Syscall.RawResult{
                                     .a = allocation_result.address,
                                     .b = allocation_result.size,
@@ -146,11 +146,12 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 return result;
                             },
                             .get_framebuffer => {
-                                const framebuffer = current_thread.framebuffer;
-                                return Syscall.RawResult{
-                                    .a = @ptrToInt(framebuffer),
-                                    .b = 0,
-                                };
+                                @panic("todo get framebuffer syscall");
+                                //const framebuffer = current_thread.framebuffer;
+                                //return Syscall.RawResult{
+                                //.a = @ptrToInt(framebuffer),
+                                //.b = 0,
+                                //};
                             },
                             .send_message => {
                                 @panic("todo kernel send_message");

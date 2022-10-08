@@ -61,6 +61,6 @@ pub inline fn next_timer(lapic: LAPIC, ms: u32) void {
     lapic.write(.TIMER_INITCNT, lapic.ticks_per_ms * ms);
 }
 
-pub inline fn end_of_interrupt(lapic: LAPIC) void {
+pub fn end_of_interrupt(lapic: LAPIC) void {
     lapic.write(.EOI, 0);
 }

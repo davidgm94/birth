@@ -100,18 +100,8 @@ pub export fn kernel_entry_point() noreturn {
     const kernel_address_response = bootloader_kernel_address.response orelse @panic("Kernel address response not present");
     // Init paging
     {
+
         // Kernel address space initialization
-        kernel.bootloader_virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
-        kernel.virtual_address_space = kernel.bootstrap_allocator.allocator().create(VirtualAddressSpace) catch @panic("bootstrap allocator failed");
-        VirtualAddressSpace.from_current(kernel.bootloader_virtual_address_space);
-
-        kernel.virtual_address_space.* = VirtualAddressSpace{
-            .arch = .{},
-            .privilege_level = .kernel,
-            .heap = Heap.new(kernel.virtual_address_space),
-            .lock = Spinlock{},
-        };
-
         VAS.init_kernel(kernel.virtual_address_space, &kernel.physical_address_space);
         logger.debug("New kernel address space CR3 0x{x}", .{@bitCast(u64, kernel.virtual_address_space.arch.cr3)});
 
@@ -151,6 +141,7 @@ pub export fn kernel_entry_point() noreturn {
 
         {
             kernel.virtual_address_space.make_current();
+            kernel.process.virtual_address_space = kernel.virtual_address_space;
             //kernel.virtual_address_space.copy_to_new(&kernel.virtual_address_space);
         }
 
@@ -269,7 +260,9 @@ pub export fn kernel_entry_point() noreturn {
         };
 
         const cpu_count = limine_cpus.len;
+        logger.debug("CPU count: {}", .{cpu_count});
         const ap_cpu_count = cpu_count - 1;
+        logger.debug("AP CPU count: {}", .{ap_cpu_count});
         const ap_threads = kernel.memory.threads.allocate_contiguously(kernel.virtual_address_space.heap.allocator, ap_cpu_count) catch @panic("wtf");
         const bsp_thread = TLS.get_current();
         logger.debug("Bsp thread: {*}", .{bsp_thread});
@@ -280,6 +273,7 @@ pub export fn kernel_entry_point() noreturn {
         const thread_stack_size = Scheduler.default_kernel_stack_size;
         const thread_bulk_stack_allocation_size = threads.len * thread_stack_size;
         const thread_stacks = kernel.virtual_address_space.allocate(thread_bulk_stack_allocation_size, null, .{ .write = true }) catch @panic("wtF");
+        logger.debug("Current CPUs before adding AP: {}", .{kernel.memory.cpus.items.len});
         const ap_cpus = kernel.memory.cpus.add_many(ap_cpu_count) catch @panic("Unable to allocate cpus");
         _ = ap_cpus;
         assert(kernel.memory.cpus.items[0].id == limine_cpus[0].processor_id);
@@ -289,6 +283,7 @@ pub export fn kernel_entry_point() noreturn {
 
         kernel.scheduler.lock.acquire();
 
+        logger.debug("CPU thread count: {}", .{threads.len});
         // TODO: figure out stacks
         // TODO: ignore BSP cpu when AP initialization?
         for (threads) |*thread, thread_i| {
@@ -303,7 +298,7 @@ pub export fn kernel_entry_point() noreturn {
             };
 
             const entry_point = &kernel_smp_entry;
-            kernel.scheduler.initialize_thread(thread, thread_i, kernel.virtual_address_space, .kernel, .idle, @ptrToInt(entry_point), thread_stack);
+            kernel.scheduler.initialize_thread(thread, thread_i, .kernel, .idle, @ptrToInt(entry_point), thread_stack, kernel.process);
 
             cpu.id = smp.processor_id;
             cpu.idle_thread = thread;
@@ -325,9 +320,7 @@ pub export fn kernel_entry_point() noreturn {
     const cpu = current_thread.cpu orelse @panic("cpu");
     cpu.start();
 
-    _ = kernel.scheduler.spawn_kernel_thread(kernel.virtual_address_space, .{
-        .address = @ptrToInt(&kernel.main),
-    });
+    _ = kernel.scheduler.spawn_kernel_thread(.{ .address = @ptrToInt(&kernel.main) }) catch unreachable;
 
     logger.debug("Congrats! Reached to the end", .{});
     cpu.ready = true;

@@ -26,15 +26,14 @@ kernel_stack_size: u64,
 user_stack_base: VirtualAddress,
 user_stack_size: u64,
 id: u64,
-context: *Context,
+context: ?*Context,
 time_slices: u64,
-address_space: *VirtualAddressSpace,
 cpu: ?*CPU,
 process: *Process,
 syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,
-framebuffer: *Framebuffer,
+//framebuffer: *Framebuffer,
 executing: bool,
 
 pub const Type = enum(u1) {
@@ -51,6 +50,10 @@ pub const State = enum {
     paused,
     active,
 };
+
+pub fn get_context(thread: *Thread) *Context {
+    return thread.context orelse unreachable;
+}
 
 pub const ListItem = ListFile.ListItem(*Thread);
 pub const List = ListFile.List(*Thread);

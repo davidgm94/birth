@@ -58,7 +58,7 @@ pub inline fn epilogue() void {
 }
 
 pub inline fn swap_privilege_registers(new_thread: *Thread) void {
-    const new_cs_user_bits = @truncate(u2, new_thread.context.cs);
+    const new_cs_user_bits = @truncate(u2, new_thread.get_context().cs);
     const old_cs_user_bits = @truncate(u2, registers.cs.read());
     const should_swap_gs = new_cs_user_bits == ~old_cs_user_bits;
     if (should_swap_gs) asm volatile ("swapgs");

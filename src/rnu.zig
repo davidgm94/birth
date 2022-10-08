@@ -11,6 +11,7 @@ pub const DeviceManager = @import("kernel/device_manager.zig");
 pub const Disk = @import("kernel/disk.zig");
 pub const Drivers = @import("kernel/drivers.zig");
 pub const ELF = @import("kernel/elf.zig");
+pub const Executable = @import("kernel/executable.zig");
 pub const Filesystem = @import("kernel/filesystem.zig");
 pub const Graphics = @import("kernel/graphics.zig");
 pub const Heap = @import("kernel/heap.zig");
