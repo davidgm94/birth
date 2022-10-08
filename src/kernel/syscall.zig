@@ -6,6 +6,7 @@ const Syscall = common.Syscall;
 const zeroes = common.zeroes;
 
 const RNU = @import("RNU");
+const Message = RNU.Message;
 const panic = RNU.panic;
 const TODO = RNU.TODO;
 const VirtualAddress = RNU.VirtualAddress;
@@ -154,10 +155,25 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 //};
                             },
                             .send_message => {
-                                @panic("todo kernel send_message");
+                                const message = Message{
+                                    .id = @intToEnum(Message.ID, submission.arguments[0]),
+                                    .context = @intToPtr(?*anyopaque, submission.arguments[1]),
+                                };
+                                logger.debug("Send message: {}", .{message.id});
+                                current_thread.message_queue.send(message) catch unreachable;
+
+                                return RawResult{
+                                    .a = 0,
+                                    .b = 0,
+                                };
                             },
                             .receive_message => {
-                                @panic("todo kernel receive_message");
+                                const message = current_thread.message_queue.receive_message() catch unreachable;
+                                logger.debug("Receive message: {}", .{message});
+                                return RawResult{
+                                    .a = @enumToInt(message.id),
+                                    .b = @ptrToInt(message.context),
+                                };
                             },
                         }
                     } else {

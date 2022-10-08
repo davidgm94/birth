@@ -6,6 +6,7 @@ const ListFile = common.List;
 const RNU = @import("RNU");
 const Graphics = RNU.Graphics;
 const Framebuffer = Graphics.Framebuffer;
+const MessageQueue = RNU.MessageQueue;
 const PrivilegeLevel = RNU.PrivilegeLevel;
 const Process = RNU.Process;
 const Syscall = RNU.Syscall;
@@ -30,6 +31,7 @@ context: ?*Context,
 time_slices: u64,
 cpu: ?*CPU,
 process: *Process,
+message_queue: MessageQueue,
 syscall_manager: Syscall.KernelManager,
 all_item: ListItem,
 queue_item: ListItem,

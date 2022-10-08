@@ -132,6 +132,13 @@ pub const Manager = struct {
                             const framebuffer = @intToPtr(*common.DrawingAreaDescriptor, result.a);
                             return framebuffer;
                         },
+                        .receive_message => {
+                            const message = ReturnType{
+                                .id = @intToEnum(ReturnType.ID, result.a),
+                                .context = @intToPtr(?*anyopaque, result.b),
+                            };
+                            return message;
+                        },
                         else => @panic("User syscall not implemented: " ++ @tagName(id)),
                     },
                 }

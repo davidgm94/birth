@@ -178,6 +178,7 @@ pub fn initialize_thread(scheduler: *Scheduler, thread: *Thread, thread_id: u64,
         .executing = false,
         .time_slices = 0,
         .process = parent_process,
+        .message_queue = .{},
         // Defined in Context initialization
         .kernel_stack = VirtualAddress.invalid(),
         .kernel_stack_base = thread_stack.kernel.address,
