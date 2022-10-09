@@ -2,6 +2,8 @@ const common = @import("common");
 const assert = common.assert;
 const field_size = common.field_size;
 pub const logger = common.log.scoped(.main);
+
+const Desktop = @import("desktop.zig");
 const Message = common.Message;
 
 const user = @import("user");
@@ -22,15 +24,6 @@ fn receive_message() Message {
     return message;
 }
 
-fn desktop_send_message(message: Message) void {
-    switch (message.id) {
-        .desktop_setup_ui => {
-            @panic("todo setup ui");
-        },
-        //else => @compileLog("Not implemented", message.id),
-    }
-}
-
 export fn user_entry_point() callconv(.C) void {
     syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
 
@@ -38,6 +31,6 @@ export fn user_entry_point() callconv(.C) void {
 
     while (true) {
         const message = receive_message();
-        desktop_send_message(message);
+        Desktop.send_message(message);
     }
 }
