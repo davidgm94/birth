@@ -17,7 +17,7 @@ pub const Writer = struct {
 
     // TODO: handle errors
     fn write(_: void, bytes: []const u8) Error!usize {
-        _ = root.syscall_manager.syscall(.log, execution_mode, .{ .message = bytes });
+        _ = root.syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
 
         return bytes.len;
     }
@@ -76,7 +76,7 @@ var writer: common.Writer(void, Writer.Error, Writer.write) = undefined;
 
 // TODO: handle locks in userspace
 // TODO: handle errors
-pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn zig_log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     var buffer: [0x2000]u8 = undefined;
     Writer.lock.acquire();
     defer Writer.lock.release();
@@ -85,7 +85,11 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
 }
 
 // TODO: improve user panic implementation
-pub fn panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
-    common.log.scoped(.PANIC).err("{s}", .{message});
+pub fn zig_panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
+    panic("{s}", .{message});
+}
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    common.log.scoped(.PANIC).err(format, arguments);
     while (true) {}
 }

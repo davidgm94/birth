@@ -1,111 +1,24 @@
 const common = @import("common");
 const assert = common.assert;
-const Syscall = common.Syscall;
-
-const ExecutionMode = Syscall.ExecutionMode;
-const HardwareID = Syscall.HardwareID;
-const Input = Syscall.Input;
-const QueueDescriptor = Syscall.QueueDescriptor;
-const RawResult = Syscall.RawResult;
-const ServiceID = Syscall.ServiceID;
-const Submission = Syscall.Submission;
-const SyscallParameters = Syscall.SyscallParameters;
-const SyscallReturnType = Syscall.SyscallReturnType;
-
-const LogParameters = Syscall.LogParameters;
-/// @Syscall
-pub fn log(parameters: LogParameters) Submission {
-    return new_submission(.log, @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0);
-}
-
-const ReadFileParameters = Syscall.ReadFileParameters;
-/// @Syscall
-pub fn read_file(parameters: ReadFileParameters) Submission {
-    const file_name_address = @ptrToInt(parameters.name.ptr);
-    const file_name_length = parameters.name.len;
-    assert(file_name_address != 0);
-    assert(file_name_length != 0);
-    return new_submission(.read_file, file_name_address, file_name_length, 0, 0, 0);
-}
-
-const AllocateMemoryParameters = Syscall.AllocateMemoryParameters;
-/// @Syscall
-pub fn allocate_memory(parameters: AllocateMemoryParameters) Submission {
-    return new_submission(.allocate_memory, parameters.size, parameters.alignment, 0, 0, 0);
-}
-
-const GetFramebufferParameters = Syscall.GetFramebufferParameters;
-/// @Syscall
-pub fn get_framebuffer(parameters: GetFramebufferParameters) Submission {
-    _ = parameters;
-    return new_submission(.get_framebuffer, 0, 0, 0, 0, 0);
-}
-
-const ThreadExitParameters = Syscall.ThreadExitParameters;
-/// @Syscall
-pub fn thread_exit(thread_exit_parameters: ThreadExitParameters) Submission {
-    var message_ptr: ?[*]const u8 = undefined;
-    var message_len: u64 = undefined;
-    if (thread_exit_parameters.message) |message| {
-        message_ptr = message.ptr;
-        message_len = message.len;
-    } else {
-        message_ptr = null;
-        message_len = 0;
-    }
-
-    return new_submission(.thread_exit, thread_exit_parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0);
-}
-
-/// @Syscall
-pub fn send_message(message: common.Message) Submission {
-    return new_submission(.send_message, @enumToInt(message.id), @ptrToInt(message.context), 0, 0, 0);
-}
-const ReceiveMessageParameters = void;
-/// @Syscall
-pub fn receive_message(receive_message_parameters: ReceiveMessageParameters) Submission {
-    _ = receive_message_parameters;
-    return new_submission(.receive_message, 0, 0, 0, 0, 0);
-}
-
-pub fn new_submission(id: ServiceID, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) Submission {
-    const input = Input{
-        .id = @enumToInt(id),
-        .options = .{
-            .execution_mode = .blocking,
-            .type = .software,
-        },
-    };
-    return Submission{ .input = input, .arguments = [_]u64{
-        argument1,
-        argument2,
-        argument3,
-        argument4,
-        argument5,
-    } };
-}
+const ExecutionMode = common.Syscall.ExecutionMode;
+const QueueDescriptor = common.Syscall.Manager.QueueDescriptor;
+const Service = common.Syscall.Service;
+const Submission = common.Syscall.Submission;
+const Syscall = common.Syscall.Syscall;
 
 pub const Manager = struct {
     buffer: []u8,
     submission_queue: QueueDescriptor,
     completion_queue: QueueDescriptor,
 
-    pub fn syscall(manager: *Manager, comptime id: ServiceID, comptime execution_mode: ExecutionMode, parameters: SyscallParameters[@enumToInt(id)]) SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)] {
-        const ReturnType = SyscallReturnType[@enumToInt(id)][@enumToInt(execution_mode)];
-        const submission = switch (id) {
-            .thread_exit => thread_exit(parameters),
-            .log => log(parameters),
-            .read_file => read_file(parameters),
-            .allocate_memory => allocate_memory(parameters),
-            .get_framebuffer => get_framebuffer(parameters),
-            .send_message => send_message(parameters),
-            .receive_message => receive_message(parameters),
-        };
+    pub fn syscall(manager: *Manager, comptime id: Service.ID, comptime execution_mode: ExecutionMode, parameters: Service.ParametersType(id)) !Service.ResultType(id, execution_mode) {
+        const service = Service.from_id(id);
+        const submission = try Submission.from_parameters(service, parameters);
 
         switch (execution_mode) {
             .blocking => {
                 const result = syscall_entry_point(submission.input, submission.arguments[0], submission.arguments[1], submission.arguments[2], submission.arguments[3], submission.arguments[4]);
-                switch (ReturnType) {
+                switch (service.Result) {
                     noreturn, void => {},
                     else => switch (id) {
                         .read_file => {
@@ -133,8 +46,8 @@ pub const Manager = struct {
                             return framebuffer;
                         },
                         .receive_message => {
-                            const message = ReturnType{
-                                .id = @intToEnum(ReturnType.ID, result.a),
+                            const message = common.Message{
+                                .id = @intToEnum(common.Message.ID, result.a),
                                 .context = @intToPtr(?*anyopaque, result.b),
                             };
                             return message;
@@ -142,14 +55,14 @@ pub const Manager = struct {
                         else => @panic("User syscall not implemented: " ++ @tagName(id)),
                     },
                 }
+
+                if (service.Result == noreturn) {
+                    @panic("should not have returned");
+                }
             },
             .non_blocking => {
                 manager.add_submission(submission);
             },
-        }
-
-        if (ReturnType == noreturn) {
-            @panic("should not have returned");
         }
     }
 
@@ -160,29 +73,29 @@ pub const Manager = struct {
     }
 
     pub fn ask() ?*Manager {
-        const result = hardware_syscall(.ask_syscall_manager);
+        const result = perform_syscall(.ask_syscall_manager);
         return @intToPtr(?*Manager, result.a);
     }
 
     pub fn flush(manager: *Manager) void {
         const submission_queue_head = manager.submission_queue.head;
-        _ = hardware_syscall(.flush_syscall_manager);
+        _ = perform_syscall(.flush_syscall_manager);
         assert(manager.completion_queue.head == submission_queue_head);
     }
 };
 
-pub fn hardware_syscall(comptime hw_syscall_id: HardwareID) RawResult {
-    const input = Input{
+pub fn perform_syscall(comptime hw_syscall_id: Syscall.ID) Syscall.Result {
+    const input = Submission.Input{
         .id = @enumToInt(hw_syscall_id),
         .options = .{
             .execution_mode = .blocking,
-            .type = .hardware,
+            .type = .syscall,
         },
     };
     return syscall_entry_point(input, 0, 0, 0, 0, 0);
 }
 
-pub extern fn syscall_entry_point(arg0: Input, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) RawResult;
+pub extern fn syscall_entry_point(arg0: Submission.Input, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) callconv(.C) Syscall.Result;
 
 // INFO: only RSP is handled in the kernel
 comptime {

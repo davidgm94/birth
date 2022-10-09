@@ -59,7 +59,7 @@ pub fn build(b: *Build.Builder) void {
                                     .assembly = false,
                                     .interrupts = true,
                                 },
-                                .virtualize = true,
+                                .virtualize = false,
                                 .print_command = true,
                             },
                         },
@@ -147,6 +147,7 @@ const Kernel = struct {
                 //kernel.executable.pie = true;
                 kernel.executable.force_pic = true;
                 kernel.executable.disable_stack_probing = true;
+                kernel.executable.stack_protector = false;
                 kernel.executable.strip = false;
                 kernel.executable.code_model = .kernel;
                 kernel.executable.red_zone = false;
@@ -280,7 +281,7 @@ const Kernel = struct {
                 const qemu_name = common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
                 kernel.run_argument_list.append(qemu_name) catch unreachable;
 
-                if (!kernel.options.run.emulator.qemu.virtualize) {
+                if (!kernel.options.is_virtualizing()) {
                     kernel.run_argument_list.append("-trace") catch unreachable;
                     kernel.run_argument_list.append("-nvme*") catch unreachable;
                     kernel.run_argument_list.append("-trace") catch unreachable;
@@ -400,7 +401,7 @@ const Kernel = struct {
                     }
                 }
 
-                // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
+                // Here the arch-specific stuff start and that's why the lists are split.
                 //kernel.run_argument_list.append("-machine") catch unreachable;
                 kernel.debug_argument_list = kernel.run_argument_list.clone() catch unreachable;
                 //const machine = switch (kernel.options.arch) {
@@ -409,7 +410,7 @@ const Kernel = struct {
                 //else => unreachable,
                 //};
                 //kernel.debug_argument_list.append(machine) catch unreachable;
-                if (kernel.options.arch == Build.arch and kernel.options.run.emulator.qemu.virtualize) {
+                if (kernel.options.is_virtualizing()) {
                     const args = &.{ "-enable-kvm", "-cpu", "host" };
                     kernel.run_argument_list.appendSlice(args) catch unreachable;
                     kernel.debug_argument_list.appendSlice(args) catch unreachable;
@@ -448,7 +449,7 @@ const Kernel = struct {
                     else => unreachable,
                 }) catch unreachable;
 
-                if (!kernel.options.run.emulator.qemu.virtualize) {
+                if (!kernel.options.is_virtualizing()) {
                     kernel.debug_argument_list.append("-S") catch unreachable;
                 }
 
@@ -479,12 +480,20 @@ const Kernel = struct {
             .x86_64 => gdb_script_buffer.appendSlice("set disassembly-flavor intel\n") catch unreachable,
             else => {},
         }
-        gdb_script_buffer.appendSlice(
-            \\symbol-file zig-cache/kernel.elf
-            \\target remote localhost:1234
-            //\\b kernel_entry_point
-            \\c
-        ) catch unreachable;
+        if (kernel.options.is_virtualizing()) {
+            gdb_script_buffer.appendSlice(
+                \\symbol-file zig-cache/kernel.elf
+                \\target remote localhost:1234
+                \\c
+            ) catch unreachable;
+        } else {
+            gdb_script_buffer.appendSlice(
+                \\symbol-file zig-cache/kernel.elf
+                \\target remote localhost:1234
+                \\b kernel_entry_point
+                \\c
+            ) catch unreachable;
+        }
 
         kernel.gdb_script = kernel.builder.addWriteFile("gdb_script", gdb_script_buffer.items);
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);
@@ -753,6 +762,10 @@ const Kernel = struct {
                 assembly: bool,
             };
         };
+
+        fn is_virtualizing(options: Options) bool {
+            return options.run.emulator.qemu.virtualize and Build.arch == options.arch;
+        }
     };
 };
 

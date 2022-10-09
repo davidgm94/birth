@@ -6,11 +6,6 @@ comptime {
     if (common.os != .freestanding) @compileError("This file should not be imported in build.zig");
 }
 
-pub const RawResult = extern struct {
-    a: u64,
-    b: u64,
-};
-
 pub const Options = packed struct(u8) {
     execution_mode: ExecutionMode,
     type: Type,
@@ -21,49 +16,10 @@ pub const Options = packed struct(u8) {
     }
 };
 
-pub const Input = extern struct {
-    const IDIntType = u16;
-    id: IDIntType,
-    options: Options,
-    unused0: u8 = 0,
-    unused1: u16 = 0,
-    unused2: u16 = 0,
-
-    comptime {
-        assert(@sizeOf(Input) == @sizeOf(u64));
-    }
-};
-
 pub const Type = enum(u1) {
-    hardware = 0,
-    software = 1,
+    syscall = 0,
+    service = 1,
 };
-
-pub const HardwareID = enum(u16) {
-    ask_syscall_manager = 0,
-    flush_syscall_manager = 1,
-
-    pub const count = enum_count(@This());
-};
-
-pub const ThreadExitParameters = struct {
-    message: ?[]const u8 = null,
-    exit_code: u64 = 0,
-};
-
-pub const LogParameters = struct {
-    message: []const u8,
-};
-pub const ReadFileParameters = struct {
-    name: []const u8,
-};
-
-pub const AllocateMemoryParameters = struct {
-    size: u64,
-    alignment: u64,
-};
-
-pub const GetFramebufferParameters = void;
 
 pub const ExecutionMode = enum(u1) {
     blocking,
@@ -71,100 +27,221 @@ pub const ExecutionMode = enum(u1) {
     const count = enum_count(@This());
 };
 
-pub const SyscallReturnType = blk: {
-    var ReturnTypes: [ServiceID.count][ExecutionMode.count]type = undefined;
-    ReturnTypes[@enumToInt(ServiceID.thread_exit)][@enumToInt(ExecutionMode.blocking)] = noreturn;
-    ReturnTypes[@enumToInt(ServiceID.thread_exit)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.log)][@enumToInt(ExecutionMode.blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.log)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.read_file)][@enumToInt(ExecutionMode.blocking)] = []const u8;
-    ReturnTypes[@enumToInt(ServiceID.read_file)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.blocking)] = []u8;
-    ReturnTypes[@enumToInt(ServiceID.allocate_memory)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.blocking)] = *common.Graphics.DrawingArea;
-    ReturnTypes[@enumToInt(ServiceID.get_framebuffer)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.send_message)][@enumToInt(ExecutionMode.blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.send_message)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    ReturnTypes[@enumToInt(ServiceID.receive_message)][@enumToInt(ExecutionMode.blocking)] = common.Message;
-    ReturnTypes[@enumToInt(ServiceID.receive_message)][@enumToInt(ExecutionMode.non_blocking)] = void;
-    break :blk ReturnTypes;
-};
-
-pub const SyscallParameters = blk: {
-    var ParameterTypes: [ServiceID.count]type = undefined;
-    ParameterTypes[@enumToInt(ServiceID.thread_exit)] = ThreadExitParameters;
-    ParameterTypes[@enumToInt(ServiceID.log)] = LogParameters;
-    ParameterTypes[@enumToInt(ServiceID.read_file)] = ReadFileParameters;
-    ParameterTypes[@enumToInt(ServiceID.allocate_memory)] = AllocateMemoryParameters;
-    ParameterTypes[@enumToInt(ServiceID.get_framebuffer)] = GetFramebufferParameters;
-    ParameterTypes[@enumToInt(ServiceID.send_message)] = common.Message;
-    ParameterTypes[@enumToInt(ServiceID.receive_message)] = void;
-    break :blk ParameterTypes;
+pub const services = blk: {
+    var service_descriptors: [Service.count]Service = undefined;
+    add_service_descriptor(Service{
+        .id = .thread_exit,
+        .Parameters = struct {
+            message: ?[]const u8 = null,
+            exit_code: u64 = 0,
+        },
+        .Result = noreturn,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .log,
+        .Parameters = struct {
+            message: []const u8,
+        },
+        .Result = void,
+        .Error = error{
+            empty_string,
+        },
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .read_file,
+        .Parameters = struct {
+            filename: []const u8,
+        },
+        .Result = []const u8,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .allocate_memory,
+        .Parameters = struct {
+            size: u64,
+            alignment: u64,
+        },
+        .Result = []u8,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .get_framebuffer,
+        .Parameters = void,
+        .Result = *common.Graphics.DrawingArea,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .send_message,
+        .Parameters = common.Message,
+        .Result = void,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .receive_message,
+        .Parameters = void,
+        .Result = common.Message,
+        .Error = error{},
+    }, &service_descriptors);
+    break :blk service_descriptors;
 };
 
 pub const Submission = struct {
     input: Input,
-    arguments: [5]u64,
+    arguments: Arguments,
+
+    fn from_service(id: Service.ID, arguments: Submission.Arguments) Submission {
+        const input = Input{
+            .id = @enumToInt(id),
+            .options = .{
+                .execution_mode = .blocking,
+                .type = .service,
+            },
+        };
+        return Submission{ .input = input, .arguments = arguments };
+    }
+
+    pub fn from_parameters(comptime service: Service, parameters: service.Parameters) service.Error!Submission {
+        const arguments: Submission.Arguments = blk: {
+            switch (service.id) {
+                .thread_exit => {
+                    var message_ptr: ?[*]const u8 = undefined;
+                    var message_len: u64 = undefined;
+                    if (parameters.message) |message| {
+                        if (message.len == 0) return service.Error.empty_message;
+                        message_ptr = message.ptr;
+                        message_len = message.len;
+                    } else {
+                        message_ptr = null;
+                        message_len = 0;
+                    }
+
+                    break :blk .{ parameters.exit_code, @ptrToInt(message_ptr), message_len, 0, 0 };
+                },
+                .log => {
+                    if (parameters.message.len == 0) return service.Error.empty_string;
+                    break :blk .{ @ptrToInt(parameters.message.ptr), parameters.message.len, 0, 0, 0 };
+                },
+                .read_file => {
+                    if (parameters.filename.len == 0) return service.Error.empty_filename;
+                    break :blk .{ @ptrToInt(parameters.filename.ptr), parameters.filename.len, 0, 0, 0 };
+                },
+                .allocate_memory => {
+                    if (parameters.size == 0) return service.Error.size_is_zero;
+                    if (parameters.alignment == 0) return service.Error.alignment_is_zero;
+                    break :blk .{ parameters.size, parameters.alignment, 0, 0, 0 };
+                },
+                .get_framebuffer => {
+                    assert(@TypeOf(parameters) == void);
+                    break :blk .{ 0, 0, 0, 0, 0 };
+                },
+                .receive_message => {
+                    assert(@TypeOf(parameters) == void);
+                    break :blk .{ 0, 0, 0, 0, 0 };
+                },
+                .send_message => {
+                    assert(@TypeOf(parameters) == common.Message);
+                    const message = parameters;
+                    break :blk .{ @enumToInt(message.id), @ptrToInt(message.context), 0, 0, 0 };
+                },
+                .create_plain_window => {
+                    assert(@TypeOf(parameters) == void);
+                    break :blk .{ 0, 0, 0, 0, 0 };
+                },
+            }
+        };
+
+        return Submission.from_service(service.id, arguments);
+    }
+
+    pub const Input = extern struct {
+        const IDIntType = u16;
+        id: IDIntType,
+        options: Options,
+        unused0: u8 = 0,
+        unused1: u16 = 0,
+        unused2: u16 = 0,
+
+        comptime {
+            assert(@sizeOf(Input) == @sizeOf(u64));
+        }
+    };
+    pub const Arguments = [5]u64;
 
     comptime {
         assert(@sizeOf(Submission) == 6 * @sizeOf(u64));
     }
 };
 
-pub const Completion = RawResult;
-
-pub const QueueDescriptor = struct {
-    head: u32,
-    tail: u32,
-    offset: u32,
-};
-
 pub const Manager = struct {
     buffer: []u8,
     submission_queue: QueueDescriptor,
     completion_queue: QueueDescriptor,
-};
 
-//pub const KernelManager = struct {
-//kernel: ?*Manager,
-//user: ?*Manager,
-//};
+    pub const QueueDescriptor = struct {
+        head: u32,
+        tail: u32,
+        offset: u32,
+    };
+};
 
 // TODO: develop on this idea
-const SyscallDescriptor = struct {};
+pub const Syscall = struct {
+    id: ID,
 
-pub const SyscallID = enum(Input.IDIntType) {
-    ask_syscall_manager = 0,
-    flush_syscall_manager = 1,
+    pub const count = enum_count(ID);
+    pub const ID = enum(Submission.Input.IDIntType) {
+        ask_syscall_manager = 0,
+        flush_syscall_manager = 1,
+    };
 
-    pub const count = enum_count(@This());
+    pub const Result = extern struct {
+        a: u64,
+        b: u64,
+    };
 };
 
-pub const ServiceID = enum(Input.IDIntType) {
-    thread_exit = 0,
-    log = 1,
-    read_file = 2,
-    allocate_memory = 3,
-    get_framebuffer = 4,
-    receive_message = 5,
-    send_message = 6,
-
-    pub const count = enum_count(@This());
-};
-
-pub fn add_syscall_descriptor(comptime id: SyscallID, arr: []SyscallDescriptor) void {
+pub fn add_syscall_descriptor(syscall: Syscall, arr: []Syscall) void {
     _ = arr;
-    _ = id;
+    _ = syscall;
 }
 
-const ServiceDescriptor = struct {
-    id: ServiceID,
-    UserParameters: type,
-    UserResult: type,
-    used: bool = false,
+pub const DefaultNonBlockingResult = void;
+
+pub const Service = struct {
+    id: ID,
+    Parameters: type,
+    Result: type,
+    Error: type,
+
+    pub const ID = enum(Submission.Input.IDIntType) {
+        thread_exit = 0,
+        log = 1,
+        read_file = 2,
+        allocate_memory = 3,
+        get_framebuffer = 4,
+        receive_message = 5,
+        send_message = 6,
+        create_plain_window = 7,
+    };
+    pub const count = enum_count(ID);
+
+    pub fn from_id(comptime id: ID) Service {
+        return services[@enumToInt(id)];
+    }
+
+    pub fn ParametersType(comptime id: ID) type {
+        return services[@enumToInt(id)].Parameters;
+    }
+
+    pub fn ResultType(comptime id: Service.ID, comptime execution_mode: ExecutionMode) type {
+        return switch (execution_mode) {
+            .blocking => services[@enumToInt(id)].Result,
+            .non_blocking => DefaultNonBlockingResult,
+        };
+    }
 };
 
-pub fn add_service_descriptor(comptime id: ServiceID, arr: []ServiceDescriptor) void {
-    _ = id;
-    _ = arr;
+pub fn add_service_descriptor(comptime service: Service, comptime arr: []Service) void {
+    arr[@enumToInt(service.id)] = service;
 }

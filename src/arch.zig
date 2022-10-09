@@ -7,7 +7,7 @@ const common = @import("common");
 const RNU = @import("RNU");
 const Spinlock = RNU.Spinlock;
 
-const arch = switch (common.cpu.arch) {
+const arch = switch (@import("builtin").cpu.arch) {
     .x86_64 => x86_64,
     else => @compileError("Architecture not supported"),
 };

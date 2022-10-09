@@ -35,9 +35,9 @@ const Indices = [enum_count(PageIndex)]u16;
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, flags: MemoryFlags) MapError!void {
     if (kernel.config.safe_slow) {
-        assert(virtual_address_space != kernel.bootstrap_virtual_address_space);
-        assert(is_aligned(virtual_address.value, common.page_size));
-        assert(is_aligned(physical_address.value, common.page_size));
+        assert(virtual_address_space != kernel.bootloader_virtual_address_space);
+        assert(is_aligned(virtual_address.value, page_size));
+        assert(is_aligned(physical_address.value, page_size));
     }
 
     const indices = compute_indices(virtual_address);
@@ -610,15 +610,15 @@ fn compute_indices(virtual_address: VirtualAddress) Indices {
 
 pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
     if (kernel.config.safe_slow) {
-        if (virtual_address_space == &kernel.virtual_address_space) {
+        if (virtual_address_space == kernel.virtual_address_space) {
             log.debug("About to switch to kernel address space", .{});
             const instruction_pointer = VirtualAddress.new(@returnAddress()).aligned_backward(page_size);
             const frame_pointer = VirtualAddress.new(@frameAddress()).aligned_backward(page_size);
             const global_ptr_va = VirtualAddress.new(@ptrToInt(&kernel.virtual_address_space)).aligned_backward(page_size);
 
-            const instruction_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(instruction_pointer) orelse unreachable;
-            const frame_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(frame_pointer) orelse unreachable;
-            const global_pointer_physical_address = kernel.bootstrap_virtual_address_space.translate_address(global_ptr_va) orelse unreachable;
+            const instruction_pointer_physical_address = kernel.bootloader_virtual_address_space.translate_address(instruction_pointer) orelse unreachable;
+            const frame_pointer_physical_address = kernel.bootloader_virtual_address_space.translate_address(frame_pointer) orelse unreachable;
+            const global_pointer_physical_address = kernel.bootloader_virtual_address_space.translate_address(global_ptr_va) orelse unreachable;
 
             log.debug("Checking if instruction pointer is mapped to {}...", .{instruction_pointer_physical_address});
             assert(virtual_address_space.translate_address(instruction_pointer) != null);

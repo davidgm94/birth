@@ -218,52 +218,41 @@ pub fn load_into_kernel_memory(file: []const u8) !Executable.InKernelMemory {
                 const base_virtual_address = VirtualAddress.new(ph.virtual_address - misalignment);
                 const segment_size = align_forward(ph.size_in_memory + misalignment, page_size);
 
-                if (!ph.flags.writable) {
-                    if (misalignment != 0) {
-                        return Error.program_header_not_page_aligned;
-                    }
+                if (misalignment != 0) {
+                    return Error.program_header_not_page_aligned;
+                }
 
-                    if (!is_aligned(ph.offset, page_size)) {
-                        return Error.program_header_offset_not_page_aligned;
-                    }
+                if (!is_aligned(ph.offset, page_size)) {
+                    return Error.program_header_offset_not_page_aligned;
+                }
 
-                    if (kernel.config.safe_slow) {
-                        assert(ph.flags.readable);
-                        assert(ph.size_in_file <= ph.size_in_memory);
-                        assert(misalignment == 0);
-                        assert(kernel.virtual_address_space.translate_address(base_virtual_address) == null);
-                    }
+                if (kernel.config.safe_slow) {
+                    assert(ph.flags.readable);
+                    assert(ph.size_in_file <= ph.size_in_memory);
+                    assert(misalignment == 0);
+                    assert(kernel.virtual_address_space.translate_address(base_virtual_address) == null);
+                }
 
-                    const kernel_segment_virtual_address = try kernel.virtual_address_space.allocate(segment_size, null, .{ .write = true });
-                    const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
-                    const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
-                    assert(dst_slice.len >= src_slice.len);
-                    copy(u8, dst_slice, src_slice);
+                const kernel_segment_virtual_address = try kernel.virtual_address_space.allocate(segment_size, null, .{ .write = true });
+                const dst_slice = kernel_segment_virtual_address.offset(misalignment).access([*]u8)[0..ph.size_in_memory];
+                const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];
+                assert(dst_slice.len >= src_slice.len);
+                copy(u8, dst_slice, src_slice);
 
-                    if (result.section_count < result.sections.len) {
-                        const section = &result.sections[result.section_count];
-                        section.* = Executable.Section{
-                            .user_address = base_virtual_address,
-                            .kernel_address = kernel_segment_virtual_address,
-                            .size = segment_size,
-                            .flags = .{ .execute = ph.flags.executable, .write = true, .user = true },
-                        };
+                if (result.section_count < result.sections.len) {
+                    const section = &result.sections[result.section_count];
+                    section.* = Executable.Section{
+                        .user_address = base_virtual_address,
+                        .kernel_address = kernel_segment_virtual_address,
+                        .size = segment_size,
+                        .flags = .{ .execute = ph.flags.executable, .write = ph.flags.writable, .user = true },
+                    };
 
-                        log.debug("New section: {}", .{section});
+                    log.debug("New section: {}", .{section});
 
-                        result.section_count += 1;
-                    } else {
-                        @panic("Can't load executable because section count exceeds the ones supported");
-                    }
-
-                    // Giving executable permissions here to perform the copy
-                    // TODO: load segments and then take the right settings from the sections
-                    // .write attribute is just wrong here, but it avoids page faults when writing to the bss section
-                    //address_spaces.user.map(physical_region.address, base_virtual_address, physical_region.size, ) catch unreachable;
-                    //const translation_result = address_spaces.user.translate_address_extended(base_virtual_address, .no);
-                    //log.debug("Translation result: {}", .{translation_result});
+                    result.section_count += 1;
                 } else {
-                    TODO();
+                    @panic("Can't load executable because section count exceeds the ones supported");
                 }
             },
             else => {

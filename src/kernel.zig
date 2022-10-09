@@ -56,7 +56,7 @@ pub var drivers_ready: bool = false;
 pub var window_manager = Window.Manager{};
 
 pub const config = struct {
-    safe_slow: bool = false,
+    safe_slow: bool = true,
 }{};
 
 pub const start = @extern(*u8, .{ .name = "kernel_start" });

@@ -2,7 +2,11 @@ const common = @import("common");
 const align_forward = common.align_forward;
 const assert = common.assert;
 const logger = common.log.scoped(.Syscall);
-const Syscall = common.Syscall;
+const Service = common.Syscall.Service;
+const Submission = common.Syscall.Submission;
+const Syscall = common.Syscall.Syscall;
+const Manager = common.Syscall.Manager;
+const services = common.Syscall.services;
 const zeroes = common.zeroes;
 
 const RNU = @import("RNU");
@@ -17,17 +21,14 @@ const kernel = @import("kernel");
 const arch = @import("arch");
 const TLS = arch.TLS;
 
-pub const Input = Syscall.Input;
-pub const RawResult = Syscall.RawResult;
-
 pub const KernelManager = struct {
-    kernel: ?*Syscall.Manager,
-    user: ?*Syscall.Manager,
+    kernel: ?*Manager,
+    user: ?*Manager,
 
     pub fn new(virtual_address_space: *VirtualAddressSpace, entry_count: u64) KernelManager {
         assert(virtual_address_space.privilege_level == .user);
-        const submission_queue_buffer_size = align_forward(entry_count * @sizeOf(Syscall.Submission), arch.page_size);
-        const completion_queue_buffer_size = align_forward(entry_count * @sizeOf(Syscall.Completion), arch.page_size);
+        const submission_queue_buffer_size = align_forward(entry_count * @sizeOf(Submission), arch.page_size);
+        const completion_queue_buffer_size = align_forward(entry_count * @sizeOf(Syscall.Result), arch.page_size);
         const total_buffer_size = submission_queue_buffer_size + completion_queue_buffer_size;
 
         const syscall_buffer_physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, @divFloor(total_buffer_size, arch.page_size), .{ .zeroed = true }) orelse @panic("wtF");
@@ -41,20 +42,20 @@ pub const KernelManager = struct {
         // TODO: not use a full page
         // TODO: unmap
         // TODO: @Hack undo
-        const user_syscall_manager_virtual = virtual_address_space.allocate(align_forward(@sizeOf(Syscall.Manager), arch.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
+        const user_syscall_manager_virtual = virtual_address_space.allocate(align_forward(@sizeOf(Manager), arch.page_size), null, .{ .write = true, .user = true }) catch @panic("wtff");
         const translated_physical = virtual_address_space.translate_address(user_syscall_manager_virtual) orelse @panic("wtff");
         const kernel_syscall_manager_virtual = translated_physical.to_higher_half_virtual_address();
         const trans_result = virtual_address_space.translate_address(kernel_syscall_manager_virtual) orelse @panic("wtf");
         assert(trans_result.value == translated_physical.value);
-        const user_syscall_manager = kernel_syscall_manager_virtual.access(*Syscall.Manager);
-        user_syscall_manager.* = Syscall.Manager{
+        const user_syscall_manager = kernel_syscall_manager_virtual.access(*Manager);
+        user_syscall_manager.* = Manager{
             .buffer = user_virtual_buffer.access([*]u8)[0..total_buffer_size],
-            .submission_queue = Syscall.QueueDescriptor{
+            .submission_queue = Manager.QueueDescriptor{
                 .head = 0,
                 .tail = 0,
                 .offset = 0,
             },
-            .completion_queue = Syscall.QueueDescriptor{
+            .completion_queue = Manager.QueueDescriptor{
                 .head = 0,
                 .tail = 0,
                 .offset = @intCast(u32, submission_queue_buffer_size),
@@ -66,17 +67,17 @@ pub const KernelManager = struct {
         assert(physical_user.value == physical_kernel.value);
 
         return KernelManager{
-            .kernel = kernel_syscall_manager_virtual.access(*Syscall.Manager),
-            .user = user_syscall_manager_virtual.access(*Syscall.Manager),
+            .kernel = kernel_syscall_manager_virtual.access(*Manager),
+            .user = user_syscall_manager_virtual.access(*Manager),
         };
     }
 };
 
-const HandlerPrototype = fn (Syscall.Input, u64, u64, u64, u64, u64) callconv(.C) Syscall.RawResult;
+const HandlerPrototype = fn (Submission.Input, u64, u64, u64, u64, u64) callconv(.C) Syscall.Result;
 pub const handler: *const HandlerPrototype = kernel_syscall_handler;
 
-pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.RawResult {
-    const submission = Syscall.Submission{
+pub export fn kernel_syscall_handler(input: Submission.Input, argument1: u64, argument2: u64, argument3: u64, argument4: u64, argument5: u64) callconv(.C) Syscall.Result {
+    const submission = Submission{
         .input = input,
         .arguments = [_]u64{ argument1, argument2, argument3, argument4, argument5 },
     };
@@ -85,9 +86,9 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
     switch (submission.input.options.execution_mode) {
         .blocking => {
             switch (submission.input.options.type) {
-                .software => {
-                    if (submission.input.id < Syscall.ServiceID.count) {
-                        const id = @intToEnum(Syscall.ServiceID, submission.input.id);
+                .service => {
+                    if (submission.input.id < Service.count) {
+                        const id = @intToEnum(Service.ID, submission.input.id);
 
                         switch (id) {
                             .thread_exit => {
@@ -124,7 +125,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 logger.debug("Len: {}", .{file.len});
                                 logger.debug("File[0]: 0x{x}", .{file[0]});
 
-                                const result = Syscall.RawResult{
+                                const result = Syscall.Result{
                                     .a = @ptrToInt(file.ptr),
                                     .b = file.len,
                                 };
@@ -137,7 +138,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 const size = submission.arguments[0];
                                 const alignment = submission.arguments[1];
                                 const allocation_result = current_thread.process.virtual_address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
-                                const result = Syscall.RawResult{
+                                const result = Syscall.Result{
                                     .a = allocation_result.address,
                                     .b = allocation_result.size,
                                 };
@@ -162,7 +163,7 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                                 logger.debug("Send message: {}", .{message.id});
                                 current_thread.message_queue.send(message) catch unreachable;
 
-                                return RawResult{
+                                return Syscall.Result{
                                     .a = 0,
                                     .b = 0,
                                 };
@@ -170,19 +171,22 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
                             .receive_message => {
                                 const message = current_thread.message_queue.receive_message() catch unreachable;
                                 logger.debug("Receive message: {}", .{message});
-                                return RawResult{
+                                return Syscall.Result{
                                     .a = @enumToInt(message.id),
                                     .b = @ptrToInt(message.context),
                                 };
+                            },
+                            .create_plain_window => {
+                                @panic("todo create_plain_window");
                             },
                         }
                     } else {
                         @panic("unrecognized software syscall");
                     }
                 },
-                .hardware => {
-                    if (input.id < Syscall.HardwareID.count) {
-                        const id = @intToEnum(Syscall.HardwareID, input.id);
+                .syscall => {
+                    if (input.id < Syscall.count) {
+                        const id = @intToEnum(Syscall.ID, input.id);
                         return switch (id) {
                             .ask_syscall_manager => ask_syscall_manager(),
                             else => panic("NI: {s}", .{@tagName(id)}),
@@ -198,16 +202,16 @@ pub export fn kernel_syscall_handler(input: Syscall.Input, argument1: u64, argum
         },
     }
 
-    return zeroes(Syscall.RawResult);
+    return zeroes(Syscall.Result);
 }
 
 /// @HardwareSyscall
-pub noinline fn ask_syscall_manager() Syscall.RawResult {
+pub noinline fn ask_syscall_manager() Syscall.Result {
     logger.debug("Asking syscall manager", .{});
     const current_thread = TLS.get_current();
     const user_syscall_manager = current_thread.syscall_manager.user;
     assert(user_syscall_manager != null);
-    return Syscall.RawResult{
+    return Syscall.Result{
         .a = @ptrToInt(user_syscall_manager),
         .b = 0,
     };
