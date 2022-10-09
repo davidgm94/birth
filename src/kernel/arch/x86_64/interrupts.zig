@@ -438,6 +438,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
                 }
             }
         },
+        0x20...0x2f => {}, // PIC
         0x40 => {
             if (current_cpu.ready) {
                 kernel.scheduler.yield(context);
@@ -461,7 +462,7 @@ export fn interrupt_handler(context: *Context) align(0x10) callconv(.C) void {
             //context.debug();
             //unreachable;
         },
-        else => unreachable,
+        else => panic("Unhandled interrupt: {}", .{context}),
     }
 
     context.check(@src());

@@ -35,7 +35,6 @@ pub const Table = packed struct {
     }
 
     pub fn setup(gdt: *Table) void {
-        log.debug("Loading GDT...", .{});
         gdt.* = Table{
             .tss = bootstrap_tss.get_descriptor(),
         };

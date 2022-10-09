@@ -1,3 +1,6 @@
+const common = @import("common");
+const log = common.log.scoped(.IO);
+
 pub const Ports = struct {
     pub const DMA1 = 0x0000;
     pub const PIC1 = 0x0020;

@@ -59,8 +59,8 @@ pub fn build(b: *Build.Builder) void {
                                     .assembly = false,
                                     .interrupts = true,
                                 },
-                                .run_for_debug = true,
-                                .print_command = false,
+                                .virtualize = true,
+                                .print_command = true,
                             },
                         },
                     },
@@ -280,18 +280,20 @@ const Kernel = struct {
                 const qemu_name = common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
                 kernel.run_argument_list.append(qemu_name) catch unreachable;
 
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-nvme*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-pci*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-ide*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-ata*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-ahci*") catch unreachable;
-                kernel.run_argument_list.append("-trace") catch unreachable;
-                kernel.run_argument_list.append("-sata*") catch unreachable;
+                if (!kernel.options.run.emulator.qemu.virtualize) {
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-nvme*") catch unreachable;
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-pci*") catch unreachable;
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-ide*") catch unreachable;
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-ata*") catch unreachable;
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-ahci*") catch unreachable;
+                    kernel.run_argument_list.append("-trace") catch unreachable;
+                    kernel.run_argument_list.append("-sata*") catch unreachable;
+                }
 
                 switch (kernel.options.arch) {
                     .x86_64 => {
@@ -399,19 +401,20 @@ const Kernel = struct {
                 }
 
                 // Here the arch-specific stuff start and that's why the lists are split. For debug builds virtualization is pointless since it gives you no debug information
-                kernel.run_argument_list.append("-machine") catch unreachable;
+                //kernel.run_argument_list.append("-machine") catch unreachable;
                 kernel.debug_argument_list = kernel.run_argument_list.clone() catch unreachable;
-                const machine = switch (kernel.options.arch) {
-                    .x86_64 => "q35",
-                    .riscv64 => "virt",
-                    else => unreachable,
-                };
-                kernel.debug_argument_list.append(machine) catch unreachable;
-                if (kernel.options.arch == Build.arch and !kernel.options.run.emulator.qemu.run_for_debug) {
-                    kernel.run_argument_list.append(kernel.builder.fmt("{s},accel=kvm:whpx:tcg", .{machine})) catch unreachable;
+                //const machine = switch (kernel.options.arch) {
+                //.x86_64 => "q35",
+                //.riscv64 => "virt",
+                //else => unreachable,
+                //};
+                //kernel.debug_argument_list.append(machine) catch unreachable;
+                if (kernel.options.arch == Build.arch and kernel.options.run.emulator.qemu.virtualize) {
+                    const args = &.{ "-enable-kvm", "-cpu", "host" };
+                    kernel.run_argument_list.appendSlice(args) catch unreachable;
+                    kernel.debug_argument_list.appendSlice(args) catch unreachable;
                 } else {
-                    kernel.run_argument_list.append(machine) catch unreachable;
-
+                    //kernel.run_argument_list.append(machine) catch unreachable;
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
                         var log_what = common.ArrayListManaged(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
@@ -445,7 +448,10 @@ const Kernel = struct {
                     else => unreachable,
                 }) catch unreachable;
 
-                kernel.debug_argument_list.append("-S") catch unreachable;
+                if (!kernel.options.run.emulator.qemu.virtualize) {
+                    kernel.debug_argument_list.append("-S") catch unreachable;
+                }
+
                 kernel.debug_argument_list.append("-s") catch unreachable;
             },
         }
@@ -476,7 +482,7 @@ const Kernel = struct {
         gdb_script_buffer.appendSlice(
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
-            \\b kernel_entry_point
+            //\\b kernel_entry_point
             \\c
         ) catch unreachable;
 
@@ -726,7 +732,7 @@ const Kernel = struct {
                 vga: ?VGA,
                 log: ?LogOptions,
                 smp: ?u64,
-                run_for_debug: bool,
+                virtualize: bool,
                 print_command: bool,
                 const VGA = enum {
                     std,

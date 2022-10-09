@@ -100,21 +100,21 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub fn from_address(physical_address: PhysicalAddress) cr3 {
-        assert(arch.max_physical_address_bit == 40);
+        assert(arch.max_physical_address_bit <= 40);
         return .{
             .address = @intCast(u28, physical_address.value >> x86_64.page_shifter),
         };
     }
 
     pub inline fn read() cr3 {
-        assert(arch.max_physical_address_bit == 40);
+        assert(arch.max_physical_address_bit <= 40);
         return asm volatile ("mov %%cr3, %[result]"
             : [result] "=r" (-> cr3),
         );
     }
 
     pub inline fn write(value: cr3) void {
-        assert(arch.max_physical_address_bit == 40);
+        assert(arch.max_physical_address_bit <= 40);
         asm volatile ("mov %[in], %%cr3"
             :
             : [in] "r" (value),
@@ -122,7 +122,7 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn equal(self: cr3, other: cr3) bool {
-        assert(arch.max_physical_address_bit == 40);
+        assert(arch.max_physical_address_bit <= 40);
 
         const self_int = @bitCast(u64, self);
         const other_int = @bitCast(u64, other);
@@ -130,7 +130,7 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn get_address(self: cr3) PhysicalAddress {
-        assert(arch.max_physical_address_bit == 40);
+        assert(arch.max_physical_address_bit <= 40);
 
         return PhysicalAddress.new(@as(u64, self.address) << x86_64.page_shifter);
     }

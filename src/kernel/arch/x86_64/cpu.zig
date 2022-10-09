@@ -51,6 +51,8 @@ pub fn early_bsp_bootstrap() void {
     TLS.preset_bsp(bsp_thread, kernel.process, bsp_cpu);
     bsp_thread.state = .active;
 
+    log.debug("Max physical address bit: {}", .{arch.max_physical_address_bit});
+
     kernel.bootloader_virtual_address_space = kernel.memory.virtual_address_spaces.add_one_statically() catch unreachable;
     VirtualAddressSpace.from_current(kernel.bootloader_virtual_address_space);
     kernel.virtual_address_space = kernel.memory.virtual_address_spaces.add_one_statically() catch unreachable;
@@ -108,15 +110,12 @@ pub fn enable_cpu_features() void {
 }
 
 pub fn init_interrupts(cpu: *CPU) void {
+    asm volatile ("cli");
     // Initialize interrupts
-    log.debug("Initializing interrupts", .{});
     PIC.disable();
     interrupts.install_handlers(&cpu.idt);
-    log.debug("Installed interrupt handlers", .{});
     cpu.idt.load();
-    log.debug("Loaded IDT", .{});
     interrupts.enable();
-    log.debug("Enabled interrupts", .{});
 }
 
 var map_lapic_address_times_called: u8 = 0;
