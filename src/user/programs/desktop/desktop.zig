@@ -2,6 +2,7 @@ const Desktop = @This();
 
 const common = @import("common");
 const Message = common.Message;
+const Window = common.Window;
 
 const user = @import("user");
 const panic = user.panic;
@@ -14,12 +15,11 @@ fn setup(desktop: *Desktop) !void {
 }
 
 fn create_plain_window() !*Window {
-    const window = try window_buffer.add_one_statically();
-    if (true) @panic("todo plain window");
-    return window;
+    const window = try user.syscall_manager.syscall(.create_plain_window, .blocking, .{});
+    _ = window;
+    @panic("todo create_plain_window");
+    //return window;
 }
-
-const Window = struct {};
 
 pub var window_buffer: common.List.BufferList(Window, 64, false) = .{};
 

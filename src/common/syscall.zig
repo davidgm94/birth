@@ -1,6 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
 const enum_count = common.enum_count;
+const log = common.log.scoped(.Syscall);
 
 comptime {
     if (common.os != .freestanding) @compileError("This file should not be imported in build.zig");
@@ -36,7 +37,9 @@ pub const services = blk: {
             exit_code: u64 = 0,
         },
         .Result = noreturn,
-        .Error = error{},
+        .Error = error{
+            empty_message,
+        },
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .log,
@@ -46,6 +49,7 @@ pub const services = blk: {
         .Result = void,
         .Error = error{
             empty_string,
+            null_string,
         },
     }, &service_descriptors);
     add_service_descriptor(Service{
@@ -54,7 +58,10 @@ pub const services = blk: {
             filename: []const u8,
         },
         .Result = []const u8,
-        .Error = error{},
+        .Error = error{
+            empty_string,
+            null_string,
+        },
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .allocate_memory,
@@ -63,7 +70,10 @@ pub const services = blk: {
             alignment: u64,
         },
         .Result = []u8,
-        .Error = error{},
+        .Error = error{
+            size_is_zero,
+            alignment_is_zero,
+        },
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .get_framebuffer,
@@ -75,12 +85,20 @@ pub const services = blk: {
         .id = .send_message,
         .Parameters = common.Message,
         .Result = void,
-        .Error = error{},
+        .Error = error{
+            invalid_message_id,
+        },
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .receive_message,
         .Parameters = void,
         .Result = common.Message,
+        .Error = error{},
+    }, &service_descriptors);
+    add_service_descriptor(Service{
+        .id = .create_plain_window,
+        .Parameters = void,
+        .Result = *common.Message,
         .Error = error{},
     }, &service_descriptors);
     break :blk service_descriptors;
@@ -154,6 +172,75 @@ pub const Submission = struct {
         return Submission.from_service(service.id, arguments);
     }
 
+    pub fn to_parameters(submission: Submission, comptime service: Service) service.Error!service.Parameters {
+        return switch (service.id) {
+            .thread_exit => blk: {
+                const message = msg_blk: {
+                    if (@intToPtr(?[*]const u8, submission.arguments[1])) |message_ptr| {
+                        const message_len = submission.arguments[2];
+                        if (message_len == 0) return service.Error.empty_message;
+                        break :msg_blk message_ptr[0..message_len];
+                    } else {
+                        break :msg_blk null;
+                    }
+                };
+
+                break :blk .{
+                    .exit_code = submission.arguments[0],
+                    .message = message,
+                };
+            },
+            .log => blk: {
+                if (@intToPtr(?[*]const u8, submission.arguments[0])) |message_ptr| {
+                    const message_len = submission.arguments[1];
+                    if (message_len == 0) return service.Error.empty_string;
+                    break :blk .{ .message = message_ptr[0..message_len] };
+                } else {
+                    return service.Error.null_string;
+                }
+            },
+            .read_file => blk: {
+                if (@intToPtr(?[*]const u8, submission.arguments[0])) |filename_ptr| {
+                    const filename_len = submission.arguments[1];
+                    if (filename_len == 0) return service.Error.empty_string;
+                    break :blk .{ .filename = filename_ptr[0..filename_len] };
+                } else {
+                    return service.Error.null_string;
+                }
+            },
+            .allocate_memory => blk: {
+                const size = submission.arguments[0];
+                const alignment = submission.arguments[1];
+                if (size == 0) return service.Error.size_is_zero;
+                if (alignment == 0) return service.Error.alignment_is_zero;
+                break :blk .{ .size = size, .alignment = alignment };
+            },
+            .get_framebuffer => blk: {
+                assert(service.Parameters == void);
+                break :blk {};
+            },
+            .receive_message => blk: {
+                assert(service.Parameters == void);
+                break :blk {};
+            },
+            .send_message => blk: {
+                assert(service.Parameters == common.Message);
+
+                if (submission.arguments[0] < common.Message.count) {
+                    const message_id = @intToEnum(common.Message.ID, submission.arguments[0]);
+                    const message_context = @intToPtr(?*anyopaque, submission.arguments[1]);
+                    break :blk .{ .id = message_id, .context = message_context };
+                } else {
+                    return service.Error.invalid_message_id;
+                }
+            },
+            .create_plain_window => blk: {
+                assert(service.Parameters == void);
+                break :blk {};
+            },
+        };
+    }
+
     pub const Input = extern struct {
         const IDIntType = u16;
         id: IDIntType,
@@ -166,6 +253,7 @@ pub const Submission = struct {
             assert(@sizeOf(Input) == @sizeOf(u64));
         }
     };
+
     pub const Arguments = [5]u64;
 
     comptime {

@@ -73,6 +73,80 @@ pub const KernelManager = struct {
     }
 };
 
+pub fn process_syscall(comptime service: Service, parameters: service.Parameters) service.Error!Syscall.Result {
+    switch (service.id) {
+        .thread_exit => {
+            logger.debug("We are thread exiting with code: 0x{x}", .{parameters.exit_code});
+            if (parameters.message) |message| {
+                logger.debug("User message: {s}", .{message});
+            }
+        },
+        .log => {
+            const message = parameters.message;
+            const current_thread = TLS.get_current();
+            const current_cpu = current_thread.cpu orelse while (true) {};
+            const processor_id = current_cpu.id;
+            arch.writer_lock.acquire();
+            defer arch.writer_lock.release();
+            arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+            arch.writer.writeAll(message) catch unreachable;
+            arch.writer.writeByte('\n') catch unreachable;
+        },
+        .read_file => {
+            const filename = parameters.filename;
+            const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
+            const file = main_storage.read_file(TLS.get_current().process.virtual_address_space, filename) catch unreachable;
+            assert(file.len > 0);
+            logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
+            logger.debug("Len: {}", .{file.len});
+            logger.debug("File[0]: 0x{x}", .{file[0]});
+
+            const result = Syscall.Result{
+                .a = @ptrToInt(file.ptr),
+                .b = file.len,
+            };
+            assert(result.a != 0);
+            assert(result.b != 0);
+            return result;
+        },
+        .allocate_memory => {
+            const size = parameters.size;
+            const alignment = parameters.alignment;
+            const allocation_result = TLS.get_current().process.virtual_address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
+            const result = Syscall.Result{
+                .a = allocation_result.address,
+                .b = allocation_result.size,
+            };
+            assert(result.a != 0);
+            assert(result.b != 0);
+
+            return result;
+        },
+        .get_framebuffer => {
+            //const framebuffer = current_thread.framebuffer;
+            //return Syscall.RawResult{
+            //.a = @ptrToInt(framebuffer),
+            //.b = 0,
+            //};
+            @panic("todo get_framebuffer");
+        },
+        .receive_message => {
+            const message = TLS.get_current().message_queue.receive_message() catch unreachable;
+            logger.debug("Receive message: {}", .{message});
+            return Syscall.Result{
+                .a = @enumToInt(message.id),
+                .b = @ptrToInt(message.context),
+            };
+        },
+        //.receive_message => unreachable,
+        //.send_message => unreachable,
+        //.create_plain_window => unreachable,
+        else => @compileLog(service.id),
+    }
+
+    unreachable;
+}
+
 const HandlerPrototype = fn (Submission.Input, u64, u64, u64, u64, u64) callconv(.C) Syscall.Result;
 pub const handler: *const HandlerPrototype = kernel_syscall_handler;
 
@@ -81,108 +155,58 @@ pub export fn kernel_syscall_handler(input: Submission.Input, argument1: u64, ar
         .input = input,
         .arguments = [_]u64{ argument1, argument2, argument3, argument4, argument5 },
     };
-    const current_thread = TLS.get_current();
+    //const current_thread = TLS.get_current();
 
     switch (submission.input.options.execution_mode) {
         .blocking => {
             switch (submission.input.options.type) {
                 .service => {
+                    if (submission.input.id >= Service.count) @panic("wtf");
+
                     if (submission.input.id < Service.count) {
-                        const id = @intToEnum(Service.ID, submission.input.id);
-
-                        switch (id) {
-                            .thread_exit => {
-                                const exit_code = argument1;
-                                var maybe_message: ?[]const u8 = null;
-                                if (@intToPtr(?[*]const u8, argument2)) |message_ptr| {
-                                    const message_len = argument3;
-                                    if (message_len != 0) {
-                                        const user_message = message_ptr[0..message_len];
-                                        logger.debug("User message: {s}", .{user_message});
-                                    } else {
-                                        logger.err("Message pointer is valid but user didn't specify valid length", .{});
-                                    }
-                                }
-                                thread_exit(exit_code, maybe_message);
-                            },
-                            .log => {
-                                const message_ptr = @intToPtr(?[*]const u8, argument1) orelse @panic("null message ptr");
-                                const message_len = argument2;
-                                const message = message_ptr[0..message_len];
-                                log(message);
-                            },
-                            .read_file => {
-                                const filename = blk: {
-                                    const ptr = @intToPtr(?[*]const u8, submission.arguments[0]) orelse @panic("null message ptr");
-                                    const len = submission.arguments[1];
-                                    break :blk ptr[0..len];
-                                };
-
-                                const main_storage = kernel.device_manager.devices.filesystem.get_main_device();
-                                const file = main_storage.read_file(current_thread.process.virtual_address_space, filename) catch unreachable;
-                                assert(file.len > 0);
-                                logger.debug("File: 0x{x}", .{@ptrToInt(file.ptr)});
-                                logger.debug("Len: {}", .{file.len});
-                                logger.debug("File[0]: 0x{x}", .{file[0]});
-
-                                const result = Syscall.Result{
-                                    .a = @ptrToInt(file.ptr),
-                                    .b = file.len,
-                                };
-                                assert(result.a != 0);
-                                assert(result.b != 0);
+                        switch (@intToEnum(Service.ID, submission.input.id)) {
+                            inline else => |id| {
+                                const service = Service.from_id(id);
+                                // TODO: remove unreachable
+                                const parameters = submission.to_parameters(service) catch unreachable;
+                                const result = process_syscall(service, parameters) catch unreachable;
                                 return result;
-                            },
-                            .allocate_memory => {
-                                logger.debug("Submission: {}", .{submission});
-                                const size = submission.arguments[0];
-                                const alignment = submission.arguments[1];
-                                const allocation_result = current_thread.process.virtual_address_space.heap.allocator.allocate_bytes(size, alignment) catch unreachable;
-                                const result = Syscall.Result{
-                                    .a = allocation_result.address,
-                                    .b = allocation_result.size,
-                                };
-                                assert(result.a != 0);
-                                assert(result.b != 0);
-
-                                return result;
-                            },
-                            .get_framebuffer => {
-                                @panic("todo get framebuffer syscall");
-                                //const framebuffer = current_thread.framebuffer;
-                                //return Syscall.RawResult{
-                                //.a = @ptrToInt(framebuffer),
-                                //.b = 0,
-                                //};
-                            },
-                            .send_message => {
-                                const message = Message{
-                                    .id = @intToEnum(Message.ID, submission.arguments[0]),
-                                    .context = @intToPtr(?*anyopaque, submission.arguments[1]),
-                                };
-                                logger.debug("Send message: {}", .{message.id});
-                                current_thread.message_queue.send(message) catch unreachable;
-
-                                return Syscall.Result{
-                                    .a = 0,
-                                    .b = 0,
-                                };
-                            },
-                            .receive_message => {
-                                const message = current_thread.message_queue.receive_message() catch unreachable;
-                                logger.debug("Receive message: {}", .{message});
-                                return Syscall.Result{
-                                    .a = @enumToInt(message.id),
-                                    .b = @ptrToInt(message.context),
-                                };
-                            },
-                            .create_plain_window => {
-                                @panic("todo create_plain_window");
                             },
                         }
                     } else {
-                        @panic("unrecognized software syscall");
+                        @panic("todo implement error to syscall for index out of bounds: invalid service id");
                     }
+                    //const parameters = blk: {
+                    //switch (service.id) {
+                    //inline else => |id| {
+
+                    //}
+                    //}
+                    //};
+                    //if (submission.input.id < Service.count) {
+                    //const id = @intToEnum(Service.ID, submission.input.id);
+
+                    //switch (id) {
+                    //.send_message => {
+                    //const message = Message{
+                    //.id = @intToEnum(Message.ID, submission.arguments[0]),
+                    //.context = @intToPtr(?*anyopaque, submission.arguments[1]),
+                    //};
+                    //logger.debug("Send message: {}", .{message.id});
+                    //current_thread.message_queue.send(message) catch unreachable;
+
+                    //return Syscall.Result{
+                    //.a = 0,
+                    //.b = 0,
+                    //};
+                    //},
+                    //.create_plain_window => {
+                    //@panic("todo kernel create_plain_window");
+                    //},
+                    //}
+                    //} else {
+                    //@panic("unrecognized software syscall");
+                    //}
                 },
                 .syscall => {
                     if (input.id < Syscall.count) {
@@ -243,15 +267,16 @@ pub noinline fn flush_syscall_manager(argument0: u64, argument1: u64, argument2:
         const submission = @ptrCast(*Syscall.Submission, @alignCast(@alignOf(Syscall.Submission), &manager.buffer[index]));
         const id_arg = submission.arguments[0];
         if (id_arg < Syscall.ID.count) {
-            const id = @intToEnum(Syscall.ID, id_arg);
-            switch (id) {
-                .log => {
-                    const message_ptr = @intToPtr(?[*]const u8, submission.arguments[0]) orelse @panic("null message ptr");
-                    const message_len = submission.arguments[1];
-                    log(message_ptr[0..message_len]);
-                },
-                else => panic("NI: {s}", .{@tagName(id)}),
-            }
+            @panic("todo implement flush");
+            //const id = @intToEnum(Syscall.ID, id_arg);
+            //switch (id) {
+            //.log => {
+            //const message_ptr = @intToPtr(?[*]const u8, submission.arguments[0]) orelse @panic("null message ptr");
+            //const message_len = submission.arguments[1];
+            //log(message_ptr[0..message_len]);
+            //},
+            //else => panic("NI: {s}", .{@tagName(id)}),
+            //}
         } else {
             @panic("invalid syscall id");
         }
@@ -270,15 +295,4 @@ pub fn thread_exit(exit_code: u64, maybe_message: ?[]const u8) noreturn {
     }
 
     TODO();
-}
-
-pub fn log(message: []const u8) void {
-    const current_thread = TLS.get_current();
-    const current_cpu = current_thread.cpu orelse while (true) {};
-    const processor_id = current_cpu.id;
-    arch.writer_lock.acquire();
-    defer arch.writer_lock.release();
-    arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
-    arch.writer.writeAll(message) catch unreachable;
-    arch.writer.writeByte('\n') catch unreachable;
 }

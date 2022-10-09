@@ -1,9 +1,6 @@
 comptime {
     if (common.os != .freestanding) @compileError("This file is not meant to be imported in build.zig");
-    if (!@hasDecl(root, "syscall_manager")) @compileError("User root file must have syscall manager");
 }
-
-const root = @import("root");
 
 const common = @import("common");
 const ExecutionMode = common.Syscall.ExecutionMode;
@@ -17,7 +14,7 @@ pub const Writer = struct {
 
     // TODO: handle errors
     fn write(_: void, bytes: []const u8) Error!usize {
-        _ = root.syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
+        _ = syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
 
         return bytes.len;
     }
@@ -93,3 +90,5 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     common.log.scoped(.PANIC).err(format, arguments);
     while (true) {}
 }
+
+pub var syscall_manager: *Syscall.Manager = undefined;

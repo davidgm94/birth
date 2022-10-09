@@ -13,20 +13,19 @@ const Syscall = user.Syscall;
 
 //const text = @import("../../text.zig");
 
-pub var syscall_manager: *Syscall.Manager = undefined;
 pub var desktop: Desktop = .{};
 
 fn send_message(id: Message.ID, context: ?*anyopaque) !void {
-    _ = try syscall_manager.syscall(.send_message, .blocking, .{ .id = id, .context = context });
+    _ = try user.syscall_manager.syscall(.send_message, .blocking, .{ .id = id, .context = context });
 }
 
 fn receive_message() !Message {
-    const message = try syscall_manager.syscall(.receive_message, .blocking, .{});
+    const message = try user.syscall_manager.syscall(.receive_message, .blocking, .{});
     return message;
 }
 
 export fn user_entry_point() callconv(.C) void {
-    syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
+    user.syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
 
     send_message(.desktop_setup_ui, null) catch unreachable;
 
