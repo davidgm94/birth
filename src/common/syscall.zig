@@ -83,7 +83,9 @@ pub const services = blk: {
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .send_message,
-        .Parameters = common.Message,
+        .Parameters = struct {
+            message: common.Message,
+        },
         .Result = void,
         .Error = error{
             invalid_message_id,
@@ -150,20 +152,19 @@ pub const Submission = struct {
                     break :blk .{ parameters.size, parameters.alignment, 0, 0, 0 };
                 },
                 .get_framebuffer => {
-                    assert(@TypeOf(parameters) == void);
+                    comptime assert(@TypeOf(parameters) == void);
                     break :blk .{ 0, 0, 0, 0, 0 };
                 },
                 .receive_message => {
-                    assert(@TypeOf(parameters) == void);
+                    comptime assert(@TypeOf(parameters) == void);
                     break :blk .{ 0, 0, 0, 0, 0 };
                 },
                 .send_message => {
-                    assert(@TypeOf(parameters) == common.Message);
-                    const message = parameters;
+                    const message = parameters.message;
                     break :blk .{ @enumToInt(message.id), @ptrToInt(message.context), 0, 0, 0 };
                 },
                 .create_plain_window => {
-                    assert(@TypeOf(parameters) == void);
+                    comptime assert(@TypeOf(parameters) == void);
                     break :blk .{ 0, 0, 0, 0, 0 };
                 },
             }
@@ -216,26 +217,24 @@ pub const Submission = struct {
                 break :blk .{ .size = size, .alignment = alignment };
             },
             .get_framebuffer => blk: {
-                assert(service.Parameters == void);
+                comptime assert(service.Parameters == void);
                 break :blk {};
             },
             .receive_message => blk: {
-                assert(service.Parameters == void);
+                comptime assert(service.Parameters == void);
                 break :blk {};
             },
             .send_message => blk: {
-                assert(service.Parameters == common.Message);
-
                 if (submission.arguments[0] < common.Message.count) {
                     const message_id = @intToEnum(common.Message.ID, submission.arguments[0]);
                     const message_context = @intToPtr(?*anyopaque, submission.arguments[1]);
-                    break :blk .{ .id = message_id, .context = message_context };
+                    break :blk .{ .message = .{ .id = message_id, .context = message_context } };
                 } else {
                     return service.Error.invalid_message_id;
                 }
             },
             .create_plain_window => blk: {
-                assert(service.Parameters == void);
+                comptime assert(service.Parameters == void);
                 break :blk {};
             },
         };

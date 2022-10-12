@@ -80,6 +80,8 @@ pub fn process_syscall(comptime service: Service, parameters: service.Parameters
             if (parameters.message) |message| {
                 logger.debug("User message: {s}", .{message});
             }
+
+            @panic("todo thread_exit");
         },
         .log => {
             const message = parameters.message;
@@ -91,6 +93,11 @@ pub fn process_syscall(comptime service: Service, parameters: service.Parameters
             arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
             arch.writer.writeAll(message) catch unreachable;
             arch.writer.writeByte('\n') catch unreachable;
+
+            return Syscall.Result{
+                .a = 0,
+                .b = 0,
+            };
         },
         .read_file => {
             const filename = parameters.filename;
@@ -133,18 +140,28 @@ pub fn process_syscall(comptime service: Service, parameters: service.Parameters
         .receive_message => {
             const message = TLS.get_current().message_queue.receive_message() catch unreachable;
             logger.debug("Receive message: {}", .{message});
+
             return Syscall.Result{
                 .a = @enumToInt(message.id),
                 .b = @ptrToInt(message.context),
             };
         },
-        //.receive_message => unreachable,
-        //.send_message => unreachable,
-        //.create_plain_window => unreachable,
-        else => @compileLog(service.id),
-    }
+        .send_message => {
+            const message = parameters.message;
+            logger.debug("Send message: {}", .{message.id});
+            TLS.get_current().message_queue.send(message) catch unreachable;
 
-    unreachable;
+            return Syscall.Result{
+                .a = 0,
+                .b = 0,
+            };
+        },
+        .create_plain_window => {
+            const a = kernel.window_manager.create_plain_window() catch unreachable;
+            _ = a;
+            @panic("todo process create_plain_window");
+        },
+    }
 }
 
 const HandlerPrototype = fn (Submission.Input, u64, u64, u64, u64, u64) callconv(.C) Syscall.Result;
@@ -187,19 +204,6 @@ pub export fn kernel_syscall_handler(input: Submission.Input, argument1: u64, ar
                     //const id = @intToEnum(Service.ID, submission.input.id);
 
                     //switch (id) {
-                    //.send_message => {
-                    //const message = Message{
-                    //.id = @intToEnum(Message.ID, submission.arguments[0]),
-                    //.context = @intToPtr(?*anyopaque, submission.arguments[1]),
-                    //};
-                    //logger.debug("Send message: {}", .{message.id});
-                    //current_thread.message_queue.send(message) catch unreachable;
-
-                    //return Syscall.Result{
-                    //.a = 0,
-                    //.b = 0,
-                    //};
-                    //},
                     //.create_plain_window => {
                     //@panic("todo kernel create_plain_window");
                     //},

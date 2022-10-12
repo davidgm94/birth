@@ -99,11 +99,11 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics.Driver) void {
     graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = Rectangle.left(cursor_bounds), .y = Rectangle.top(cursor_bounds) }, Rectangle.from_width_and_height(Rectangle.width(cursor_bounds), Rectangle.height(cursor_bounds)), true);
 }
 
-pub fn create_plain_window(manager: *Manager) void {
+pub fn create_plain_window(manager: *Manager) !void {
     manager.lock.acquire();
     defer manager.lock.release();
 
     const window = try kernel.memory.windows.add_one(kernel.virtual_address_space.heap.allocator);
-    _ = window;
-    @panic("todo create plain window");
+    window.* = Window{ .id = window.id };
+    @panic("todo kernel create plain window");
 }

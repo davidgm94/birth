@@ -15,8 +15,8 @@ const Syscall = user.Syscall;
 
 pub var desktop: Desktop = .{};
 
-fn send_message(id: Message.ID, context: ?*anyopaque) !void {
-    _ = try user.syscall_manager.syscall(.send_message, .blocking, .{ .id = id, .context = context });
+fn send_message(message: Message) !void {
+    _ = try user.syscall_manager.syscall(.send_message, .blocking, .{ .message = message });
 }
 
 fn receive_message() !Message {
@@ -27,7 +27,7 @@ fn receive_message() !Message {
 export fn user_entry_point() callconv(.C) void {
     user.syscall_manager = Syscall.Manager.ask() orelse @panic("wtf");
 
-    send_message(.desktop_setup_ui, null) catch unreachable;
+    send_message(Message{ .id = .desktop_setup_ui, .context = null }) catch unreachable;
 
     while (true) {
         const message = receive_message() catch unreachable;
