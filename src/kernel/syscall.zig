@@ -157,9 +157,12 @@ pub fn process_syscall(comptime service: Service, parameters: service.Parameters
             };
         },
         .create_plain_window => {
-            const a = kernel.window_manager.create_plain_window() catch unreachable;
-            _ = a;
-            @panic("todo process create_plain_window");
+            const user_window = parameters.user_window;
+            const kernel_window = kernel.window_manager.create_plain_window(user_window) catch unreachable;
+            return Syscall.Result{
+                .a = @ptrToInt(kernel_window.user),
+                .b = 0,
+            };
         },
     }
 }

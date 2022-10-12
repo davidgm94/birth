@@ -14,6 +14,9 @@ const Window = RNU.Window;
 
 const kernel = @import("kernel");
 
+const arch = @import("arch");
+const TLS = arch.TLS;
+
 lock: Spinlock = .{},
 cursor: Cursor = .{},
 initialized: bool = false,
@@ -99,11 +102,11 @@ pub fn update_screen(manager: *Manager, graphics: *Graphics.Driver) void {
     graphics.frontbuffer.copy(&manager.cursor.surface.swap, Point{ .x = Rectangle.left(cursor_bounds), .y = Rectangle.top(cursor_bounds) }, Rectangle.from_width_and_height(Rectangle.width(cursor_bounds), Rectangle.height(cursor_bounds)), true);
 }
 
-pub fn create_plain_window(manager: *Manager) !void {
+pub fn create_plain_window(manager: *Manager, user_window: *common.Window) !*Window {
     manager.lock.acquire();
     defer manager.lock.release();
 
     const window = try kernel.memory.windows.add_one(kernel.virtual_address_space.heap.allocator);
-    window.* = Window{ .id = window.id };
+    window.* = Window{ .id = window.id, .user = user_window, .thread = TLS.get_current() };
     @panic("todo kernel create plain window");
 }
