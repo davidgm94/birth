@@ -90,7 +90,7 @@ pub fn process_syscall(comptime service: Service, parameters: service.Parameters
             const processor_id = current_cpu.id;
             arch.writer_lock.acquire();
             defer arch.writer_lock.release();
-            arch.writer.print("[ User ] [Core #{}] [Thread #{}] ", .{ processor_id, current_thread.id }) catch unreachable;
+            arch.writer.print("[ User ] [Core #{}] [Process #{}] [Thread #{}] ", .{ processor_id, current_thread.process.id, current_thread.id }) catch unreachable;
             arch.writer.writeAll(message) catch unreachable;
             arch.writer.writeByte('\n') catch unreachable;
 

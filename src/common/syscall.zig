@@ -99,8 +99,10 @@ pub const services = blk: {
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .create_plain_window,
-        .Parameters = void,
-        .Result = *common.Message,
+        .Parameters = struct {
+            user_window: *common.Window,
+        },
+        .Result = void,
         .Error = error{},
     }, &service_descriptors);
     break :blk service_descriptors;
@@ -164,8 +166,7 @@ pub const Submission = struct {
                     break :blk .{ @enumToInt(message.id), @ptrToInt(message.context), 0, 0, 0 };
                 },
                 .create_plain_window => {
-                    comptime assert(@TypeOf(parameters) == void);
-                    break :blk .{ 0, 0, 0, 0, 0 };
+                    break :blk .{ @ptrToInt(parameters.user_window), 0, 0, 0, 0 };
                 },
             }
         };
@@ -234,8 +235,9 @@ pub const Submission = struct {
                 }
             },
             .create_plain_window => blk: {
-                comptime assert(service.Parameters == void);
-                break :blk {};
+                break :blk .{
+                    .user_window = @intToPtr(*common.Window, submission.arguments[0]),
+                };
             },
         };
     }
@@ -294,6 +296,7 @@ pub fn add_syscall_descriptor(syscall: Syscall, arr: []Syscall) void {
 }
 
 pub const DefaultNonBlockingResult = void;
+pub const DefaultNonBlockingError = error{};
 
 pub const Service = struct {
     id: ID,
@@ -325,6 +328,13 @@ pub const Service = struct {
         return switch (execution_mode) {
             .blocking => services[@enumToInt(id)].Result,
             .non_blocking => DefaultNonBlockingResult,
+        };
+    }
+
+    pub fn ErrorType(comptime id: Service.ID, comptime execution_mode: ExecutionMode) type {
+        return switch (execution_mode) {
+            .blocking => services[@enumToInt(id)].Error,
+            .non_blocking => DefaultNonBlockingError,
         };
     }
 };

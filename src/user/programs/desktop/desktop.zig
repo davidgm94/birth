@@ -15,10 +15,10 @@ fn setup(desktop: *Desktop) !void {
 }
 
 fn create_plain_window() !*Window {
-    const window = try user.syscall_manager.syscall(.create_plain_window, .blocking, .{});
-    _ = window;
-    @panic("todo create_plain_window");
-    //return window;
+    const window = try window_buffer.add_one_statically();
+    _ = try user.syscall_manager.syscall(.create_plain_window, .blocking, .{ .user_window = window });
+    if (true) @panic("todo implement more stuff");
+    return window;
 }
 
 pub var window_buffer: common.List.BufferList(Window, 64, false) = .{};

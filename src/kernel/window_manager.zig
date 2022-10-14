@@ -108,5 +108,5 @@ pub fn create_plain_window(manager: *Manager, user_window: *common.Window) !*Win
 
     const window = try kernel.memory.windows.add_one(kernel.virtual_address_space.heap.allocator);
     window.* = Window{ .id = window.id, .user = user_window, .thread = TLS.get_current() };
-    @panic("todo kernel create plain window");
+    return window;
 }

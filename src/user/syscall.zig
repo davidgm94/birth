@@ -11,7 +11,7 @@ pub const Manager = struct {
     submission_queue: QueueDescriptor,
     completion_queue: QueueDescriptor,
 
-    pub fn syscall(manager: *Manager, comptime id: Service.ID, comptime execution_mode: ExecutionMode, parameters: Service.ParametersType(id)) !Service.ResultType(id, execution_mode) {
+    pub fn syscall(manager: *Manager, comptime id: Service.ID, comptime execution_mode: ExecutionMode, parameters: Service.ParametersType(id)) Service.ErrorType(id, execution_mode)!Service.ResultType(id, execution_mode) {
         const service = Service.from_id(id);
         const submission = try Submission.from_parameters(service, parameters);
 
