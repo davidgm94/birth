@@ -43,6 +43,12 @@ pub export fn kernel_entry_point() noreturn {
 
     logger.debug("Hello kernel!", .{});
 
+    if (bootloader_modules.response) |response| {
+        logger.debug("Module count: {}", .{response.module_count});
+    } else {
+        logger.err("Module response not present", .{});
+    }
+
     kernel.higher_half_direct_map = blk: {
         const response = bootloader_hhdm.response orelse @panic("HHDM response not present");
         if (response.offset == 0) @panic("No offset in HHDM response");
@@ -393,6 +399,10 @@ export var bootloader_boot_time = Limine.BootTime.Request{
 };
 
 export var bootloader_kernel_address = Limine.KernelAddress.Request{
+    .revision = 0,
+};
+
+export var bootloader_modules = Limine.Module.Request{
     .revision = 0,
 };
 

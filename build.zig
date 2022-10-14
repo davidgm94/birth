@@ -142,7 +142,7 @@ const Kernel = struct {
 
         switch (kernel.options.arch) {
             .x86_64 => {
-                kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/arch/x86_64/limine.zig");
+                kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/arch/x86_64/limine_entry_point.zig");
                 kernel.executable.code_model = .kernel;
                 //kernel.executable.pie = true;
                 kernel.executable.force_pic = true;
