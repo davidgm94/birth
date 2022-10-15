@@ -25,7 +25,8 @@ pub const TLS = arch.TLS;
 pub const VAS = arch.VAS;
 
 pub const page_size = arch.page_size;
+pub const valid_page_sizes = arch.valid_page_sizes;
 
-pub var max_physical_address_bit: u6 = 0;
+pub var max_physical_address_bit: u6 = 40;
 pub var writer = common.Writer(DefaultWriter.Context, DefaultWriter.Error, DefaultWriter.write){ .context = DefaultWriter.Context{} };
 pub var writer_lock = Spinlock{};

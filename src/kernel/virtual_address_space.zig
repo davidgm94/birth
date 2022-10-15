@@ -26,12 +26,11 @@ id: u64,
 arch: VAS.Specific,
 privilege_level: PrivilegeLevel,
 heap: Heap,
-lock: Spinlock,
 free_regions: ArrayList(Region) = .{},
 used_regions: ArrayList(Region) = .{},
 
-pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
-    VAS.from_current(virtual_address_space);
+pub fn from_current() VirtualAddressSpace {
+    return VAS.from_current();
 }
 
 pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace) void {
@@ -42,7 +41,6 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .arch = undefined,
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
-        .lock = Spinlock{},
     };
 
     VAS.init_user(virtual_address_space);
@@ -50,15 +48,10 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     //const graphics = virtual_address_space.translate_address() orelse unreachable;
 }
 
-pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
-    new.* = old.*;
-    new.heap.allocator.ptr = new;
-}
-
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
-    if (kernel.config.safe_slow) {
-        assert(kernel.memory_initialized);
-    }
+    //if (kernel.config.safe_slow) {
+    //assert(kernel.memory_initialized);
+    //}
     const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no);
     return result.virtual_address;
 }
@@ -69,22 +62,14 @@ const Result = struct {
 };
 
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
-    if (already_locked == .no) {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
+    _ = already_locked;
 
-    const page_count = @divFloor(byte_count, arch.page_size);
-    const page_aligned_size = page_count * arch.page_size;
-    const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return Allocator.Error.OutOfMemory;
+    assert(common.is_aligned(byte_count, arch.page_size));
+    const physical_region = kernel.physical_address_space.allocate_pages(byte_count, .{ .zeroed = true }) catch return Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            assert(flags.user == (specific_address.value < kernel.higher_half_direct_map.value));
+            assert(flags.user == (specific_address.value < kernel.higher_half));
             break :blk specific_address;
         } else {
             if (flags.user) {
@@ -100,7 +85,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
 
     // Only map in user space
     if (flags.user) {
-        try virtual_address_space.map_extended(physical_region.address, virtual_address, page_aligned_size, flags, AlreadyLocked.yes);
+        try virtual_address_space.map_extended(physical_region.address, virtual_address, byte_count, flags, AlreadyLocked.yes);
     }
 
     return Result{
@@ -124,23 +109,9 @@ pub const AlreadyLocked = enum {
 };
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
-    if (already_locked == .yes) {
-        assert(virtual_address_space.lock.status != 0);
-    } else {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
-
+    _ = already_locked;
     if (!is_aligned(size, arch.page_size)) {
         panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
-    }
-
-    if (!kernel.memory_initialized) {
-        @panic("Bootstrap VAS is still valid at the time of using map_extended");
     }
 
     log.debug("Mapping ({}, {}) to ({}, {}) - {}", .{ base_physical_address, base_physical_address.offset(size), base_virtual_address, base_virtual_address.offset(size), flags });
@@ -223,17 +194,7 @@ pub const TranslationResult = struct {
 };
 
 pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {
-    if (already_locked == .yes) {
-        assert(virtual_address_space.lock.status != 0);
-    } else {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
-
+    _ = already_locked;
     const result = VAS.translate_address(virtual_address_space, virtual_address);
     return result;
 }
@@ -367,7 +328,7 @@ pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical
 }
 
 pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock });
+    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s})", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level) });
 }
 
 pub const Buffer = common.List.BufferList(VirtualAddressSpace, 64);

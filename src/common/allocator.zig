@@ -7,18 +7,17 @@ const assert = common.assert;
 callback_allocate: *const AllocateFunction,
 callback_resize: *const ResizeFunction,
 callback_free: *const FreeFunction,
-context: ?*anyopaque,
 
-pub fn allocate_bytes(allocator: CustomAllocator, size: u64, alignment: u64) Error!Result {
+pub fn allocate_bytes(allocator: *CustomAllocator, size: u64, alignment: u64) Error!Result {
     return try allocator.callback_allocate(allocator, size, alignment);
 }
 
-pub fn allocate_many(allocator: CustomAllocator, comptime T: type, count: usize) Error![]T {
+pub fn allocate_many(allocator: *CustomAllocator, comptime T: type, count: usize) Error![]T {
     const result = try allocator.callback_allocate(allocator, @sizeOf(T) * count, @alignOf(T));
     return @intToPtr([*]T, result.address)[0..count];
 }
 
-pub fn realloc(allocator: CustomAllocator, old_mem: anytype, new_n: usize) t: {
+pub fn realloc(allocator: *CustomAllocator, old_mem: anytype, new_n: usize) t: {
     const Slice = @typeInfo(@TypeOf(old_mem)).Pointer;
     break :t Error![]align(Slice.alignment) Slice.child;
 } {
@@ -26,7 +25,7 @@ pub fn realloc(allocator: CustomAllocator, old_mem: anytype, new_n: usize) t: {
     return allocator.reallocate_advanced(old_mem, old_alignment, new_n);
 }
 
-pub fn allocate_advanced(allocator: CustomAllocator, comptime T: type, comptime alignment: ?u29, count: usize) Error![]align(alignment orelse @alignOf(T)) T {
+pub fn allocate_advanced(allocator: *CustomAllocator, comptime T: type, comptime alignment: ?u29, count: usize) Error![]align(alignment orelse @alignOf(T)) T {
     const a = if (alignment) |a| blk: {
         if (a == @alignOf(T)) return allocator.allocate_advanced(T, null, count);
         break :blk a;
@@ -55,7 +54,7 @@ pub fn allocate_advanced(allocator: CustomAllocator, comptime T: type, comptime 
     }
 }
 
-pub fn reallocate_advanced(allocator: CustomAllocator, old_mem: anytype, comptime new_alignment: u29, new_n: usize) Error![]align(new_alignment) @typeInfo(@TypeOf(old_mem)).Pointer.child {
+pub fn reallocate_advanced(allocator: *CustomAllocator, old_mem: anytype, comptime new_alignment: u29, new_n: usize) Error![]align(new_alignment) @typeInfo(@TypeOf(old_mem)).Pointer.child {
     const Slice = @typeInfo(@TypeOf(old_mem)).Pointer;
     const T = Slice.child;
     if (old_mem.len == 0) {
@@ -101,13 +100,13 @@ pub fn reallocate_advanced(allocator: CustomAllocator, old_mem: anytype, comptim
     return common.bytes_as_slice(T, @alignCast(new_alignment, new_mem));
 }
 
-pub fn free(allocator: CustomAllocator, old_mem: anytype) void {
+pub fn free(allocator: *CustomAllocator, old_mem: anytype) void {
     _ = allocator;
     _ = old_mem;
     @panic("todo free");
 }
 
-pub fn create(allocator: CustomAllocator, comptime T: type) Error!*T {
+pub fn create(allocator: *CustomAllocator, comptime T: type) Error!*T {
     const result = try allocator.callback_allocate(allocator, @sizeOf(T), @alignOf(T));
     return @intToPtr(*T, result.address);
 }
@@ -129,7 +128,7 @@ fn zig_alloc(context: *anyopaque, size: usize, ptr_align: u29, len_align: u29, r
     _ = len_align;
     _ = return_address;
     const allocator = @ptrCast(*CustomAllocator, @alignCast(@alignOf(CustomAllocator), context));
-    const result = allocator.callback_allocate(allocator.*, size, ptr_align) catch return Allocator.Error.OutOfMemory;
+    const result = allocator.callback_allocate(allocator, size, ptr_align) catch return Allocator.Error.OutOfMemory;
     const byte_slice = @intToPtr([*]u8, result.address)[0..result.size];
     return byte_slice;
 }
@@ -155,9 +154,9 @@ fn zig_free(context: *anyopaque, old_mem: []u8, old_align: u29, return_address: 
 //pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;
 //pub const AllocatorResizeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize;
 //pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void;
-pub const AllocateFunction = fn (allocator: CustomAllocator, size: u64, alignment: u64) Error!Result;
-pub const ResizeFunction = fn (allocator: CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize;
-pub const FreeFunction = fn (allocator: CustomAllocator, memory: []u8, alignment: u29) void;
+pub const AllocateFunction = fn (allocator: *CustomAllocator, size: u64, alignment: u64) Error!Result;
+pub const ResizeFunction = fn (allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize;
+pub const FreeFunction = fn (allocator: *CustomAllocator, memory: []u8, alignment: u29) void;
 
 pub const Result = struct {
     address: u64,

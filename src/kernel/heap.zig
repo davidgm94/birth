@@ -25,33 +25,19 @@ pub const Region = struct {
     allocated: u64 = 0,
 };
 
-allocator: Allocator = undefined,
+allocator: Allocator = .{
+    .callback_allocate = allocate_function,
+    .callback_resize = resize_function,
+    .callback_free = free_function,
+},
 regions: [region_count]Region = [1]Region{.{}} ** region_count,
-lock: Spinlock = .{},
 
 const region_size = 1024 * arch.page_size;
 pub const region_count = 0x1000_0000 / region_size;
 
-pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
-    return Heap{
-        .allocator = Allocator{
-            .context = virtual_address_space,
-            .callback_allocate = allocate_function,
-            .callback_resize = resize_function,
-            .callback_free = free_function,
-        },
-        .regions = zeroes([region_count]Region),
-        .lock = Spinlock{},
-    };
-}
-
-fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
-    const virtual_address_space = @ptrCast(?*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), allocator.context)) orelse unreachable;
-    virtual_address_space.heap.lock.acquire();
-    defer {
-        virtual_address_space.heap.lock.release();
-    }
-    assert(virtual_address_space.lock.status == 0);
+fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
+    const heap = @fieldParentPtr(Heap, "allocator", allocator);
+    const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", heap);
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
@@ -115,7 +101,7 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
     }
 }
 
-fn resize_function(allocator: Allocator, old_mem: []u8, old_align: u29, new_size: usize) ?usize {
+fn resize_function(allocator: *Allocator, old_mem: []u8, old_align: u29, new_size: usize) ?usize {
     _ = allocator;
     _ = old_mem;
     _ = old_align;
@@ -123,7 +109,7 @@ fn resize_function(allocator: Allocator, old_mem: []u8, old_align: u29, new_size
     TODO();
 }
 
-fn free_function(allocator: Allocator, old_mem: []u8, old_align: u29) void {
+fn free_function(allocator: *Allocator, old_mem: []u8, old_align: u29) void {
     _ = allocator;
     _ = old_mem;
     _ = old_align;

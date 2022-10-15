@@ -64,8 +64,7 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
 //}
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    const higher_half = kernel.higher_half_direct_map.value;
-    const address = VirtualAddress.new(physical_address.value + higher_half);
+    const address = VirtualAddress.new(physical_address.value + kernel.higher_half);
     return address;
 }
 

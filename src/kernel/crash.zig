@@ -14,18 +14,24 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     panic_extended(format, arguments, @returnAddress(), @frameAddress());
 }
 
+const extend = false;
+
 pub fn panic_extended(comptime format: []const u8, arguments: anytype, start_address: usize, frame_pointer: usize) noreturn {
     @setCold(true);
     interrupts.disable();
-    if (kernel.memory.cpus.items.len > 1) {
-        log.err("Panic happened. Stopping all cores...", .{});
-        interrupts.send_panic_interrupt_to_all_cpus();
+    if (extend) {
+        if (kernel.memory.cpus.items.len > 1) {
+            log.err("Panic happened. Stopping all cores...", .{});
+            interrupts.send_panic_interrupt_to_all_cpus();
+        }
     }
 
     log.err(format, arguments);
 
-    // TODO: this is causing some recursive panics
-    if (enable_stack_trace) dump_stack_trace(start_address, frame_pointer);
+    if (extend) {
+        // TODO: this is causing some recursive panics
+        if (enable_stack_trace) dump_stack_trace(start_address, frame_pointer);
+    }
 
     while (true) {
         asm volatile (
