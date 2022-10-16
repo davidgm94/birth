@@ -17,8 +17,7 @@ pub fn build(b: *Build.Builder) void {
                 .allocator = Build.get_allocator(),
                 .options = .{
                     .arch = Build.Kernel.Options.x86_64.new(.{
-                        .bootloader = .limine,
-                        .protocol = .limine,
+                        .bootloader = .inhouse,
                     }),
                     .run = .{
                         .disks = &.{

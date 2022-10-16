@@ -452,6 +452,7 @@ pub const Kernel = struct {
     fn create_boot_image(kernel: *Kernel) void {
         kernel.boot_image_step = switch (kernel.options.arch) {
             .x86_64 => switch (kernel.options.arch.x86_64.bootloader) {
+                .inhouse => BootImage.x86_64.InHouse.new(kernel),
                 .limine => BootImage.x86_64.Limine.new(kernel),
             },
             else => unreachable,
@@ -484,14 +485,17 @@ pub const Kernel = struct {
                     kernel.run_argument_list.append("-sata*") catch unreachable;
                 }
 
+                // Boot device
                 switch (kernel.options.arch) {
                     .x86_64 => {
-                        const image_flag = "-cdrom";
-                        const image_path = switch (kernel.options.arch.x86_64.bootloader) {
-                            .limine => Kernel.BootImage.x86_64.Limine.image_path,
-                        };
-                        kernel.run_argument_list.append(image_flag) catch unreachable;
-                        kernel.run_argument_list.append(image_path) catch unreachable;
+                        switch (kernel.options.arch.x86_64.bootloader) {
+                            .inhouse => {
+                                kernel.run_argument_list.appendSlice(&.{ "-hda", Kernel.BootImage.x86_64.InHouse.get_binary_path("disk") }) catch unreachable;
+                            },
+                            .limine => {
+                                kernel.run_argument_list.appendSlice(&.{ "-cdrom", Kernel.BootImage.x86_64.Limine.image_path }) catch unreachable;
+                            },
+                        }
                     },
                     .riscv64 => {
                         kernel.run_argument_list.append("-bios") catch unreachable;
@@ -698,6 +702,48 @@ pub const Kernel = struct {
 
     const BootImage = struct {
         const x86_64 = struct {
+            const InHouse = struct {
+                const flat_binaries = &[_][]const u8{ "mbr", "stage1", "stage2" };
+
+                fn new(kernel: *Kernel) Step {
+                    inline for (flat_binaries) |binary_name| {
+                        kernel.builder.default_step.dependOn(flat_binary(kernel.builder, binary_name));
+                    }
+
+                    var step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, InHouse.build);
+                    step.dependOn(&kernel.executable.step);
+                    step.dependOn(kernel.builder.default_step);
+                    return step;
+                }
+
+                fn build(step: *Step) !void {
+                    const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
+                    var disk_buffer = std.ArrayListManaged(u8).init(kernel.builder.allocator);
+                    inline for (flat_binaries) |binary_name| {
+                        const binary_path = get_binary_path(binary_name);
+                        const file_handle = try zig_std.fs.cwd().openFile(binary_path, .{});
+                        defer file_handle.close();
+                        std.log.debug("File {s}, {} bytes", .{ binary_name, try file_handle.getEndPos() });
+                        try file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
+                    }
+
+                    try zig_std.fs.cwd().writeFile(get_binary_path("disk"), disk_buffer.items);
+                }
+
+                fn flat_binary(b: *Builder, comptime name: []const u8) *Step {
+                    const command = b.addSystemCommand(&.{ "nasm", "-f", "bin", get_source_path(name), "-o", get_binary_path(name) });
+                    return &command.step;
+                }
+
+                fn get_source_path(comptime name: []const u8) []const u8 {
+                    return "src/bootloader/inhouse/" ++ name ++ ".asm";
+                }
+
+                fn get_binary_path(comptime name: []const u8) []const u8 {
+                    return "zig-cache/" ++ name ++ ".bin";
+                }
+            };
+
             const Limine = struct {
                 const installer = @import("../bootloader/limine/installer.zig");
                 const base_path = "src/bootloader/limine";
@@ -760,14 +806,23 @@ pub const Kernel = struct {
         pub const x86_64 = struct {
             bootloader: union(Bootloader) {
                 limine: void,
+                inhouse: void,
             },
 
             const Bootloader = enum {
+                inhouse,
                 limine,
             };
 
             pub fn new(context: anytype) Options.ArchSpecific {
                 return switch (context.bootloader) {
+                    .inhouse => .{
+                        .x86_64 = .{
+                            .bootloader = .{
+                                .inhouse = {},
+                            },
+                        },
+                    },
                     .limine => .{
                         .x86_64 = .{
                             .bootloader = .{

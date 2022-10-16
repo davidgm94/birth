@@ -135,6 +135,8 @@ pub export fn kernel_entry_point() noreturn {
 
         kernel.virtual_address_space.make_current();
 
+        logger.debug("Changed virtual address space", .{});
+
         while (true) {}
 
         //{
