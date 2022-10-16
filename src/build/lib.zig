@@ -330,7 +330,12 @@ pub const Kernel = struct {
 
         switch (kernel.options.arch) {
             .x86_64 => {
-                kernel.executable = kernel.builder.addExecutable(kernel_name, "src/kernel/arch/x86_64/limine_entry_point.zig");
+                const zig_root_file = switch (kernel.options.arch.x86_64.bootloader) {
+                    .inhouse => "src/kernel/arch/x86_64/inhouse_entry_point.zig",
+                    .limine => "src/kernel/arch/x86_64/limine_entry_point.zig",
+                };
+
+                kernel.executable = kernel.builder.addExecutable(kernel_name, zig_root_file);
                 kernel.executable.code_model = .kernel;
                 //kernel.executable.pie = true;
                 kernel.executable.force_pic = true;
@@ -703,7 +708,7 @@ pub const Kernel = struct {
     const BootImage = struct {
         const x86_64 = struct {
             const InHouse = struct {
-                const flat_binaries = &[_][]const u8{ "mbr", "stage1", "stage2" };
+                const flat_binaries = &[_][]const u8{ "mbr", "stage1" };
 
                 fn new(kernel: *Kernel) Step {
                     inline for (flat_binaries) |binary_name| {
@@ -726,6 +731,14 @@ pub const Kernel = struct {
                         std.log.debug("File {s}, {} bytes", .{ binary_name, try file_handle.getEndPos() });
                         try file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
                     }
+
+                    try disk_buffer.appendNTimes(0, 0x200 * 20 - disk_buffer.items.len);
+
+                    const kernel_file_handle = try zig_std.fs.cwd().openFile(kernel_path, .{});
+                    defer kernel_file_handle.close();
+
+                    try kernel_file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
+                    try disk_buffer.appendNTimes(0, std.align_forward(disk_buffer.items.len, 0x200) - disk_buffer.items.len);
 
                     try zig_std.fs.cwd().writeFile(get_binary_path("disk"), disk_buffer.items);
                 }

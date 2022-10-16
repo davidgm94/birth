@@ -62,16 +62,18 @@ main:
     push bx
     mov di, 1
     mov bx, 0x7c00
-    call load_sector
+    call load_sectors
 
     mov dl, [drive] ; drive number
     mov si, 0 ; partition
     mov dh, 0x1 ; use emulator
+    mov bx, [max_sectors]
+    mov cx, [max_heads]
     jmp 0x0:0x7c00
 
 ; di - LBA.
 ; es:bx - buffer
-load_sector:
+load_sectors:
 	; Calculate cylinder and head.
 	mov	ax,di
 	xor	dx,dx
@@ -94,7 +96,7 @@ load_sector:
 	pop	dx
 	mov	dh,dl
 	mov	dl,[drive]
-	mov	ax,0x0201
+	mov	ax,0x0215
 	int	0x13
 	mov	si,error_disk
 	jc	error
