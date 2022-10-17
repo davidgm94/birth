@@ -1,5 +1,7 @@
+%include "src/bootloader/inhouse/common.asm"
+
 [bits 16]
-[org 0x600]
+[org bootsector_location]
 
 start:
 
@@ -10,7 +12,7 @@ start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov sp, 0x7c00
+    mov sp, stack_top
 
     cmp dl, 0x80
     mov si, error_floppy_dl
@@ -21,9 +23,9 @@ start:
 
     ; Relocate to 0x600
     cld
-    mov si, 0x7c00
-    mov di, 0x600
-    mov cx, 0x200
+    mov si, original_bootsector_location
+    mov di, bootsector_location
+    mov cx, sector_size
     rep movsb
     jmp 0x0:main
 main:
@@ -61,7 +63,7 @@ main:
     ; TODO: check for bootable partitions
     push bx
     mov di, 1
-    mov bx, 0x7c00
+    mov bx, stage1_location
     call load_sectors
 
     mov dl, [drive] ; drive number
@@ -69,7 +71,7 @@ main:
     mov dh, 0x1 ; use emulator
     mov bx, [max_sectors]
     mov cx, [max_heads]
-    jmp 0x0:0x7c00
+    jmp 0x0:stage1_location
 
 ; di - LBA.
 ; es:bx - buffer

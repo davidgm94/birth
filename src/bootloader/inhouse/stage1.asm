@@ -1,11 +1,7 @@
-[bits 16]
-[org 0x7c00]
+%include "src/bootloader/inhouse/common.asm"
 
-%define stage2_location 0x1000
-%define temporary_load_buffer 0x9000
-%define page_directory 0x40000
-%define page_directory_length 0x20000
-%define memory_map 0x60000
+[bits 16]
+[org stage1_location]
 
 start:
     cli
@@ -15,7 +11,7 @@ start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x7c00
+    mov esp, stack_top
     jmp 0x0:main
 
 main:
@@ -69,45 +65,28 @@ check_msr:
     .has_msr:
 
 enable_a20:
-    cli
-    call check_a20
-    jc .a20_enabled
+    mov ax, 0x2403
+    int 0x15
+    mov si, error_a20
+    jb error
+    cmp ah, 0
+    jnz error
+    mov ax, 0x2402
+    int 0x15
+    jb error
+    cmp ah, 0
+    jnz error
+
+    cmp al, 1
+    jz .activated
+
     mov ax, 0x2401
     int 0x15
-    call check_a20
-    jc .a20_enabled
-    mov si, error_a20
-    jmp error
-    .a20_enabled:
+    jb error
+    cmp ah, 0
+    jnz error
+    .activated:
     sti
-
-identity_paging:
-    mov eax, page_directory / 16
-    mov es, ax
-    
-    ; Clear the page directory
-    xor eax, eax
-    mov ecx, 0x400
-    xor di, di
-    rep stosd
-
-    mov dword [es:0x3ff * 4], page_directory | 3
-
-    mov dword [es:0], (page_directory + 0x1000) | 3
-
-    ; Fill the table
-    mov edi, 0x1000
-    mov cx, 0x400
-    mov eax, 3
-
-    .loop:
-    mov [es:edi], eax
-    add edi, 4
-    add eax, 0x1000
-    loop .loop
-
-    mov eax, page_directory
-    mov cr3, eax
 
 load_gdt:
     lgdt [gdt_data.gdt]
@@ -117,201 +96,295 @@ inform_bios_mixed_mode:
     mov ebx, 3
     int 0x15
 
-load_memory_map:
-    xor ebx, ebx
+;load_memory_map:
+   ;; Load the memory map
+   ;xor   ebx,ebx
 
-    xor eax, eax
-    mov es, ax
-    mov ax, memory_map / 16
-    mov fs, ax
+   ;; Set FS to access the memory map
+   ;xor ax, ax
+   ;mov   es,ax
+   ;mov   ax, memory_map / 16
+   ;mov   fs,ax
 
-    .loop:
-    mov di, .entry
-    mov edx, 0x534D4150
-    mov ecx, 24
-    mov eax, 0xe820
-    mov byte [.acpi], 1
-    int 0x15
-    jc .finished
+   ;; Loop through each memory map entry
+   ;.loop:
+   ;mov   di,.entry
+   ;mov   edx,0x534D4150
+   ;mov   ecx,24
+   ;mov   eax,0xE820
+   ;mov   byte [.acpi],1
+   ;int   0x15
+   ;jc   .finished
 
-    cmp eax, 0x534D4150
-    jne .fail
+   ;; Check the BIOS call worked
+   ;cmp   eax,0x534D4150
+   ;jne   .fail
 
-    cmp dword [.type], 1
-    jne .try_next
-    cmp dword [.size], 0
-    je .try_next
-    cmp dword [.acpi], 0
-    je .try_next
+;;   pusha   
+;;   mov   di,.entry
+;;   call   .print_bytes
+;;   popa
 
-    mov eax, [.size]
-    and eax, ~0x3fff
-    or eax, eax
-    jz .try_next
+   ;; Check if this is usable memory
+   ;cmp   dword [.type],1
+   ;jne   .try_next
+   ;cmp   dword [.size],0
+   ;je   .try_next
+   ;cmp   dword [.acpi],0
+   ;je   .try_next
 
-    cmp dword [.base + 4], 0
-    jne .base_good
-    cmp dword [.base], 0x100000
-    jl .try_next
+   ;; Check that the region is big enough
+   ;mov   eax,[.size]
+   ;and   eax,~0x3FFF
+   ;or   eax,eax
+   ;jz   .try_next
 
-    .base_good:
-    mov eax, [.base]
-    and eax, 0xfff
-    or eax, eax
-    jz .base_aligned
-    mov eax, [.base]
-    and eax, ~0xfff
-    add eax, 0x1000
-    mov [.base], eax
-    sub dword [.size], 0x1000
-    sbb dword [.size + 4], 0
+   ;; Check that the base is above 1MB
+   ;cmp   dword [.base + 4],0
+   ;jne   .base_good
+   ;cmp   dword [.base],0x100000
+   ;jl   .try_next
+   ;.base_good:
 
-    .base_aligned:
-    mov eax, [.size]
-    and eax, ~0xfff
-    mov [.size], eax
+   ;; Align the base to the nearest page
+   ;mov   eax,[.base]
+   ;and   eax,0xFFF
+   ;or   eax,eax
+   ;jz   .base_aligned
+   ;mov   eax,[.base]
+   ;and   eax,~0xFFF
+   ;add   eax,0x1000
+   ;mov   [.base],eax
+   ;sub   dword [.size],0x1000
+   ;sbb   dword [.size + 4],0
+   ;.base_aligned:
 
-    mov eax, [.size]
-    shr eax, 12
-    push ebx
-    mov ebx, [.size + 4]
-    shl ebx, 20
-    add eax, ebx
-    pop ebx
-    mov [.size], eax
-    mov dword [.size + 4], 0
+   ;; Align the size to the nearest page
+   ;mov   eax,[.size]
+   ;and   eax,~0xFFF
+   ;mov   [.size],eax
 
-    ; Store the entry
-    push ebx
+   ;; Convert the size from bytes to 4KB pages
+   ;mov   eax,[.size]
+   ;shr   eax,12
+   ;push   ebx
+   ;mov   ebx,[.size + 4]
+   ;shl   ebx,20
+   ;add   eax,ebx
+   ;pop   ebx
+   ;mov   [.size],eax
+   ;mov   dword [.size + 4],0
 
-    mov ebx, [.pointer]
-    mov eax, [.base]
-    mov [fs:bx], eax
-    mov eax, [.base + 4]
-    mov [fs:bx + 4], eax
-    mov eax, [.size]
-    mov [fs:bx + 8], eax
-    add [.total_memory], eax
-    mov eax, [.size + 4]
-    adc [.total_memory + 4], eax
-    mov [fs:bx + 12], eax
-    add dword [.pointer], 16
+   ;; Store the entry
+   ;push   ebx
+   ;mov   ebx,[.pointer]
+   ;mov   eax,[.base]
+   ;mov   [fs:bx],eax
+   ;mov   eax,[.base + 4]
+   ;mov   [fs:bx + 4],eax
+   ;mov   eax,[.size]
+   ;mov   [fs:bx + 8],eax
+   ;add   [.total_memory],eax
+   ;mov   eax,[.size + 4]
+   ;adc   [.total_memory + 4],eax
+   ;mov   [fs:bx + 12],eax
+   ;add   dword [.pointer],16
+   ;pop   ebx
 
-    pop ebx
+   ;; Continue to the next entry
+   ;.try_next:
+   ;or   ebx,ebx
+   ;jnz   .loop
 
-    .try_next:
-    or ebx, ebx
-    jnz .loop
+   ;; Make sure that there were enough entries
+   ;.finished:
+   ;mov   eax,[.pointer]
+   ;shr   eax,4
+   ;or   eax,eax
+   ;jz   .fail
 
-    .finished:
-    mov eax, [.pointer]
-    shr eax, 4
-    or eax, eax
-    jz .fail
+   ;; Clear the base value for the entry after last
+   ;mov   ebx,[.pointer]
+   ;mov   dword [fs:bx],0
+   ;mov   dword [fs:bx + 4],0
 
-    ; Clear the base value for the entry after last
-    mov ebx, [.pointer]
-    mov dword [fs:bx], 0
-    mov dword [fs:bx + 4], 0
+   ;; Store the total memory
+   ;mov   eax,[.total_memory]
+   ;mov   dword [fs:bx + 8],eax
+   ;mov   eax,[.total_memory + 4]
+   ;mov   dword [fs:bx + 12],eax
 
-    mov eax, [.total_memory]
-    mov dword [fs:bx + 8], eax
-    mov eax, [.total_memory + 4]
-    mov dword [fs:bx + 12], eax
+   ;; Load the kernel!
+   ;jmp   load_kernel
 
-    jmp load_kernel
+   ;; Display an error message if we could not load the memory map
+   ;.fail:
+   ;mov   si,error_memory_map
+   ;jmp   error
 
-    .fail:
-    mov si, error_memory_map
-    jmp error
-
-    .pointer: dd 0
-    .entry: 
-    .base:    dq 0
-    .size:    dq 0
-    .type:    dd 0
-    .acpi:    dd 0
-    .total_memory:    dq 0
+   ;.pointer:   dd 0
+   ;.entry: 
+      ;.base:   dq 0
+      ;.size:   dq 0
+      ;.type:   dd 0
+      ;.acpi:   dd 0
+   ;.total_memory:   dq 0
 
 load_kernel:
-    mov di, 20 ; sector offset for the kernel
-    mov si, 1
-    mov bx, 0x8000
-    call load_sectors
+    push ds
+    push es
+    push ss
+    cli
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax
+    jmp 0x8:.protected_mode 
 
-    xor ecx, ecx
-    mov edx, [0x8020]
-    .ph_loop:
-    xor eax, eax
-    mov ax, [0x8038]
-    cmp ecx, eax
-    jge .finished
-    cmp dword [edx], 1
-    jne .inc
-    mov eax, [edx + 0x20]
-    cmp eax, 0
-    je .inc
+    [bits 32]
+    .protected_mode:
+	mov	ax,0x10
+	mov	ds,ax
+	mov	es,ax
+	mov	ss,ax
+    jmp $
 
-    and eax, 0xfff
-    mov ebx, [edx + 4] ; file offset of the segment
-
-    .inc:
-    jmp .ph_loop
+    ;mov edi, end
+    ;call align_u32_to_sector_size
+    ;mov word [kernel_elf_prologue_buffer], di
     
-    .finished:
-    jmp success
+    ;mov bx, di ; sector-aligned temporary buffer after this file
+    ;mov di, kernel_file_sector_offset ; sector offset for the kernel
+    ;mov si, 1
+    ;call load_sectors
+
+    ;xor ecx, ecx
+    ;mov eax, [kernel_elf_prologue_buffer]
+    ;mov edx, [eax + 0x20]
+    ;add edx, eax
+    ;.ph_loop:
+    ;xor ebx, ebx
+    ;mov bx, [eax + 0x38]
+    ;cmp ecx, ebx
+    ;jge .finished
+    ;cmp dword [edx], 1 ; check if the segment is PT_LOAD
+    ;jne .inc
+    ;mov si, error_kernel_too_big
+    ;mov eax, [edx + 0x12]
+    ;cmp eax, 0
+    ;je error
+    ;mov eax, [edx + 0x24]
+    ;cmp eax, 0
+    ;je error
+    ;mov eax, [edx + 0x20]
+    ;cmp eax, 0 ; check if filesize is 0
+    ;je .inc
+
+    ;xor ebx, ebx
+    ;mov bx, [kernel_segment_count]
+    ;inc word [kernel_segment_count]
+    ;shl ebx, 5 ; multiply by 32, assert that kernel_segment_size == 32
+    ;mov eax, [edx + 0x10] ; copy p_vaddr to the kernel segment element
+    ;mov [kernel_segments], eax
+    ;mov eax, [edx + 0x14]
+    ;mov [kernel_segments + 4], eax
+    ;mov edi, [edx + 0x20] ; kernel file size
+    ;mov esi, 0x1000
+    ;call align_u32
+    ;mov [kernel_segments + 8], eax
+    ;shr eax, 9 ; segment sectors
+    ;and eax, 0xffff0000
+    ;cmp eax, 0
+    ;mov si, error_kernel_too_big
+    ;jne error
+    ;push eax
+
+    ;mov edi, [edx + 0x08]
+    ;shr edi, 9
+    ;add edi, kernel_file_sector_offset ; sector offset of the segment
+
+    ;push esi
+    ;mov bx, kernel_segments
+    ;call load_sectors
+
+
+    
+
+    ;and eax, 0xfff
+    ;mov ebx, [edx + 4] ; file offset of the segment
+
+    ;.inc:
+    ;jmp .ph_loop
+    
+    ;.finished:
+    ;jmp success
+
+; edi: value to align
+; esi: alignment
+; eax: result
+align_u32_to_sector_size:
+    lea eax, [edi + 0x1ff]
+    and eax, 0xfffffe00
+    ret
+align_u32_to_page_size:
+    lea eax, [edi + 0xfff]
+    and eax, 0xfffff000
+    ret
+    
+; si: sector count
+; di: LBA
+load_many_sectors:
+    .loop:
+    cmp si, 6
+    jl .do_less_than_6
+    push si
+    push di
+    mov si, 6
+    call load_sectors
+    pop di
+    pop si
+    sub si, 6
+    add di, 6
+    jmp .loop
+    .do_less_than_6:
+    call load_sectors
+    ret
+    
 
 ; si - sector count
 ; di - LBA.
-; es:bx - buffer
 load_sectors:
-	; Calculate cylinder and head.
-	mov	ax,di
-	xor	dx,dx
-	div	word [max_sectors]
-	xor	dx,dx
-	div	word [max_heads]
-	push	dx ; remainder - head
-	mov	ch,al ; quotient - cylinder
-	shl	ah,6
-	mov	cl,ah
+    .loop:
+    ; Calculate cylinder and head.
+    mov   ax,di
+    xor   dx,dx
+    div   word [max_sectors]
+    xor   dx,dx
+    div   word [max_heads]
+    push   dx ; remainder - head
+    mov   ch,al ; quotient - cylinder
+    shl   ah,6
+    mov   cl,ah
 
-	; Calculate sector.
-	mov	ax,di
-	xor	dx,dx
-	div	word [max_sectors]
-	inc	dx
-	or	cl,dl
+    ; Calculate sector.
+    mov   ax,di
+    xor   dx,dx
+    div   word [max_sectors]
+    inc   dx
+    or   cl,dl
 
-	; Load the sector.
-	pop	dx
-	mov	dh,dl
-	mov	dl,[drive]
-	mov	ax,0x0215
-	int	0x13
-	mov	si,error_disk
-	jc	error
+    ; Load the sector.
+    pop   dx
+    mov   dh,dl
+    mov   dl,[drive]
+    mov   ax, si
+    mov ah, 0x02
+    mov bx, temporary_buffer
+    int   0x13
+    mov   si,error_disk
+    jc   error
 
-	ret
-
-check_a20:
-    xor ax, ax
-    mov es, ax
-    mov ax, 0xffff
-    mov fs, ax
-    mov byte [es:0x600], 0
-    mov byte [fs:0x610], 0xff
-    cmp byte [es:0x600], 0xff
-    je .enabled
-    stc
-    ret
-    .enabled:
-    clc
     ret
 
-success:
-    cli
-    hlt
 
 error:
     xor ax, ax
@@ -329,12 +402,6 @@ error:
     .break:
     cli
     hlt
-
-read_structure:
-    dw 0x10
-    dw 1
-    dd temporary_load_buffer
-    .lba: dq 0
 
 gdt_data:
     .null_entry:    dq 0
@@ -401,8 +468,15 @@ error_kernel_too_big: db "Error: kernel executable too big", 0
 
 startup_message: db "Booting RNU...",10,13,0
 
+kernel_elf_prologue_buffer: dw 0
+kernel_segment_count: dw 0
 max_sectors: dw 0
 max_heads: dw 0
 partition: dw 0
 drive: db 0
 is_emulator: db 0
+
+success:
+    cli
+    hlt
+end:

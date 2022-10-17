@@ -38,7 +38,7 @@ pub fn build(b: *Build.Builder) void {
                                     .file = null,
                                     .guest_errors = true,
                                     .cpu = false,
-                                    .assembly = false,
+                                    .assembly = true,
                                     .interrupts = true,
                                 },
                                 .virtualize = false,
