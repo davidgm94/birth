@@ -3,9 +3,10 @@ const PhysicalMemoryRegion = @This();
 const common = @import("common");
 const assert = common.assert;
 
-const PhysicalAddress = @import("physical_address.zig");
-const VirtualAddress = @import("physical_address.zig");
-const VirtualMemoryRegion = @import("virtual_memory_region.zig");
+const privileged = @import("privileged");
+const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
 address: PhysicalAddress,
 size: u64,
@@ -13,6 +14,13 @@ size: u64,
 pub fn to_higher_half_virtual_address(physical_memory_region: PhysicalMemoryRegion) VirtualMemoryRegion {
     return VirtualMemoryRegion{
         .address = physical_memory_region.address.to_higher_half_virtual_address(),
+        .size = physical_memory_region.size,
+    };
+}
+
+pub fn to_identity_mapped_virtual_address(physical_memory_region: PhysicalMemoryRegion) VirtualMemoryRegion {
+    return VirtualMemoryRegion{
+        .address = VirtualAddress.new(physical_memory_region.address.value),
         .size = physical_memory_region.size,
     };
 }

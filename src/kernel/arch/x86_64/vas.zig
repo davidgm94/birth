@@ -357,7 +357,7 @@ pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion) VirtualAddressSp
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
     const pml4_entries = switch (common.os) {
         .freestanding => pml4_physical_region.to_higher_half_virtual_address().access(PML4Entry),
-        .uefi => VirtualAddress.new(pml4_physical_region.address.value).access(PML4Entry),
+        .uefi => pml4_physical_region.to_identity_mapped_virtual_address().access(PML4Entry),
         else => unreachable,
     };
 
