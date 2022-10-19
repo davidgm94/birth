@@ -34,7 +34,7 @@ pub fn build(b: *Build.Builder) void {
                             .interrupts = true,
                         },
                         .virtualize = true,
-                        .print_command = true,
+                        .print_command = false,
                     },
                 },
             },

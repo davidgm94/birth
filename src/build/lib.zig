@@ -519,7 +519,7 @@ pub const Kernel = struct {
                         switch (kernel.options.arch.x86_64.bootloader) {
                             .inhouse => {
                                 kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" }) catch unreachable;
-                                kernel.run_argument_list.appendSlice(&.{ "-bios", "/home/david/Downloads/OVMF_CODE-pure-efi.fd" }) catch unreachable;
+                                kernel.run_argument_list.appendSlice(&.{ "-bios", "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" }) catch unreachable;
                             },
                             .limine => {
                                 kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path }) catch unreachable;
