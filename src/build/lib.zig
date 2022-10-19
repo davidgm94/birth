@@ -366,6 +366,8 @@ pub const Kernel = struct {
                         });
                         bootloader_exe.setOutputDir(cache_dir);
                         bootloader_exe.addPackage(common_package);
+                        //bootloader_exe.strip = true;
+                        //bootloader_exe.setBuildMode(.ReleaseFast);
 
                         kernel.builder.default_step.dependOn(&bootloader_exe.step);
                         kernel.bootloader = bootloader_exe;

@@ -186,6 +186,7 @@ pub fn field_size(comptime T: type, field_name: []const u8) comptime_int {
 pub const config = @import("common/config.zig");
 pub const CustomAllocator = @import("common/allocator.zig");
 pub const Disk = @import("common/disk.zig");
+pub const ELF = @import("common/elf.zig");
 pub const Filesystem = @import("common/filesystem.zig");
 pub const List = @import("common/list.zig");
 pub const Message = @import("common/message.zig");
