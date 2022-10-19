@@ -112,8 +112,10 @@ pub export fn kernel_entry_point() noreturn {
         const kernel_address_response = bootloader_kernel_address.response orelse @panic("Kernel address response not present");
         const kernel_base_physical_address = PhysicalAddress.new(kernel_address_response.physical_address);
         const kernel_base_virtual_address = VirtualAddress.new(kernel_address_response.virtual_address);
-        var bootstrap_address_space = VirtualAddressSpace.from_current();
-        VAS.init_kernel_bsp(bootstrap_address_space);
+
+        const bsp_kernel_address_space_physical_region = kernel.physical_address_space.allocate_pages(VAS.needed_physical_memory_for_bootstrapping_kernel_address_space, .{ .zeroed = true }) catch |err| panic("could not allocate base page tables for kernel: {}", .{err});
+        kernel.add_bootstrap_region(bsp_kernel_address_space_physical_region);
+        kernel.virtual_address_space = VAS.init_kernel_bsp(bsp_kernel_address_space_physical_region);
         map_kernel(kernel_base_physical_address, kernel_base_virtual_address);
 
         for (memory_map_entries) |entry| {
@@ -487,6 +489,7 @@ export var bootloader_kernel_address = Limine.KernelAddress.Request{
 export var bootloader_modules = Limine.Module.Request{
     .revision = 0,
 };
+
 fn map_section(comptime section_name: []const u8, kernel_base_physical_address: PhysicalAddress, kernel_base_virtual_address: VirtualAddress, flags: VirtualAddressSpace.Flags) void {
     const section_boundaries = kernel.get_section_boundaries(section_name);
 

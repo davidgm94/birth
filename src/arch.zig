@@ -1,5 +1,5 @@
 comptime {
-    if (common.os != .freestanding) @compileError("This file is only to be imported in the kernel");
+    if (common.os != .freestanding and common.os != .uefi) @compileError("This file is only to be imported in the kernel or the bootloader");
 }
 
 const common = @import("common");
@@ -25,6 +25,7 @@ pub const TLS = arch.TLS;
 pub const VAS = arch.VAS;
 
 pub const page_size = arch.page_size;
+pub const page_shifter = arch.page_shifter;
 pub const valid_page_sizes = arch.valid_page_sizes;
 
 pub var max_physical_address_bit: u6 = 40;

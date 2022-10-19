@@ -1,8 +1,8 @@
 const common = @import("common");
 const assert = common.assert;
 
-const RNU = @import("RNU");
-const PhysicalAddress = RNU.PhysicalAddress;
+const privileged = @import("privileged");
+const PhysicalAddress = privileged.PhysicalAddress;
 
 const arch = @import("arch");
 const x86_64 = arch.x86_64;

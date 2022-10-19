@@ -1,7 +1,7 @@
 const VirtualMemoryRegion = @This();
 
-const RNU = @import("RNU");
-const VirtualAddress = RNU.VirtualAddress;
+const privileged = @import("privileged");
+const VirtualAddress = privileged.VirtualAddress;
 
 address: VirtualAddress,
 size: u64,

@@ -4,12 +4,10 @@ const common = @import("common");
 const assert = common.assert;
 const max_int = common.max_int;
 
-const RNU = @import("RNU");
-const panic = RNU.panic;
-const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
-const VirtualAddress = RNU.VirtualAddress;
+const privileged = @import("privileged");
 
-const kernel = @import("kernel");
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualAddress = privileged.VirtualAddress;
 
 const arch = @import("arch");
 
@@ -21,7 +19,7 @@ pub inline fn new(value: u64) PhysicalAddress {
     };
 
     if (!physical_address.is_valid()) {
-        panic("physical address 0x{x} is invalid", .{physical_address.value});
+        @panic("Physical address is invalid");
     }
 
     return physical_address;
@@ -64,7 +62,7 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
 //}
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-    const address = VirtualAddress.new(physical_address.value + kernel.higher_half);
+    const address = VirtualAddress.new(physical_address.value + common.config.kernel_higher_half_address);
     return address;
 }
 

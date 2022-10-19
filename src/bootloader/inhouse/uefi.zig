@@ -19,8 +19,14 @@ const EFIError = Status.EfiError;
 
 const str16 = common.std.unicode.utf8ToUtf16LeStringLiteral;
 
-const page_size = 0x1000;
-const page_shifter = @ctz(@as(u32, page_size));
+const privileged = @import("privileged");
+const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
+
+const arch = @import("arch");
+const page_size = arch.page_size;
+const page_shifter = arch.page_shifter;
 
 const extended_memory_start = 0x00100000;
 
@@ -100,6 +106,17 @@ pub fn main() noreturn {
     var program_segments: []ProgramSegment = &.{};
     program_segments.ptr = @intToPtr([*]ProgramSegment, extended_memory.allocate(@sizeOf(ProgramSegment) * program_headers.len) catch @panic("unable to allocate memory for program segments"));
     assert(program_segments.len == 0);
+
+    var kernel_address_space = blk: {
+        const chunk_address = extended_memory.allocate_aligned(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space, page_size) catch @panic("Unable to get physical memory to bootstrap kernel address space");
+        const kernel_address_space_physical_region = PhysicalMemoryRegion{
+            .address = PhysicalAddress.new(chunk_address),
+            .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
+        };
+        break :blk VirtualAddressSpace.initialize_kernel_address_space_bsp(kernel_address_space_physical_region);
+    };
+    _ = kernel_address_space;
+    logger.debug("here", .{});
 
     for (program_headers) |*ph| {
         switch (ph.type) {

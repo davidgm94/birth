@@ -69,6 +69,11 @@ var user_package = Package{
     .source = FileSource.relative("src/user.zig"),
 };
 
+var privileged_package = Package{
+    .name = "privileged",
+    .source = FileSource.relative("src/privileged.zig"),
+};
+
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
         .windows => {
@@ -338,11 +343,14 @@ pub const Kernel = struct {
     allocator: CustomAllocator,
 
     pub fn create(kernel: *Kernel) void {
+        // Initialize package dependencies here
         common_package.dependencies = &.{common_package};
-        rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
-        arch_package.dependencies = &.{ common_package, rnu_package, kernel_package, bootloader_package, arch_package };
+        rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package, privileged_package };
+        arch_package.dependencies = &.{ common_package, bootloader_package, privileged_package, arch_package };
         kernel_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package };
         user_package.dependencies = &.{common_package};
+        privileged_package.dependencies = &.{ common_package, arch_package, privileged_package };
+
         kernel.create_bootloader();
         kernel.create_executable();
         kernel.create_disassembly_step();
@@ -366,6 +374,8 @@ pub const Kernel = struct {
                         });
                         bootloader_exe.setOutputDir(cache_dir);
                         bootloader_exe.addPackage(common_package);
+                        bootloader_exe.addPackage(privileged_package);
+                        bootloader_exe.addPackage(arch_package);
                         //bootloader_exe.strip = true;
                         //bootloader_exe.setBuildMode(.ReleaseFast);
 

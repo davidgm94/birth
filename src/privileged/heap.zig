@@ -9,13 +9,11 @@ const is_aligned = common.is_aligned;
 const log = common.log.scoped(.Heap);
 const zeroes = common.zeroes;
 
-const RNU = @import("RNU");
-const Spinlock = RNU.Spinlock;
-const TODO = RNU.TODO;
-const VirtualAddress = RNU.VirtualAddress;
-const VirtualAddressSpace = RNU.VirtualAddressSpace;
-
-const kernel = @import("kernel");
+const privileged = @import("privileged");
+const Spinlock = privileged.Spinlock;
+const TODO = privileged.TODO;
+const VirtualAddress = privileged.VirtualAddress;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const arch = @import("arch");
 
@@ -77,7 +75,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
         };
 
         const result_address = region.virtual.value + region.allocated;
-        if (kernel.config.safe_slow) {
+        if (common.config.safe_slow) {
             assert(virtual_address_space.translate_address(VirtualAddress.new(align_backward(result_address, 0x1000))) != null);
         }
         region.allocated += size;
@@ -106,12 +104,12 @@ fn resize_function(allocator: *Allocator, old_mem: []u8, old_align: u29, new_siz
     _ = old_mem;
     _ = old_align;
     _ = new_size;
-    TODO();
+    @panic("todo resize function");
 }
 
 fn free_function(allocator: *Allocator, old_mem: []u8, old_align: u29) void {
     _ = allocator;
     _ = old_mem;
     _ = old_align;
-    TODO();
+    @panic("todo free function");
 }
