@@ -39,15 +39,34 @@ const kernel_path = cache_dir ++ kernel_name;
 const user_programs = .{@import("../user/programs/desktop/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
-const common_package = Package{
+var common_package = Package{
     .name = "common",
     .source = FileSource.relative("src/common.zig"),
-    .dependencies = &.{common_package_dummy},
 };
 
-const common_package_dummy = Package{
-    .name = "common",
-    .source = FileSource.relative("src/common.zig"),
+var bootloader_package = Package{
+    .name = "bootloader",
+    .source = FileSource.relative("src/bootloader.zig"),
+};
+
+var arch_package = Package{
+    .name = "arch",
+    .source = FileSource.relative("src/arch.zig"),
+};
+
+var rnu_package = Package{
+    .name = "RNU",
+    .source = FileSource.relative("src/rnu.zig"),
+};
+
+var kernel_package = Package{
+    .name = "kernel",
+    .source = FileSource.relative("src/kernel.zig"),
+};
+
+var user_package = Package{
+    .name = "user",
+    .source = FileSource.relative("src/user.zig"),
 };
 
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
@@ -175,6 +194,7 @@ pub const Disk = struct {
             .buffer = BufferType.initCapacity(allocator.get_allocator(), capacity) catch unreachable,
         };
     }
+
     fn create(kernel: *Kernel) void {
         kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, make);
 
@@ -318,6 +338,11 @@ pub const Kernel = struct {
     allocator: CustomAllocator,
 
     pub fn create(kernel: *Kernel) void {
+        common_package.dependencies = &.{common_package};
+        rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
+        arch_package.dependencies = &.{ common_package, rnu_package, kernel_package, bootloader_package, arch_package };
+        kernel_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package };
+        user_package.dependencies = &.{common_package};
         kernel.create_bootloader();
         kernel.create_executable();
         kernel.create_disassembly_step();
@@ -340,6 +365,7 @@ pub const Kernel = struct {
                             .abi = .msvc,
                         });
                         bootloader_exe.setOutputDir(cache_dir);
+                        bootloader_exe.addPackage(common_package);
 
                         kernel.builder.default_step.dependOn(&bootloader_exe.step);
                         kernel.bootloader = bootloader_exe;
@@ -375,30 +401,6 @@ pub const Kernel = struct {
             },
             else => unreachable,
         }
-
-        var bootloader_package = Package{
-            .name = "bootloader",
-            .source = FileSource.relative("src/bootloader.zig"),
-        };
-
-        var arch_package = Package{
-            .name = "arch",
-            .source = FileSource.relative("src/arch.zig"),
-        };
-
-        var rnu_package = Package{
-            .name = "RNU",
-            .source = FileSource.relative("src/rnu.zig"),
-        };
-
-        var kernel_package = Package{
-            .name = "kernel",
-            .source = FileSource.relative("src/kernel.zig"),
-        };
-
-        rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package };
-        arch_package.dependencies = &.{ common_package, rnu_package, kernel_package, bootloader_package, arch_package };
-        kernel_package.dependencies = &.{ common_package, rnu_package, arch_package, kernel_package };
 
         kernel.executable.addPackage(common_package);
         kernel.executable.addPackage(bootloader_package);
@@ -463,11 +465,6 @@ pub const Kernel = struct {
             program.setLinkerScriptPath(FileSource.relative(linker_script_path));
             program.entry_symbol_name = "user_entry_point";
 
-            const user_package = Package{
-                .name = "user",
-                .source = FileSource.relative("src/user.zig"),
-                .dependencies = &.{common_package},
-            };
             program.addPackage(common_package);
             program.addPackage(user_package);
 

@@ -1,4 +1,4 @@
-const std = @import("std");
+pub const std = @import("std");
 const builtin = @import("builtin");
 
 pub const Cpu = std.Target.Cpu;
@@ -183,6 +183,7 @@ pub fn field_size(comptime T: type, field_name: []const u8) comptime_int {
 }
 
 /// This is done so the allocator can respect allocating from different address spaces
+pub const config = @import("common/config.zig");
 pub const CustomAllocator = @import("common/allocator.zig");
 pub const Disk = @import("common/disk.zig");
 pub const Filesystem = @import("common/filesystem.zig");
