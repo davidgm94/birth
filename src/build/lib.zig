@@ -520,6 +520,7 @@ pub const Kernel = struct {
                             .inhouse => {
                                 kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" }) catch unreachable;
                                 kernel.run_argument_list.appendSlice(&.{ "-bios", "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" }) catch unreachable;
+                                kernel.run_argument_list.appendSlice(&.{ "-L", "zig-cache/ovmf" }) catch unreachable;
                             },
                             .limine => {
                                 kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path }) catch unreachable;
