@@ -304,6 +304,7 @@ pub const Filesystem = struct {
 
 pub const Kernel = struct {
     builder: *Builder,
+    bootloader: ?*LibExeObjStep = null,
     executable: *LibExeObjStep = undefined,
     userspace_programs: []*LibExeObjStep = &.{},
     options: Options,
@@ -317,6 +318,7 @@ pub const Kernel = struct {
     allocator: CustomAllocator,
 
     pub fn create(kernel: *Kernel) void {
+        kernel.create_bootloader();
         kernel.create_executable();
         kernel.create_disassembly_step();
         kernel.create_userspace_programs();
@@ -325,8 +327,31 @@ pub const Kernel = struct {
         kernel.create_run_and_debug_steps();
     }
 
+    fn create_bootloader(kernel: *Kernel) void {
+        switch (kernel.options.arch) {
+            .x86_64 => {
+                switch (kernel.options.arch.x86_64.bootloader) {
+                    .limine => {},
+                    .inhouse => {
+                        const bootloader_exe = kernel.builder.addExecutable("BOOTX64", "src/bootloader/inhouse/uefi.zig");
+                        bootloader_exe.setTarget(.{
+                            .cpu_arch = .x86_64,
+                            .os_tag = .uefi,
+                            .abi = .msvc,
+                        });
+                        bootloader_exe.setOutputDir(cache_dir);
+
+                        kernel.builder.default_step.dependOn(&bootloader_exe.step);
+                        kernel.bootloader = bootloader_exe;
+                    },
+                }
+            },
+            else => unreachable,
+        }
+    }
+
     fn create_executable(kernel: *Kernel) void {
-        var target = get_target(kernel.options.arch, false);
+        const target = get_target(kernel.options.arch, false);
 
         switch (kernel.options.arch) {
             .x86_64 => {
@@ -455,13 +480,11 @@ pub const Kernel = struct {
     }
 
     fn create_boot_image(kernel: *Kernel) void {
-        kernel.boot_image_step = switch (kernel.options.arch) {
-            .x86_64 => switch (kernel.options.arch.x86_64.bootloader) {
-                .inhouse => BootImage.x86_64.InHouse.new(kernel),
-                .limine => BootImage.x86_64.Limine.new(kernel),
-            },
-            else => unreachable,
-        };
+        kernel.boot_image_step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, BootImage.build);
+        const bootloader_step = kernel.bootloader orelse unreachable;
+        kernel.boot_image_step.dependOn(&bootloader_step.step);
+        kernel.boot_image_step.dependOn(&kernel.executable.step);
+        kernel.boot_image_step.dependOn(kernel.builder.default_step);
     }
 
     fn create_disk(kernel: *Kernel) void {
@@ -495,10 +518,11 @@ pub const Kernel = struct {
                     .x86_64 => {
                         switch (kernel.options.arch.x86_64.bootloader) {
                             .inhouse => {
-                                kernel.run_argument_list.appendSlice(&.{ "-hda", Kernel.BootImage.x86_64.InHouse.get_binary_path("disk") }) catch unreachable;
+                                kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" }) catch unreachable;
+                                kernel.run_argument_list.appendSlice(&.{ "-bios", "/home/david/Downloads/OVMF_CODE-pure-efi.fd" }) catch unreachable;
                             },
                             .limine => {
-                                kernel.run_argument_list.appendSlice(&.{ "-cdrom", Kernel.BootImage.x86_64.Limine.image_path }) catch unreachable;
+                                kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path }) catch unreachable;
                             },
                         }
                     },
@@ -706,110 +730,106 @@ pub const Kernel = struct {
     }
 
     const BootImage = struct {
-        const x86_64 = struct {
-            const InHouse = struct {
-                const flat_binaries = &[_][]const u8{ "mbr", "stage1" };
+        fn build(step: *Step) !void {
+            const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
 
-                fn new(kernel: *Kernel) Step {
-                    inline for (flat_binaries) |binary_name| {
-                        kernel.builder.default_step.dependOn(flat_binary(kernel.builder, binary_name));
+            switch (kernel.options.arch) {
+                .x86_64 => {
+                    switch (kernel.options.arch.x86_64.bootloader) {
+                        .inhouse => {
+                            var cache_dir_handle = try zig_std.fs.cwd().openDir(kernel.builder.cache_root, .{});
+                            defer cache_dir_handle.close();
+                            const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+                            const current_directory = cwd();
+                            current_directory.deleteFile(Limine.image_path) catch {};
+                            const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+                            const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+                            try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
+                            try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
+                        },
+                        .limine => {
+                            const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+                            const current_directory = cwd();
+                            current_directory.deleteFile(Limine.image_path) catch {};
+                            const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+                            const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+                            const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
+
+                            const limine_efi_bin_file = "limine-cd-efi.bin";
+                            const files_to_copy_from_limine_dir = [_][]const u8{
+                                "limine.cfg",
+                                "limine.sys",
+                                "limine-cd.bin",
+                                limine_efi_bin_file,
+                            };
+
+                            for (files_to_copy_from_limine_dir) |filename| {
+                                log.debug("Trying to copy {s}", .{filename});
+                                try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+                            }
+                            try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+                            try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
+
+                            const xorriso_executable = switch (std.os) {
+                                .windows => "tools/xorriso-windows/xorriso.exe",
+                                else => "xorriso",
+                            };
+                            var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
+                            // Ignore stderr and stdout
+                            xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
+                            xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
+                            xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
+                            _ = try xorriso_process.spawnAndWait();
+
+                            try Limine.installer.install(Limine.image_path, false, null);
+                        },
                     }
+                },
+                else => unreachable,
+            }
+        }
+        //const x86_64 = struct {
+        //const InHouse = struct {
+        //const flat_binaries = &[_][]const u8{ "mbr", "stage1" };
 
-                    var step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, InHouse.build);
-                    step.dependOn(&kernel.executable.step);
-                    step.dependOn(kernel.builder.default_step);
-                    return step;
-                }
+        //fn build(step: *Step) !void {
+        //const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
+        //var disk_buffer = std.ArrayListManaged(u8).init(kernel.builder.allocator);
+        //const bootloader_file_handle = try zig_std.fs.cwd().openFile("zig-cache/bootloader.elf", .{});
+        //defer bootloader_file_handle.close();
+        //try bootloader_file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
 
-                fn build(step: *Step) !void {
-                    const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-                    var disk_buffer = std.ArrayListManaged(u8).init(kernel.builder.allocator);
-                    inline for (flat_binaries) |binary_name| {
-                        const binary_path = get_binary_path(binary_name);
-                        const file_handle = try zig_std.fs.cwd().openFile(binary_path, .{});
-                        defer file_handle.close();
-                        std.log.debug("File {s}, {} bytes", .{ binary_name, try file_handle.getEndPos() });
-                        try file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
-                    }
+        //log.debug("disk len: {}", .{disk_buffer.items.len});
+        //std.assert(disk_buffer.items.len < 100000);
+        //try disk_buffer.appendNTimes(0, 100000 - disk_buffer.items.len);
 
-                    try disk_buffer.appendNTimes(0, 0x200 * 20 - disk_buffer.items.len);
+        //const kernel_file_handle = try zig_std.fs.cwd().openFile(kernel_path, .{});
+        //defer kernel_file_handle.close();
 
-                    const kernel_file_handle = try zig_std.fs.cwd().openFile(kernel_path, .{});
-                    defer kernel_file_handle.close();
+        //try kernel_file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
+        //try disk_buffer.appendNTimes(0, std.align_forward(disk_buffer.items.len, 0x200) - disk_buffer.items.len);
 
-                    try kernel_file_handle.reader().readAllArrayList(&disk_buffer, 0xffff_ffff_ffff_ffff);
-                    try disk_buffer.appendNTimes(0, std.align_forward(disk_buffer.items.len, 0x200) - disk_buffer.items.len);
+        //try zig_std.fs.cwd().writeFile("zig-cache/disk.bin", disk_buffer.items);
+        //}
+        //};
 
-                    try zig_std.fs.cwd().writeFile(get_binary_path("disk"), disk_buffer.items);
-                }
+        //const Limine = struct {
+        //const image_path = cache_dir ++ "universal.iso";
 
-                fn flat_binary(b: *Builder, comptime name: []const u8) *Step {
-                    const command = b.addSystemCommand(&.{ "nasm", "-f", "bin", get_source_path(name), "-o", get_binary_path(name) });
-                    return &command.step;
-                }
+        //fn new(kernel: *Kernel) Step {
+        //var step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build);
+        //step.dependOn(&kernel.executable.step);
+        //return step;
+        //}
 
-                fn get_source_path(comptime name: []const u8) []const u8 {
-                    return "src/bootloader/inhouse/" ++ name ++ ".asm";
-                }
-
-                fn get_binary_path(comptime name: []const u8) []const u8 {
-                    return "zig-cache/" ++ name ++ ".bin";
-                }
-            };
-
-            const Limine = struct {
-                const installer = @import("../bootloader/limine/installer.zig");
-                const base_path = "src/bootloader/limine";
-                const installables_path = base_path ++ "/installables";
-                const image_path = cache_dir ++ "universal.iso";
-
-                fn new(kernel: *Kernel) Step {
-                    var step = Step.init(.custom, "_limine_image_", kernel.builder.allocator, Limine.build);
-                    step.dependOn(&kernel.executable.step);
-                    return step;
-                }
-
-                fn build(step: *Step) !void {
-                    const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-                    std.assert(kernel.options.arch == .x86_64);
-                    const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-                    const current_directory = cwd();
-                    current_directory.deleteFile(image_path) catch {};
-                    const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-                    const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-                    const limine_dir = try current_directory.openDir(installables_path, .{});
-
-                    const limine_efi_bin_file = "limine-cd-efi.bin";
-                    const files_to_copy_from_limine_dir = [_][]const u8{
-                        "limine.cfg",
-                        "limine.sys",
-                        "limine-cd.bin",
-                        limine_efi_bin_file,
-                    };
-
-                    for (files_to_copy_from_limine_dir) |filename| {
-                        log.debug("Trying to copy {s}", .{filename});
-                        try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
-                    }
-                    try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
-                    try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
-
-                    const xorriso_executable = switch (std.os) {
-                        .windows => "tools/xorriso-windows/xorriso.exe",
-                        else => "xorriso",
-                    };
-                    var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", image_path }, kernel.builder.allocator);
-                    // Ignore stderr and stdout
-                    xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
-                    xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
-                    xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
-                    _ = try xorriso_process.spawnAndWait();
-
-                    try Limine.installer.install(image_path, false, null);
-                }
-            };
-        };
+        //fn build(step: *Step) !void {
+        //const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
+        //std.assert(kernel.options.arch == .x86_64);
+        //}
+        //};
+        //};
     };
 
     pub const Options = struct {
@@ -1039,3 +1059,10 @@ fn do_debug_step(step: *Step) !void {
         else => unreachable,
     }
 }
+
+pub const Limine = struct {
+    const base_path = "src/bootloader/limine";
+    const installables_path = base_path ++ "/installables";
+    const image_path = cache_dir ++ "universal.iso";
+    const installer = @import("../bootloader/limine/installer.zig");
+};
