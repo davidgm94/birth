@@ -31,8 +31,6 @@ const page_size = arch.page_size;
 const page_shifter = arch.page_shifter;
 const VAS = arch.VAS;
 
-const extended_memory_start = 0x00100000;
-
 pub fn main() noreturn {
     const system_table = uefi.system_table;
     const boot_services = system_table.boot_services orelse @panic("boot services");
@@ -58,12 +56,6 @@ pub fn main() noreturn {
     };
 
     logger.debug("EFI revision: {s}", .{revision_string});
-    var pointer = @intToPtr([*]align(page_size) u8, extended_memory_start);
-    result(@src(), boot_services.allocatePages(.AllocateAddress, .LoaderData, 0x700, &pointer));
-    var extended_memory = ExtendedMemory{
-        .size = 0x700 << page_shifter,
-        .allocated = page_size,
-    };
 
     const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
     const rsdp_address = blk: {
@@ -90,13 +82,54 @@ pub fn main() noreturn {
         var file_info_size = buffer.len;
         result(@src(), kernel_file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
         const file_info = @ptrCast(*FileInfo, &buffer);
-        logger.debug("Unaligned file size: {}", .{file_info.file_size});
+        logger.debug("Unaligned kernel file size: {}", .{file_info.file_size});
         break :blk common.align_forward(file_info.file_size + page_size, page_size);
+    };
+
+    var memory_map_size = blk: {
+        var memory_map_size: usize = 0;
+        var memory_map_key: usize = 0;
+        var memory_map_descriptor_size: usize = 0;
+        var memory_map_descriptor_version: u32 = 0;
+        _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+        break :blk common.align_forward(memory_map_size + page_size, page_size);
+    };
+
+    var extended_memory = blk: {
+        // TODO: don't hardcode the last part
+
+        var pointer: [*]align(page_size) u8 = undefined;
+        const total_size = kernel_file_size + (kernel_file_size / 2) + memory_map_size + VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + (page_size << 5);
+        assert(common.is_aligned(total_size, page_size));
+        const total_page_count = total_size >> page_shifter;
+        logger.debug("Allocating {} pages to bootstrap the kernel", .{total_page_count});
+        result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, total_page_count, &pointer));
+        break :blk ExtendedMemory{
+            .address = @ptrToInt(pointer),
+            .size = total_size,
+        };
     };
 
     var kernel_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(kernel_file_size, page_size) catch @panic("oom"))[0..kernel_file_size];
     result(@src(), kernel_file.read(&kernel_buffer.len, kernel_buffer.ptr));
-    logger.debug("Read the kernel", .{});
+    logger.debug("Kernel file ({} bytes aligned to page size) read", .{kernel_file_size});
+
+    logger.debug("Trying to get memory map", .{});
+    var memory_map = @intToPtr([*]uefi.tables.MemoryDescriptor, extended_memory.allocate_aligned(memory_map_size, page_size) catch @panic("can't allocate memory for memory map"));
+    var memory_map_key: usize = 0;
+    var memory_map_descriptor_size: usize = 0;
+    var memory_map_descriptor_version: u32 = 0;
+    result(@src(), boot_services.getMemoryMap(&memory_map_size, memory_map, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version));
+    assert(memory_map_size % memory_map_descriptor_size == 0);
+    logger.debug("Memory map size: {}", .{memory_map_size});
+
+    var memory_map_i: u64 = 0;
+    const memory_map_entry_count = memory_map_size / memory_map_descriptor_size;
+    while (memory_map_i < memory_map_entry_count) : (memory_map_i += 1) {
+        const memory_map_entry = @intToPtr(*uefi.tables.MemoryDescriptor, @ptrToInt(memory_map) + memory_map_i * memory_map_descriptor_size);
+        if (memory_map_entry.type == .LoaderData)
+            logger.debug("Entry {s}. Page count: {}. Address: 0x{x}. Virtual: 0x{x}", .{ @tagName(memory_map_entry.type), memory_map_entry.number_of_pages, memory_map_entry.physical_start, memory_map_entry.virtual_start });
+    }
 
     const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), kernel_buffer.ptr));
     if (!file_header.is_valid()) @panic("Trying to load as ELF file a corrupted ELF file");
@@ -122,7 +155,6 @@ pub fn main() noreturn {
     for (program_headers) |*ph| {
         switch (ph.type) {
             .load => {
-                logger.debug("PH: {}", .{ph});
                 if (ph.size_in_memory == 0) continue;
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const segment_size = common.align_forward(ph.size_in_memory + misalignment, page_size);
@@ -203,9 +235,9 @@ fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void
 }
 
 const ExtendedMemory = struct {
-    address: u64 = extended_memory_start,
+    address: u64,
     size: u64,
-    allocated: u64,
+    allocated: u64 = 0,
     allocator: CustomAllocator = .{
         .callback_allocate = physical_allocate,
         .callback_resize = physical_resize,
@@ -217,7 +249,6 @@ const ExtendedMemory = struct {
     }
 
     pub fn allocate_aligned(extended_memory: *ExtendedMemory, bytes: usize, alignment: u29) EFIError!u64 {
-        logger.debug("Trying to allocate {} bytes with {} alignment in {}", .{ bytes, alignment, extended_memory });
         const allocated_aligned = common.align_forward(extended_memory.allocated, alignment);
         if (bytes >= extended_memory.size - allocated_aligned) {
             return EFIError.BufferTooSmall;
