@@ -56,10 +56,9 @@ pub inline fn offset(physical_address: PhysicalAddress, asked_offset: u64) Physi
     return PhysicalAddress.new(physical_address.value + asked_offset);
 }
 
-//pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
-//log.warn("Warning: to_identity_mapped_virtual_address", .{});
-//return VirtualAddress.new(physical_address.value);
-//}
+pub inline fn to_identity_mapped_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
+    return VirtualAddress.new(physical_address.value);
+}
 
 pub inline fn to_higher_half_virtual_address(physical_address: PhysicalAddress) VirtualAddress {
     const address = VirtualAddress.new(physical_address.value + common.config.kernel_higher_half_address);

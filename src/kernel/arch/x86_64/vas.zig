@@ -1,6 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
 const copy = common.copy;
+const CustomAllocator = common.CustomAllocator;
 const enum_count = common.enum_count;
 const is_aligned = common.is_aligned;
 const log = common.log.scoped(.VAS);
@@ -189,7 +190,9 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, physical_address: Physic
     }
 }
 
-pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, page_count: u64, general_flags: VirtualAddressSpace.Flags) void {
+const limine_physical_allocator = CustomAllocator{};
+
+pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, page_count: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *CustomAllocator, maybe_pending_list: ?*common.List.StableBuffer(PhysicalAddress, 64)) void {
     // TODO: use flags
     const flags = general_flags.to_arch_specific();
     _ = flags;
@@ -214,7 +217,11 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
 
         const pml4_table = blk: {
             const pml4_physical_address = virtual_address_space.arch.cr3.get_address();
-            const pml4_virtual_address = pml4_physical_address.to_higher_half_virtual_address();
+            const pml4_virtual_address = switch (common.os) {
+                .freestanding => pml4_physical_address.to_higher_half_virtual_address(),
+                .uefi => pml4_physical_address.to_identity_mapped_virtual_address(),
+                else => unreachable,
+            };
             if (common.config.safe_slow) {
                 assert(pml4_virtual_address.is_valid());
             }
@@ -227,28 +234,39 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
 
             const table_physical_address = physical_address_blk: {
                 const entry_value = entry_pointer.*;
-                if (entry_value.present) {
+                const fast = true;
+                if (fast) {
+                    assert(entry_value.present);
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
-                    @panic("wtf");
-                    //const entry_physical_region = kernel.physical_address_space.allocate_pages(@sizeOf(PDPTable), .{ .zeroed = true }) orelse @panic("WTF");
-                    //if (common.config.safe_slow) {
-                    //for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
-                    //assert(byte == 0);
-                    //}
-                    //}
+                    if (entry_value.present) {
+                        break :physical_address_blk unpack_address(entry_value);
+                    } else {
+                        @panic("wtf");
+                        //const entry_physical_region = kernel.physical_address_space.allocate_pages(@sizeOf(PDPTable), .{ .zeroed = true }) orelse @panic("WTF");
+                        //if (common.config.safe_slow) {
+                        //for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                        //assert(byte == 0);
+                        //}
+                        //}
 
-                    //entry_pointer.* = PML4Entry{
-                    //.present = true,
-                    //.read_write = true,
-                    //.address = pack_address(entry_physical_region.address),
-                    //};
+                        //entry_pointer.* = PML4Entry{
+                        //.present = true,
+                        //.read_write = true,
+                        //.address = pack_address(entry_physical_region.address),
+                        //};
 
-                    //break :physical_address_blk entry_physical_region.address;
+                        //break :physical_address_blk entry_physical_region.address;
+                    }
                 }
             };
 
-            const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
+            const table_virtual_address = switch (common.os) {
+                .freestanding => table_physical_address.to_higher_half_virtual_address(),
+                .uefi => table_physical_address.to_identity_mapped_virtual_address(),
+                else => unreachable,
+            };
+
             if (common.config.safe_slow) assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PDPTable);
         };
@@ -266,26 +284,35 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
                     // TODO: track this physical allocation in order to map it later in the kernel address space
-                    @panic("todo implement pd table");
-                    //const entry_physical_region = kernel.physical_address_space.allocate_pages(@sizeOf(PDTable), .{ .zeroed = true }) catch @panic("WTF");
-                    //kernel.add_bootstrap_region(entry_physical_region);
-                    //if (common.config.safe_slow) {
-                    //for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
-                    //assert(byte == 0);
-                    //}
-                    //}
+                    const entry_allocation = physical_allocator.allocate_bytes(@sizeOf(PDTable), page_size) catch @panic("wtf");
+                    const entry_physical_region = PhysicalMemoryRegion{
+                        .address = PhysicalAddress.new(entry_allocation.address),
+                        .size = entry_allocation.size,
+                    };
+                    if (maybe_pending_list) |pending_list| {
+                        pending_list.append(physical_allocator, entry_physical_region.address) catch unreachable;
+                    }
+                    if (common.config.safe_slow) {
+                        for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                            assert(byte == 0);
+                        }
+                    }
 
-                    //entry_pointer.* = PDPEntry{
-                    //.present = true,
-                    //.read_write = true,
-                    //.address = pack_address(entry_physical_region.address),
-                    //};
+                    entry_pointer.* = PDPEntry{
+                        .present = true,
+                        .read_write = true,
+                        .address = pack_address(entry_physical_region.address),
+                    };
 
-                    //break :physical_address_blk entry_physical_region.address;
+                    break :physical_address_blk entry_physical_region.address;
                 }
             };
 
-            const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
+            const table_virtual_address = switch (common.os) {
+                .freestanding => table_physical_address.to_higher_half_virtual_address(),
+                .uefi => table_physical_address.to_identity_mapped_virtual_address(),
+                else => unreachable,
+            };
             if (common.config.safe_slow) assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PDTable);
         };
@@ -302,28 +329,36 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
                     }
                     break :physical_address_blk unpack_address(entry_value);
                 } else {
-                    // TODO: track this physical allocation in order to map it later in the kernel address space
-                    @panic("todo implement p table");
-                    //const entry_physical_region = kernel.physical_address_space.allocate_pages(@sizeOf(PDTable), .{ .zeroed = true }) catch @panic("WTF");
-                    //kernel.add_bootstrap_region(entry_physical_region);
+                    const entry_allocation = physical_allocator.allocate_bytes(@sizeOf(PTable), page_size) catch @panic("wtf");
+                    const entry_physical_region = PhysicalMemoryRegion{
+                        .address = PhysicalAddress.new(entry_allocation.address),
+                        .size = entry_allocation.size,
+                    };
+                    if (maybe_pending_list) |pending_list| {
+                        pending_list.append(physical_allocator, entry_physical_region.address) catch unreachable;
+                    }
+                    if (common.config.safe_slow) {
+                        for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
+                            assert(byte == 0);
+                        }
+                    }
 
-                    //if (common.config.safe_slow) {
-                    //for (entry_physical_region.address.to_higher_half_virtual_address().access([*]const u8)[0..entry_physical_region.size]) |byte| {
-                    //assert(byte == 0);
-                    //}
-                    //}
+                    entry_pointer.* = PDEntry{
+                        .present = true,
+                        .read_write = true,
+                        .address = pack_address(entry_physical_region.address),
+                    };
 
-                    //entry_pointer.* = PDEntry{
-                    //.present = true,
-                    //.read_write = true,
-                    //.address = pack_address(entry_physical_region.address),
-                    //};
-
-                    //break :physical_address_blk entry_physical_region.address;
+                    break :physical_address_blk entry_physical_region.address;
                 }
             };
 
-            const table_virtual_address = table_physical_address.to_higher_half_virtual_address();
+            const table_virtual_address = switch (common.os) {
+                .freestanding => table_physical_address.to_higher_half_virtual_address(),
+                .uefi => table_physical_address.to_identity_mapped_virtual_address(),
+                else => unreachable,
+            };
+
             if (common.config.safe_slow) assert(table_virtual_address.is_valid());
             break :blk table_virtual_address.access(*volatile PTable);
         };

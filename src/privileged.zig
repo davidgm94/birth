@@ -1,4 +1,9 @@
 // This package provides of privileged data structures and routines to both kernel and bootloaders, for now
+const crash = @import("privileged/crash.zig");
+pub const panic = crash.panic;
+pub const panic_extended = crash.panic_extended;
+
+pub const TODO = crash.TODO;
 pub const Heap = @import("privileged/heap.zig");
 pub const PhysicalAddress = @import("privileged/physical_address.zig");
 pub const PhysicalAddressSpace = @import("privileged/physical_address_space.zig");

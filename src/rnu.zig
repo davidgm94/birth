@@ -6,11 +6,6 @@ comptime {
 
 const privileged = @import("privileged");
 
-const crash = @import("kernel/crash.zig");
-pub const panic = crash.panic;
-pub const panic_extended = crash.panic_extended;
-pub const TODO = crash.TODO;
-
 pub const DeviceManager = @import("kernel/device_manager.zig");
 pub const Disk = @import("kernel/disk.zig");
 pub const Drivers = @import("kernel/drivers.zig");

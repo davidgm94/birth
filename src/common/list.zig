@@ -105,7 +105,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             }
         };
 
-        pub fn add_one(stable_buffer: *@This(), allocator: Allocator) Allocator.Error!*T {
+        pub fn add_one(stable_buffer: *@This(), allocator: *Allocator) Allocator.Error!*T {
             if (stable_buffer.first == null) {
                 const first_bucket = try allocator.create(Bucket);
                 first_bucket.* = Bucket{ .data = zeroes([bucket_size]T) };
@@ -134,7 +134,12 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
             }
         }
 
-        pub fn add_many(stable_buffer: *@This(), allocator: Allocator, count: u64) Allocator.Error![]T {
+        pub fn append(stable_buffer: *@This(), allocator: *Allocator, element: T) Allocator.Error!void {
+            const new_one = try stable_buffer.add_one(allocator);
+            new_one.* = element;
+        }
+
+        pub fn add_many(stable_buffer: *@This(), allocator: *Allocator, count: u64) Allocator.Error![]T {
             if (stable_buffer.first == null) {
                 const bucket_count = div_ceil(u64, count, Bucket.size) catch unreachable;
                 //assert(bucket_count == 1);

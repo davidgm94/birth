@@ -1,6 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
 const config = common.config;
+const CustomAllocator = common.CustomAllocator;
 const ELF = common.ELF;
 const logger = common.log.scoped(.UEFI);
 const uefi = common.std.os.uefi;
@@ -22,11 +23,13 @@ const str16 = common.std.unicode.utf8ToUtf16LeStringLiteral;
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const arch = @import("arch");
 const page_size = arch.page_size;
 const page_shifter = arch.page_shifter;
+const VAS = arch.VAS;
 
 const extended_memory_start = 0x00100000;
 
@@ -115,8 +118,6 @@ pub fn main() noreturn {
         };
         break :blk VirtualAddressSpace.initialize_kernel_address_space_bsp(kernel_address_space_physical_region);
     };
-    _ = kernel_address_space;
-    logger.debug("here", .{});
 
     for (program_headers) |*ph| {
         switch (ph.type) {
@@ -161,6 +162,11 @@ pub fn main() noreturn {
                         .execute = ph.flags.executable,
                     },
                 };
+
+                const physical_address = PhysicalAddress.new(kernel_segment_virtual_address);
+                const virtual_address = VirtualAddress.new(ph.virtual_address & 0xffff_ffff_ffff_f000);
+                const segment_page_count = segment_size >> page_shifter;
+                VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, segment_page_count, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &extended_memory.allocator, null);
             },
             else => {
                 logger.warn("Unhandled PH {s}", .{@tagName(ph.type)});
@@ -168,17 +174,43 @@ pub fn main() noreturn {
         }
     }
 
-    for (program_segments) |segment| {
-        logger.debug("Segment: {}", .{segment});
-    }
-
     success();
 }
 
-const ExtendedMemory = extern struct {
+fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
+    const extended_memory = @fieldParentPtr(ExtendedMemory, "allocator", allocator);
+    // todo: better define types
+    const allocation = extended_memory.allocate_aligned(size, @intCast(u29, alignment)) catch unreachable;
+    return CustomAllocator.Result{
+        .address = allocation,
+        .size = size,
+    };
+}
+
+fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
+    _ = allocator;
+    _ = old_memory;
+    _ = old_alignment;
+    _ = new_size;
+    unreachable;
+}
+
+fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
+    _ = allocator;
+    _ = memory;
+    _ = alignment;
+    unreachable;
+}
+
+const ExtendedMemory = struct {
     address: u64 = extended_memory_start,
     size: u64,
     allocated: u64,
+    allocator: CustomAllocator = .{
+        .callback_allocate = physical_allocate,
+        .callback_resize = physical_resize,
+        .callback_free = physical_free,
+    },
 
     pub fn allocate(extended_memory: *ExtendedMemory, bytes: usize) EFIError!u64 {
         return extended_memory.allocate_aligned(bytes, 1);
