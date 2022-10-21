@@ -254,7 +254,7 @@ pub fn main() noreturn {
 
     // TODO: there can be an enourmous bug here because we dont map page tables
 
-    const stack_size = page_size;
+    const stack_size = 10 * page_size;
     const gdt_size = page_size;
     const trampoline_allocation_size = loader_file.size + stack_size + gdt_size;
     // TODO: not junk but we don't need to categoryze it now
@@ -281,13 +281,15 @@ pub fn main() noreturn {
     const load_kernel_function = code_physical.to_identity_mapped_virtual_address().access(*const LoadKernelFunction);
     const stack_top = stack.to_higher_half_virtual_address().value + stack_size;
 
-    const gdt_descriptor = gdt.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_offset(common.config.kernel_higher_half_address);
-    logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor.limit, gdt_descriptor.address });
+    const gdt_descriptor_identity = gdt.to_identity_mapped_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
+    gdt_descriptor_identity.* = gdt.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_offset(common.config.kernel_higher_half_address);
+    logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor_identity.limit, gdt_descriptor_identity.address });
+    const gdt_descriptor_higher_half = gdt.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
 
-    load_kernel_function(&extended_memory, entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor.limit, gdt_descriptor.address);
+    load_kernel_function(&extended_memory, entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
 }
 
-const LoadKernelFunction = fn (extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor_limit: u16, gdt_descriptor_address: u64) callconv(.SysV) noreturn;
+const LoadKernelFunction = fn (extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *GDT.Descriptor) callconv(.SysV) noreturn;
 
 // This is only meant to allocate page tables
 fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {

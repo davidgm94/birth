@@ -9,6 +9,8 @@ const x86_64 = arch.x86_64;
 const DescriptorTable = x86_64.DescriptorTable;
 const TSS = x86_64.TSS;
 
+pub const Descriptor = DescriptorTable.Register;
+
 pub const Table = extern struct {
     null_entry: Entry = 0, // 0x00
     code_16: Entry = 0x00009a000000ffff, // 0x08
