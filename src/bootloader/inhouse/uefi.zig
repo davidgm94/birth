@@ -30,6 +30,10 @@ const arch = @import("arch");
 const page_size = arch.page_size;
 const page_shifter = arch.page_shifter;
 const VAS = arch.VAS;
+const x86_64 = arch.x86_64;
+const GDT = x86_64.GDT;
+
+const page_table_estimated_size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + 200 * page_size;
 
 pub fn main() noreturn {
     const system_table = uefi.system_table;
@@ -83,7 +87,7 @@ pub fn main() noreturn {
         result(@src(), kernel_file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
         const file_info = @ptrCast(*FileInfo, &buffer);
         logger.debug("Unaligned kernel file size: {}", .{file_info.file_size});
-        break :blk common.align_forward(file_info.file_size + page_size, page_size);
+        break :blk @intCast(u32, common.align_forward(file_info.file_size + page_size, page_size));
     };
 
     var memory_map_size = blk: {
@@ -99,7 +103,7 @@ pub fn main() noreturn {
         // TODO: don't hardcode the last part
 
         var pointer: [*]align(page_size) u8 = undefined;
-        const total_size = kernel_file_size + (kernel_file_size / 2) + memory_map_size + VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + (page_size << 5);
+        const total_size = @intCast(u32, kernel_file_size + (kernel_file_size / 2) + memory_map_size + page_table_estimated_size + (page_size << 5));
         assert(common.is_aligned(total_size, page_size));
         const total_page_count = total_size >> page_shifter;
         logger.debug("Allocating {} pages to bootstrap the kernel", .{total_page_count});
@@ -110,12 +114,12 @@ pub fn main() noreturn {
         };
     };
 
-    var kernel_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(kernel_file_size, page_size) catch @panic("oom"))[0..kernel_file_size];
+    var kernel_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(kernel_file_size, page_size, MemoryCategory.kernel_file) catch @panic("oom"))[0..kernel_file_size];
     result(@src(), kernel_file.read(&kernel_buffer.len, kernel_buffer.ptr));
     logger.debug("Kernel file ({} bytes aligned to page size) read", .{kernel_file_size});
 
     logger.debug("Trying to get memory map", .{});
-    var memory_map = @intToPtr([*]uefi.tables.MemoryDescriptor, extended_memory.allocate_aligned(memory_map_size, page_size) catch @panic("can't allocate memory for memory map"));
+    var memory_map = @intToPtr([*]uefi.tables.MemoryDescriptor, extended_memory.allocate_aligned(@intCast(u32, memory_map_size), page_size, MemoryCategory.memory_map) catch @panic("can't allocate memory for memory map"));
     var memory_map_key: usize = 0;
     var memory_map_descriptor_size: usize = 0;
     var memory_map_descriptor_version: u32 = 0;
@@ -123,16 +127,21 @@ pub fn main() noreturn {
     assert(memory_map_size % memory_map_descriptor_size == 0);
     logger.debug("Memory map size: {}", .{memory_map_size});
 
+    logger.debug("Exiting boot services...", .{});
+    result(@src(), boot_services.exitBootServices(uefi.handle, memory_map_key));
+
     var memory_map_i: u64 = 0;
     const memory_map_entry_count = memory_map_size / memory_map_descriptor_size;
     while (memory_map_i < memory_map_entry_count) : (memory_map_i += 1) {
         const memory_map_entry = @intToPtr(*uefi.tables.MemoryDescriptor, @ptrToInt(memory_map) + memory_map_i * memory_map_descriptor_size);
         if (memory_map_entry.type == .LoaderData)
-            logger.debug("Entry {s}. Page count: {}. Address: 0x{x}. Virtual: 0x{x}", .{ @tagName(memory_map_entry.type), memory_map_entry.number_of_pages, memory_map_entry.physical_start, memory_map_entry.virtual_start });
+            logger.debug("Entry {s}. Page count: {}. Address: 0x{x}. Virtual: 0x{x}. Can execute: {}", .{ @tagName(memory_map_entry.type), memory_map_entry.number_of_pages, memory_map_entry.physical_start, memory_map_entry.virtual_start, !memory_map_entry.attribute.xp });
     }
 
     const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), kernel_buffer.ptr));
     if (!file_header.is_valid()) @panic("Trying to load as ELF file a corrupted ELF file");
+
+    const entry_point = file_header.entry;
 
     assert(file_header.program_header_size == @sizeOf(ELF.ProgramHeader));
     assert(file_header.section_header_size == @sizeOf(ELF.SectionHeader));
@@ -140,11 +149,12 @@ pub fn main() noreturn {
     const program_headers = @intToPtr([*]const ELF.ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
 
     var program_segments: []ProgramSegment = &.{};
-    program_segments.ptr = @intToPtr([*]ProgramSegment, extended_memory.allocate(@sizeOf(ProgramSegment) * program_headers.len) catch @panic("unable to allocate memory for program segments"));
+    program_segments.ptr = @intToPtr([*]ProgramSegment, extended_memory.allocate(@intCast(u32, @sizeOf(ProgramSegment) * program_headers.len), MemoryCategory.junk) catch @panic("unable to allocate memory for program segments"));
     assert(program_segments.len == 0);
 
     var kernel_address_space = blk: {
-        const chunk_address = extended_memory.allocate_aligned(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space, page_size) catch @panic("Unable to get physical memory to bootstrap kernel address space");
+        logger.debug("Big chunk", .{});
+        const chunk_address = extended_memory.allocate_aligned(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space, page_size, MemoryCategory.page_tables) catch @panic("Unable to get physical memory to bootstrap kernel address space");
         const kernel_address_space_physical_region = PhysicalMemoryRegion{
             .address = PhysicalAddress.new(chunk_address),
             .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
@@ -152,14 +162,14 @@ pub fn main() noreturn {
         break :blk VirtualAddressSpace.initialize_kernel_address_space_bsp(kernel_address_space_physical_region);
     };
 
+    var all_segments_size: u32 = 0;
     for (program_headers) |*ph| {
         switch (ph.type) {
             .load => {
                 if (ph.size_in_memory == 0) continue;
-                const misalignment = ph.virtual_address & (page_size - 1);
-                const segment_size = common.align_forward(ph.size_in_memory + misalignment, page_size);
+                const address_misalignment = ph.virtual_address & (page_size - 1);
 
-                if (misalignment != 0) {
+                if (address_misalignment != 0) {
                     @panic("ELF PH segment size is supposed to be page-aligned");
                 }
 
@@ -171,34 +181,26 @@ pub fn main() noreturn {
                     @panic("ELF program segment is marked as non-readable");
                 }
 
-                if (ph.size_in_file < ph.size_in_memory) {
+                if (ph.size_in_file != ph.size_in_memory) {
                     @panic("ELF program segment file size is smaller than memory size");
                 }
-
-                const kernel_segment_virtual_address = extended_memory.allocate_aligned(segment_size, page_size) catch @panic("Unable to allocate memory for ELF segment");
-                const segment_start = kernel_segment_virtual_address + misalignment;
-                const dst_slice = @intToPtr([*]u8, segment_start)[0..ph.size_in_memory];
-                const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_buffer.ptr) + ph.offset)[0..ph.size_in_file];
-                assert(dst_slice.len >= src_slice.len);
-                common.copy(u8, dst_slice, src_slice);
 
                 const segment_index = program_segments.len;
                 program_segments.len += 1;
                 const segment = &program_segments[segment_index];
                 segment.* = .{
-                    .physical = segment_start, // UEFI uses identity mapping
+                    .physical = 0, // UEFI uses identity mapping
                     .virtual = ph.virtual_address,
-                    .size = ph.size_in_memory,
+                    .size = @intCast(u32, ph.size_in_memory),
+                    .file_offset = @intCast(u32, ph.offset),
                     .mappings = .{
                         .write = ph.flags.writable,
                         .execute = ph.flags.executable,
                     },
                 };
 
-                const physical_address = PhysicalAddress.new(kernel_segment_virtual_address);
-                const virtual_address = VirtualAddress.new(ph.virtual_address & 0xffff_ffff_ffff_f000);
-                const segment_page_count = segment_size >> page_shifter;
-                VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, segment_page_count, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &extended_memory.allocator, null);
+                const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, page_size));
+                all_segments_size += aligned_segment_size;
             },
             else => {
                 logger.warn("Unhandled PH {s}", .{@tagName(ph.type)});
@@ -206,13 +208,125 @@ pub fn main() noreturn {
         }
     }
 
-    success();
+    logger.debug("Allocate aligned: {}", .{all_segments_size});
+    const segments_allocation = extended_memory.allocate_aligned(all_segments_size, page_size, MemoryCategory.kernel_segments) catch @panic("Unable to allocate memory for kernel segments");
+    var allocated_segment_memory: u32 = 0;
+
+    for (program_segments) |*segment| {
+        const virtual_address = VirtualAddress.new(segment.virtual & 0xffff_ffff_ffff_f000);
+        const address_misalignment = @intCast(u32, segment.virtual - virtual_address.value);
+        const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, page_size));
+        const physical_address = PhysicalAddress.new(segments_allocation + allocated_segment_memory);
+        segment.physical = physical_address.value + address_misalignment;
+        allocated_segment_memory += aligned_segment_size;
+        const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
+        const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_buffer.ptr) + segment.file_offset)[0..segment.size];
+        if (!(dst_slice.len >= src_slice.len)) {
+            @panic("WTFFFFFFF");
+        }
+        assert(dst_slice.len >= src_slice.len);
+        common.copy(u8, dst_slice, src_slice);
+        const segment_page_count = aligned_segment_size >> page_shifter;
+        VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, segment_page_count, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &extended_memory.allocator, null);
+    }
+
+    logger.debug("It: {}. All: {}", .{ allocated_segment_memory, all_segments_size });
+    assert(allocated_segment_memory == all_segments_size);
+
+    // TODO: there can be an enourmous bug here because we dont map page tables
+
+    const code_size = page_size;
+    const stack_size = page_size;
+    const gdt_size = page_size;
+    const trampoline_allocation_size = code_size + stack_size + gdt_size;
+    // TODO: not junk but we don't need to categoryze it now
+    const physical_trampoline_allocation = PhysicalAddress.new(extended_memory.allocate_aligned(trampoline_allocation_size, page_size, MemoryCategory.junk) catch @panic("wtf"));
+    const code = physical_trampoline_allocation.offset(0);
+    const stack = physical_trampoline_allocation.offset(code_size);
+    const gdt = physical_trampoline_allocation.offset(code_size + stack_size);
+
+    VAS.bootstrap_map(&kernel_address_space, code, code.to_identity_mapped_virtual_address(), code_size >> page_shifter, .{ .write = false, .execute = true }, &extended_memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size >> page_shifter, .{ .write = true, .execute = false }, &extended_memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size >> page_shifter, .{ .write = true, .execute = false }, &extended_memory.allocator, null);
+
+    // Make sure every page table is mapped
+    logger.debug("Started mapping page tables...", .{});
+    {
+        const category = extended_memory.categories[@enumToInt(MemoryCategory.page_tables)];
+        const physical = PhysicalAddress.new(extended_memory.address + category.offset);
+        const virtual = physical.to_higher_half_virtual_address();
+        const page_count = category.size >> page_shifter;
+        VAS.bootstrap_map(&kernel_address_space, physical, virtual, page_count, .{ .write = true, .execute = false }, &extended_memory.allocator, null);
+    }
+    logger.debug("Ended mapping page tables...", .{});
+
+    const load_kernel_address = @ptrToInt(&load_kernel_stub);
+    const gdt_stub_address = @ptrToInt(&gdt_stub);
+    const load_kernel_size = gdt_stub_address - load_kernel_address;
+    logger.debug("Load kernel: 0x{x}. GDT stub: 0x{x}", .{ load_kernel_address, gdt_stub_address });
+
+    const load_kernel_destination = code.to_identity_mapped_virtual_address().access([*]u8)[0..load_kernel_size];
+    const load_kernel_source = @intToPtr([*]u8, load_kernel_address)[0..load_kernel_size];
+
+    common.copy(u8, load_kernel_destination, load_kernel_source);
+
+    logger.debug("Load kernel copied!", .{});
+
+    const gdt_stub_offset = load_kernel_size;
+    const gdt_stub_end_destination = code_size;
+    const gdt_stub_end_source = code_size - load_kernel_size;
+
+    const gdt_stub_destination = code.to_identity_mapped_virtual_address().access([*]u8)[gdt_stub_offset..gdt_stub_end_destination];
+    const gdt_stub_source = @intToPtr([*]const u8, @ptrToInt(&gdt_load))[0..gdt_stub_end_source];
+
+    common.copy(u8, gdt_stub_destination, gdt_stub_source);
+    logger.debug("GDT stub copied!", .{});
+
+    const load_kernel_function = code.to_identity_mapped_virtual_address().access(*const LoadKernelFunction);
+    const gdt_load_function = code.to_identity_mapped_virtual_address().offset(gdt_stub_offset).access(*const @TypeOf(gdt_load));
+    const stack_top = stack.to_higher_half_virtual_address().value + stack_size;
+    logger.debug("About to jump to the kernel. Map address space: 0x{x}. Logging is off", .{@bitCast(u64, kernel_address_space.arch.cr3)});
+
+    load_kernel_function(&extended_memory, entry_point, kernel_address_space.arch.cr3, stack_top, gdt.to_higher_half_virtual_address().access(*GDT.Table), gdt_load_function);
 }
 
+const LoadKernelFunction = fn (extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt: *GDT.Table, gdt_loader: *const @TypeOf(gdt_load)) callconv(.SysV) noreturn;
+
+extern fn load_kernel_stub(extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt: *GDT.Table, gdt_loader: *const @TypeOf(gdt_load)) callconv(.SysV) noreturn;
+
+comptime {
+    asm (
+        \\.section .text
+        \\.global load_kernel_stub
+        \\.align 16
+        \\load_kernel_stub:
+        \\mov %rdx, %cr3
+        \\mov %rcx, %rsp
+        \\push %rdi
+        \\mov %r8, %rdi
+        \\call *(%r9)
+        \\cli
+        \\hlt
+        \\pop %rdi
+        \\call *(%rsi)
+        \\.align 16
+        \\.global gdt_stub
+        \\gdt_stub:
+    );
+}
+
+extern var gdt_stub: *u8;
+
+export fn gdt_load(gdt_address: u64) callconv(.SysV) void {
+    @setRuntimeSafety(false);
+    @intToPtr(*GDT.Table, gdt_address).setup();
+}
+
+// This is only meant to allocate page tables
 fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     const extended_memory = @fieldParentPtr(ExtendedMemory, "allocator", allocator);
     // todo: better define types
-    const allocation = extended_memory.allocate_aligned(size, @intCast(u29, alignment)) catch unreachable;
+    const allocation = extended_memory.allocate_aligned(@intCast(u32, size), @intCast(u29, alignment), MemoryCategory.page_tables) catch unreachable;
     return CustomAllocator.Result{
         .address = allocation,
         .size = size,
@@ -234,28 +348,90 @@ fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void
     unreachable;
 }
 
+const MemoryCategory = enum {
+    page_tables,
+    kernel_file,
+    kernel_segments,
+    memory_map,
+    junk,
+
+    const count = common.enum_count(@This());
+};
+
+const CategoryBookingKeeping = struct {
+    offset: u32 = 0,
+    allocated: u32 = 0,
+    size: u32 = 0,
+};
+
 const ExtendedMemory = struct {
     address: u64,
-    size: u64,
-    allocated: u64 = 0,
+    size: u32,
+    allocated: u32 = 0,
     allocator: CustomAllocator = .{
         .callback_allocate = physical_allocate,
         .callback_resize = physical_resize,
         .callback_free = physical_free,
     },
+    categories: [MemoryCategory.count]CategoryBookingKeeping = [1]CategoryBookingKeeping{.{}} ** MemoryCategory.count,
 
-    pub fn allocate(extended_memory: *ExtendedMemory, bytes: usize) EFIError!u64 {
-        return extended_memory.allocate_aligned(bytes, 1);
+    pub fn allocate(extended_memory: *ExtendedMemory, bytes: u32, category: MemoryCategory) EFIError!u64 {
+        return extended_memory.allocate_aligned(bytes, 1, category);
     }
 
-    pub fn allocate_aligned(extended_memory: *ExtendedMemory, bytes: usize, alignment: u29) EFIError!u64 {
-        const allocated_aligned = common.align_forward(extended_memory.allocated, alignment);
-        if (bytes >= extended_memory.size - allocated_aligned) {
-            return EFIError.BufferTooSmall;
+    pub fn allocate_aligned(extended_memory: *ExtendedMemory, bytes: u32, alignment: u29, category_type: MemoryCategory) EFIError!u64 {
+        const category = &extended_memory.categories[@enumToInt(category_type)];
+
+        const category_size = switch (category_type) {
+            .junk => 20 * page_size,
+            .page_tables => page_table_estimated_size,
+            else => bytes,
+        };
+
+        switch (category_type) {
+            .kernel_file,
+            .kernel_segments,
+            .memory_map,
+            => {
+                if (category.allocated != 0) @panic("static big chunks cannot be redistributed");
+
+                logger.debug("Bytes: {}. Alignment: {}", .{ bytes, alignment });
+                if (bytes % alignment != 0) @panic("WTFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+                assert(bytes % alignment == 0);
+                const base = extended_memory.allocated;
+                defer extended_memory.allocated += bytes;
+                category.* = .{
+                    .offset = base,
+                    .allocated = bytes,
+                    .size = bytes,
+                };
+
+                return extended_memory.address + extended_memory.allocated;
+            },
+            .junk, .page_tables => {
+                if (category.allocated == 0) {
+                    const base = extended_memory.allocated;
+                    if (base + category_size > extended_memory.size) @panic("Category size too big");
+                    defer extended_memory.allocated += category_size;
+
+                    category.* = .{
+                        .offset = base,
+                        .allocated = 0,
+                        .size = category_size,
+                    };
+                }
+            },
         }
 
-        extended_memory.allocated = allocated_aligned + bytes;
-        return extended_memory.address + allocated_aligned;
+        const aligned_allocated = @intCast(u32, common.align_forward(category.allocated, alignment));
+        const target_allocated = aligned_allocated + bytes;
+        if (target_allocated > category_size) {
+            @panic("Category size overflow");
+        }
+
+        category.allocated = target_allocated;
+        const result_address = extended_memory.address + category.offset + aligned_allocated;
+        return result_address;
     }
 };
 
@@ -367,7 +543,8 @@ fn result(src: common.SourceLocation, status: Status) void {
 pub const ProgramSegment = extern struct {
     physical: u64,
     virtual: u64,
-    size: u64,
+    size: u32,
+    file_offset: u32,
     mappings: extern struct {
         write: bool,
         execute: bool,

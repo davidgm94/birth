@@ -15,6 +15,7 @@ const panic = privileged.panic;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PrivilegeLevel = privileged.PrivilegeLevel;
+const ResourceOwner = privileged.ResourceOwner;
 const Spinlock = privileged.Spinlock;
 const VirtualAddress = privileged.VirtualAddress;
 
@@ -23,13 +24,14 @@ const VAS = arch.VAS;
 
 id: u64,
 arch: VAS.Specific,
-privilege_level: PrivilegeLevel,
+privileged: bool,
+owner: ResourceOwner = .kernel,
 heap: Heap,
 free_regions: ArrayList(Region) = .{},
 used_regions: ArrayList(Region) = .{},
 
-pub fn from_current() VirtualAddressSpace {
-    return VAS.from_current();
+pub fn from_current(owner: ResourceOwner) VirtualAddressSpace {
+    return VAS.from_current(owner);
 }
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = VAS.needed_physical_memory_for_bootstrapping_kernel_address_space;

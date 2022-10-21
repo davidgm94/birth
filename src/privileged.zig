@@ -12,7 +12,8 @@ pub const VirtualAddress = @import("privileged/virtual_address.zig");
 pub const VirtualAddressSpace = @import("privileged/virtual_address_space.zig");
 pub const VirtualMemoryRegion = @import("privileged/virtual_memory_region.zig");
 
-pub const PrivilegeLevel = enum(u1) {
-    kernel = 0,
-    user = 1,
+pub const ResourceOwner = enum(u2) {
+    bootloader = 0,
+    kernel = 1,
+    user = 2,
 };

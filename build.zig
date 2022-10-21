@@ -33,7 +33,7 @@ pub fn build(b: *Build.Builder) void {
                             .assembly = false,
                             .interrupts = true,
                         },
-                        .virtualize = true,
+                        .virtualize = false,
                         .print_command = true,
                     },
                 },

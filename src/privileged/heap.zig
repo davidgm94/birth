@@ -39,7 +39,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
-        .user = virtual_address_space.privilege_level == .user,
+        .user = !virtual_address_space.privileged,
     };
 
     //// TODO: check if the region has enough available space
