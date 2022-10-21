@@ -366,6 +366,7 @@ pub const Kernel = struct {
                 switch (kernel.options.arch.x86_64.bootloader) {
                     .limine => {},
                     .inhouse => {
+                        const loader = kernel.builder.addSystemCommand(&.{ "nasm", "-fbin", "src/bootloader/inhouse/uefi_trampoline.asm", "-o", "zig-cache/uefi_trampoline.bin" });
                         const bootloader_exe = kernel.builder.addExecutable("BOOTX64", "src/bootloader/inhouse/uefi.zig");
                         bootloader_exe.setTarget(.{
                             .cpu_arch = .x86_64,
@@ -378,8 +379,10 @@ pub const Kernel = struct {
                         bootloader_exe.addPackage(arch_package);
                         //bootloader_exe.strip = true;
                         //bootloader_exe.setBuildMode(.ReleaseFast);
+                        bootloader_exe.step.dependOn(&loader.step);
 
                         kernel.builder.default_step.dependOn(&bootloader_exe.step);
+                        kernel.builder.default_step.dependOn(&loader.step);
                         kernel.bootloader = bootloader_exe;
                     },
                 }
@@ -757,6 +760,7 @@ pub const Kernel = struct {
 
                             try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
                             try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
+                            try Dir.copyFile(cache_dir_handle, "uefi_trampoline.bin", img_dir, "uefi_trampoline.bin", .{});
                         },
                         .limine => {
                             const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});

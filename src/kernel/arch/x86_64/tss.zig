@@ -39,8 +39,8 @@ pub const Struct = extern struct {
         assert(@sizeOf(Struct) == 104);
     }
 
-    pub fn get_descriptor(tss: *const Struct) callconv(.SysV) Descriptor {
-        const address = @ptrToInt(tss);
+    pub fn get_descriptor(tss: *const Struct, offset: u64) callconv(.SysV) Descriptor {
+        const address = @ptrToInt(tss) + offset;
         return Descriptor{
             .low = .{
                 .limit_low = @truncate(u16, @sizeOf(Struct) - 1),

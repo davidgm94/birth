@@ -37,12 +37,9 @@ pub const Table = extern struct {
         assert(@offsetOf(Table, "tss_descriptor") == entry_count * @sizeOf(Entry));
     }
 
-    pub fn setup(gdt: *Table) void {
-        gdt.* = Table{
-            .tss_descriptor = undefined,
-        };
-        gdt.tss_descriptor = gdt.tss.get_descriptor();
-        gdt.load();
+    pub fn setup(gdt: *Table, offset: u64) void {
+        const descriptor = gdt.fill_with_offset(offset);
+        load(descriptor);
 
         // Flush segments
         asm volatile (
@@ -55,27 +52,28 @@ pub const Table = extern struct {
             :
             : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
         );
+    }
 
-        asm volatile (
-            \\cli
-            \\hlt
-        );
+    pub fn fill_with_offset(gdt: *Table, offset: u64) DescriptorTable.Register {
+        gdt.* = Table{
+            .tss_descriptor = undefined, // Leave it undefined until later
+        };
+
+        return DescriptorTable.Register{
+            .limit = get_size() - 1,
+            .address = @ptrToInt(gdt) + offset,
+        };
     }
 
     pub fn get_size() u16 {
         return @offsetOf(GDT.Table, "tss");
     }
 
-    pub inline fn load(gdt: *Table) void {
-        const register = DescriptorTable.Register{
-            .limit = get_size() - 1,
-            .address = @ptrToInt(gdt),
-        };
-
+    pub inline fn load(descriptor: DescriptorTable.Register) void {
         asm volatile (
             \\  lgdt %[gdt_register]
             :
-            : [gdt_register] "*p" (&register),
+            : [gdt_register] "*p" (&descriptor),
         );
     }
 

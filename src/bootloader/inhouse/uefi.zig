@@ -35,6 +35,31 @@ const GDT = x86_64.GDT;
 
 const page_table_estimated_size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + 200 * page_size;
 
+const File = struct {
+    handle: *FileProtocol,
+    size: u32,
+
+    fn get(filesystem_root: *FileProtocol, comptime name: []const u8) File {
+        var file: *FileProtocol = undefined;
+        const filename = str16(name);
+        result(@src(), filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
+        const file_size = blk: {
+            // TODO: figure out why it is succeeding with 16 and not with 8
+            var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(filename)) + 0x100]u8 align(@alignOf(FileInfo)) = undefined;
+            var file_info_size = buffer.len;
+            result(@src(), file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
+            const file_info = @ptrCast(*FileInfo, &buffer);
+            logger.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
+            break :blk @intCast(u32, common.align_forward(file_info.file_size + page_size, page_size));
+        };
+
+        return File{
+            .handle = file,
+            .size = file_size,
+        };
+    }
+};
+
 pub fn main() noreturn {
     const system_table = uefi.system_table;
     const boot_services = system_table.boot_services orelse @panic("boot services");
@@ -77,18 +102,8 @@ pub fn main() noreturn {
     const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, boot_services, loaded_image.device_handle orelse unreachable);
     var filesystem_root: *FileProtocol = undefined;
     result(@src(), filesystem_protocol.openVolume(&filesystem_root));
-    var kernel_file: *FileProtocol = undefined;
-    const kernel_filename = str16("kernel.elf");
-    result(@src(), filesystem_root.open(&kernel_file, kernel_filename, FileProtocol.efi_file_mode_read, 0));
-    const kernel_file_size = blk: {
-        // TODO: figure out why it is succeeding with 16 and not with 8
-        var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(kernel_filename)) + 16]u8 align(@alignOf(FileInfo)) = undefined;
-        var file_info_size = buffer.len;
-        result(@src(), kernel_file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
-        const file_info = @ptrCast(*FileInfo, &buffer);
-        logger.debug("Unaligned kernel file size: {}", .{file_info.file_size});
-        break :blk @intCast(u32, common.align_forward(file_info.file_size + page_size, page_size));
-    };
+    const kernel_file = File.get(filesystem_root, "kernel.elf");
+    const loader_file = File.get(filesystem_root, "uefi_trampoline.bin");
 
     var memory_map_size = blk: {
         var memory_map_size: usize = 0;
@@ -103,7 +118,7 @@ pub fn main() noreturn {
         // TODO: don't hardcode the last part
 
         var pointer: [*]align(page_size) u8 = undefined;
-        const total_size = @intCast(u32, kernel_file_size + (kernel_file_size / 2) + memory_map_size + page_table_estimated_size + (page_size << 5));
+        const total_size = @intCast(u32, kernel_file.size + (kernel_file.size / 2) + loader_file.size + memory_map_size + page_table_estimated_size + (page_size << 5));
         assert(common.is_aligned(total_size, page_size));
         const total_page_count = total_size >> page_shifter;
         logger.debug("Allocating {} pages to bootstrap the kernel", .{total_page_count});
@@ -114,9 +129,13 @@ pub fn main() noreturn {
         };
     };
 
-    var kernel_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(kernel_file_size, page_size, MemoryCategory.kernel_file) catch @panic("oom"))[0..kernel_file_size];
-    result(@src(), kernel_file.read(&kernel_buffer.len, kernel_buffer.ptr));
-    logger.debug("Kernel file ({} bytes aligned to page size) read", .{kernel_file_size});
+    var kernel_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(kernel_file.size, page_size, MemoryCategory.kernel_file) catch @panic("oom"))[0..kernel_file.size];
+    result(@src(), kernel_file.handle.read(&kernel_buffer.len, kernel_buffer.ptr));
+    logger.debug("Kernel file ({} bytes aligned to page size) read", .{kernel_file.size});
+
+    var loader_buffer = @intToPtr([*]align(page_size) u8, extended_memory.allocate_aligned(loader_file.size, page_size, MemoryCategory.loader_file) catch @panic("oom"))[0..loader_file.size];
+    result(@src(), loader_file.handle.read(&loader_buffer.len, loader_buffer.ptr));
+    logger.debug("Loader file ({} bytes aligned to page size) read", .{loader_file.size});
 
     logger.debug("Trying to get memory map", .{});
     var memory_map = @intToPtr([*]uefi.tables.MemoryDescriptor, extended_memory.allocate_aligned(@intCast(u32, memory_map_size), page_size, MemoryCategory.memory_map) catch @panic("can't allocate memory for memory map"));
@@ -235,17 +254,16 @@ pub fn main() noreturn {
 
     // TODO: there can be an enourmous bug here because we dont map page tables
 
-    const code_size = page_size;
     const stack_size = page_size;
     const gdt_size = page_size;
-    const trampoline_allocation_size = code_size + stack_size + gdt_size;
+    const trampoline_allocation_size = loader_file.size + stack_size + gdt_size;
     // TODO: not junk but we don't need to categoryze it now
     const physical_trampoline_allocation = PhysicalAddress.new(extended_memory.allocate_aligned(trampoline_allocation_size, page_size, MemoryCategory.junk) catch @panic("wtf"));
-    const code = physical_trampoline_allocation.offset(0);
-    const stack = physical_trampoline_allocation.offset(code_size);
-    const gdt = physical_trampoline_allocation.offset(code_size + stack_size);
+    const stack = physical_trampoline_allocation.offset(loader_file.size);
+    const gdt = physical_trampoline_allocation.offset(loader_file.size + stack_size);
 
-    VAS.bootstrap_map(&kernel_address_space, code, code.to_identity_mapped_virtual_address(), code_size >> page_shifter, .{ .write = false, .execute = true }, &extended_memory.allocator, null);
+    const code_physical = PhysicalAddress.new(@ptrToInt(loader_buffer.ptr));
+    VAS.bootstrap_map(&kernel_address_space, code_physical, code_physical.to_identity_mapped_virtual_address(), loader_file.size >> page_shifter, .{ .write = false, .execute = true }, &extended_memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size >> page_shifter, .{ .write = true, .execute = false }, &extended_memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size >> page_shifter, .{ .write = true, .execute = false }, &extended_memory.allocator, null);
 
@@ -260,67 +278,16 @@ pub fn main() noreturn {
     }
     logger.debug("Ended mapping page tables...", .{});
 
-    const load_kernel_address = @ptrToInt(&load_kernel_stub);
-    const gdt_stub_address = @ptrToInt(&gdt_stub);
-    const load_kernel_size = gdt_stub_address - load_kernel_address;
-    logger.debug("Load kernel: 0x{x}. GDT stub: 0x{x}", .{ load_kernel_address, gdt_stub_address });
-
-    const load_kernel_destination = code.to_identity_mapped_virtual_address().access([*]u8)[0..load_kernel_size];
-    const load_kernel_source = @intToPtr([*]u8, load_kernel_address)[0..load_kernel_size];
-
-    common.copy(u8, load_kernel_destination, load_kernel_source);
-
-    logger.debug("Load kernel copied!", .{});
-
-    const gdt_stub_offset = load_kernel_size;
-    const gdt_stub_end_destination = code_size;
-    const gdt_stub_end_source = code_size - load_kernel_size;
-
-    const gdt_stub_destination = code.to_identity_mapped_virtual_address().access([*]u8)[gdt_stub_offset..gdt_stub_end_destination];
-    const gdt_stub_source = @intToPtr([*]const u8, @ptrToInt(&gdt_load))[0..gdt_stub_end_source];
-
-    common.copy(u8, gdt_stub_destination, gdt_stub_source);
-    logger.debug("GDT stub copied!", .{});
-
-    const load_kernel_function = code.to_identity_mapped_virtual_address().access(*const LoadKernelFunction);
-    const gdt_load_function = code.to_identity_mapped_virtual_address().offset(gdt_stub_offset).access(*const @TypeOf(gdt_load));
+    const load_kernel_function = code_physical.to_identity_mapped_virtual_address().access(*const LoadKernelFunction);
     const stack_top = stack.to_higher_half_virtual_address().value + stack_size;
-    logger.debug("About to jump to the kernel. Map address space: 0x{x}. Logging is off", .{@bitCast(u64, kernel_address_space.arch.cr3)});
 
-    load_kernel_function(&extended_memory, entry_point, kernel_address_space.arch.cr3, stack_top, gdt.to_higher_half_virtual_address().access(*GDT.Table), gdt_load_function);
+    const gdt_descriptor = gdt.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_offset(common.config.kernel_higher_half_address);
+    logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor.limit, gdt_descriptor.address });
+
+    load_kernel_function(&extended_memory, entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor.limit, gdt_descriptor.address);
 }
 
-const LoadKernelFunction = fn (extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt: *GDT.Table, gdt_loader: *const @TypeOf(gdt_load)) callconv(.SysV) noreturn;
-
-extern fn load_kernel_stub(extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt: *GDT.Table, gdt_loader: *const @TypeOf(gdt_load)) callconv(.SysV) noreturn;
-
-comptime {
-    asm (
-        \\.section .text
-        \\.global load_kernel_stub
-        \\.align 16
-        \\load_kernel_stub:
-        \\mov %rdx, %cr3
-        \\mov %rcx, %rsp
-        \\push %rdi
-        \\mov %r8, %rdi
-        \\call *(%r9)
-        \\cli
-        \\hlt
-        \\pop %rdi
-        \\call *(%rsi)
-        \\.align 16
-        \\.global gdt_stub
-        \\gdt_stub:
-    );
-}
-
-extern var gdt_stub: *u8;
-
-export fn gdt_load(gdt_address: u64) callconv(.SysV) void {
-    @setRuntimeSafety(false);
-    @intToPtr(*GDT.Table, gdt_address).setup();
-}
+const LoadKernelFunction = fn (extended_memory: *ExtendedMemory, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor_limit: u16, gdt_descriptor_address: u64) callconv(.SysV) noreturn;
 
 // This is only meant to allocate page tables
 fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
@@ -351,6 +318,7 @@ fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void
 const MemoryCategory = enum {
     page_tables,
     kernel_file,
+    loader_file,
     kernel_segments,
     memory_map,
     junk,
@@ -391,6 +359,7 @@ const ExtendedMemory = struct {
         switch (category_type) {
             .kernel_file,
             .kernel_segments,
+            .loader_file,
             .memory_map,
             => {
                 if (category.allocated != 0) @panic("static big chunks cannot be redistributed");
