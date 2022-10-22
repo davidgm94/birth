@@ -216,3 +216,13 @@ pub fn make_thread_idle(cpu: *CPU) noreturn {
         );
     }
 }
+
+pub inline fn stop() noreturn {
+    while (true) {
+        asm volatile (
+            \\cli
+            \\hlt
+            \\pause
+            ::: "memory");
+    }
+}

@@ -422,6 +422,7 @@ pub const Kernel = struct {
         kernel.executable.addPackage(kernel_package);
         kernel.executable.addPackage(rnu_package);
         kernel.executable.addPackage(arch_package);
+        kernel.executable.addPackage(privileged_package);
 
         kernel.executable.setMainPkgPath("src");
         kernel.executable.setTarget(target);
