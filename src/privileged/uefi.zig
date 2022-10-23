@@ -33,11 +33,11 @@ pub const BootloaderInformation = struct {
     kernel_segments: []ProgramSegment = &.{},
     rsdp_physical_address: PhysicalAddress,
 
-    pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, loader_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
+    pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
         // TODO: don't hardcode the last part
 
         var pointer: [*]align(page_size) u8 = undefined;
-        const total_size = @intCast(u32, common.align_forward(kernel_file_size + (kernel_file_size / 2) + loader_file_size + memory_map_size + page_table_estimated_size + @sizeOf(BootloaderInformation) + extra, page_size));
+        const total_size = @intCast(u32, common.align_forward(kernel_file_size + (kernel_file_size / 2) + memory_map_size + page_table_estimated_size + @sizeOf(BootloaderInformation) + extra, page_size));
         assert(common.is_aligned(total_size, page_size));
         const total_page_count = total_size >> page_shifter;
         result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, total_page_count, &pointer));
@@ -60,7 +60,6 @@ pub const MemoryCategory = enum {
     bootloader_info,
     page_tables,
     kernel_file,
-    loader_file,
     kernel_segments,
     kernel_segment_descriptors,
     memory_map,
@@ -79,7 +78,6 @@ fn get_category_size(category_type: MemoryCategory, bytes: usize) u32 {
         .kernel_file,
         .kernel_segments,
         .kernel_segment_descriptors,
-        .loader_file,
         .memory_map,
         => bytes,
     });
@@ -107,7 +105,6 @@ pub const ExtendedMemory = struct {
         switch (category_type) {
             .kernel_file,
             .kernel_segments,
-            .loader_file,
             .memory_map,
             .bootloader_info,
             .kernel_segment_descriptors,

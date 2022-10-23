@@ -83,7 +83,6 @@ pub fn main() noreturn {
     };
 
     var kernel_file = File.get(filesystem_root, "kernel.elf");
-    var loader_file = File.get(filesystem_root, "uefi_trampoline.bin");
     logger.debug("Got files", .{});
 
     var memory_map_size = blk: {
@@ -92,15 +91,14 @@ pub fn main() noreturn {
         var memory_map_descriptor_size: usize = 0;
         var memory_map_descriptor_version: u32 = 0;
         _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
-        logger.debug("Expected size: {}. Actual size: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor) });
+        logger.debug("Expected size: {}. Actual size: {}. Descriptor version: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor), memory_map_descriptor_version });
         break :blk common.align_forward(memory_map_size + page_size, page_size);
     };
 
-    var bootloader_information = BootloaderInformation.new(boot_services, rsdp_physical_address, kernel_file.size, loader_file.size, memory_map_size, page_size << 5);
+    var bootloader_information = BootloaderInformation.new(boot_services, rsdp_physical_address, kernel_file.size, memory_map_size, page_size << 5);
     logger.debug("Got new bootloader information", .{});
 
     const kernel_file_content = kernel_file.read(&bootloader_information.memory, .kernel_file);
-    const loader_file_content = loader_file.read(&bootloader_information.memory, .loader_file);
 
     logger.debug("Trying to get memory map", .{});
     var memory_map = @intToPtr([*]MemoryDescriptor, bootloader_information.memory.allocate_aligned(@intCast(u32, memory_map_size), page_size, MemoryCategory.memory_map) catch @panic("can't allocate memory for memory map"));
@@ -226,14 +224,16 @@ pub fn main() noreturn {
 
     const stack_size = 10 * page_size;
     const gdt_size = page_size;
-    const trampoline_allocation_size = loader_file.size + stack_size + gdt_size;
+    const trampoline_allocation_size = stack_size + gdt_size;
     // TODO: not junk but we don't need to categoryze it now
     const physical_trampoline_allocation = PhysicalAddress.new(bootloader_information.memory.allocate_aligned(trampoline_allocation_size, page_size, MemoryCategory.junk) catch @panic("wtf"));
-    const stack = physical_trampoline_allocation.offset(loader_file.size);
-    const gdt = physical_trampoline_allocation.offset(loader_file.size + stack_size);
+    const stack = physical_trampoline_allocation.offset(0);
+    const gdt = physical_trampoline_allocation.offset(stack_size);
+    const trampoline_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
+    const trampoline_code_start = @ptrToInt(&load_kernel);
+    const code_physical_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, page_size));
 
-    const code_physical = PhysicalAddress.new(@ptrToInt(loader_file_content.ptr));
-    VAS.bootstrap_map(&kernel_address_space, code_physical, code_physical.to_identity_mapped_virtual_address(), loader_file.size >> page_shifter, .{ .write = false, .execute = true }, &bootloader_information.memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, code_physical_page, code_physical_page.to_identity_mapped_virtual_address(), common.align_forward(trampoline_size, page_size) >> page_shifter, .{ .write = false, .execute = true }, &bootloader_information.memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
 
@@ -248,7 +248,6 @@ pub fn main() noreturn {
     }
     logger.debug("Ended mapping page tables...", .{});
 
-    const load_kernel_function = code_physical.to_identity_mapped_virtual_address().access(*const LoadKernelFunction);
     const stack_top = stack.to_higher_half_virtual_address().value + stack_size;
 
     const gdt_descriptor_identity = gdt.to_identity_mapped_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
@@ -256,7 +255,39 @@ pub fn main() noreturn {
     logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor_identity.limit, gdt_descriptor_identity.address });
     const gdt_descriptor_higher_half = gdt.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
 
-    load_kernel_function(bootinfo_higher_half.access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
+    load_kernel(bootinfo_higher_half.access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
+}
+
+extern const kernel_trampoline_start: *volatile u8;
+extern const kernel_trampoline_end: *volatile u8;
+
+extern fn load_kernel(bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
+comptime {
+    asm (
+        \\.intel_syntax noprefix
+        \\.global load_kernel
+        \\.global kernel_trampoline_start
+        \\.global kernel_trampoline_end
+        \\kernel_trampoline_start:
+        \\load_kernel:
+        \\mov cr3, rdx
+        \\lgdt [r8]
+        \\mov rsp, rcx
+        \\mov rax, 0x30
+        \\mov ds, rax
+        \\mov es, rax
+        \\mov fs, rax
+        \\mov gs, rax
+        \\mov ss, rax
+        \\call set_cs
+        \\jmp rsi
+        \\set_cs:
+        \\pop rax
+        \\push 0x28
+        \\push rax
+        \\retfq
+        \\kernel_trampoline_end:
+    );
 }
 
 pub const log_level = common.std.log.Level.debug;
