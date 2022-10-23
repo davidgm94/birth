@@ -1,4 +1,5 @@
 const common = @import("common");
+const logger = common.log.scoped(.EntryPoint);
 
 const privileged = @import("privileged");
 const UEFI = privileged.UEFI;
@@ -7,30 +8,30 @@ const arch = @import("arch");
 const CPU = arch.CPU;
 
 export fn kernel_entry_point(bootloader_info: *UEFI.BootloaderInformation) noreturn {
-    _ = bootloader_info;
+    logger.debug("Hello kernel", .{});
+    logger.debug("Info: {}", .{bootloader_info});
     CPU.stop();
 }
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    //if (!rework) {
-    //arch.writer_lock.acquire();
-    //defer arch.writer_lock.release();
-
-    //const current_thread = TLS.get_current();
-
-    //arch.writer.writeAll("[Kernel] ") catch unreachable;
-    //if (current_thread.cpu) |current_cpu| {
-    //arch.writer.print("[Core #{}] ", .{current_cpu.id}) catch unreachable;
-    //} else {
-    //arch.writer.writeAll("[WARNING: unknown core] ") catch unreachable;
-    //}
-    //arch.writer.print("[Process #{}] [Thread #{}] ", .{ current_thread.process.id, current_thread.id }) catch unreachable;
-    //}
-
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    arch.writer.writeAll(prefix) catch unreachable;
+    writer.writeAll(prefix) catch unreachable;
 
-    arch.writer.print(format, args) catch unreachable;
-    arch.writer.writeByte('\n') catch unreachable;
+    writer.print(format, args) catch unreachable;
+    writer.writeByte('\n') catch unreachable;
+}
+
+const Writer = common.Writer(void, UEFI.Error, e9_write);
+const writer = Writer{ .context = {} };
+fn e9_write(_: void, bytes: []const u8) UEFI.Error!usize {
+    const bytes_left = asm volatile (
+        \\cld
+        \\rep outsb
+        : [ret] "={rcx}" (-> usize),
+        : [dest] "{dx}" (0xe9),
+          [src] "{rsi}" (bytes.ptr),
+          [len] "{rcx}" (bytes.len),
+    );
+    return bytes.len - bytes_left;
 }

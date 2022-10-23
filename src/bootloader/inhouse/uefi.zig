@@ -4,19 +4,6 @@ const config = common.config;
 const CustomAllocator = common.CustomAllocator;
 const ELF = common.ELF;
 const logger = common.log.scoped(.UEFI);
-//const uefi = common.std.os.uefi;
-//const uefi_error = uefi.Status.err;
-//const BlockIOProtocol = uefi.protocols.BlockIoProtocol;
-//const BootServices = uefi.tables.BootServices;
-//const FileInfo = uefi.protocols.FileInfo;
-//const FileProtocol = uefi.protocols.FileProtocol;
-//const GraphicsOutputProtocol = uefi.protocols.GraphicsOutputProtocol;
-//const LoadedImageProtocol = uefi.protocols.LoadedImageProtocol;
-//const SimpleTextOutputProtocol = uefi.protocols.SimpleTextOutputProtocol;
-//const SimpleFilesystemProtocol = uefi.protocols.SimpleFileSystemProtocol;
-//const Status = uefi.Status;
-//const SystemTable = uefi.tables.SystemTable;
-//const UEFI.Error = Status.EfiError;
 
 const privileged = @import("privileged");
 const UEFI = privileged.UEFI;
@@ -27,8 +14,11 @@ const File = UEFI.File;
 const FileProtocol = UEFI.FileProtocol;
 const Handle = UEFI.Handle;
 const LoadedImageProtocol = UEFI.LoadedImageProtocol;
+const LoadKernelFunction = UEFI.LoadKernelFunction;
 const MemoryCategory = UEFI.MemoryCategory;
 const MemoryDescriptor = UEFI.MemoryDescriptor;
+const ProgramSegment = UEFI.ProgramSegment;
+const Protocol = UEFI.Protocol;
 const page_table_estimated_size = UEFI.page_table_estimated_size;
 const SimpleFilesystemProtocol = UEFI.SimpleFilesystemProtocol;
 const SystemTable = UEFI.SystemTable;
@@ -74,23 +64,26 @@ pub fn main() noreturn {
     logger.debug("EFI revision: {s}", .{revision_string});
 
     const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
-    const rsdp_address = blk: {
+    const rsdp_physical_address = blk: {
         for (configuration_tables) |configuration_table| {
             if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
-                break :blk @ptrToInt(configuration_table.vendor_table);
+                break :blk PhysicalAddress.new(@ptrToInt(configuration_table.vendor_table));
             }
         }
 
-        uefi_panic("Unable to find RSDP", .{});
+        UEFI.panic("Unable to find RSDP", .{});
     };
 
-    logger.debug("RSDP: 0x{x}", .{rsdp_address});
-    const loaded_image = Protocol.open(LoadedImageProtocol, boot_services, handle);
-    const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, boot_services, loaded_image.device_handle orelse unreachable);
-    var filesystem_root: *FileProtocol = undefined;
-    UEFI.result(@src(), filesystem_protocol.openVolume(&filesystem_root));
-    const kernel_file = File.get(filesystem_root, "kernel.elf");
-    const loader_file = File.get(filesystem_root, "uefi_trampoline.bin");
+    const filesystem_root = blk: {
+        const loaded_image = Protocol.open(LoadedImageProtocol, boot_services, handle);
+        const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, boot_services, loaded_image.device_handle orelse unreachable);
+        var root: *FileProtocol = undefined;
+        UEFI.result(@src(), filesystem_protocol.openVolume(&root));
+        break :blk root;
+    };
+
+    var kernel_file = File.get(filesystem_root, "kernel.elf");
+    var loader_file = File.get(filesystem_root, "uefi_trampoline.bin");
     logger.debug("Got files", .{});
 
     var memory_map_size = blk: {
@@ -99,19 +92,15 @@ pub fn main() noreturn {
         var memory_map_descriptor_size: usize = 0;
         var memory_map_descriptor_version: u32 = 0;
         _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
+        logger.debug("Expected size: {}. Actual size: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor) });
         break :blk common.align_forward(memory_map_size + page_size, page_size);
     };
 
-    var bootloader_information = BootloaderInformation.new(boot_services, kernel_file.size, loader_file.size, memory_map_size, page_size << 5);
+    var bootloader_information = BootloaderInformation.new(boot_services, rsdp_physical_address, kernel_file.size, loader_file.size, memory_map_size, page_size << 5);
     logger.debug("Got new bootloader information", .{});
 
-    var kernel_buffer = @intToPtr([*]align(page_size) u8, bootloader_information.memory.allocate_aligned(kernel_file.size, page_size, MemoryCategory.kernel_file) catch @panic("oom"))[0..kernel_file.size];
-    UEFI.result(@src(), kernel_file.handle.read(&kernel_buffer.len, kernel_buffer.ptr));
-    logger.debug("Kernel file ({} bytes aligned to page size) read", .{kernel_file.size});
-
-    var loader_buffer = @intToPtr([*]align(page_size) u8, bootloader_information.memory.allocate_aligned(loader_file.size, page_size, MemoryCategory.loader_file) catch @panic("oom"))[0..loader_file.size];
-    UEFI.result(@src(), loader_file.handle.read(&loader_buffer.len, loader_buffer.ptr));
-    logger.debug("Loader file ({} bytes aligned to page size) read", .{loader_file.size});
+    const kernel_file_content = kernel_file.read(&bootloader_information.memory, .kernel_file);
+    const loader_file_content = loader_file.read(&bootloader_information.memory, .loader_file);
 
     logger.debug("Trying to get memory map", .{});
     var memory_map = @intToPtr([*]MemoryDescriptor, bootloader_information.memory.allocate_aligned(@intCast(u32, memory_map_size), page_size, MemoryCategory.memory_map) catch @panic("can't allocate memory for memory map"));
@@ -133,7 +122,7 @@ pub fn main() noreturn {
             logger.debug("Entry {s}. Page count: {}. Address: 0x{x}. Virtual: 0x{x}. Can execute: {}", .{ @tagName(memory_map_entry.type), memory_map_entry.number_of_pages, memory_map_entry.physical_start, memory_map_entry.virtual_start, !memory_map_entry.attribute.xp });
     }
 
-    const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), kernel_buffer.ptr));
+    const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), kernel_file_content.ptr));
     if (!file_header.is_valid()) @panic("Trying to load as ELF file a corrupted ELF file");
 
     const entry_point = file_header.entry;
@@ -144,7 +133,7 @@ pub fn main() noreturn {
     const program_headers = @intToPtr([*]const ELF.ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
 
     var program_segments: []ProgramSegment = &.{};
-    program_segments.ptr = @intToPtr([*]ProgramSegment, bootloader_information.memory.allocate(@intCast(u32, @sizeOf(ProgramSegment) * program_headers.len), MemoryCategory.junk) catch @panic("unable to allocate memory for program segments"));
+    program_segments.ptr = @intToPtr([*]ProgramSegment, bootloader_information.memory.allocate(@intCast(u32, common.align_forward(@sizeOf(ProgramSegment) * program_headers.len, page_size)), MemoryCategory.kernel_segment_descriptors) catch @panic("unable to allocate memory for program segments"));
     assert(program_segments.len == 0);
 
     var kernel_address_space = blk: {
@@ -203,6 +192,12 @@ pub fn main() noreturn {
         }
     }
 
+    const bootinfo_physical = PhysicalAddress.new(@ptrToInt(bootloader_information));
+    const bootinfo_higher_half = bootinfo_physical.to_higher_half_virtual_address();
+    logger.debug("Started mapping bootloader information: {}", .{bootinfo_physical});
+    VAS.bootstrap_map(&kernel_address_space, bootinfo_physical, bootinfo_higher_half, common.align_forward(@sizeOf(BootloaderInformation), page_size) >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
+    logger.debug("Ended mapping bootloader information", .{});
+
     logger.debug("Allocate aligned: {}", .{all_segments_size});
     const segments_allocation = bootloader_information.memory.allocate_aligned(all_segments_size, page_size, MemoryCategory.kernel_segments) catch @panic("Unable to allocate memory for kernel segments");
     var allocated_segment_memory: u32 = 0;
@@ -215,7 +210,7 @@ pub fn main() noreturn {
         segment.physical = physical_address.value + address_misalignment;
         allocated_segment_memory += aligned_segment_size;
         const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
-        const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_buffer.ptr) + segment.file_offset)[0..segment.size];
+        const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_file_content.ptr) + segment.file_offset)[0..segment.size];
         if (!(dst_slice.len >= src_slice.len)) {
             @panic("WTFFFFFFF");
         }
@@ -225,7 +220,6 @@ pub fn main() noreturn {
         VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, segment_page_count, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &bootloader_information.memory.allocator, null);
     }
 
-    logger.debug("It: {}. All: {}", .{ allocated_segment_memory, all_segments_size });
     assert(allocated_segment_memory == all_segments_size);
 
     // TODO: there can be an enourmous bug here because we dont map page tables
@@ -238,7 +232,7 @@ pub fn main() noreturn {
     const stack = physical_trampoline_allocation.offset(loader_file.size);
     const gdt = physical_trampoline_allocation.offset(loader_file.size + stack_size);
 
-    const code_physical = PhysicalAddress.new(@ptrToInt(loader_buffer.ptr));
+    const code_physical = PhysicalAddress.new(@ptrToInt(loader_file_content.ptr));
     VAS.bootstrap_map(&kernel_address_space, code_physical, code_physical.to_identity_mapped_virtual_address(), loader_file.size >> page_shifter, .{ .write = false, .execute = true }, &bootloader_information.memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
     VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
@@ -262,34 +256,8 @@ pub fn main() noreturn {
     logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor_identity.limit, gdt_descriptor_identity.address });
     const gdt_descriptor_higher_half = gdt.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
 
-    load_kernel_function(bootloader_information, entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
+    load_kernel_function(bootinfo_higher_half.access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
 }
-
-const LoadKernelFunction = fn (bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *GDT.Descriptor) callconv(.SysV) noreturn;
-
-const Protocol = struct {
-    fn locate(comptime ProtocolT: type, boot_services: *BootServices) UEFI.Error!*ProtocolT {
-        var pointer_buffer: ?*anyopaque = null;
-        UEFI.result(@src(), boot_services.locateProtocol(&ProtocolT.guid, null, &pointer_buffer));
-        return cast(ProtocolT, pointer_buffer);
-    }
-
-    fn handle(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) UEFI.Error!*ProtocolT {
-        var interface_buffer: ?*anyopaque = null;
-        UEFI.result(@src(), boot_services.handleProtocol(efi_handle, &ProtocolT.guid, &interface_buffer));
-        return cast(ProtocolT, interface_buffer);
-    }
-
-    fn open(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) *ProtocolT {
-        var interface_buffer: ?*anyopaque = null;
-        UEFI.result(@src(), boot_services.openProtocol(efi_handle, &ProtocolT.guid, &interface_buffer, efi_handle, null, .{ .get_protocol = true }));
-        return cast(ProtocolT, interface_buffer);
-    }
-
-    fn cast(comptime ProtocolT: type, ptr: ?*anyopaque) *ProtocolT {
-        return @ptrCast(*ProtocolT, @alignCast(@alignOf(ProtocolT), ptr));
-    }
-};
 
 pub const log_level = common.std.log.Level.debug;
 
@@ -315,12 +283,7 @@ pub fn log(comptime level: common.std.log.Level, comptime scope: @TypeOf(.EnumLi
 }
 
 pub fn panic(message: []const u8, _: ?*common.std.builtin.StackTrace, _: ?usize) noreturn {
-    uefi_panic("{s}", .{message});
-}
-
-pub fn uefi_panic(comptime format: []const u8, arguments: anytype) noreturn {
-    common.std.log.scoped(.PANIC).err(format, arguments);
-    CPU.stop();
+    UEFI.panic("{s}", .{message});
 }
 
 fn flush_new_line() !void {
@@ -333,11 +296,6 @@ fn flush_new_line() !void {
         else => @compileError("arch not supported"),
     }
 }
-
-const Error = error{
-    missing_con_out,
-    missing_boot_services,
-};
 
 const Writer = common.Writer(void, UEFI.Error, e9_write);
 const debug_writer = Writer{ .context = {} };
@@ -352,14 +310,3 @@ fn e9_write(_: void, bytes: []const u8) UEFI.Error!usize {
     );
     return bytes.len - bytes_left;
 }
-
-pub const ProgramSegment = extern struct {
-    physical: u64,
-    virtual: u64,
-    size: u32,
-    file_offset: u32,
-    mappings: extern struct {
-        write: bool,
-        execute: bool,
-    },
-};

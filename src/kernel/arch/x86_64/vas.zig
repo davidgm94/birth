@@ -208,6 +208,8 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
     var physical_address = asked_physical_address;
     const top_virtual_address = asked_virtual_address.offset(page_count * page_size);
 
+    log.debug("Mapping {} pages from {} to {}. Top virtual address: {}", .{ page_count, asked_physical_address, asked_virtual_address, top_virtual_address });
+
     while (virtual_address.value < top_virtual_address.value) : ({
         physical_address.value += page_size;
         virtual_address.value += page_size;

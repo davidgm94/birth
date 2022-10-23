@@ -25,12 +25,15 @@ const page_size = arch.page_size;
 const page_shifter = arch.page_shifter;
 
 const privileged = @import("privileged");
+const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
-pub const BootloaderInformation = extern struct {
+pub const BootloaderInformation = struct {
     memory: ExtendedMemory,
+    kernel_segments: []ProgramSegment = &.{},
+    rsdp_physical_address: PhysicalAddress,
 
-    pub fn new(boot_services: *BootServices, kernel_file_size: usize, loader_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
+    pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, loader_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
         // TODO: don't hardcode the last part
 
         var pointer: [*]align(page_size) u8 = undefined;
@@ -42,10 +45,11 @@ pub const BootloaderInformation = extern struct {
             .address = @ptrToInt(pointer),
             .size = total_size,
         };
-        const bootloader_info_blob = extended_memory.allocate_aligned(common.align_forward(@sizeOf(BootloaderInformation), page_size), page_size, MemoryCategory.bootloader_info) catch @panic("wtf");
+        const bootloader_info_blob = extended_memory.allocate_aligned(@intCast(u32, common.align_forward(@sizeOf(BootloaderInformation), page_size)), page_size, MemoryCategory.bootloader_info) catch @panic("wtf");
         const bootloader_information = @intToPtr(*BootloaderInformation, bootloader_info_blob);
         bootloader_information.* = .{
             .memory = extended_memory,
+            .rsdp_physical_address = rsdp_physical_address,
         };
 
         return bootloader_information;
@@ -58,6 +62,7 @@ pub const MemoryCategory = enum {
     kernel_file,
     loader_file,
     kernel_segments,
+    kernel_segment_descriptors,
     memory_map,
     junk,
 
@@ -69,16 +74,18 @@ fn get_category_size(category_type: MemoryCategory, bytes: usize) u32 {
     return @intCast(u32, switch (category_type) {
         .junk => 20 * page_size,
         .page_tables => page_table_estimated_size,
+
         .bootloader_info,
         .kernel_file,
         .kernel_segments,
+        .kernel_segment_descriptors,
         .loader_file,
         .memory_map,
         => bytes,
     });
 }
 
-pub const ExtendedMemory = extern struct {
+pub const ExtendedMemory = struct {
     address: u64,
     size: u32,
     allocated: u32 = 0,
@@ -103,12 +110,14 @@ pub const ExtendedMemory = extern struct {
             .loader_file,
             .memory_map,
             .bootloader_info,
+            .kernel_segment_descriptors,
             => {
                 if (category.allocated != 0) @panic("static big chunks cannot be redistributed");
 
-                log.debug("Bytes: {}. Alignment: {}. Category: {s}", .{ bytes, alignment, @tagName(category_type) });
                 if (bytes % alignment != 0) @panic("WTFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+
                 const base = extended_memory.allocated;
+                const result_address = extended_memory.address + base;
                 defer extended_memory.allocated += category_size;
                 category.* = .{
                     .offset = base,
@@ -116,13 +125,16 @@ pub const ExtendedMemory = extern struct {
                     .size = category_size,
                 };
 
-                return extended_memory.address + extended_memory.allocated;
+                log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
+
+                return result_address;
             },
             .junk, .page_tables => {
                 if (category.allocated == 0) {
                     const base = extended_memory.allocated;
                     if (base + category_size > extended_memory.size) @panic("Category size too big");
                     defer extended_memory.allocated += category_size;
+                    log.debug("[CATEGORY-SIZE ALLOCATION] Address: 0x{x}. Size: {}. Category: {s}", .{ extended_memory.address + base, category_size, @tagName(category_type) });
 
                     category.* = .{
                         .offset = base,
@@ -141,6 +153,7 @@ pub const ExtendedMemory = extern struct {
 
         category.allocated = target_allocated;
         const result_address = extended_memory.address + category.offset + aligned_allocated;
+        log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
         return result_address;
     }
 
@@ -178,10 +191,10 @@ pub const ExtendedMemory = extern struct {
 
 pub fn result(src: common.SourceLocation, status: Status) void {
     uefi_error(status) catch |err| {
-        uefi_panic("UEFI error {} at {s}:{}:{} in function {s}", .{ err, src.file, src.line, src.column, src.fn_name });
+        panic("UEFI error {} at {s}:{}:{} in function {s}", .{ err, src.file, src.line, src.column, src.fn_name });
     };
 }
-pub fn uefi_panic(comptime format: []const u8, arguments: anytype) noreturn {
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     common.std.log.scoped(.PANIC).err(format, arguments);
     CPU.stop();
 }
@@ -209,6 +222,14 @@ pub const File = struct {
             .size = file_size,
         };
     }
+
+    pub fn read(file: *File, memory: *ExtendedMemory, category: MemoryCategory) []u8 {
+        var file_buffer = @intToPtr([*]align(page_size) u8, memory.allocate_aligned(file.size, page_size, category) catch @panic("oom"))[0..file.size];
+        var size: u64 = file.size;
+        result(@src(), file.handle.read(&size, file_buffer.ptr));
+        assert(size != file_buffer.len);
+        return file_buffer[0..size];
+    }
 };
 
 pub inline fn get_system_table() *SystemTable {
@@ -218,3 +239,40 @@ pub inline fn get_system_table() *SystemTable {
 pub inline fn get_handle() Handle {
     return uefi.handle;
 }
+
+pub const Protocol = struct {
+    pub fn locate(comptime ProtocolT: type, boot_services: *BootServices) Error!*ProtocolT {
+        var pointer_buffer: ?*anyopaque = null;
+        result(@src(), boot_services.locateProtocol(&ProtocolT.guid, null, &pointer_buffer));
+        return cast(ProtocolT, pointer_buffer);
+    }
+
+    pub fn handle(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) Error!*ProtocolT {
+        var interface_buffer: ?*anyopaque = null;
+        result(@src(), boot_services.handleProtocol(efi_handle, &ProtocolT.guid, &interface_buffer));
+        return cast(ProtocolT, interface_buffer);
+    }
+
+    pub fn open(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) *ProtocolT {
+        var interface_buffer: ?*anyopaque = null;
+        result(@src(), boot_services.openProtocol(efi_handle, &ProtocolT.guid, &interface_buffer, efi_handle, null, .{ .get_protocol = true }));
+        return cast(ProtocolT, interface_buffer);
+    }
+
+    fn cast(comptime ProtocolT: type, ptr: ?*anyopaque) *ProtocolT {
+        return @ptrCast(*ProtocolT, @alignCast(@alignOf(ProtocolT), ptr));
+    }
+};
+
+pub const ProgramSegment = extern struct {
+    physical: u64,
+    virtual: u64,
+    size: u32,
+    file_offset: u32,
+    mappings: extern struct {
+        write: bool,
+        execute: bool,
+    },
+};
+
+pub const LoadKernelFunction = fn (bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
