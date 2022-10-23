@@ -26,11 +26,25 @@ const page_shifter = arch.page_shifter;
 
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+
+pub const MemoryMap = struct {
+    region: VirtualMemoryRegion,
+    descriptor_size: u32 = @sizeOf(MemoryDescriptor),
+    descriptor_version: u32 = 1,
+};
 
 pub const BootloaderInformation = struct {
     memory: ExtendedMemory,
     kernel_segments: []ProgramSegment = &.{},
+    memory_map: MemoryMap = .{
+        .region = VirtualMemoryRegion{
+            .address = VirtualAddress.invalid(),
+            .size = 0,
+        },
+    },
     rsdp_physical_address: PhysicalAddress,
 
     pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
@@ -68,7 +82,7 @@ pub const MemoryCategory = enum {
     const count = common.enum_count(@This());
 };
 
-const page_table_estimated_size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + 200 * page_size;
+const page_table_estimated_size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space + 100 * page_size;
 fn get_category_size(category_type: MemoryCategory, bytes: usize) u32 {
     return @intCast(u32, switch (category_type) {
         .junk => 20 * page_size,

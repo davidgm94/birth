@@ -17,6 +17,7 @@ const LoadedImageProtocol = UEFI.LoadedImageProtocol;
 const LoadKernelFunction = UEFI.LoadKernelFunction;
 const MemoryCategory = UEFI.MemoryCategory;
 const MemoryDescriptor = UEFI.MemoryDescriptor;
+const MemoryMap = UEFI.MemoryMap;
 const ProgramSegment = UEFI.ProgramSegment;
 const Protocol = UEFI.Protocol;
 const page_table_estimated_size = UEFI.page_table_estimated_size;
@@ -27,6 +28,7 @@ const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
 const arch = @import("arch");
 const CPU = arch.CPU;
@@ -112,14 +114,6 @@ pub fn main() noreturn {
     logger.debug("Exiting boot services...", .{});
     UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
 
-    var memory_map_i: u64 = 0;
-    const memory_map_entry_count = memory_map_size / memory_map_descriptor_size;
-    while (memory_map_i < memory_map_entry_count) : (memory_map_i += 1) {
-        const memory_map_entry = @intToPtr(*MemoryDescriptor, @ptrToInt(memory_map) + memory_map_i * memory_map_descriptor_size);
-        if (memory_map_entry.type == .LoaderData)
-            logger.debug("Entry {s}. Page count: {}. Address: 0x{x}. Virtual: 0x{x}. Can execute: {}", .{ @tagName(memory_map_entry.type), memory_map_entry.number_of_pages, memory_map_entry.physical_start, memory_map_entry.virtual_start, !memory_map_entry.attribute.xp });
-    }
-
     const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), kernel_file_content.ptr));
     if (!file_header.is_valid()) @panic("Trying to load as ELF file a corrupted ELF file");
 
@@ -196,6 +190,18 @@ pub fn main() noreturn {
     VAS.bootstrap_map(&kernel_address_space, bootinfo_physical, bootinfo_higher_half, common.align_forward(@sizeOf(BootloaderInformation), page_size) >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
     logger.debug("Ended mapping bootloader information", .{});
 
+    const memory_map_physical = PhysicalAddress.new(@ptrToInt(memory_map));
+    const memory_map_higher_half = memory_map_physical.to_higher_half_virtual_address();
+    VAS.bootstrap_map(&kernel_address_space, memory_map_physical, memory_map_higher_half, common.align_forward(memory_map_size, page_size) >> page_shifter, .{ .write = false, .execute = false }, &bootloader_information.memory.allocator, null);
+    bootloader_information.memory_map = MemoryMap{
+        .region = VirtualMemoryRegion{
+            .address = memory_map_higher_half,
+            .size = memory_map_size,
+        },
+        .descriptor_size = @intCast(u32, memory_map_descriptor_size),
+        .descriptor_version = memory_map_descriptor_version,
+    };
+
     logger.debug("Allocate aligned: {}", .{all_segments_size});
     const segments_allocation = bootloader_information.memory.allocate_aligned(all_segments_size, page_size, MemoryCategory.kernel_segments) catch @panic("Unable to allocate memory for kernel segments");
     var allocated_segment_memory: u32 = 0;
@@ -255,6 +261,11 @@ pub fn main() noreturn {
     logger.debug("About to jump to the kernel. Map address space: 0x{x}. GDT descriptor: ({}, {}). Logging is off", .{ @bitCast(u64, kernel_address_space.arch.cr3), gdt_descriptor_identity.limit, gdt_descriptor_identity.address });
     const gdt_descriptor_higher_half = gdt.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
 
+    logger.debug("Report for the use of memory:", .{});
+    for (bootloader_information.memory.categories) |category, i| {
+        logger.debug("Category {s}. Allocated: {}. Size: {}", .{ @tagName(@intToEnum(MemoryCategory, i)), category.allocated, category.size });
+    }
+
     load_kernel(bootinfo_higher_half.access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor_higher_half);
 }
 
@@ -273,21 +284,25 @@ comptime {
         \\mov cr3, rdx
         \\lgdt [r8]
         \\mov rsp, rcx
-        \\mov rax, 0x30
+        \\mov rax, 0x10
         \\mov ds, rax
         \\mov es, rax
         \\mov fs, rax
         \\mov gs, rax
         \\mov ss, rax
         \\call set_cs
+        \\xor rbp, rbp
         \\jmp rsi
         \\set_cs:
         \\pop rax
-        \\push 0x28
+        \\push 0x08
         \\push rax
         \\retfq
         \\kernel_trampoline_end:
     );
+
+    assert(@offsetOf(GDT.Table, "code_64") == 0x08);
+    assert(@offsetOf(GDT.Table, "data_64") == 0x10);
 }
 
 pub const log_level = common.std.log.Level.debug;
