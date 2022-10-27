@@ -2,6 +2,7 @@ name: Lightning
 
 on:
   push:
+    branches: [ main inhouse-bootloader ]
   pull_request:
   schedule:
     - cron: '0 0 * * *'
