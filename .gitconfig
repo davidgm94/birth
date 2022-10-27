@@ -1,4 +1,0 @@
-[core]
-    lf = open
-    eol = lf
-    autocrlf = false
