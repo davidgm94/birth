@@ -78,7 +78,7 @@ pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
         .windows => {
             const windows = zig_std.os.windows;
-            return @ptrCast([*]align(0x1000) u8, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE))[0..bytes];
+            return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
         },
         else => {
             const mmap = zig_std.os.mmap;
