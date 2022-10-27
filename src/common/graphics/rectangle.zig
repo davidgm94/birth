@@ -57,8 +57,8 @@ pub fn from_point_and_rectangle(point: Point, rectangle: Rectangle) Rectangle {
 }
 
 pub fn bounding(a: Rectangle, b: Rectangle) Rectangle {
-    const max = @maximum(a, b);
-    const min = @minimum(a, b);
+    const max = @max(a, b);
+    const min = @min(a, b);
     const mask = Mask{ false, true, false, true };
     const result = @select(Int, mask, max, min);
 

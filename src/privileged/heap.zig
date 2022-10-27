@@ -9,13 +9,11 @@ const is_aligned = common.is_aligned;
 const log = common.log.scoped(.Heap);
 const zeroes = common.zeroes;
 
-const RNU = @import("RNU");
-const Spinlock = RNU.Spinlock;
-const TODO = RNU.TODO;
-const VirtualAddress = RNU.VirtualAddress;
-const VirtualAddressSpace = RNU.VirtualAddressSpace;
-
-const kernel = @import("kernel");
+const privileged = @import("privileged");
+const Spinlock = privileged.Spinlock;
+const TODO = privileged.TODO;
+const VirtualAddress = privileged.VirtualAddress;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const arch = @import("arch");
 
@@ -25,37 +23,23 @@ pub const Region = struct {
     allocated: u64 = 0,
 };
 
-allocator: Allocator = undefined,
+allocator: Allocator = .{
+    .callback_allocate = allocate_function,
+    .callback_resize = resize_function,
+    .callback_free = free_function,
+},
 regions: [region_count]Region = [1]Region{.{}} ** region_count,
-lock: Spinlock = .{},
 
 const region_size = 1024 * arch.page_size;
 pub const region_count = 0x1000_0000 / region_size;
 
-pub fn new(virtual_address_space: *VirtualAddressSpace) Heap {
-    return Heap{
-        .allocator = Allocator{
-            .context = virtual_address_space,
-            .callback_allocate = allocate_function,
-            .callback_resize = resize_function,
-            .callback_free = free_function,
-        },
-        .regions = zeroes([region_count]Region),
-        .lock = Spinlock{},
-    };
-}
-
-fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
-    const virtual_address_space = @ptrCast(?*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), allocator.context)) orelse unreachable;
-    virtual_address_space.heap.lock.acquire();
-    defer {
-        virtual_address_space.heap.lock.release();
-    }
-    assert(virtual_address_space.lock.status == 0);
+fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
+    const heap = @fieldParentPtr(Heap, "allocator", allocator);
+    const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", heap);
 
     const flags = VirtualAddressSpace.Flags{
         .write = true,
-        .user = virtual_address_space.privilege_level == .user,
+        .user = !virtual_address_space.privileged,
     };
 
     //// TODO: check if the region has enough available space
@@ -91,7 +75,7 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
         };
 
         const result_address = region.virtual.value + region.allocated;
-        if (kernel.config.safe_slow) {
+        if (common.config.safe_slow) {
             assert(virtual_address_space.translate_address(VirtualAddress.new(align_backward(result_address, 0x1000))) != null);
         }
         region.allocated += size;
@@ -115,17 +99,17 @@ fn allocate_function(allocator: Allocator, size: u64, alignment: u64) Allocator.
     }
 }
 
-fn resize_function(allocator: Allocator, old_mem: []u8, old_align: u29, new_size: usize) ?usize {
+fn resize_function(allocator: *Allocator, old_mem: []u8, old_align: u29, new_size: usize) ?usize {
     _ = allocator;
     _ = old_mem;
     _ = old_align;
     _ = new_size;
-    TODO();
+    @panic("todo resize function");
 }
 
-fn free_function(allocator: Allocator, old_mem: []u8, old_align: u29) void {
+fn free_function(allocator: *Allocator, old_mem: []u8, old_align: u29) void {
     _ = allocator;
     _ = old_mem;
     _ = old_align;
-    TODO();
+    @panic("todo free function");
 }

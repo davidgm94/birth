@@ -9,29 +9,35 @@ const ListFile = common.List;
 const log = common.log.scoped(.VirtualAddressSpace);
 const zeroes = common.zeroes;
 
-const RNU = @import("RNU");
-const Heap = RNU.Heap;
-const panic = RNU.panic;
-const PhysicalAddress = RNU.PhysicalAddress;
-const PrivilegeLevel = RNU.PrivilegeLevel;
-const Spinlock = RNU.Spinlock;
-const VirtualAddress = RNU.VirtualAddress;
-
-const kernel = @import("kernel");
+const privileged = @import("privileged");
+const Heap = privileged.Heap;
+const panic = privileged.panic;
+const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const PrivilegeLevel = privileged.PrivilegeLevel;
+const ResourceOwner = privileged.ResourceOwner;
+const Spinlock = privileged.Spinlock;
+const VirtualAddress = privileged.VirtualAddress;
 
 const arch = @import("arch");
 const VAS = arch.VAS;
 
 id: u64,
 arch: VAS.Specific,
-privilege_level: PrivilegeLevel,
+privileged: bool,
+owner: ResourceOwner = .kernel,
 heap: Heap,
-lock: Spinlock,
 free_regions: ArrayList(Region) = .{},
 used_regions: ArrayList(Region) = .{},
 
-pub fn from_current(virtual_address_space: *VirtualAddressSpace) void {
-    VAS.from_current(virtual_address_space);
+pub fn from_current(owner: ResourceOwner) VirtualAddressSpace {
+    return VAS.from_current(owner);
+}
+
+pub const needed_physical_memory_for_bootstrapping_kernel_address_space = VAS.needed_physical_memory_for_bootstrapping_kernel_address_space;
+
+pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemoryRegion) VirtualAddressSpace {
+    return VAS.init_kernel_bsp(physical_memory_region);
 }
 
 pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace) void {
@@ -42,7 +48,6 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .arch = undefined,
         .privilege_level = .user,
         .heap = Heap.new(virtual_address_space),
-        .lock = Spinlock{},
     };
 
     VAS.init_user(virtual_address_space);
@@ -50,15 +55,10 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
     //const graphics = virtual_address_space.translate_address() orelse unreachable;
 }
 
-pub fn copy_to_new(old: *VirtualAddressSpace, new: *VirtualAddressSpace) void {
-    new.* = old.*;
-    new.heap.allocator.ptr = new;
-}
-
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
-    if (kernel.config.safe_slow) {
-        assert(kernel.memory_initialized);
-    }
+    //if (kernel.config.safe_slow) {
+    //assert(kernel.memory_initialized);
+    //}
     const result = try virtual_address_space.allocate_extended(byte_count, maybe_specific_address, flags, AlreadyLocked.no);
     return result.virtual_address;
 }
@@ -69,22 +69,17 @@ const Result = struct {
 };
 
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
-    if (already_locked == .no) {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
+    _ = already_locked;
 
-    const page_count = @divFloor(byte_count, arch.page_size);
-    const page_aligned_size = page_count * arch.page_size;
-    const physical_region = kernel.physical_address_space.allocate_pages(arch.page_size, page_count, .{ .zeroed = true }) orelse return Allocator.Error.OutOfMemory;
+    if (common.os != .freestanding) unreachable;
+    const kernel = @import("kernel");
+
+    assert(common.is_aligned(byte_count, arch.page_size));
+    const physical_region = kernel.physical_address_space.allocate_pages(byte_count, .{ .zeroed = true }) catch return Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            assert(flags.user == (specific_address.value < kernel.higher_half_direct_map.value));
+            assert(flags.user == (specific_address.value < kernel.higher_half));
             break :blk specific_address;
         } else {
             if (flags.user) {
@@ -100,7 +95,7 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
 
     // Only map in user space
     if (flags.user) {
-        try virtual_address_space.map_extended(physical_region.address, virtual_address, page_aligned_size, flags, AlreadyLocked.yes);
+        try virtual_address_space.map_extended(physical_region.address, virtual_address, byte_count, flags, AlreadyLocked.yes);
     }
 
     return Result{
@@ -114,7 +109,6 @@ pub const MapError = error{
 };
 
 pub fn map(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags) MapError!void {
-    assert(kernel.memory_initialized);
     try map_extended(virtual_address_space, base_physical_address, base_virtual_address, size, flags, AlreadyLocked.no);
 }
 
@@ -124,23 +118,9 @@ pub const AlreadyLocked = enum {
 };
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
-    if (already_locked == .yes) {
-        assert(virtual_address_space.lock.status != 0);
-    } else {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
-
+    _ = already_locked;
     if (!is_aligned(size, arch.page_size)) {
         panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
-    }
-
-    if (!kernel.memory_initialized) {
-        @panic("Bootstrap VAS is still valid at the time of using map_extended");
     }
 
     log.debug("Mapping ({}, {}) to ({}, {}) - {}", .{ base_physical_address, base_physical_address.offset(size), base_virtual_address, base_virtual_address.offset(size), flags });
@@ -190,7 +170,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
         virtual_address.value += arch.page_size;
     }) {
         try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific());
-        if (kernel.config.safe_slow) {
+        if (common.config.safe_slow) {
             const translation_result = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes);
             if (!translation_result.mapped) {
                 @panic("address not present");
@@ -223,17 +203,7 @@ pub const TranslationResult = struct {
 };
 
 pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {
-    if (already_locked == .yes) {
-        assert(virtual_address_space.lock.status != 0);
-    } else {
-        virtual_address_space.lock.acquire();
-    }
-    defer {
-        if (already_locked == .no) {
-            virtual_address_space.lock.release();
-        }
-    }
-
+    _ = already_locked;
     const result = VAS.translate_address(virtual_address_space, virtual_address);
     return result;
 }
@@ -265,7 +235,7 @@ pub const Flags = packed struct {
 
 pub fn add_used_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
     if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {
-        try virtual_address_space.used_regions.append(kernel.virtual_address_space.heap.allocator.get_allocator(), region);
+        try virtual_address_space.used_regions.append(virtual_address_space.heap.allocator.get_allocator(), region);
     } else {
         @panic("Invalid region");
     }
@@ -273,7 +243,7 @@ pub fn add_used_region(virtual_address_space: *VirtualAddressSpace, region: Regi
 
 pub fn add_free_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
     if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {
-        try virtual_address_space.free_regions.append(kernel.virtual_address_space.heap.allocator, region);
+        try virtual_address_space.free_regions.append(virtual_address_space.heap.allocator, region);
     } else {
         @panic("Invalid region");
     }
@@ -356,18 +326,18 @@ pub const Region = struct {
 };
 
 pub fn map_reserved_region(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress, virtual_address: VirtualAddress, size: u64, flags: Flags) void {
-    assert(virtual_address_space == kernel.virtual_address_space);
+    if (virtual_address_space.privilege_level != .kernel) @panic("WTF");
     // Fake a free region
     virtual_address_space.free_regions.append(virtual_address_space.heap.allocator.get_allocator(), VirtualAddressSpace.Region{
         .address = virtual_address,
         .size = size,
         .flags = flags,
     }) catch unreachable;
-    kernel.virtual_address_space.map(physical_address, virtual_address, size, flags) catch @panic("Unable to map reserved region");
+    virtual_address_space.map(physical_address, virtual_address, size, flags) catch @panic("Unable to map reserved region");
 }
 
 pub fn format(virtual_address_space: VirtualAddressSpace, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s}, .spinlock = {} )", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level), virtual_address_space.lock });
+    try common.internal_format(writer, "VirtualAddressSpace: ( .arch = {}, .privilege_level: {s})", .{ virtual_address_space.arch, @tagName(virtual_address_space.privilege_level) });
 }
 
 pub const Buffer = common.List.BufferList(VirtualAddressSpace, 64);

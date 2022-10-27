@@ -1,23 +1,25 @@
 const PhysicalAddressSpace = @This();
 
 const common = @import("common");
-const RNU = @import("RNU");
-const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
-const Spinlock = RNU.Spinlock;
-
+const assert = common.assert;
 const log = common.log.scoped(.PhysicalAddressSpace);
 
-zero_free_list: List = .{},
+const RNU = @import("RNU");
+const PhysicalMemoryRegion = RNU.PhysicalMemoryRegion;
+
+const arch = @import("arch");
+
 free_list: List = .{},
-lock: Spinlock = .{},
 
-pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime page_size: u64, page_count: u64, flags: Flags) ?PhysicalMemoryRegion {
-    physical_address_space.lock.acquire();
-    defer physical_address_space.lock.release();
+const AllocateError = error{
+    not_base_page_aligned,
+    out_of_memory,
+};
 
-    var list = if (flags.zeroed) &physical_address_space.zero_free_list else &physical_address_space.free_list;
-    var node_ptr = list.first;
-    const size = page_size * page_count;
+pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, size: u64, flags: Flags) AllocateError!PhysicalMemoryRegion {
+    if (!common.is_aligned(size, arch.valid_page_sizes[0])) return AllocateError.not_base_page_aligned;
+
+    var node_ptr = physical_address_space.free_list.first;
 
     const allocated_region = blk: {
         while (node_ptr) |node| : (node_ptr = node.next) {
@@ -34,14 +36,14 @@ pub fn allocate_pages(physical_address_space: *PhysicalAddressSpace, comptime pa
                 const allocated_region = node.descriptor;
                 if (node.previous) |previous| previous.next = node.next;
                 if (node.next) |next| next.previous = node.previous;
-                if (node_ptr == list.first) list.first = node.next;
-                if (node_ptr == list.last) list.last = node.previous;
+                if (node_ptr == physical_address_space.free_list.first) physical_address_space.free_list.first = node.next;
+                if (node_ptr == physical_address_space.free_list.last) physical_address_space.free_list.last = node.previous;
 
                 break :blk allocated_region;
             }
         }
 
-        return null;
+        return AllocateError.out_of_memory;
     };
 
     // For now, just zero it out.

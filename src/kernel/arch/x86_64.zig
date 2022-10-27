@@ -1,12 +1,14 @@
 const RNU = @import("RNU");
 const PhysicalAddress = RNU.PhysicalAddress;
 
+pub const APIC = @import("x86_64/apic.zig");
 pub const Context = @import("x86_64/context.zig");
 pub const context_switch = @import("x86_64/context_switch.zig");
 pub const CPU = @import("x86_64/cpu.zig");
 pub const CPUID = @import("x86_64/cpuid.zig");
 pub const DefaultWriter = @import("x86_64/serial_writer.zig");
 pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
+pub const Director = @import("x86_64/director.zig");
 pub const drivers = @import("x86_64/drivers.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const IDT = @import("x86_64/idt.zig");
