@@ -15,6 +15,7 @@ const arch = switch (@import("builtin").cpu.arch) {
 pub const x86_64 = @import("kernel/arch/x86_64.zig");
 
 pub const Context = arch.Context;
+pub const Director = arch.Director;
 pub const context_switch = arch.context_switch;
 pub const CPU = arch.CPU;
 pub const DefaultWriter = arch.DefaultWriter;

@@ -6,10 +6,15 @@ const UEFI = privileged.UEFI;
 
 const arch = @import("arch");
 const CPU = arch.CPU;
+const x86_64 = arch.x86_64;
+const APIC = x86_64.APIC;
+const IDT = x86_64.IDT;
 
-export fn kernel_entry_point(bootloader_info: *UEFI.BootloaderInformation) noreturn {
+export fn kernel_entry_point(_: *UEFI.BootloaderInformation) noreturn {
     logger.debug("Hello kernel", .{});
-    logger.debug("Info: {}", .{bootloader_info});
+    IDT.setup();
+    logger.debug("Loaded IDT", .{});
+    APIC.init();
     CPU.stop();
 }
 
@@ -22,9 +27,17 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
     writer.writeByte('\n') catch unreachable;
 }
 
-const Writer = common.Writer(void, UEFI.Error, e9_write);
+pub fn panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
+    asm volatile (
+        \\cli
+    );
+    common.log.scoped(.PANIC).err("{s}", .{message});
+    CPU.stop();
+}
+
+const Writer = common.Writer(void, error{}, e9_write);
 const writer = Writer{ .context = {} };
-fn e9_write(_: void, bytes: []const u8) UEFI.Error!usize {
+fn e9_write(_: void, bytes: []const u8) error{}!usize {
     const bytes_left = asm volatile (
         \\cld
         \\rep outsb

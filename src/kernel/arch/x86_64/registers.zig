@@ -220,7 +220,6 @@ pub const RFLAGS = packed struct(u64) {
 //}
 //};
 
-//pub const PAT = SimpleMSR(0x277);
 pub const IA32_STAR = SimpleMSR(0xC0000081);
 pub const IA32_LSTAR = SimpleMSR(0xC0000082);
 pub const IA32_FMASK = SimpleMSR(0xC0000084);
@@ -263,7 +262,7 @@ pub const IA32_EFER = packed struct(u64) {
     }
 };
 
-pub const IA32_APIC_BASE = packed struct {
+pub const IA32_APIC_BASE = packed struct(u64) {
     reserved0: u8 = 0,
     bsp: bool = false,
     reserved1: u2 = 0,
@@ -284,8 +283,8 @@ pub const IA32_APIC_BASE = packed struct {
     }
 };
 
-pub fn get_apic_base() u32 {
-    return @truncate(u32, @bitCast(u64, IA32_APIC_BASE.read()) & 0xfffff000);
+pub fn get_apic_base() PhysicalAddress {
+    return PhysicalAddress.new(@bitCast(u64, IA32_APIC_BASE.read()) & 0x0000_ffff_ffff_f000);
 }
 
 pub fn SimpleR64(comptime Register: SimpleRegister) type {
@@ -903,3 +902,48 @@ pub fn SimpleMSR(comptime msr: u32) type {
         }
     };
 }
+
+pub const Registers = struct {
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    rbp: u64,
+    rsp: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rip: u64,
+    rflags: u64,
+    fs: u16,
+    gs: u16,
+    fxsave_area: struct {
+        fcw: u16,
+        fsw: u16,
+        ftw: u8,
+        reserved1: u8,
+        fop: u16,
+        fpu_ip1: u32,
+        fpu_ip2: u16,
+        reserved2: u16,
+        fpu_dp1: u32,
+        fpu_dp2: u16,
+        reserved3: u16,
+        mxcsr: u32,
+        mxcsr_mask: u32,
+        st: [8][2]u64,
+        xmm: [16][2]u64,
+        reserved4: [12]u64,
+    } align(16),
+
+    comptime {
+        assert(@sizeOf(Registers) == 672);
+    }
+};

@@ -3,6 +3,7 @@ const crash = @import("privileged/crash.zig");
 pub const panic = crash.panic;
 pub const panic_extended = crash.panic_extended;
 
+pub const Director = @import("privileged/director.zig");
 pub const Heap = @import("privileged/heap.zig");
 pub const PhysicalAddress = @import("privileged/physical_address.zig");
 pub const PhysicalAddressSpace = @import("privileged/physical_address_space.zig");
