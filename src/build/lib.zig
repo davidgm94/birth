@@ -277,7 +277,7 @@ pub const Dependency = struct {
     }
 
     fn get_program_name(dependency: Dependency) []const u8 {
-        const directory_length = std.last_index_of(u8, dependency.path, "/dependency.zig") orelse unreachable;
+        const directory_length = std.last_index_of(u8, dependency.path, "dependency.zig") orelse unreachable;
         const directory_path = dependency.path[0..directory_length];
         const directory_name = basename(directory_path);
         return directory_name;
