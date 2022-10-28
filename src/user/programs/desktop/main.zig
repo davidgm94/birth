@@ -20,7 +20,7 @@ fn send_message(message: Message) !void {
 }
 
 fn receive_message() !Message {
-    const message = try user.syscall_manager.syscall(.receive_message, .blocking, .{});
+    const message = try user.syscall_manager.syscall(.receive_message, .blocking, {});
     return message;
 }
 
