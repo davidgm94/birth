@@ -120,17 +120,17 @@ pub export fn kernel_entry_point() noreturn {
 
         for (memory_map_entries) |entry| {
             if (entry.type == .bootloader_reclaimable) {
-                const page_count = @divExact(entry.size, arch.page_size);
+                _ = @divExact(entry.size, arch.page_size);
                 const physical_address = PhysicalAddress.new(entry.address);
-                VAS.bootstrap_map(physical_address, physical_address.to_higher_half_virtual_address(), page_count, .{ .write = true });
+                VAS.bootstrap_map(physical_address, physical_address.to_higher_half_virtual_address(), entry.size, .{ .write = true });
             }
         }
 
         var mapped_count: u64 = 0;
         while (mapped_count < kernel.get_bootstrap_regions().len) {
             for (kernel.get_bootstrap_regions()[mapped_count..]) |region| {
-                const page_count = @divExact(region.size, arch.page_size);
-                VAS.bootstrap_map(region.address, region.address.to_higher_half_virtual_address(), page_count, .{ .write = true });
+                _ = @divExact(region.size, arch.page_size);
+                VAS.bootstrap_map(region.address, region.address.to_higher_half_virtual_address(), region.size, .{ .write = true });
                 mapped_count += 1;
             }
         }
@@ -496,10 +496,11 @@ fn map_section(comptime section_name: []const u8, kernel_base_physical_address: 
     const virtual_address = VirtualAddress.new(section_boundaries.start);
     const physical_address = PhysicalAddress.new(virtual_address.value - kernel_base_virtual_address.value + kernel_base_physical_address.value);
     const size = section_boundaries.get_size();
-    const page_count = @divExact(size, x86_64.page_size);
+    _ = @divExact(size, x86_64.page_size);
 
     logger.debug("Mapping kernel section {s} ({}, {}) ({}, {})", .{ section_name, physical_address, physical_address.offset(size), virtual_address, virtual_address.offset(size) });
-    VAS.bootstrap_map(physical_address, virtual_address, page_count, flags);
+
+    VAS.bootstrap_map(physical_address, virtual_address, size, flags);
 }
 
 pub fn map_kernel(base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress) void {

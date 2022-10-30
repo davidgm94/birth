@@ -187,12 +187,12 @@ pub fn main() noreturn {
     const bootinfo_physical = PhysicalAddress.new(@ptrToInt(bootloader_information));
     const bootinfo_higher_half = bootinfo_physical.to_higher_half_virtual_address();
     logger.debug("Started mapping bootloader information: {}", .{bootinfo_physical});
-    VAS.bootstrap_map(&kernel_address_space, bootinfo_physical, bootinfo_higher_half, common.align_forward(@sizeOf(BootloaderInformation), page_size) >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, bootinfo_physical, bootinfo_higher_half, common.align_forward(@sizeOf(BootloaderInformation), page_size), .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
     logger.debug("Ended mapping bootloader information", .{});
 
     const memory_map_physical = PhysicalAddress.new(@ptrToInt(memory_map));
     const memory_map_higher_half = memory_map_physical.to_higher_half_virtual_address();
-    VAS.bootstrap_map(&kernel_address_space, memory_map_physical, memory_map_higher_half, common.align_forward(memory_map_size, page_size) >> page_shifter, .{ .write = false, .execute = false }, &bootloader_information.memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, memory_map_physical, memory_map_higher_half, common.align_forward(memory_map_size, page_size), .{ .write = false, .execute = false }, &bootloader_information.memory.allocator);
     bootloader_information.memory_map = MemoryMap{
         .region = VirtualMemoryRegion{
             .address = memory_map_higher_half,
@@ -220,8 +220,7 @@ pub fn main() noreturn {
         }
         assert(dst_slice.len >= src_slice.len);
         common.copy(u8, dst_slice, src_slice);
-        const segment_page_count = aligned_segment_size >> page_shifter;
-        VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, segment_page_count, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &bootloader_information.memory.allocator, null);
+        VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &bootloader_information.memory.allocator);
     }
 
     assert(allocated_segment_memory == all_segments_size);
@@ -239,9 +238,29 @@ pub fn main() noreturn {
     const trampoline_code_start = @ptrToInt(&load_kernel);
     const code_physical_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, page_size));
 
-    VAS.bootstrap_map(&kernel_address_space, code_physical_page, code_physical_page.to_identity_mapped_virtual_address(), common.align_forward(trampoline_size, page_size) >> page_shifter, .{ .write = false, .execute = true }, &bootloader_information.memory.allocator, null);
-    VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
-    VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size >> page_shifter, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
+    VAS.bootstrap_map(&kernel_address_space, code_physical_page, code_physical_page.to_identity_mapped_virtual_address(), common.align_forward(trampoline_size, page_size), .{ .write = false, .execute = true }, &bootloader_information.memory.allocator);
+    VAS.bootstrap_map(&kernel_address_space, stack, stack.to_higher_half_virtual_address(), stack_size, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
+    VAS.bootstrap_map(&kernel_address_space, gdt, gdt.to_higher_half_virtual_address(), gdt_size, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
+    // Map the rest of the memory to be used in the kernel allocator
+    {
+        const physical_address = PhysicalAddress.new(bootloader_information.memory.address + bootloader_information.memory.allocated);
+        const size = bootloader_information.memory.size - bootloader_information.memory.allocated;
+        assert(common.is_aligned(size, page_size));
+        VAS.bootstrap_map(&kernel_address_space, physical_address, physical_address.to_higher_half_virtual_address(), size, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
+    }
+
+    {
+        var memory_map_pointer = @ptrToInt(memory_map);
+        const memory_map_top_pointer = memory_map_pointer + memory_map_size;
+        while (memory_map_pointer < memory_map_top_pointer) : (memory_map_pointer += memory_map_descriptor_size) {
+            const entry = @intToPtr(*MemoryDescriptor, memory_map_pointer);
+            if (entry.type == .ConventionalMemory) {
+                const size = entry.number_of_pages * arch.page_size;
+                const physical_address = PhysicalAddress.new(entry.physical_start);
+                VAS.bootstrap_map(&kernel_address_space, physical_address, physical_address.to_higher_half_virtual_address(), size, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
+            }
+        }
+    }
 
     // Make sure every page table is mapped
     logger.debug("Started mapping page tables...", .{});
@@ -249,8 +268,7 @@ pub fn main() noreturn {
         const category = bootloader_information.memory.categories[@enumToInt(MemoryCategory.page_tables)];
         const physical = PhysicalAddress.new(bootloader_information.memory.address + category.offset);
         const virtual = physical.to_higher_half_virtual_address();
-        const page_count = category.size >> page_shifter;
-        VAS.bootstrap_map(&kernel_address_space, physical, virtual, page_count, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator, null);
+        VAS.bootstrap_map(&kernel_address_space, physical, virtual, category.size, .{ .write = true, .execute = false }, &bootloader_information.memory.allocator);
     }
     logger.debug("Ended mapping page tables...", .{});
 

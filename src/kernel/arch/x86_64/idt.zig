@@ -6,9 +6,13 @@ const log = common.log.scoped(.IDT);
 
 const privileged = @import("privileged");
 const Director = privileged.Director;
+const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
 
 const arch = @import("arch");
 const x86_64 = arch.x86_64;
+const cr2 = x86_64.registers.cr2;
+const RFLAGS = x86_64.registers.RFLAGS;
 
 const interrupts = x86_64.interrupts;
 const DescriptorTable = x86_64.DescriptorTable;
@@ -298,82 +302,134 @@ pub fn setup() void {
 
     asm volatile (
         \\lidt (%[idt_address])
+        \\sti
         :
         : [idt_address] "r" (&idt_register),
     );
 }
 
-pub inline fn prologue() void {
-    asm volatile (
-        \\cld
-        \\push %%rax
-        \\push %%rbx
-        \\push %%rcx
-        \\push %%rdx
-        \\push %%rdi
-        \\push %%rsi
-        \\push %%rbp
-        \\push %%r8
-        \\push %%r9
-        \\push %%r10
-        \\push %%r11
-        \\push %%r12
-        \\push %%r13
-        \\push %%r14
-        \\push %%r15
-        \\xor %%rax, %%rax
-        \\mov %%ds, %%rax
-        \\push %% rax
-        \\mov %%cr8, %%rax
-        \\push %%rax
-        \\mov %%rsp, %%rdi
-    );
-}
+//pub inline fn prologue() void {
+//asm volatile (
+//\\cld
+//\\push %%rax
+//\\push %%rbx
+//\\push %%rcx
+//\\push %%rdx
+//\\push %%rdi
+//\\push %%rsi
+//\\push %%rbp
+//\\push %%r8
+//\\push %%r9
+//\\push %%r10
+//\\push %%r11
+//\\push %%r12
+//\\push %%r13
+//\\push %%r14
+//\\push %%r15
+//\\xor %%rax, %%rax
+//\\mov %%ds, %%rax
+//\\push %% rax
+//\\mov %%cr8, %%rax
+//\\push %%rax
+//\\mov %%rsp, %%rdi
+//);
+//}
 
-pub inline fn epilogue() void {
-    asm volatile (
-        \\cli
-        \\pop %%rax
-        \\mov %%rax, %%cr8
-        \\pop %%rax
-        \\mov %%rax, %%ds
-        \\mov %%rax, %%es
-        \\mov %%rax, %%fs
-        \\pop %%r15
-        \\pop %%r14
-        \\pop %%r13
-        \\pop %%r12
-        \\pop %%r11
-        \\pop %%r10
-        \\pop %%r9
-        \\pop %%r8
-        \\pop %%rbp
-        \\pop %%rsi
-        \\pop %%rdi
-        \\pop %%rdx
-        \\pop %%rcx
-        \\pop %%rbx
-        \\pop %%rax
-        \\add $0x10, %%rsp
-        \\iretq
-    );
-}
+//pub inline fn epilogue() void {
+//asm volatile (
+//\\cli
+//\\pop %%rax
+//\\mov %%rax, %%cr8
+//\\pop %%rax
+//\\mov %%rax, %%ds
+//\\mov %%rax, %%es
+//\\mov %%rax, %%fs
+//\\pop %%r15
+//\\pop %%r14
+//\\pop %%r13
+//\\pop %%r12
+//\\pop %%r11
+//\\pop %%r10
+//\\pop %%r9
+//\\pop %%r8
+//\\pop %%rbp
+//\\pop %%rsi
+//\\pop %%rdi
+//\\pop %%rdx
+//\\pop %%rcx
+//\\pop %%rbx
+//\\pop %%rax
+//\\add $0x10, %%rsp
+//\\iretq
+//);
+//}
 
 export var current_director: *Director = undefined;
 
-export fn kernel_exception_handler() noreturn {
-    while (true) {}
+const Frame = extern struct {
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    rbp: u64,
+    rsp: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rip: u64,
+    rflags: RFLAGS,
+    cs: u64,
+    ss: u64,
+
+    pub fn format(frame: *const Frame, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try writer.writeAll("\n");
+        inline for (common.fields(Frame)) |field| {
+            const name = field.name;
+            const value = @field(frame, field.name);
+            const args = .{ name, value };
+
+            switch (field.field_type) {
+                u64 => try common.internal_format(writer, "\t{s}: 0x{x}\n", args),
+                RFLAGS => try common.internal_format(writer, "\t{s}: {}\n", args),
+                else => @compileError("Type not supported"),
+            }
+        }
+    }
+};
+
+export fn kernel_exception_handler(interrupt_number: u64, error_code: u64, save_frame: *Frame) noreturn {
+    log.err("Exception 0x{x} happened with error code 0x{x}.{}", .{ interrupt_number, error_code, save_frame });
+    if (interrupt_number == 0xe) {
+        const fault_address = cr2.read();
+        const physical_address = PhysicalAddress.new(fault_address - common.config.kernel_higher_half_address);
+        const virtual_address = VirtualAddress.new(fault_address);
+        arch.paging.map_a_page(physical_address, virtual_address, arch.reasonable_page_size) catch @panic("WTF");
+
+        while (true) {}
+    } else {
+        while (true) {}
+    }
 }
 
 export fn user_exception_handler() noreturn {
+    log.err("User exception happened!", .{});
     while (true) {}
 }
 
 export fn irq_handler() noreturn {
+    log.err("IRQ to be handled!", .{});
     while (true) {}
 }
 
 export fn handle_irq() noreturn {
+    log.err("IRQ to be handled!", .{});
     while (true) {}
 }
 
@@ -410,7 +466,7 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 // if CS.CPL == 0
                     \\testb $3, 24(%rsp)
                 );
-                asm volatile (comptimePrint("jz {}", .{@enumToInt(Tag.kernel_fault)}));
+                asm volatile (comptimePrint("jz {}f", .{@enumToInt(Tag.kernel_fault)}));
                 asm volatile (
                 // User code
                     \\pushq %rcx
@@ -432,16 +488,16 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 );
 
                 asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.Director, "crit_pc_low")}));
-                asm volatile (comptimePrint("jae {}", .{@enumToInt(Tag.disabled_test)}));
+                asm volatile (comptimePrint("jae {}f", .{@enumToInt(Tag.disabled_test)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.save_enabled)}));
                 asm volatile (
                     \\popq %rbx
                 );
                 asm volatile (comptimePrint("addq ${}, %rcx", .{@offsetOf(arch.Director, "enabled_save_area")}));
-                asm volatile (comptimePrint("jmp {}", .{@enumToInt(Tag.do_save)}));
+                asm volatile (comptimePrint("jmp {}f", .{@enumToInt(Tag.do_save)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.disabled_test)}));
                 asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.Director, "crit_pc_high")}));
-                asm volatile (comptimePrint("jae {}", .{@enumToInt(Tag.save_enabled)}));
+                asm volatile (comptimePrint("jae {}b", .{@enumToInt(Tag.save_enabled)}));
                 asm volatile (
                     \\popq %rbx
                 );

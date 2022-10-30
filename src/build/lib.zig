@@ -376,8 +376,8 @@ pub const Kernel = struct {
                         bootloader_exe.addPackage(common_package);
                         bootloader_exe.addPackage(privileged_package);
                         bootloader_exe.addPackage(arch_package);
-                        //bootloader_exe.strip = true;
-                        //bootloader_exe.setBuildMode(.ReleaseFast);
+                        bootloader_exe.strip = true;
+                        bootloader_exe.setBuildMode(.ReleaseSafe);
 
                         kernel.builder.default_step.dependOn(&bootloader_exe.step);
                         kernel.bootloader = bootloader_exe;
