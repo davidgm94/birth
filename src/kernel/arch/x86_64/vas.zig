@@ -236,12 +236,15 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, asked_physical
                         log.debug("Misalignment: {}", .{misalignment});
                         if (aligned_size_left >= reverse_page_size) {
                             if (misalignment != 0) {
+                                var mapped = false;
                                 inline for (arch.reverse_valid_page_sizes[reverse_page_index + 1 ..]) |page_size| {
                                     log.debug("Trying Misalignment page size: {}", .{page_size});
 
-                                    if (common.is_aligned(asked_virtual_address.value, page_size)) {
-                                        try map_generic(virtual_address_space, asked_physical_address, asked_virtual_address, misalignment, page_size, flags, physical_allocator);
-                                        break;
+                                    if (!mapped) {
+                                        if (common.is_aligned(asked_virtual_address.value, page_size)) {
+                                            try map_generic(virtual_address_space, asked_physical_address, asked_virtual_address, misalignment, page_size, flags, physical_allocator);
+                                            mapped = true;
+                                        }
                                     }
                                 }
                             }
