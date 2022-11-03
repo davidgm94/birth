@@ -219,7 +219,6 @@ pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
 pub const Flags = packed struct {
     write: bool = false,
     cache_disable: bool = false,
-    accessed: bool = false,
     global: bool = false,
     execute: bool = false,
     user: bool = false,

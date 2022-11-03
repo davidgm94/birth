@@ -159,6 +159,8 @@ pub const ExtendedMemory = struct {
         const aligned_allocated = @intCast(u32, common.align_forward(category.allocated, alignment));
         const target_allocated = aligned_allocated + bytes;
         if (target_allocated > category_size) {
+            log.debug("Target allocated: {}. Category size: {}", .{ target_allocated, category_size });
+            log.debug("Category: {s}", .{@tagName(category_type)});
             @panic("Category size overflow");
         }
 
