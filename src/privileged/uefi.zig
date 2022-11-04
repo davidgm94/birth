@@ -34,10 +34,35 @@ pub const MemoryMap = struct {
     region: VirtualMemoryRegion,
     descriptor_size: u32 = @sizeOf(MemoryDescriptor),
     descriptor_version: u32 = 1,
+
+    pub const SizeCounters = struct {
+        counters: []u32 = &.{},
+    };
+
+    pub fn iterator(_: MemoryMap) Iterator {
+        return Iterator{};
+    }
+
+    pub const Iterator = struct {
+        offset: usize = 0,
+
+        pub fn next(it: *Iterator, memory_map: MemoryMap) ?*MemoryDescriptor {
+            if (it.offset < memory_map.region.size) {
+                const descriptor_address = memory_map.region.address.value + it.offset;
+                it.offset += memory_map.descriptor_size;
+                return @intToPtr(*MemoryDescriptor, descriptor_address);
+            }
+
+            return null;
+        }
+
+        pub inline fn reset(it: *Iterator) void {
+            it.offset = 0;
+        }
+    };
 };
 
 pub const BootloaderInformation = struct {
-    memory: ExtendedMemory,
     kernel_segments: []ProgramSegment = &.{},
     memory_map: MemoryMap = .{
         .region = VirtualMemoryRegion{
@@ -47,27 +72,19 @@ pub const BootloaderInformation = struct {
     },
     rsdp_physical_address: PhysicalAddress,
 
-    pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, memory_map_size: usize, extra: usize) *BootloaderInformation {
-        // TODO: don't hardcode the last part
+    //pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, memory_map_size: usize) *BootloaderInformation {
+    //// TODO: don't hardcode the last part
 
-        var pointer: [*]align(page_size) u8 = undefined;
-        const total_size = @intCast(u32, common.align_forward(kernel_file_size + (kernel_file_size / 2) + memory_map_size + page_table_estimated_size + @sizeOf(BootloaderInformation) + extra, page_size));
-        assert(common.is_aligned(total_size, page_size));
-        const total_page_count = total_size >> page_shifter;
-        result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, total_page_count, &pointer));
-        var extended_memory = ExtendedMemory{
-            .address = @ptrToInt(pointer),
-            .size = total_size,
-        };
-        const bootloader_info_blob = extended_memory.allocate_aligned(@intCast(u32, common.align_forward(@sizeOf(BootloaderInformation), page_size)), page_size, MemoryCategory.bootloader_info) catch @panic("wtf");
-        const bootloader_information = @intToPtr(*BootloaderInformation, bootloader_info_blob);
-        bootloader_information.* = .{
-            .memory = extended_memory,
-            .rsdp_physical_address = rsdp_physical_address,
-        };
+    //var pointer: [*]align(page_size) u8 = undefined;
+    //const total_size = @intCast(u32, common.align_forward(kernel_file_size, page_size) + common.align_forward(memory_map_size + page_size, page_size));
+    //const bootloader_information = @intToPtr(*BootloaderInformation, bootloader_info_blob);
+    //bootloader_information.* = .{
+    //.memory = extended_memory,
+    //.rsdp_physical_address = rsdp_physical_address,
+    //};
 
-        return bootloader_information;
-    }
+    //return bootloader_information;
+    //}
 };
 
 pub const MemoryCategory = enum {
@@ -97,110 +114,86 @@ fn get_category_size(category_type: MemoryCategory, bytes: usize) u32 {
     });
 }
 
-pub const ExtendedMemory = struct {
-    address: u64,
-    size: u32,
-    allocated: u32 = 0,
-    allocator: CustomAllocator = .{
-        .callback_allocate = physical_allocate,
-        .callback_resize = physical_resize,
-        .callback_free = physical_free,
-    },
-    categories: [MemoryCategory.count]CategoryBookingKeeping = [1]CategoryBookingKeeping{.{}} ** MemoryCategory.count,
+//pub const ExtendedMemory = struct {
+//address: u64,
+//size: u32,
+//allocated: u32 = 0,
+//allocator: CustomAllocator = .{
+//.callback_allocate = physical_allocate,
+//.callback_resize = physical_resize,
+//.callback_free = physical_free,
+//},
+//categories: [MemoryCategory.count]CategoryBookingKeeping = [1]CategoryBookingKeeping{.{}} ** MemoryCategory.count,
 
-    pub fn allocate(extended_memory: *ExtendedMemory, bytes: u32, category: MemoryCategory) Error!u64 {
-        return extended_memory.allocate_aligned(bytes, 1, category);
-    }
+//pub fn allocate(extended_memory: *ExtendedMemory, bytes: u32, category: MemoryCategory) Error!u64 {
+//return extended_memory.allocate_aligned(bytes, 1, category);
+//}
 
-    pub fn allocate_aligned(extended_memory: *ExtendedMemory, bytes: u32, alignment: u29, category_type: MemoryCategory) Error!u64 {
-        const category = &extended_memory.categories[@enumToInt(category_type)];
-        const category_size = get_category_size(category_type, bytes);
+//pub fn allocate_aligned(extended_memory: *ExtendedMemory, bytes: u32, alignment: u29, category_type: MemoryCategory) Error!u64 {
+//const category = &extended_memory.categories[@enumToInt(category_type)];
+//const category_size = get_category_size(category_type, bytes);
 
-        switch (category_type) {
-            .kernel_file,
-            .kernel_segments,
-            .memory_map,
-            .bootloader_info,
-            .kernel_segment_descriptors,
-            => {
-                if (category.allocated != 0) @panic("static big chunks cannot be redistributed");
+//switch (category_type) {
+//.kernel_file,
+//.kernel_segments,
+//.memory_map,
+//.bootloader_info,
+//.kernel_segment_descriptors,
+//=> {
+//if (category.allocated != 0) @panic("static big chunks cannot be redistributed");
 
-                if (bytes % alignment != 0) @panic("WTFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+//if (bytes % alignment != 0) @panic("WTFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
-                const base = extended_memory.allocated;
-                const result_address = extended_memory.address + base;
-                defer extended_memory.allocated += category_size;
-                category.* = .{
-                    .offset = base,
-                    .allocated = category_size,
-                    .size = category_size,
-                };
+//const base = extended_memory.allocated;
+//const result_address = extended_memory.address + base;
+//defer extended_memory.allocated += category_size;
+//category.* = .{
+//.offset = base,
+//.allocated = category_size,
+//.size = category_size,
+//};
 
-                log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
+//log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
 
-                return result_address;
-            },
-            .junk, .page_tables => {
-                if (category.allocated == 0) {
-                    const base = extended_memory.allocated;
-                    if (base + category_size > extended_memory.size) @panic("Category size too big");
-                    defer extended_memory.allocated += category_size;
-                    log.debug("[CATEGORY-SIZE ALLOCATION] Address: 0x{x}. Size: {}. Category: {s}", .{ extended_memory.address + base, category_size, @tagName(category_type) });
+//return result_address;
+//},
+//.junk, .page_tables => {
+//if (category.allocated == 0) {
+//const base = extended_memory.allocated;
+//if (base + category_size > extended_memory.size) @panic("Category size too big");
+//defer extended_memory.allocated += category_size;
+//log.debug("[CATEGORY-SIZE ALLOCATION] Address: 0x{x}. Size: {}. Category: {s}", .{ extended_memory.address + base, category_size, @tagName(category_type) });
 
-                    category.* = .{
-                        .offset = base,
-                        .allocated = 0,
-                        .size = category_size,
-                    };
-                }
-            },
-        }
+//category.* = .{
+//.offset = base,
+//.allocated = 0,
+//.size = category_size,
+//};
+//}
+//},
+//}
 
-        const aligned_allocated = @intCast(u32, common.align_forward(category.allocated, alignment));
-        const target_allocated = aligned_allocated + bytes;
-        if (target_allocated > category_size) {
-            log.debug("Target allocated: {}. Category size: {}", .{ target_allocated, category_size });
-            log.debug("Category: {s}", .{@tagName(category_type)});
-            @panic("Category size overflow");
-        }
+//const aligned_allocated = @intCast(u32, common.align_forward(category.allocated, alignment));
+//const target_allocated = aligned_allocated + bytes;
+//if (target_allocated > category_size) {
+//log.debug("Target allocated: {}. Category size: {}", .{ target_allocated, category_size });
+//log.debug("Category: {s}", .{@tagName(category_type)});
+//@panic("Category size overflow");
+//}
 
-        category.allocated = target_allocated;
-        const result_address = extended_memory.address + category.offset + aligned_allocated;
-        log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
-        return result_address;
-    }
+//category.allocated = target_allocated;
+//const result_address = extended_memory.address + category.offset + aligned_allocated;
+//log.debug("[USER-LEVEL ALLOCATION] Address: 0x{x}. Bytes: {}. Alignment: {}. Category: {s}", .{ result_address, bytes, alignment, @tagName(category_type) });
+//return result_address;
+//}
 
-    const CategoryBookingKeeping = extern struct {
-        offset: u32 = 0,
-        allocated: u32 = 0,
-        size: u32 = 0,
-    };
-    // This is only meant to allocate page tables
-    fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
-        const extended_memory = @fieldParentPtr(ExtendedMemory, "allocator", allocator);
-        // todo: better define types
-        const allocation = extended_memory.allocate_aligned(@intCast(u32, size), @intCast(u29, alignment), MemoryCategory.page_tables) catch unreachable;
-        return CustomAllocator.Result{
-            .address = allocation,
-            .size = size,
-        };
-    }
+//const CategoryBookingKeeping = extern struct {
+//offset: u32 = 0,
+//allocated: u32 = 0,
+//size: u32 = 0,
+//};
 
-    fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
-        _ = allocator;
-        _ = old_memory;
-        _ = old_alignment;
-        _ = new_size;
-        unreachable;
-    }
-
-    fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
-        _ = allocator;
-        _ = memory;
-        _ = alignment;
-        unreachable;
-    }
-};
+//};
 
 pub fn result(src: common.SourceLocation, status: Status) void {
     uefi_error(status) catch |err| {
@@ -236,12 +229,11 @@ pub const File = struct {
         };
     }
 
-    pub fn read(file: *File, memory: *ExtendedMemory, category: MemoryCategory) []u8 {
-        var file_buffer = @intToPtr([*]align(page_size) u8, memory.allocate_aligned(file.size, page_size, category) catch @panic("oom"))[0..file.size];
+    pub fn read(file: *File, buffer: []u8) []u8 {
         var size: u64 = file.size;
-        result(@src(), file.handle.read(&size, file_buffer.ptr));
-        assert(size != file_buffer.len);
-        return file_buffer[0..size];
+        result(@src(), file.handle.read(&size, buffer.ptr));
+        assert(size != buffer.len);
+        return buffer[0..size];
     }
 };
 
