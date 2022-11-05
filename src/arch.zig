@@ -21,10 +21,10 @@ pub const CPU = arch.CPU;
 pub const DefaultWriter = arch.DefaultWriter;
 pub const drivers = arch.drivers;
 pub const interrupts = arch.interrupts;
+pub const paging = arch.paging;
 pub const PCI = arch.PCI;
 pub const startup = arch.startup;
 pub const TLS = arch.TLS;
-pub const VAS = arch.VAS;
 
 pub const page_size = arch.page_size;
 pub const page_shifter = arch.page_shifter;

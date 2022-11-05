@@ -17,13 +17,13 @@ pub const IDT = @import("x86_64/idt.zig");
 pub const io = @import("x86_64/io.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const LAPIC = @import("x86_64/lapic.zig");
+pub const paging = @import("x86_64/paging.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const PCI = @import("x86_64/pci.zig");
 pub const startup = @import("x86_64/startup.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 pub const TLS = @import("x86_64/tls.zig");
 pub const TSS = @import("x86_64/tss.zig");
-pub const VAS = @import("x86_64/vas.zig");
 
 pub const registers = @import("x86_64/registers.zig");
 

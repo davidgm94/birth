@@ -678,6 +678,25 @@ pub fn make_current(virtual_address_space: *VirtualAddressSpace) void {
     virtual_address_space.arch.cr3.write();
 }
 
+var paging_physical_allocator = CustomAllocator{
+    .callback_allocate = physical_allocate,
+    .callback_resize = physical_resize,
+    .callback_free = physical_free,
+};
+
+pub fn physical_allocate() void {}
+pub fn physical_resize() void {}
+pub fn physical_free() void {}
+
+pub fn map_device(asked_physical_address: PhysicalAddress, size: u64) !void {
+    const vas = from_current(.kernel);
+    try map_function(vas, asked_physical_address, asked_physical_address.to_higher_half_virtual_address(), size, .{
+        .read_write = true,
+        .cache_disable = true,
+        .global = true,
+    }, &paging_physical_allocator);
+}
+
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {
     return MemoryFlags{
         .read_write = general_flags.write,
@@ -855,7 +874,8 @@ const PTE = packed struct(u64) {
     reserved1: u2 = 0,
     hlat_restart: bool = false,
     address: u28,
-    reserved2: u23 = 0,
+    reserved2: u19 = 0,
+    protection_key: u4 = 0,
     execute_disable: bool = false,
 
     comptime {

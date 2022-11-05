@@ -20,10 +20,10 @@ const Spinlock = privileged.Spinlock;
 const VirtualAddress = privileged.VirtualAddress;
 
 const arch = @import("arch");
-const VAS = arch.VAS;
+const paging = arch.paging;
 
 id: u64,
-arch: VAS.Specific,
+arch: paging.Specific,
 privileged: bool,
 owner: ResourceOwner = .kernel,
 heap: Heap,
@@ -31,13 +31,13 @@ free_regions: ArrayList(Region) = .{},
 used_regions: ArrayList(Region) = .{},
 
 pub fn from_current(owner: ResourceOwner) VirtualAddressSpace {
-    return VAS.from_current(owner);
+    return paging.from_current(owner);
 }
 
-pub const needed_physical_memory_for_bootstrapping_kernel_address_space = VAS.needed_physical_memory_for_bootstrapping_kernel_address_space;
+pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
 
 pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemoryRegion) VirtualAddressSpace {
-    return VAS.init_kernel_bsp(physical_memory_region);
+    return paging.init_kernel_bsp(physical_memory_region);
 }
 
 pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace) void {
@@ -50,7 +50,7 @@ pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace
         .heap = Heap.new(virtual_address_space),
     };
 
-    VAS.init_user(virtual_address_space);
+    paging.init_user(virtual_address_space);
 
     //const graphics = virtual_address_space.translate_address() orelse unreachable;
 }
@@ -169,7 +169,7 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
         physical_address.value += arch.page_size;
         virtual_address.value += arch.page_size;
     }) {
-        try VAS.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific());
+        try paging.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific());
         if (common.config.safe_slow) {
             const translation_result = virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes);
             if (!translation_result.mapped) {
@@ -204,16 +204,16 @@ pub const TranslationResult = struct {
 
 pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, already_locked: AlreadyLocked) TranslationResult {
     _ = already_locked;
-    const result = VAS.translate_address(virtual_address_space, virtual_address);
+    const result = paging.translate_address(virtual_address_space, virtual_address);
     return result;
 }
 
 pub inline fn make_current(virtual_address_space: *VirtualAddressSpace) void {
-    VAS.make_current(virtual_address_space);
+    paging.make_current(virtual_address_space);
 }
 
 pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
-    return VAS.is_current(virtual_address_space);
+    return paging.is_current(virtual_address_space);
 }
 
 pub const Flags = packed struct {
@@ -227,8 +227,8 @@ pub const Flags = packed struct {
         return common.zeroes(Flags);
     }
 
-    pub inline fn to_arch_specific(flags: Flags) VAS.MemoryFlags {
-        return VAS.new_flags(flags);
+    pub inline fn to_arch_specific(flags: Flags) paging.MemoryFlags {
+        return paging.new_flags(flags);
     }
 };
 

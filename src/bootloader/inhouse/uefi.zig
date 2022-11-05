@@ -33,7 +33,7 @@ const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const arch = @import("arch");
 const CPU = arch.CPU;
 const GDT = x86_64.GDT;
-const VAS = arch.VAS;
+const paging = arch.paging;
 const x86_64 = arch.x86_64;
 
 pub fn main() noreturn {
@@ -221,7 +221,7 @@ pub fn main() noreturn {
         }
         assert(dst_slice.len >= src_slice.len);
         common.copy(u8, dst_slice, src_slice);
-        VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment");
+        paging.bootstrap_map(&kernel_address_space, physical_address, virtual_address, aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment");
     }
 
     assert(allocated_segment_memory == all_segments_size);
@@ -247,7 +247,7 @@ pub fn main() noreturn {
         const code_physical_base_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, UEFI.page_size));
         const misalignment = trampoline_code_start - code_physical_base_page.value;
         const trampoline_size_to_map = common.align_forward(misalignment + trampoline_code_size, UEFI.page_size);
-        VAS.bootstrap_map(&kernel_address_space, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
+        paging.bootstrap_map(&kernel_address_space, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
     }
 
     var bootloader_information = PhysicalAddress.new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
@@ -262,7 +262,7 @@ pub fn main() noreturn {
             const physical_address = PhysicalAddress.new(entry.physical_start);
             const virtual_address = physical_address.to_higher_half_virtual_address();
             const size = entry.number_of_pages * arch.valid_page_sizes[0];
-            VAS.bootstrap_map(&kernel_address_space, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
+            paging.bootstrap_map(&kernel_address_space, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
         }
     }
 
@@ -359,6 +359,7 @@ fn flush_new_line() !void {
 
 const Writer = common.Writer(void, UEFI.Error, e9_write);
 const debug_writer = Writer{ .context = {} };
+
 fn e9_write(_: void, bytes: []const u8) UEFI.Error!usize {
     const bytes_left = asm volatile (
         \\cld
@@ -415,7 +416,7 @@ const MemoryManager = struct {
         while (memory_map_iterator.next(memory_manager.map)) |entry| {
             if (entry.type == .ConventionalMemory) {
                 defer conventional_memory_index += 1;
-                if (entry.number_of_pages * UEFI.page_size > size_to_allocate_memory_map_size_counters) {
+                if (entry.number_of_pages << UEFI.page_shifter > size_to_allocate_memory_map_size_counters) {
                     const index = conventional_memory_index;
                     const counters = @intToPtr([*]u32, entry.physical_start)[0..conventional_entry_count];
                     common.std.mem.set(u32, counters, 0);
