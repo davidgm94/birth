@@ -105,20 +105,17 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     logger.debug("Finished processing memory map", .{});
 
-    _ = free_physical_regions;
-    //arch.startup.bsp_address_space = PhysicalAddressSpace{
-    //.free_list = .{
-    //.first = &ram_usable_entries[0],
-    //.last = &ram_usable_entries[ram_usable_entries.len - 1],
-    //.count = ram_usable_entries.len,
-    //},
-    //};
-
-    CPU.stop();
-
-    logger.debug("Left size: {}", .{bootloader_information.memory.size - bootloader_information.memory.allocated});
+    arch.startup.bsp_address_space = PhysicalAddressSpace{
+        .free_list = .{
+            .first = &free_physical_regions[0],
+            .last = &free_physical_regions[free_physical_regions.len - 1],
+            .count = free_physical_regions.len,
+        },
+    };
 
     APIC.init();
+
+    logger.debug("Reached to the end", .{});
     CPU.stop();
 }
 
