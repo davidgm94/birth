@@ -262,9 +262,11 @@ pub const IA32_EFER = packed struct(u64) {
 pub const IA32_APIC_BASE = packed struct(u64) {
     reserved0: u8 = 0,
     bsp: bool = false,
-    reserved1: u2 = 0,
+    reserved1: u1 = 0,
+    extended: bool = false,
     global_enable: bool = false,
-    reserved2: u52 = 0,
+    address: u24,
+    reserved2: u28 = 0,
 
     pub const MSR = SimpleMSR(0x0000001B);
 
@@ -277,6 +279,10 @@ pub const IA32_APIC_BASE = packed struct(u64) {
     pub fn write(typed_value: IA32_APIC_BASE) void {
         const value = @bitCast(u64, typed_value);
         MSR.write(value);
+    }
+
+    pub fn get_address(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress {
+        return PhysicalAddress.new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
     }
 };
 

@@ -684,17 +684,44 @@ var paging_physical_allocator = CustomAllocator{
     .callback_free = physical_free,
 };
 
-pub fn physical_allocate() void {}
-pub fn physical_resize() void {}
-pub fn physical_free() void {}
+pub fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
+    _ = allocator;
+    // TODO: proper error
+    if (!common.is_aligned(alignment, arch.valid_page_sizes[0])) {
+        return CustomAllocator.Error.OutOfMemory;
+    }
 
-pub fn map_device(asked_physical_address: PhysicalAddress, size: u64) !void {
-    const vas = from_current(.kernel);
-    try map_function(vas, asked_physical_address, asked_physical_address.to_higher_half_virtual_address(), size, .{
+    const result = arch.startup.bsp_address_space.allocate(size, arch.valid_page_sizes[0]) catch return CustomAllocator.Error.OutOfMemory;
+
+    return CustomAllocator.Result{
+        .address = result.address.value,
+        .size = result.size,
+    };
+}
+
+pub fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
+    _ = allocator;
+    _ = old_memory;
+    _ = old_alignment;
+    _ = new_size;
+    @panic("todo physical_resize");
+}
+pub fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
+    _ = allocator;
+    _ = memory;
+    _ = alignment;
+    @panic("todo physical_free");
+}
+
+pub fn map_device(asked_physical_address: PhysicalAddress, size: u64) !VirtualAddress {
+    var vas = from_current(.kernel);
+    try map_function(&vas, asked_physical_address, asked_physical_address.to_higher_half_virtual_address(), size, .{
         .read_write = true,
         .cache_disable = true,
         .global = true,
     }, &paging_physical_allocator);
+
+    return asked_physical_address.to_higher_half_virtual_address();
 }
 
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags) MemoryFlags {

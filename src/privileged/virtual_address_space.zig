@@ -71,15 +71,12 @@ const Result = struct {
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
     _ = already_locked;
 
-    if (common.os != .freestanding) unreachable;
-    const kernel = @import("kernel");
-
     assert(common.is_aligned(byte_count, arch.page_size));
-    const physical_region = kernel.physical_address_space.allocate_pages(byte_count, .{ .zeroed = true }) catch return Allocator.Error.OutOfMemory;
+    const physical_region = arch.startup.bsp_address_space.allocate(byte_count, arch.valid_page_sizes[0]) catch return Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            assert(flags.user == (specific_address.value < kernel.higher_half));
+            assert(flags.user == (specific_address.value < common.config.kernel_higher_half_address));
             break :blk specific_address;
         } else {
             if (flags.user) {
@@ -91,11 +88,14 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
     };
 
     // INFO: when allocating for userspace, virtual address spaces should be bootstrapped and not require this boolean value to be true
-    if (flags.user) assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
+    if (common.config.safe_slow) {
+        if (flags.user) assert(!virtual_address_space.translate_address_extended(virtual_address, AlreadyLocked.yes).mapped);
+    }
 
     // Only map in user space
     if (flags.user) {
-        try virtual_address_space.map_extended(physical_region.address, virtual_address, byte_count, flags, AlreadyLocked.yes);
+        @panic("todo user");
+        //try virtual_address_space.map_extended(physical_region.address, virtual_address, byte_count, flags, AlreadyLocked.yes);
     }
 
     return Result{

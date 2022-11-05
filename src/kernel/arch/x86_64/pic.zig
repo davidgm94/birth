@@ -59,17 +59,4 @@ pub fn disable() void {
     write(0x80, undefined);
     write(PIC2_data, 0xff);
     write(0x80, undefined);
-
-    //PIC_disable();
-    //write_with_wait(PIC1_command, 0x11);
-    //write_with_wait(PIC2_command, 0x11);
-    //write_with_wait(PIC1_data, 0x20);
-    //write_with_wait(PIC2_data, 0x28);
-    //write_with_wait(PIC1_data, 0x04);
-    //write_with_wait(PIC2_data, 0x02);
-    //write_with_wait(PIC1_data, 0x01);
-    //write_with_wait(PIC2_data, 0x01);
-
-    //write_with_wait(PIC1_data, 0xFF);
-    //write_with_wait(PIC2_data, 0xFF);
 }
