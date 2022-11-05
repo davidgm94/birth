@@ -19,7 +19,7 @@ pub fn build(b: *Build.Builder) void {
                     },
                 },
                 .memory = .{
-                    .amount = 16,
+                    .amount = 4,
                     .unit = .G,
                 },
                 .emulator = .{
