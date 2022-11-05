@@ -90,7 +90,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
     //},
     //};
 
-    while (true) {}
+    CPU.stop();
 
     logger.debug("Left size: {}", .{bootloader_information.memory.size - bootloader_information.memory.allocated});
 

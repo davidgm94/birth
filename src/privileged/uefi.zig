@@ -43,6 +43,12 @@ pub const MemoryMap = struct {
         return Iterator{};
     }
 
+    pub fn to_higher_half(memory_map: MemoryMap) MemoryMap {
+        var map = memory_map;
+        map.region.address = memory_map.region.address.offset(common.config.kernel_higher_half_address);
+        return map;
+    }
+
     pub const Iterator = struct {
         offset: usize = 0,
 
@@ -63,28 +69,9 @@ pub const MemoryMap = struct {
 };
 
 pub const BootloaderInformation = struct {
-    kernel_segments: []ProgramSegment = &.{},
-    memory_map: MemoryMap = .{
-        .region = VirtualMemoryRegion{
-            .address = VirtualAddress.invalid(),
-            .size = 0,
-        },
-    },
+    kernel_segments: []ProgramSegment,
+    memory_map: MemoryMap,
     rsdp_physical_address: PhysicalAddress,
-
-    //pub fn new(boot_services: *BootServices, rsdp_physical_address: PhysicalAddress, kernel_file_size: usize, memory_map_size: usize) *BootloaderInformation {
-    //// TODO: don't hardcode the last part
-
-    //var pointer: [*]align(page_size) u8 = undefined;
-    //const total_size = @intCast(u32, common.align_forward(kernel_file_size, page_size) + common.align_forward(memory_map_size + page_size, page_size));
-    //const bootloader_information = @intToPtr(*BootloaderInformation, bootloader_info_blob);
-    //bootloader_information.* = .{
-    //.memory = extended_memory,
-    //.rsdp_physical_address = rsdp_physical_address,
-    //};
-
-    //return bootloader_information;
-    //}
 };
 
 pub const MemoryCategory = enum {
