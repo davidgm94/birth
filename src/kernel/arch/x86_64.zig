@@ -17,7 +17,6 @@ pub const IDT = @import("x86_64/idt.zig");
 pub const io = @import("x86_64/io.zig");
 pub const interrupts = @import("x86_64/interrupts.zig");
 pub const LAPIC = @import("x86_64/lapic.zig");
-pub const paging = @import("x86_64/paging.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const PCI = @import("x86_64/pci.zig");
 pub const startup = @import("x86_64/startup.zig");
@@ -36,4 +35,7 @@ pub const reverse_valid_page_sizes = blk: {
 };
 pub const page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
-pub const page_shifter = @ctz(@as(u32, page_size));
+
+pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
+    return @ctz(@as(u32, asked_page_size));
+}

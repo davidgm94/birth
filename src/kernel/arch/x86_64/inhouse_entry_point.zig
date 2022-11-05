@@ -39,49 +39,73 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
     logger.debug("Loaded IDT", .{});
 
     // Claim some memory left from the bootloader
-    //arch.startup.bsp_allocator = .{
-    //.address = PhysicalAddress.new(bootloader_information.memory.address + bootloader_information.memory.allocated).to_higher_half_virtual_address(),
-    //.allocated = 0,
-    //.size = bootloader_information.memory.size - bootloader_information.memory.allocated,
-    //};
 
-    //const uefi_memory_map_size = bootloader_information.memory_map.region.size;
-    //const uefi_memory_map_descriptor_size = bootloader_information.memory_map.descriptor_size;
-    //const uefi_memory_map_descriptor_version = bootloader_information.memory_map.descriptor_version;
-    //assert(uefi_memory_map_descriptor_version == 1);
-    //var uefi_memory_map_pointer = bootloader_information.memory_map.region.address.value;
-    //const top_uefi_memory_map_pointer = uefi_memory_map_pointer + uefi_memory_map_size;
-    //const entry_count = @divExact(uefi_memory_map_size, uefi_memory_map_descriptor_size);
+    var memory_map_iterator = bootloader_information.memory_map.iterator();
+    var memory_map_conventional_entry_index: usize = 0;
 
-    //const ram_physical_address_space_allocation = arch.startup.bsp_allocator.allocate(@sizeOf(PhysicalAddressSpace.Region) * entry_count, @alignOf(PhysicalAddressSpace.Region)) catch @panic("WTF");
-    //const ram_usable_entries = ram_physical_address_space_allocation.access([*]PhysicalAddressSpace.Region)[0..entry_count];
-    //var ram_usable_entry_index: usize = 0;
-    //var maybe_previous: ?*PhysicalAddressSpace.Region = null;
+    const entry_count = bootloader_information.counters.len;
+    const physical_regions_allocation_size = @sizeOf(PhysicalAddressSpace.Region) * entry_count;
 
-    //while (uefi_memory_map_pointer < top_uefi_memory_map_pointer) : (uefi_memory_map_pointer += uefi_memory_map_descriptor_size) {
-    //const uefi_memory_map_entry = @intToPtr(*const UEFI.MemoryDescriptor, uefi_memory_map_pointer);
+    const free_physical_regions = blk: {
+        while (memory_map_iterator.next(bootloader_information.memory_map)) |entry| {
+            if (entry.type == .ConventionalMemory) {
+                const used_4k_page_count = bootloader_information.counters[memory_map_conventional_entry_index];
+                const used_byte_count = used_4k_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
 
-    //if (uefi_memory_map_entry.type == .ConventionalMemory) {
-    //const ram_usable_entry = &ram_usable_entries[ram_usable_entry_index];
-    //ram_usable_entry_index += 1;
+                if (used_byte_count >= physical_regions_allocation_size) {
+                    const physical_address = PhysicalAddress.new(entry.physical_start + used_byte_count);
+                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(physical_regions_allocation_size, arch.valid_page_sizes[0]) >> arch.page_shifter(arch.valid_page_sizes[0]));
 
-    //ram_usable_entry.* = .{
-    //.descriptor = .{
-    //.address = PhysicalAddress.new(uefi_memory_map_entry.physical_start),
-    //.size = uefi_memory_map_entry.number_of_pages * 0x1000,
-    //},
-    //.previous = maybe_previous,
-    //.next = null,
-    //};
+                    const free_regions = physical_address.to_higher_half_virtual_address().access([*]PhysicalAddressSpace.Region)[0..entry_count];
+                    memory_map_iterator.reset();
+                    memory_map_conventional_entry_index = 0;
 
-    //if (maybe_previous) |previous| {
-    //previous.next = ram_usable_entry;
-    //}
+                    var maybe_previous: ?*PhysicalAddressSpace.Region = null;
 
-    //maybe_previous = ram_usable_entry;
-    //}
-    //}
+                    while (memory_map_iterator.next(bootloader_information.memory_map)) |memory_map_entry| {
+                        if (memory_map_entry.type == .ConventionalMemory) {
+                            defer memory_map_conventional_entry_index += 1;
 
+                            const entry_used_page_count = bootloader_information.counters[memory_map_conventional_entry_index];
+                            const entry_used_byte_count = entry_used_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
+
+                            const entry_physical_address = PhysicalAddress.new(memory_map_entry.physical_start + entry_used_byte_count);
+                            const entry_free_page_count = memory_map_entry.number_of_pages - entry_used_page_count;
+                            const entry_free_byte_count = entry_free_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
+
+                            if (entry_free_byte_count != 0) {
+                                const region = &free_regions[memory_map_conventional_entry_index];
+                                region.* = .{
+                                    .descriptor = .{
+                                        .address = entry_physical_address,
+                                        .size = entry_free_byte_count,
+                                    },
+                                    .previous = maybe_previous,
+                                    .next = null,
+                                };
+
+                                if (maybe_previous) |previous| {
+                                    previous.next = region;
+                                }
+
+                                maybe_previous = region;
+                            }
+                        }
+                    }
+
+                    break :blk free_regions;
+                }
+
+                memory_map_conventional_entry_index += 1;
+            }
+        }
+
+        @panic("Unable to find a host entry for physical regions");
+    };
+
+    logger.debug("Finished processing memory map", .{});
+
+    _ = free_physical_regions;
     //arch.startup.bsp_address_space = PhysicalAddressSpace{
     //.free_list = .{
     //.first = &ram_usable_entries[0],

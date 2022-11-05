@@ -79,7 +79,7 @@ pub const cr0 = ComplexR64(.cr0, CR0Flags);
 pub const cr2 = SimpleR64(.cr2);
 
 /// WARNING: this data structure is only set to be used for 40-bit max physical address bit
-pub const cr3 = packed struct(u64) {
+pub const cr3 = packed struct(usize) {
     reserved0: u3 = 0,
     /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
     /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
@@ -91,30 +91,31 @@ pub const cr3 = packed struct(u64) {
     /// is not used if paging is disabled, with PAE paging, or with 4-level paging1 or 5-level paging if CR4.PCIDE=1.
     PCD: bool = false,
     reserved1: u7 = 0,
-    address: u28 = 0,
-    reserved2: u24 = 0,
+    address: u52 = 0, // get this to be 32-bit compatible
 
     comptime {
-        assert(@sizeOf(cr3) == @sizeOf(u64));
-        assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
+        assert(@sizeOf(cr3) == @sizeOf(usize));
+        assert(@bitSizeOf(cr3) == @bitSizeOf(usize));
     }
 
     pub fn from_address(physical_address: PhysicalAddress) cr3 {
-        assert(arch.max_physical_address_bit <= 40);
+        const PackedAddressType = blk: {
+            var foo_cr3: cr3 = undefined;
+            break :blk @TypeOf(@field(foo_cr3, "address"));
+        };
+
         return .{
-            .address = @intCast(u28, physical_address.value >> x86_64.page_shifter),
+            .address = @intCast(PackedAddressType, physical_address.value >> @bitOffsetOf(cr3, "address")),
         };
     }
 
     pub inline fn read() cr3 {
-        assert(arch.max_physical_address_bit <= 40);
         return asm volatile ("mov %%cr3, %[result]"
             : [result] "=r" (-> cr3),
         );
     }
 
     pub inline fn write(value: cr3) void {
-        assert(arch.max_physical_address_bit <= 40);
         asm volatile ("mov %[in], %%cr3"
             :
             : [in] "r" (value),
@@ -122,17 +123,13 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn equal(self: cr3, other: cr3) bool {
-        assert(arch.max_physical_address_bit <= 40);
-
-        const self_int = @bitCast(u64, self);
-        const other_int = @bitCast(u64, other);
+        const self_int = @bitCast(usize, self);
+        const other_int = @bitCast(usize, other);
         return self_int == other_int;
     }
 
     pub inline fn get_address(self: cr3) PhysicalAddress {
-        assert(arch.max_physical_address_bit <= 40);
-
-        return PhysicalAddress.new(@as(u64, self.address) << x86_64.page_shifter);
+        return PhysicalAddress.new(@as(usize, self.address) << @bitOffsetOf(cr3, "address"));
     }
 };
 

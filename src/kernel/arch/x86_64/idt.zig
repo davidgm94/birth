@@ -5,6 +5,7 @@ const assert = common.assert;
 const log = common.log.scoped(.IDT);
 
 const privileged = @import("privileged");
+const panic = privileged.panic;
 const Director = privileged.Director;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
@@ -407,12 +408,8 @@ const Frame = extern struct {
 export fn kernel_exception_handler(interrupt_number: u64, error_code: u64, save_frame: *Frame) noreturn {
     log.err("Exception 0x{x} happened with error code 0x{x}.{}", .{ interrupt_number, error_code, save_frame });
     if (interrupt_number == 0xe) {
-        const fault_address = cr2.read();
-        const physical_address = PhysicalAddress.new(fault_address - common.config.kernel_higher_half_address);
-        const virtual_address = VirtualAddress.new(fault_address);
-        arch.paging.map_a_page(physical_address, virtual_address, arch.reasonable_page_size) catch @panic("WTF");
-
-        while (true) {}
+        const virtual_address = VirtualAddress.new(cr2.read());
+        panic("Page fault at {}", .{virtual_address});
     } else {
         while (true) {}
     }

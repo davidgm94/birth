@@ -33,8 +33,6 @@ const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const arch = @import("arch");
 const CPU = arch.CPU;
 const GDT = x86_64.GDT;
-const page_size = arch.page_size;
-const page_shifter = arch.page_shifter;
 const VAS = arch.VAS;
 const x86_64 = arch.x86_64;
 
@@ -94,13 +92,13 @@ pub fn main() noreturn {
         var memory_map_descriptor_version: u32 = 0;
         _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
         logger.debug("Expected size: {}. Actual size: {}. Descriptor version: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor), memory_map_descriptor_version });
-        memory_map_size = common.align_forward(memory_map_size + page_size, page_size);
+        memory_map_size = common.align_forward(memory_map_size + UEFI.page_size, UEFI.page_size);
 
         const size = kernel_file.size + memory_map_size;
 
         //allocatePages: std.meta.FnPtr(fn (alloc_type: AllocateType, mem_type: MemoryType, pages: usize, memory: *[*]align(4096) u8) callconv(.C) Status),
-        var memory: [*]align(page_size) u8 = undefined;
-        UEFI.result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, size >> page_shifter, &memory));
+        var memory: [*]align(UEFI.page_size) u8 = undefined;
+        UEFI.result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, size >> UEFI.page_shifter, &memory));
         break :blk memory;
     };
 
@@ -146,7 +144,7 @@ pub fn main() noreturn {
 
     const program_headers = @intToPtr([*]const ELF.ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
     var program_segments: []ProgramSegment = &.{};
-    program_segments.ptr = @intToPtr([*]ProgramSegment, memory_manager.allocate(common.align_forward(@sizeOf(ProgramSegment) * program_headers.len, page_size) >> page_shifter) catch @panic("unable to allocate memory for program segments"));
+    program_segments.ptr = @intToPtr([*]ProgramSegment, memory_manager.allocate(common.align_forward(@sizeOf(ProgramSegment) * program_headers.len, UEFI.page_size) >> UEFI.page_shifter) catch @panic("unable to allocate memory for program segments"));
     assert(program_segments.len == 0);
 
     var all_segments_size: u32 = 0;
@@ -154,13 +152,13 @@ pub fn main() noreturn {
         switch (ph.type) {
             .load => {
                 if (ph.size_in_memory == 0) continue;
-                const address_misalignment = ph.virtual_address & (page_size - 1);
+                const address_misalignment = ph.virtual_address & (UEFI.page_size - 1);
 
                 if (address_misalignment != 0) {
                     @panic("ELF PH segment size is supposed to be page-aligned");
                 }
 
-                if (!common.is_aligned(ph.offset, page_size)) {
+                if (!common.is_aligned(ph.offset, UEFI.page_size)) {
                     @panic("ELF PH offset is supposed to be page-aligned");
                 }
 
@@ -186,7 +184,7 @@ pub fn main() noreturn {
                     },
                 };
 
-                const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, page_size));
+                const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, UEFI.page_size));
                 all_segments_size += aligned_segment_size;
             },
             else => {
@@ -197,7 +195,7 @@ pub fn main() noreturn {
 
     var kernel_address_space = blk: {
         logger.debug("Big chunk", .{});
-        const chunk_address = memory_manager.allocate(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space >> page_shifter) catch @panic("Unable to get physical memory to bootstrap kernel address space");
+        const chunk_address = memory_manager.allocate(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space >> UEFI.page_shifter) catch @panic("Unable to get physical memory to bootstrap kernel address space");
         const kernel_address_space_physical_region = PhysicalMemoryRegion{
             .address = PhysicalAddress.new(chunk_address),
             .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
@@ -206,13 +204,13 @@ pub fn main() noreturn {
     };
 
     logger.debug("Allocate aligned: {}", .{all_segments_size});
-    const segments_allocation = memory_manager.allocate(all_segments_size >> page_shifter) catch @panic("Unable to allocate memory for kernel segments");
+    const segments_allocation = memory_manager.allocate(all_segments_size >> UEFI.page_shifter) catch @panic("Unable to allocate memory for kernel segments");
     var allocated_segment_memory: u32 = 0;
 
     for (program_segments) |*segment| {
         const virtual_address = VirtualAddress.new(segment.virtual & 0xffff_ffff_ffff_f000);
         const address_misalignment = @intCast(u32, segment.virtual - virtual_address.value);
-        const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, page_size));
+        const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, UEFI.page_size));
         const physical_address = PhysicalAddress.new(segments_allocation + allocated_segment_memory); // UEFI uses identity mapping
         segment.physical = physical_address.value + address_misalignment;
         allocated_segment_memory += aligned_segment_size;
@@ -230,7 +228,7 @@ pub fn main() noreturn {
 
     const stack_top = blk: {
         const stack_page_count = 10;
-        const stack_size = stack_page_count << page_shifter;
+        const stack_size = stack_page_count << UEFI.page_shifter;
         const stack_physical_address = PhysicalAddress.new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
         break :blk stack_physical_address.to_higher_half_virtual_address().value + stack_size;
     };
@@ -246,15 +244,13 @@ pub fn main() noreturn {
     {
         const trampoline_code_start = @ptrToInt(&load_kernel);
         const trampoline_code_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
-        const code_physical_base_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, page_size));
+        const code_physical_base_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, UEFI.page_size));
         const misalignment = trampoline_code_start - code_physical_base_page.value;
-        const trampoline_size_to_map = common.align_forward(misalignment + trampoline_code_size, page_size);
+        const trampoline_size_to_map = common.align_forward(misalignment + trampoline_code_size, UEFI.page_size);
         VAS.bootstrap_map(&kernel_address_space, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
     }
 
-    var bootloader_information = PhysicalAddress.new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), page_size) >> page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
-
-    const bootloader_information_physical_address = PhysicalAddress.new(@ptrToInt(&bootloader_information));
+    var bootloader_information = PhysicalAddress.new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
 
     // Map all usable memory to avoid kernel delays later
     // TODO:
@@ -280,10 +276,11 @@ pub fn main() noreturn {
     bootloader_information.to_identity_mapped_virtual_address().access(*BootloaderInformation).* = .{
         .kernel_segments = program_segments,
         .memory_map = memory_manager.map.to_higher_half(),
+        .counters = memory_manager.size_counters.to_higher_half(),
         .rsdp_physical_address = rsdp_physical_address,
     };
 
-    load_kernel(bootloader_information_physical_address.to_higher_half_virtual_address().access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
+    load_kernel(bootloader_information.to_higher_half_virtual_address().access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
 }
 
 extern const kernel_trampoline_start: *volatile u8;
@@ -392,7 +389,7 @@ const MemoryManager = struct {
 
                 const number_of_page_offset = memory_manager.size_counters.counters[index];
                 if (entry.number_of_pages - number_of_page_offset >= number_of_4k_pages) {
-                    const address = entry.physical_start + (number_of_page_offset << page_shifter);
+                    const address = entry.physical_start + (number_of_page_offset << UEFI.page_shifter);
                     memory_manager.size_counters.counters[index] += @intCast(u32, number_of_4k_pages);
                     return address;
                 }
@@ -418,7 +415,7 @@ const MemoryManager = struct {
         while (memory_map_iterator.next(memory_manager.map)) |entry| {
             if (entry.type == .ConventionalMemory) {
                 defer conventional_memory_index += 1;
-                if (entry.number_of_pages * page_size > size_to_allocate_memory_map_size_counters) {
+                if (entry.number_of_pages * UEFI.page_size > size_to_allocate_memory_map_size_counters) {
                     const index = conventional_memory_index;
                     const counters = @intToPtr([*]u32, entry.physical_start)[0..conventional_entry_count];
                     common.std.mem.set(u32, counters, 0);
@@ -427,6 +424,17 @@ const MemoryManager = struct {
                     memory_manager.size_counters = .{
                         .counters = counters,
                     };
+
+                    const size_for_copy = common.align_forward(memory_manager.map.region.size, UEFI.page_size);
+                    const memory_map_copy_allocation = PhysicalMemoryRegion{
+                        .address = PhysicalAddress.new(memory_manager.allocate(size_for_copy >> UEFI.page_shifter) catch @panic("failed to allocate memory map copy")),
+                        .size = memory_manager.map.region.size,
+                    };
+
+                    const memory_copy = memory_map_copy_allocation.to_identity_mapped_virtual_address().access_bytes();
+                    const memory_original = memory_manager.map.region.access_bytes();
+                    common.copy(u8, memory_copy, memory_original);
+                    memory_manager.map.region = memory_map_copy_allocation.to_identity_mapped_virtual_address();
                     return;
                 }
             }
@@ -446,7 +454,7 @@ fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) Cus
         @panic("wrong alignment");
     }
     // todo: better define types
-    const allocation = memory_manager.allocate(size >> page_shifter) catch return CustomAllocator.Error.OutOfMemory;
+    const allocation = memory_manager.allocate(size >> UEFI.page_shifter) catch return CustomAllocator.Error.OutOfMemory;
     return CustomAllocator.Result{
         .address = allocation,
         .size = size,
