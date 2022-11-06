@@ -185,9 +185,8 @@ pub inline fn read_timestamp() u64 {
     return my_rdx << 32 | my_rax;
 }
 
-pub const spurious_vector: u8 = 0xFF;
-
 pub fn init_apic(cpu: *CPU, virtual_address_space: *VirtualAddressSpace) void {
+    const spurious_vector = 0xff;
     const spurious_value = @as(u32, 0x100) | spurious_vector;
     log.debug("Local storage: 0x{x}", .{@ptrToInt(cpu)});
     // TODO: x2APIC

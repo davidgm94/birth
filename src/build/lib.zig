@@ -913,7 +913,7 @@ pub const Kernel = struct {
             tcele,
             thumb,
             thumbeb,
-            i386,
+            x86,
             x86_64: x86_64,
             xcore,
             nvptx,

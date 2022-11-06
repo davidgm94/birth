@@ -115,6 +115,14 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     APIC.init();
 
+    // TODO: init RTC
+    if (common.config.timeslicing) {
+        @panic("todo implement timeslicing");
+    } else {
+        logger.warn("Timeslicing not enabled", .{});
+        @panic("todo implement no timeslicing");
+    }
+
     logger.debug("Reached to the end", .{});
     CPU.stop();
 }
