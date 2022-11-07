@@ -113,18 +113,36 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
         },
     };
 
-    APIC.init();
+    const apic_base = APIC.init();
 
     // TODO: init RTC
+    // TODO: setup timer properly
     if (common.config.timeslicing) {
-        @panic("todo implement timeslicing");
+        x86_64.APIC.calibrate_timer(apic_base);
     } else {
         logger.warn("Timeslicing not enabled", .{});
         @panic("todo implement no timeslicing");
     }
 
+    logger.warn("TODO: Enable IPI", .{});
+    arch.x86_64.Syscall.enable(@ptrToInt(&kernel_syscall_entry_point));
+
+    // Enable no-execute protection
+    {
+        var efer = arch.x86_64.registers.IA32_EFER.read();
+        efer.NXE = true;
+        efer.write();
+    }
+
+    enable_fpu();
+
     logger.debug("Reached to the end", .{});
     CPU.stop();
+}
+
+fn enable_fpu() void {
+    var cr0 = x86_64.registers.cr0.read();
+    cr0.
 }
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
@@ -156,4 +174,42 @@ fn e9_write(_: void, bytes: []const u8) error{}!usize {
           [len] "{rcx}" (bytes.len),
     );
     return bytes.len - bytes_left;
+}
+
+// TODO: implement syscall
+pub export fn kernel_syscall_entry_point() callconv(.Naked) void {
+    // This function only modifies RSP. The other registers are preserved in user space
+    // This sets up the kernel stack before actually starting to run kernel code
+    //asm volatile (
+    //\\swapgs
+    //// Save RFLAGS (R11), next instruction address after sysret (RCX) and user stack (RSP)
+    //\\mov %%r11, %%r12
+    //\\mov %%rcx, %%r13
+    //\\mov %%rsp, %%r14
+    //// Pass original RCX (4th argument)
+    //\\mov %%rax, %%rcx
+    //// Get kernel stack
+    //\\mov %%gs:[0], %%r15
+    //\\add %[offset], %%r15
+    //\\mov (%%r15), %%r15
+    //\\mov %%r15, %%rbp
+    //// Use kernel stack
+    //\\mov %%rbp, %%rsp
+    //// Call the syscall handler
+    //\\mov %[handler], %%rax
+    //\\call *(%%rax)
+    //// Restore RSP, R11 (RFLAGS) and RCX (RIP after sysret)
+    //\\mov %%r14, %%rsp
+    //\\mov %%r12, %%r11
+    //\\mov %%r13, %%rcx
+    //// Restore user GS
+    //\\swapgs
+    //// Go back to user mode
+    //\\sysretq
+    //:
+    //: [offset] "i" (@intCast(u8, @offsetOf(Thread, "kernel_stack"))),
+    //[handler] "i" (&Syscall.handler),
+    //);
+
+    @panic("reached unreachable: syscall handler");
 }

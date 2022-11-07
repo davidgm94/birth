@@ -19,6 +19,7 @@ pub const interrupts = @import("x86_64/interrupts.zig");
 pub const paging = @import("x86_64/paging.zig");
 pub const PIC = @import("x86_64/pic.zig");
 pub const PCI = @import("x86_64/pci.zig");
+pub const RTC = @import("x86_64/rtc.zig");
 pub const startup = @import("x86_64/startup.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 pub const TLS = @import("x86_64/tls.zig");
