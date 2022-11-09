@@ -141,8 +141,25 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 }
 
 fn enable_fpu() void {
+    logger.debug("Enabling FPU...", .{});
+    defer logger.debug("FPU enabled!", .{});
     var cr0 = x86_64.registers.cr0.read();
-    cr0.
+    cr0.emulation = false;
+    cr0.monitor_coprocessor = true;
+    cr0.numeric_error = true;
+    cr0.task_switched = false;
+    cr0.write();
+    var cr4 = x86_64.registers.cr4.read();
+    cr4.operating_system_support_for_fx_save_restore = true;
+    cr4.write();
+
+    const mxcsr_value: u32 = 0x1f80;
+    asm volatile (
+        \\fninit
+        \\ldmxcsr %[mxcsr_value]
+        :
+        : [mxcsr_value] "m" (mxcsr_value),
+    );
 }
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
