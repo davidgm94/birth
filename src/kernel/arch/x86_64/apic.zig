@@ -101,6 +101,7 @@ const Register = enum(u32) {
 
 pub fn init() VirtualAddress {
     var ia32_apic_base = IA32_APIC_BASE.read();
+    is_bsp = ia32_apic_base.bsp;
     const apic_base_physical_address = ia32_apic_base.get_address();
     const apic_base = arch.paging.map_device(apic_base_physical_address, arch.page_size) catch @panic("mapping apic failed");
     log.debug("APIC base: {}", .{apic_base});
@@ -126,7 +127,7 @@ pub fn init() VirtualAddress {
     ia32_apic_base.write();
     log.debug("APIC enabled", .{});
 
-    if (ia32_apic_base.bsp) {
+    if (is_bsp) {
         asm volatile ("cli");
         arch.x86_64.PIC.disable();
         log.debug("PIC disabled!", .{});
@@ -158,8 +159,10 @@ pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress) void {
     @panic("TODO");
 }
 
+pub var is_bsp = false;
+
 pub fn calibrate_timer(apic_base: VirtualAddress) void {
-    if (IA32_APIC_BASE.read().bsp) {
+    if (is_bsp) {
         //calibrate_timer_with_rtc(apic_base);
         const timer_calibration_start = read_timestamp();
         var times_i: u64 = 0;

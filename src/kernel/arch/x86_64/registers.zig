@@ -294,6 +294,31 @@ pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
 pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
 pub const IA32_KERNEL_GS_BASE = SimpleMSR(0xC0000102);
 
+pub const MemoryType = enum(u8) {
+    uncacheable = 0,
+    write_combining = 1,
+    reserved0 = 2,
+    reserved1 = 3,
+    write_through = 4,
+    write_protected = 5,
+    write_back = 6,
+    uncached = 7,
+};
+
+pub const IA32_PAT = extern struct {
+    page_attributes: [8]MemoryType,
+
+    const MSR = SimpleMSR(0x277);
+
+    pub fn read() IA32_PAT {
+        return @bitCast(IA32_PAT, MSR.read());
+    }
+
+    pub fn write(pat: IA32_PAT) void {
+        MSR.write(@bitCast(u64, pat));
+    }
+};
+
 pub const IA32_EFER = packed struct(u64) {
     /// Syscall Enable - syscall, sysret
     SCE: bool = false,

@@ -97,8 +97,9 @@ pub fn main() noreturn {
         const size = kernel_file.size + memory_map_size;
 
         //allocatePages: std.meta.FnPtr(fn (alloc_type: AllocateType, mem_type: MemoryType, pages: usize, memory: *[*]align(4096) u8) callconv(.C) Status),
-        var memory: [*]align(UEFI.page_size) u8 = undefined;
-        UEFI.result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, size >> UEFI.page_shifter, &memory));
+        var memory: []align(UEFI.page_size) u8 = undefined;
+        UEFI.result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, size >> UEFI.page_shifter, &memory.ptr));
+        memory.len = size;
         break :blk memory;
     };
 
@@ -109,7 +110,7 @@ pub fn main() noreturn {
     var memory_manager = MemoryManager{
         .map = UEFI.MemoryMap{
             .region = .{
-                .address = VirtualAddress.new(@ptrToInt(bootstrap_memory) + kernel_file.size),
+                .address = VirtualAddress.new(@ptrToInt(bootstrap_memory.ptr) + kernel_file.size),
                 .size = 0,
             },
             .descriptor_size = 0,
@@ -251,6 +252,12 @@ pub fn main() noreturn {
     }
 
     var bootloader_information = PhysicalAddress.new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
+
+    // map bootstrap pages
+    {
+        const physical_address = PhysicalAddress.new(@ptrToInt(bootstrap_memory.ptr));
+        paging.bootstrap_map(&kernel_address_space, physical_address, physical_address.to_higher_half_virtual_address(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
+    }
 
     // Map all usable memory to avoid kernel delays later
     // TODO:
@@ -425,17 +432,6 @@ const MemoryManager = struct {
                     memory_manager.size_counters = .{
                         .counters = counters,
                     };
-
-                    const size_for_copy = common.align_forward(memory_manager.map.region.size, UEFI.page_size);
-                    const memory_map_copy_allocation = PhysicalMemoryRegion{
-                        .address = PhysicalAddress.new(memory_manager.allocate(size_for_copy >> UEFI.page_shifter) catch @panic("failed to allocate memory map copy")),
-                        .size = memory_manager.map.region.size,
-                    };
-
-                    const memory_copy = memory_map_copy_allocation.to_identity_mapped_virtual_address().access_bytes();
-                    const memory_original = memory_manager.map.region.access_bytes();
-                    common.copy(u8, memory_copy, memory_original);
-                    memory_manager.map.region = memory_map_copy_allocation.to_identity_mapped_virtual_address();
                     return;
                 }
             }

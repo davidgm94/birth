@@ -135,9 +135,74 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
     }
 
     enable_fpu();
+    enable_performance_counters();
 
-    logger.debug("Reached to the end", .{});
+    logger.warn("TODO: enabling TLB flush filter", .{});
+
+    enable_global_pages();
+
+    enable_monitor_mwait();
+
+    configure_page_attribute_table();
+
+    logger.debug("Reached to the end of the entry point", .{});
+
+    kernel_startup();
+}
+
+fn kernel_startup() noreturn {
+    if (x86_64.APIC.is_bsp) {
+        @panic("todo bsp");
+    } else {
+        @panic("AP initialization");
+    }
     CPU.stop();
+}
+
+fn configure_page_attribute_table() void {
+    logger.debug("Configuring page attribute table...", .{});
+    defer logger.debug("Page attribute table configured!", .{});
+    var pat = x86_64.registers.IA32_PAT.read();
+    pat.page_attributes[4] = .write_combining;
+    pat.page_attributes[5] = .write_protected;
+    pat.write();
+}
+
+fn enable_global_pages() void {
+    logger.debug("Enabling global pages...", .{});
+    defer logger.debug("Global pages enabled!", .{});
+    var cr4 = x86_64.registers.cr4.read();
+    cr4.page_global_enable = true;
+    cr4.write();
+}
+
+fn enable_monitor_mwait() void {
+    // This is just reporting if it's available
+    const supported = monitor_mwait.is_supported();
+    logger.debug("mwait support: {}", .{supported});
+}
+
+var monitor_mwait: struct {
+    supported: bool = false,
+    called: bool = false,
+
+    pub fn is_supported(mwait: *@This()) bool {
+        if (!mwait.called) {
+            const cpuid = x86_64.CPUID.cpuid(1);
+            mwait.supported = cpuid.ecx & (1 << 3) != 0;
+            mwait.called = true;
+        }
+
+        return mwait.supported;
+    }
+} = .{};
+
+fn enable_performance_counters() void {
+    logger.debug("Enabling performance counters...", .{});
+    defer logger.debug("Performance counters enabled!", .{});
+    var cr4 = x86_64.registers.cr4.read();
+    cr4.performance_monitoring_counter_enable = true;
+    cr4.write();
 }
 
 fn enable_fpu() void {
@@ -153,14 +218,18 @@ fn enable_fpu() void {
     cr4.operating_system_support_for_fx_save_restore = true;
     cr4.write();
 
-    const mxcsr_value: u32 = 0x1f80;
+    //const mxcsr_value: u32 = 0x1f80;
     asm volatile (
         \\fninit
-        \\ldmxcsr %[mxcsr_value]
-        :
-        : [mxcsr_value] "m" (mxcsr_value),
+        //\\ldmxcsr %[mxcsr_value]
+        //:
+        //: [mxcsr_value] "m" (mxcsr_value),
     );
+
+    logger.warn("TODO: ldmxcsr is faulting with KVM", .{});
 }
+
+pub const log_level = common.log.Level.debug;
 
 pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
