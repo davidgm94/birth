@@ -35,3 +35,10 @@ pub const FileInMemory = struct {
     address: VirtualAddress,
     size: u64,
 };
+
+pub const CoreSupervisor = struct {
+    is_valid: bool,
+    next: ?*CoreSupervisor,
+    previous: ?*CoreSupervisor,
+    mdb_root: VirtualAddress,
+};

@@ -77,13 +77,8 @@ pub const BootloaderInformation = struct {
     memory_map: MemoryMap,
     counters: []u32,
     rsdp_physical_address: PhysicalAddress,
-    kernel_file: BootstrapChunk,
-    init_file: BootstrapChunk,
-};
-
-pub const BootstrapChunk = struct {
-    offset: usize,
-    size: usize,
+    kernel_file: []const u8,
+    init_file: []const u8,
 };
 
 pub const MemoryCategory = enum {

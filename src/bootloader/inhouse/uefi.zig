@@ -84,6 +84,7 @@ pub fn main() noreturn {
 
     var kernel_file = File.get(filesystem_root, "kernel.elf") catch @panic("Can't read kernel file");
     var init_file = File.get(filesystem_root, "init") catch @panic("Can't read init file");
+    logger.debug("Init file: {}", .{init_file.size});
     const total_file_size = kernel_file.size + init_file.size;
 
     const bootstrap_memory = blk: {
@@ -104,9 +105,10 @@ pub fn main() noreturn {
         break :blk memory;
     };
 
+    logger.debug("kernel file size: {}. bm: {}", .{ kernel_file.size, bootstrap_memory.len });
     const kernel_file_content = kernel_file.read(bootstrap_memory[0..kernel_file.size]);
-    const init_file_content = kernel_file.read(bootstrap_memory[kernel_file.size..][0..init_file.size]);
-    _ = init_file_content;
+    const init_file_content = init_file.read(bootstrap_memory[kernel_file.size .. kernel_file.size + init_file.size]);
+    logger.debug("init file content: {}", .{init_file_content.len});
 
     logger.debug("Trying to get memory map", .{});
 
@@ -283,22 +285,24 @@ pub fn main() noreturn {
 
     logger.debug("Allocated size: 0x{x}", .{allocated_size * arch.valid_page_sizes[0]});
 
-    bootloader_information.to_identity_mapped_virtual_address().access(*BootloaderInformation).* = .{
+    const bootloader_information_ptr = bootloader_information.to_identity_mapped_virtual_address().access(*BootloaderInformation);
+    bootloader_information_ptr.* = .{
         .kernel_segments = program_segments,
         .memory_map = memory_manager.map.to_higher_half(),
         .counters = memory_manager.size_counters.to_higher_half(),
         .rsdp_physical_address = rsdp_physical_address,
-        .kernel_file = .{
-            .offset = 0,
-            .size = kernel_file.size,
-        },
-        .init_file = .{
-            .offset = kernel_file.size,
-            .size = init_file.size,
-        },
+        .kernel_file = file_to_higher_half(kernel_file_content),
+        .init_file = file_to_higher_half(init_file_content),
     };
+    logger.debug("KF: {}. IF: {}.", .{ bootloader_information_ptr.kernel_file.len, bootloader_information_ptr.init_file.len });
 
     load_kernel(bootloader_information.to_higher_half_virtual_address().access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
+}
+
+pub fn file_to_higher_half(file: []const u8) []const u8 {
+    var result = file;
+    result.ptr = file.ptr + common.config.kernel_higher_half_address;
+    return result;
 }
 
 extern const kernel_trampoline_start: *volatile u8;

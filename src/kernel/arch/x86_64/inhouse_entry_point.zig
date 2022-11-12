@@ -34,6 +34,9 @@ const MemoryMap = struct {
 };
 
 export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
+    for (bootloader_information.init_file[0..10]) |byte, i| {
+        logger.debug("[{}]: 0x{x}", .{ i, byte });
+    }
     logger.debug("Hello kernel", .{});
     IDT.setup();
     logger.debug("Loaded IDT", .{});
@@ -152,11 +155,26 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
 fn kernel_startup() noreturn {
     if (x86_64.APIC.is_bsp) {
-        @panic("todo bsp");
+        spawn_bsp_init();
     } else {
         @panic("AP initialization");
     }
     CPU.stop();
+}
+
+fn spawn_bsp_init() void {
+    assert(x86_64.APIC.is_bsp);
+    spawn_init_common();
+    @panic("Todo spawn bsp init");
+}
+
+fn spawn_init_common() void {
+    spawn_module();
+    @panic("todo spawn_init_common");
+}
+
+fn spawn_module() void {
+    @panic("spawn_module");
 }
 
 fn configure_page_attribute_table() void {
