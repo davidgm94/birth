@@ -36,7 +36,6 @@ const cache_dir = "zig-cache/";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ kernel_name;
 
-const user_programs = .{@import("../user/programs/desktop/dependency.zig")};
 const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
 
 var common_package = Package{
@@ -105,7 +104,7 @@ pub const zero_allocator = CustomAllocator{
 
 fn allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     const kernel = @fieldParentPtr(Kernel, "allocator", allocator);
-    const result = kernel.builder.allocator.allocBytes(@intCast(u29, alignment), size, 0, 0) catch unreachable;
+    const result = try kernel.builder.allocator.allocBytes(@intCast(u29, alignment), size, 0, 0);
     return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
         .size = result.len,
@@ -117,20 +116,20 @@ fn resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new
     _ = old_memory;
     _ = old_alignment;
     _ = new_size;
-    unreachable;
+    @panic("todo resize");
 }
 
 fn free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
     _ = allocator;
     _ = memory;
     _ = alignment;
-    unreachable;
+    @panic("todo free");
 }
 
 fn zero_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     _ = allocator;
     std.assert(alignment <= 0x1000);
-    const result = allocate_zero_memory(size) catch unreachable;
+    const result = allocate_zero_memory(size) catch return CustomAllocator.Error.OutOfMemory;
     return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
         .size = result.len,
@@ -194,9 +193,9 @@ pub const Disk = struct {
         //}
     }
 
-    pub fn new(allocator: CustomAllocator, capacity: u64) Disk {
+    pub fn new(allocator: CustomAllocator, capacity: u64) !Disk {
         return Disk{
-            .buffer = BufferType.initCapacity(allocator.get_allocator(), capacity) catch unreachable,
+            .buffer = try BufferType.initCapacity(allocator.get_allocator(), capacity),
         };
     }
 
@@ -217,14 +216,14 @@ pub const Disk = struct {
 
         // TODO:
         for (kernel.options.run.disks) |_, disk_i| {
-            var disk = Disk.new(zero_allocator, 1024 * 1024 * 1024);
+            var disk = try Disk.new(zero_allocator, 1024 * 1024 * 1024);
             var filesystem = Filesystem.new(&disk);
 
             std.assert(resource_files.len > 0);
 
             for (resource_files) |filename| {
                 const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
-                filesystem.write_file(kernel.allocator, filename, file_content) catch unreachable;
+                try filesystem.write_file(kernel.allocator, filename, file_content);
             }
 
             std.assert(kernel.userspace_programs.len > 0);
@@ -235,7 +234,7 @@ pub const Disk = struct {
                 const file_path = program.output_path_source.getPath();
                 std.log.debug("Exe path: {s}", .{file_path});
                 const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, std.max_int(usize));
-                filesystem.write_file(get_allocator(), filename, file_content) catch unreachable;
+                try filesystem.write_file(get_allocator(), filename, file_content);
             }
 
             //const disk_size = build_disk.buffer.items.len;
@@ -260,25 +259,30 @@ pub const Disk = struct {
     }
 };
 
-pub const Dependency = struct {
+pub const Module = struct {
     type: Type,
-    path: []const u8,
-    dependencies: []const *const Dependency,
+    dependencies: []const []const u8,
 
-    pub fn from_source_file(source_file: anytype) *const Dependency {
-        return &source_file.dependency.dependency;
+    pub fn parse(allocator: std.Allocator, file: []const u8) !Module {
+        var token_stream = zig_std.json.TokenStream.init(file);
+        const module = try zig_std.json.parse(Module, &token_stream, .{ .allocator = allocator });
+        return module;
     }
 
-    pub fn get_path_to_file(dependency: Dependency, allocator: std.Allocator, file: []const u8) []const u8 {
-        const directory_length = std.last_index_of(u8, dependency.path, "dependency.zig") orelse unreachable;
-        const directory_path = dependency.path[0..directory_length];
-        const path_to_file = std.concatenate(allocator, u8, &.{ directory_path, file }) catch unreachable;
+    pub fn from_source_file(source_file: anytype) *const Module {
+        return &source_file.module.module;
+    }
+
+    pub fn get_path_to_file(module: Module, allocator: std.Allocator, file: []const u8) []const u8 {
+        const directory_length = std.last_index_of(u8, module.path, "module.zig") orelse unreachable;
+        const directory_path = module.path[0..directory_length];
+        const path_to_file = try std.concatenate(allocator, u8, &.{ directory_path, file });
         return path_to_file;
     }
 
-    fn get_program_name(dependency: Dependency) []const u8 {
-        const directory_length = std.last_index_of(u8, dependency.path, "dependency.zig") orelse unreachable;
-        const directory_path = dependency.path[0..directory_length];
+    fn get_program_name(module: Module) []const u8 {
+        const directory_length = std.last_index_of(u8, module.path, "module.zig") orelse unreachable;
+        const directory_path = module.path[0..directory_length];
         const directory_name = basename(directory_path);
         return directory_name;
     }
@@ -292,22 +296,24 @@ pub const Dependency = struct {
 };
 
 pub const CObject = struct {
-    dependency: Dependency,
+    module: Module,
     objects: []const []const u8,
 };
 
 pub const UserProgram = struct {
-    dependency: Dependency,
-    path: []const u8 = undefined,
-    name: []const u8 = undefined,
+    module: Module,
+    path: []const u8,
+    name: []const u8,
 
-    pub fn make(allocator: std.Allocator, dependencies_file: anytype) UserProgram {
-        var zig_exe = dependencies_file.dependency;
-        std.assert(zig_exe.dependency.type == .zig_exe);
-        zig_exe.path = zig_exe.dependency.get_path_to_file(allocator, "main.zig");
-        zig_exe.name = zig_exe.dependency.get_program_name();
-
-        return zig_exe;
+    pub fn make(allocator: std.Allocator, module: Module, program_name: []const u8, source_path: []const u8) UserProgram {
+        std.assert(module.type == .zig_exe);
+        _ = allocator;
+        //_ = module.get_path_to_file(allocator, "main.zig");
+        return UserProgram{
+            .module = module,
+            .path = source_path,
+            .name = program_name,
+        };
     }
 };
 
@@ -342,7 +348,7 @@ pub const Kernel = struct {
     gdb_script: *WriteFileStep = undefined,
     allocator: CustomAllocator,
 
-    pub fn create(kernel: *Kernel) void {
+    pub fn create(kernel: *Kernel) !void {
         // Initialize package dependencies here
         common_package.dependencies = &.{common_package};
         rnu_package.dependencies = &.{ common_package, arch_package, rnu_package, kernel_package, privileged_package };
@@ -353,11 +359,11 @@ pub const Kernel = struct {
 
         kernel.create_bootloader();
         kernel.create_executable();
-        kernel.create_disassembly_step();
-        kernel.create_userspace_programs();
+        try kernel.create_disassembly_step();
+        try kernel.create_userspace_programs();
         kernel.create_boot_image();
         kernel.create_disk();
-        kernel.create_run_and_debug_steps();
+        try kernel.create_run_and_debug_steps();
     }
 
     fn create_bootloader(kernel: *Kernel) void {
@@ -430,14 +436,14 @@ pub const Kernel = struct {
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
 
-    fn create_disassembly_step(kernel: *Kernel) void {
+    fn create_disassembly_step(kernel: *Kernel) !void {
         var arg_list = std.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         const main_args = &.{ "llvm-objdump", kernel_path };
         const common_flags = &.{ "-d", "-S" };
-        arg_list.appendSlice(main_args) catch unreachable;
-        arg_list.appendSlice(common_flags) catch unreachable;
+        try arg_list.appendSlice(main_args);
+        try arg_list.appendSlice(common_flags);
         switch (kernel.options.arch) {
-            .x86_64 => arg_list.append("-Mintel") catch unreachable,
+            .x86_64 => try arg_list.append("-Mintel"),
             else => {},
         }
         const disassembly_kernel = kernel.builder.addSystemCommand(arg_list.items);
@@ -446,28 +452,34 @@ pub const Kernel = struct {
         disassembly_kernel_step.dependOn(&disassembly_kernel.step);
     }
 
-    fn create_userspace_programs(kernel: *Kernel) void {
+    fn create_userspace_programs(kernel: *Kernel) !void {
         const linker_script_path = kernel.builder.fmt("src/user/arch/{s}/linker.ld", .{@tagName(kernel.options.arch)});
+        const user_programs_path = "src/user/programs";
+        const user_programs_dir = try cwd().openIterableDir(user_programs_path, .{});
+        var it = user_programs_dir.iterate();
 
-        var libexeobj_steps = std.ArrayListManaged(*LibExeObjStep).initCapacity(kernel.builder.allocator, user_programs.len) catch unreachable;
-        inline for (user_programs) |user_program| {
-            const unique_program = UserProgram.make(kernel.builder.allocator, user_program);
-            const out_filename = kernel.builder.fmt("{s}.elf", .{unique_program.name});
-            const main_source_file = unique_program.path;
-            const program = kernel.builder.addExecutable(out_filename, main_source_file);
+        var unique_programs = std.ArrayListManaged(UserProgram).init(kernel.builder.allocator);
+        while (try it.next()) |module_entry| {
+            if (module_entry.kind == .Directory) {
+                const module_dir = try user_programs_dir.dir.openDir(module_entry.name, .{});
+                const module_configuration_file = try module_dir.readFileAlloc(kernel.builder.allocator, "module.json", 0x1000 * 16);
+                const module = try Module.parse(kernel.builder.allocator, module_configuration_file);
+                // TODO: change path
+                const source_file_path = try std.concatenate(kernel.builder.allocator, u8, &.{ user_programs_path, "/", module_entry.name, "/main.zig" });
+                const unique_program = UserProgram.make(kernel.builder.allocator, module, module_entry.name, source_file_path);
+                try unique_programs.append(unique_program);
+            }
+        }
 
-            for (unique_program.dependency.dependencies) |dependency| {
-                switch (dependency.type) {
-                    .c_objects => {
-                        const cobjects = @ptrCast(*const CObject, dependency);
-                        for (cobjects.objects) |object_name| {
-                            const path_to_cobject = cobjects.dependency.get_path_to_file(kernel.builder.allocator, object_name);
-                            program.addObjectFile(path_to_cobject);
-                        }
-                        std.assert(cobjects.dependency.dependencies.len == 0);
-                    },
-                    else => unreachable,
-                }
+        var libexeobj_steps = try std.ArrayListManaged(*LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len);
+
+        for (unique_programs.items) |unique_program| {
+            const filename = unique_program.name;
+            const source_path = unique_program.path;
+            const program = kernel.builder.addExecutable(filename, source_path);
+
+            for (unique_program.module.dependencies) |dependency| {
+                log.debug("Dependency: {s}", .{dependency});
             }
 
             program.setMainPkgPath("src");
@@ -486,7 +498,7 @@ pub const Kernel = struct {
             libexeobj_steps.appendAssumeCapacity(program);
         }
 
-        kernel.userspace_programs = libexeobj_steps.items;
+        kernel.userspace_programs = libexeobj_steps.toOwnedSlice();
     }
 
     fn create_boot_image(kernel: *Kernel) void {
@@ -501,26 +513,30 @@ pub const Kernel = struct {
         Disk.create(kernel);
     }
 
-    fn create_run_and_debug_steps(kernel: *Kernel) void {
+    const Error = error{
+        not_implemented,
+    };
+
+    fn create_run_and_debug_steps(kernel: *Kernel) !void {
         kernel.run_argument_list = std.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
-                const qemu_name = std.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) }) catch unreachable;
-                kernel.run_argument_list.append(qemu_name) catch unreachable;
+                const qemu_name = try std.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
+                try kernel.run_argument_list.append(qemu_name);
 
                 if (!kernel.options.is_virtualizing()) {
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-nvme*") catch unreachable;
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-pci*") catch unreachable;
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-ide*") catch unreachable;
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-ata*") catch unreachable;
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-ahci*") catch unreachable;
-                    kernel.run_argument_list.append("-trace") catch unreachable;
-                    kernel.run_argument_list.append("-sata*") catch unreachable;
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-nvme*");
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-pci*");
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-ide*");
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-ata*");
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-ahci*");
+                    try kernel.run_argument_list.append("-trace");
+                    try kernel.run_argument_list.append("-sata*");
                 }
 
                 // Boot device
@@ -528,58 +544,58 @@ pub const Kernel = struct {
                     .x86_64 => {
                         switch (kernel.options.arch.x86_64.bootloader) {
                             .inhouse => {
-                                kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" }) catch unreachable;
-                                kernel.run_argument_list.appendSlice(&.{ "-bios", "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" }) catch unreachable;
-                                kernel.run_argument_list.appendSlice(&.{ "-L", "zig-cache/ovmf" }) catch unreachable;
+                                try kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" });
+                                try kernel.run_argument_list.appendSlice(&.{ "-bios", "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" });
+                                try kernel.run_argument_list.appendSlice(&.{ "-L", "zig-cache/ovmf" });
                             },
                             .limine => {
-                                kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path }) catch unreachable;
+                                try kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path });
                             },
                         }
                     },
                     .riscv64 => {
-                        kernel.run_argument_list.append("-bios") catch unreachable;
-                        kernel.run_argument_list.append("default") catch unreachable;
-                        kernel.run_argument_list.append("-kernel") catch unreachable;
-                        kernel.run_argument_list.append(kernel_path) catch unreachable;
+                        try kernel.run_argument_list.append("-bios");
+                        try kernel.run_argument_list.append("default");
+                        try kernel.run_argument_list.append("-kernel");
+                        try kernel.run_argument_list.append(kernel_path);
                     },
-                    else => unreachable,
+                    else => return Error.not_implemented,
                 }
 
                 {
-                    kernel.run_argument_list.append("-no-reboot") catch unreachable;
-                    kernel.run_argument_list.append("-no-shutdown") catch unreachable;
+                    try kernel.run_argument_list.append("-no-reboot");
+                    try kernel.run_argument_list.append("-no-shutdown");
                 }
 
                 {
                     const memory_arg = kernel.builder.fmt("{}{s}", .{ kernel.options.run.memory.amount, @tagName(kernel.options.run.memory.unit) });
-                    kernel.run_argument_list.append("-m") catch unreachable;
-                    kernel.run_argument_list.append(memory_arg) catch unreachable;
+                    try kernel.run_argument_list.append("-m");
+                    try kernel.run_argument_list.append(memory_arg);
                 }
 
                 if (kernel.options.run.emulator.qemu.smp) |smp_count| {
-                    kernel.run_argument_list.append("-smp") catch unreachable;
-                    kernel.run_argument_list.append(kernel.builder.fmt("{}", .{smp_count})) catch unreachable;
+                    try kernel.run_argument_list.append("-smp");
+                    try kernel.run_argument_list.append(kernel.builder.fmt("{}", .{smp_count}));
                 }
 
                 if (kernel.options.run.emulator.qemu.vga) |vga_option| {
-                    kernel.run_argument_list.append("-vga") catch unreachable;
-                    kernel.run_argument_list.append(@tagName(vga_option)) catch unreachable;
+                    try kernel.run_argument_list.append("-vga");
+                    try kernel.run_argument_list.append(@tagName(vga_option));
                 } else {
-                    kernel.run_argument_list.append("-vga") catch unreachable;
-                    kernel.run_argument_list.append("none") catch unreachable;
-                    kernel.run_argument_list.append("-display") catch unreachable;
-                    kernel.run_argument_list.append("none") catch unreachable;
-                    //kernel.run_argument_list.append("-nographic") catch unreachable;
+                    try kernel.run_argument_list.append("-vga");
+                    try kernel.run_argument_list.append("none");
+                    try kernel.run_argument_list.append("-display");
+                    try kernel.run_argument_list.append("none");
+                    //kernel.run_argument_list.append("-nographic") ;
                 }
 
                 if (kernel.options.arch == .x86_64) {
-                    kernel.run_argument_list.append("-debugcon") catch unreachable;
-                    kernel.run_argument_list.append("stdio") catch unreachable;
+                    try kernel.run_argument_list.append("-debugcon");
+                    try kernel.run_argument_list.append("stdio");
                 }
 
-                kernel.run_argument_list.append("-global") catch unreachable;
-                kernel.run_argument_list.append("virtio-mmio.force-legacy=false") catch unreachable;
+                try kernel.run_argument_list.append("-global");
+                try kernel.run_argument_list.append("virtio-mmio.force-legacy=false");
 
                 for (kernel.options.run.disks) |disk, disk_i| {
                     const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
@@ -587,105 +603,96 @@ pub const Kernel = struct {
 
                     switch (disk.interface) {
                         .nvme => {
-                            kernel.run_argument_list.append("-device") catch unreachable;
+                            try kernel.run_argument_list.append("-device");
                             const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
-                            kernel.run_argument_list.append(device_options) catch unreachable;
-                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            try kernel.run_argument_list.append(device_options);
+                            try kernel.run_argument_list.append("-drive");
                             const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
-                            kernel.run_argument_list.append(drive_options) catch unreachable;
+                            try kernel.run_argument_list.append(drive_options);
                         },
                         .virtio => {
-                            kernel.run_argument_list.append("-device") catch unreachable;
+                            try kernel.run_argument_list.append("-device");
                             const device_type = switch (kernel.options.arch) {
                                 .x86_64 => "pci",
                                 .riscv64 => "device",
-                                else => unreachable,
+                                else => return Error.not_implemented,
                             };
                             const device_options = kernel.builder.fmt("virtio-blk-{s},drive={s}", .{ device_type, disk_id });
-                            kernel.run_argument_list.append(device_options) catch unreachable;
-                            kernel.run_argument_list.append("-drive") catch unreachable;
+                            try kernel.run_argument_list.append(device_options);
+                            try kernel.run_argument_list.append("-drive");
                             const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
-                            kernel.run_argument_list.append(drive_options) catch unreachable;
+                            try kernel.run_argument_list.append(drive_options);
                         },
                         .ide => {
-                            kernel.run_argument_list.append("-device") catch unreachable;
+                            try kernel.run_argument_list.append("-device");
                             std.assert(kernel.options.arch == .x86_64);
-                            kernel.run_argument_list.append("piix3-ide,id=ide") catch unreachable;
+                            try kernel.run_argument_list.append("piix3-ide,id=ide");
 
-                            kernel.run_argument_list.append("-drive") catch unreachable;
-                            kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path })) catch unreachable;
-                            kernel.run_argument_list.append("-device") catch unreachable;
+                            try kernel.run_argument_list.append("-drive");
+                            try kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path }));
+                            try kernel.run_argument_list.append("-device");
                             // ide bus port is hardcoded to avoid errors
-                            kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ide.0", .{disk_id})) catch unreachable;
+                            try kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ide.0", .{disk_id}));
                         },
                         .ahci => {
-                            kernel.run_argument_list.append("-device") catch unreachable;
-                            kernel.run_argument_list.append("ahci,id=ahci") catch unreachable;
+                            try kernel.run_argument_list.append("-device");
+                            try kernel.run_argument_list.append("ahci,id=ahci");
 
-                            kernel.run_argument_list.append("-drive") catch unreachable;
-                            kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path })) catch unreachable;
-                            kernel.run_argument_list.append("-device") catch unreachable;
+                            try kernel.run_argument_list.append("-drive");
+                            try kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path }));
+                            try kernel.run_argument_list.append("-device");
                             // ide bus port is hardcoded to avoid errors
-                            kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ahci.0", .{disk_id})) catch unreachable;
+                            try kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ahci.0", .{disk_id}));
                         },
 
                         else => unreachable,
                     }
                 }
 
-                // Here the arch-specific stuff start and that's why the lists are split.
-                //kernel.run_argument_list.append("-machine") catch unreachable;
-                kernel.debug_argument_list = kernel.run_argument_list.clone() catch unreachable;
-                //const machine = switch (kernel.options.arch) {
-                //.x86_64 => "q35",
-                //.riscv64 => "virt",
-                //else => unreachable,
-                //};
-                //kernel.debug_argument_list.append(machine) catch unreachable;
+                kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {
                     const args = &.{ "-enable-kvm", "-cpu", "host" };
-                    kernel.run_argument_list.appendSlice(args) catch unreachable;
-                    kernel.debug_argument_list.appendSlice(args) catch unreachable;
+                    try kernel.run_argument_list.appendSlice(args);
+                    try kernel.debug_argument_list.appendSlice(args);
                 } else {
-                    //kernel.run_argument_list.append(machine) catch unreachable;
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
                         var log_what = std.ArrayListManaged(u8).init(kernel.builder.allocator);
-                        if (log_options.guest_errors) log_what.appendSlice("guest_errors,") catch unreachable;
-                        if (log_options.cpu) log_what.appendSlice("cpu,") catch unreachable;
-                        if (log_options.interrupts) log_what.appendSlice("int,") catch unreachable;
-                        if (log_options.assembly) log_what.appendSlice("in_asm,") catch unreachable;
+                        if (log_options.guest_errors) try log_what.appendSlice("guest_errors,");
+                        if (log_options.cpu) try log_what.appendSlice("cpu,");
+                        if (log_options.interrupts) try log_what.appendSlice("int,");
+                        if (log_options.assembly) try log_what.appendSlice("in_asm,");
 
                         if (log_what.items.len > 0) {
                             // Delete the last comma
                             _ = log_what.pop();
 
                             const log_flag = "-d";
-                            kernel.run_argument_list.append(log_flag) catch unreachable;
-                            kernel.debug_argument_list.append(log_flag) catch unreachable;
-                            kernel.run_argument_list.append(log_what.items) catch unreachable;
-                            kernel.debug_argument_list.append(log_what.items) catch unreachable;
+                            try kernel.run_argument_list.append(log_flag);
+                            try kernel.debug_argument_list.append(log_flag);
+                            try kernel.run_argument_list.append(log_what.items);
+                            try kernel.debug_argument_list.append(log_what.items);
                         }
 
                         if (log_options.file) |log_file| {
                             const log_file_flag = "-D";
-                            kernel.run_argument_list.append(log_file_flag) catch unreachable;
-                            kernel.debug_argument_list.append(log_file_flag) catch unreachable;
-                            kernel.run_argument_list.append(log_file) catch unreachable;
-                            kernel.debug_argument_list.append(log_file) catch unreachable;
+                            try kernel.run_argument_list.append(log_file_flag);
+                            try kernel.debug_argument_list.append(log_file_flag);
+                            try kernel.run_argument_list.append(log_file);
+                            try kernel.debug_argument_list.append(log_file);
                         }
                     }
                 }
 
-                add_qemu_debug_isa_exit(kernel.builder, &kernel.run_argument_list, switch (kernel.options.arch) {
+                try add_qemu_debug_isa_exit(kernel.builder, &kernel.run_argument_list, switch (kernel.options.arch) {
                     .x86_64 => std.QEMU.x86_64_debug_exit,
-                    else => unreachable,
-                }) catch unreachable;
+                    else => return Error.not_implemented,
+                });
 
                 if (!kernel.options.is_virtualizing()) {
-                    kernel.debug_argument_list.append("-S") catch unreachable;
+                    try kernel.debug_argument_list.append("-S");
                 }
 
-                kernel.debug_argument_list.append("-s") catch unreachable;
+                try kernel.debug_argument_list.append("-s");
             },
         }
 
@@ -704,28 +711,27 @@ pub const Kernel = struct {
 
         switch (kernel.options.arch) {
             .x86_64 => run_command.step.dependOn(&kernel.boot_image_step),
-            else => unreachable,
+            else => return Error.not_implemented,
         }
 
         var gdb_script_buffer = std.ArrayListManaged(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
-            .x86_64 => gdb_script_buffer.appendSlice("set disassembly-flavor intel\n") catch unreachable,
-            else => {},
+            .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
+            else => return Error.not_implemented,
         }
-        if (kernel.options.is_virtualizing()) {
-            gdb_script_buffer.appendSlice(
-                \\symbol-file zig-cache/kernel.elf
-                \\target remote localhost:1234
-                \\c
-            ) catch unreachable;
-        } else {
-            gdb_script_buffer.appendSlice(
-                \\symbol-file zig-cache/kernel.elf
-                \\target remote localhost:1234
-                \\b kernel_entry_point
-                \\c
-            ) catch unreachable;
-        }
+
+        const gdb_script_chunk = if (kernel.options.is_virtualizing())
+            \\symbol-file zig-cache/kernel.elf
+            \\target remote localhost:1234
+            \\c
+        else
+            \\symbol-file zig-cache/kernel.elf
+            \\target remote localhost:1234
+            \\b kernel_entry_point
+            \\c
+            ;
+
+        try gdb_script_buffer.appendSlice(gdb_script_chunk);
 
         kernel.gdb_script = kernel.builder.addWriteFile("gdb_script", gdb_script_buffer.items);
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);

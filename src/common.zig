@@ -356,6 +356,7 @@ pub const ELF = @import("common/elf.zig");
 pub const Filesystem = @import("common/filesystem.zig");
 pub const List = @import("common/list.zig");
 pub const Message = @import("common/message.zig");
+pub const Module = @import("common/module.zig");
 pub const QEMU = @import("common/qemu.zig");
 pub const RNUFS = @import("common/rnufs.zig");
 pub const Syscall = @import("common/syscall.zig");

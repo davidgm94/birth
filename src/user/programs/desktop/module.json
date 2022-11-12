@@ -1,0 +1,4 @@
+{
+    "type" : "zig_exe",
+    "dependencies": []
+}
