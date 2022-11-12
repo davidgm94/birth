@@ -18,7 +18,7 @@ const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const arch = @import("arch");
 
 pub const Region = struct {
-    virtual: VirtualAddress = VirtualAddress{ .value = 0 },
+    virtual: VirtualAddress = VirtualAddress.invalid(),
     size: u64 = 0,
     allocated: u64 = 0,
 };
@@ -47,7 +47,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
         const region = blk: {
             for (virtual_address_space.heap.regions) |*region| {
                 if (region.size > 0) {
-                    const aligned_allocated = region.virtual.offset(region.allocated).aligned_forward(alignment).value - region.virtual.value;
+                    const aligned_allocated = region.virtual.offset(region.allocated).aligned_forward(alignment).value() - region.virtual.value();
                     if (region.size < aligned_allocated + size) continue;
                     //assert((region.size - region.allocated) >= size);
                     region.allocated = aligned_allocated;
@@ -65,7 +65,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
                     };
 
                     // Avoid footguns
-                    assert(is_aligned(region.virtual.value, alignment));
+                    assert(region.virtual.is_aligned(alignment));
 
                     break :blk region;
                 }
@@ -74,7 +74,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
             @panic("heap out of memory");
         };
 
-        const result_address = region.virtual.value + region.allocated;
+        const result_address = region.virtual.value() + region.allocated;
         if (common.config.safe_slow) {
             assert(virtual_address_space.translate_address(VirtualAddress.new(align_backward(result_address, 0x1000))) != null);
         }
@@ -93,7 +93,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
         log.debug("Big allocation happened!", .{});
 
         return .{
-            .address = virtual_address.value,
+            .address = virtual_address.value(),
             .size = size,
         };
     }

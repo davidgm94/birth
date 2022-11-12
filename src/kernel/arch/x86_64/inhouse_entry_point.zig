@@ -3,6 +3,8 @@ const assert = common.assert;
 const logger = common.log.scoped(.EntryPoint);
 
 const privileged = @import("privileged");
+const CoreDirector = privileged.CoreDirector;
+const CoreSupervisor = privileged.CoreSupervisor;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
@@ -155,25 +157,39 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
 fn kernel_startup() noreturn {
     if (x86_64.APIC.is_bsp) {
-        spawn_bsp_init();
+        spawn_bsp_init() catch {
+            @panic("Can't spawn init");
+        };
     } else {
         @panic("AP initialization");
     }
     CPU.stop();
 }
 
-fn spawn_bsp_init() void {
+fn spawn_bsp_init() !void {
     assert(x86_64.APIC.is_bsp);
-    spawn_init_common();
+    try spawn_init_common();
     @panic("Todo spawn bsp init");
 }
 
-fn spawn_init_common() void {
-    spawn_module();
+fn spawn_init_common() !void {
+    try spawn_module();
     @panic("todo spawn_init_common");
 }
 
-fn spawn_module() void {
+var core_supervisor: CoreSupervisor = undefined;
+export var current_core_supervisor = &core_supervisor;
+export var current_core_director: *CoreDirector = undefined;
+
+fn spawn_module() !void {
+    const root_cn = &current_core_supervisor.init_rootcn;
+    _ = root_cn;
+    try privileged.MappingDatabase.init(current_core_supervisor);
+    current_core_supervisor.is_valid = true;
+    current_core_supervisor.scheduler_type = .round_robin;
+
+    // create capability root node
+
     @panic("spawn_module");
 }
 

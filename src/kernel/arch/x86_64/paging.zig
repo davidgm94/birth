@@ -52,17 +52,17 @@ pub fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_
                     var virtual_address = asked_virtual_address;
                     var physical_address = asked_physical_address;
 
-                    while (virtual_address.value < top_virtual_address.value) : ({
-                        physical_address.value += reverse_page_size;
-                        virtual_address.value += reverse_page_size;
+                    while (virtual_address.value() < top_virtual_address.value()) : ({
+                        physical_address.add_offset(reverse_page_size);
+                        virtual_address.add_offset(reverse_page_size);
                     }) {
                         try map_4k_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
                     }
 
                     break;
                 } else {
-                    const aligned_page_address = common.align_forward(asked_virtual_address.value, reverse_page_size);
-                    const prologue_misalignment = aligned_page_address - asked_virtual_address.value;
+                    const aligned_page_address = common.align_forward(asked_virtual_address.value(), reverse_page_size);
+                    const prologue_misalignment = aligned_page_address - asked_virtual_address.value();
                     const aligned_size_left = size - prologue_misalignment;
 
                     if (aligned_size_left >= reverse_page_size) {
@@ -76,10 +76,10 @@ pub fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_
                         log.debug("Asked: {}. Aligned: {}", .{ asked_physical_address, physical_address });
                         const this_page_top_physical_address = physical_address.offset(aligned_size_left).aligned_backward(reverse_page_size);
                         const this_page_top_virtual_address = virtual_address.offset(aligned_size_left).aligned_backward(reverse_page_size);
-                        const this_huge_page_size = this_page_top_virtual_address.value - virtual_address.value;
+                        const this_huge_page_size = this_page_top_virtual_address.value() - virtual_address.value();
                         try map_generic(virtual_address_space, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
 
-                        const epilogue_misalignment = top_virtual_address.value - this_page_top_virtual_address.value;
+                        const epilogue_misalignment = top_virtual_address.value() - this_page_top_virtual_address.value();
 
                         if (epilogue_misalignment != 0) {
                             log.debug("There is epilogue misalignment: 0x{x}", .{epilogue_misalignment});
@@ -127,11 +127,11 @@ fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_addre
     _ = reverse_index;
 
     if (true) {
-        if (!common.is_aligned(asked_physical_address.value, asked_page_size)) {
+        if (!asked_physical_address.is_aligned(asked_page_size)) {
             log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
             @panic("wtf 1");
         }
-        if (!common.is_aligned(asked_virtual_address.value, asked_page_size)) {
+        if (!asked_virtual_address.is_aligned(asked_page_size)) {
             @panic("wtf 2");
         }
         if (!common.is_aligned(size, asked_page_size)) {
@@ -152,27 +152,27 @@ fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_addre
     switch (asked_page_size) {
         // 1 GB
         0x1000 * 0x200 * 0x200 => {
-            while (virtual_address.value < top_virtual_address.value) : ({
-                physical_address.value += asked_page_size;
-                virtual_address.value += asked_page_size;
+            while (virtual_address.value() < top_virtual_address.value()) : ({
+                physical_address.add_offset(asked_page_size);
+                virtual_address.add_offset(asked_page_size);
             }) {
                 try map_1gb_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
             }
         },
         // 2 MB
         0x1000 * 0x200 => {
-            while (virtual_address.value < top_virtual_address.value) : ({
-                physical_address.value += asked_page_size;
-                virtual_address.value += asked_page_size;
+            while (virtual_address.value() < top_virtual_address.value()) : ({
+                physical_address.add_offset(asked_page_size);
+                virtual_address.add_offset(asked_page_size);
             }) {
                 try map_2mb_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
             }
         },
         // Smallest: 4 KB
         0x1000 => {
-            while (virtual_address.value < top_virtual_address.value) : ({
-                physical_address.value += asked_page_size;
-                virtual_address.value += asked_page_size;
+            while (virtual_address.value() < top_virtual_address.value()) : ({
+                physical_address.add_offset(asked_page_size);
+                virtual_address.add_offset(asked_page_size);
             }) {
                 try map_4k_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
             }
@@ -310,7 +310,7 @@ fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, ph
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address.value, arch.valid_page_sizes[2]));
+    assert(physical_address.is_aligned(arch.valid_page_sizes[2]));
 
     entry_pointer.* = @bitCast(PDPTE, get_page_entry(PDPTE_1GB, physical_address, flags));
 }
@@ -321,7 +321,7 @@ fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, phys
 
     if (entry_value.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address.value, arch.valid_page_sizes[1]));
+    assert(physical_address.is_aligned(arch.valid_page_sizes[1]));
 
     entry_pointer.* = @bitCast(PDTE, get_page_entry(PDTE_2MB, physical_address, flags));
 }
@@ -331,7 +331,7 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address.value, arch.valid_page_sizes[0]));
+    assert(physical_address.is_aligned(arch.valid_page_sizes[0]));
 
     entry_pointer.* = @bitCast(PTE, get_page_entry(PTE, physical_address, flags));
 }
@@ -638,7 +638,7 @@ pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddre
 
 fn compute_indices(virtual_address: VirtualAddress) Indices {
     var indices: Indices = undefined;
-    var va = virtual_address.value;
+    var va = virtual_address.value();
     va = va >> 12;
     indices[3] = @truncate(u9, va);
     va = va >> 9;
@@ -694,7 +694,7 @@ pub fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64)
     const result = arch.startup.bsp_address_space.allocate(size, arch.valid_page_sizes[0]) catch return CustomAllocator.Error.OutOfMemory;
 
     return CustomAllocator.Result{
-        .address = result.address.value,
+        .address = result.address.value(),
         .size = result.size,
     };
 }
@@ -773,7 +773,7 @@ fn get_address_type(comptime T: type) type {
 
 fn pack_address(comptime T: type, physical_address: PhysicalAddress) get_address_type(T) {
     const address_offset = @bitOffsetOf(T, "address");
-    return @intCast(get_address_type(T), physical_address.value >> address_offset);
+    return @intCast(get_address_type(T), physical_address.value() >> address_offset);
 }
 
 const PML4TE = packed struct(u64) {

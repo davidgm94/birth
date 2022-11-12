@@ -135,7 +135,7 @@ pub const cr3 = packed struct(usize) {
         };
 
         return .{
-            .address = @intCast(PackedAddressType, physical_address.value >> @bitOffsetOf(cr3, "address")),
+            .address = @intCast(PackedAddressType, physical_address.value() >> @bitOffsetOf(cr3, "address")),
         };
     }
 

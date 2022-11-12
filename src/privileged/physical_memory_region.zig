@@ -20,7 +20,7 @@ pub fn to_higher_half_virtual_address(physical_memory_region: PhysicalMemoryRegi
 
 pub fn to_identity_mapped_virtual_address(physical_memory_region: PhysicalMemoryRegion) VirtualMemoryRegion {
     return VirtualMemoryRegion{
-        .address = VirtualAddress.new(physical_memory_region.address.value),
+        .address = physical_memory_region.address.to_identity_mapped_virtual_address(),
         .size = physical_memory_region.size,
     };
 }

@@ -76,11 +76,11 @@ pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
-            assert(flags.user == (specific_address.value < common.config.kernel_higher_half_address));
+            assert(flags.user == (specific_address.value() < common.config.kernel_higher_half_address));
             break :blk specific_address;
         } else {
             if (flags.user) {
-                break :blk VirtualAddress.new(physical_region.address.value);
+                break :blk VirtualAddress.new(physical_region.address.value());
             } else {
                 break :blk physical_region.address.to_higher_half_virtual_address();
             }

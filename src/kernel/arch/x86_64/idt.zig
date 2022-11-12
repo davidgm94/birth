@@ -6,7 +6,7 @@ const log = common.log.scoped(.IDT);
 
 const privileged = @import("privileged");
 const panic = privileged.panic;
-const Director = privileged.Director;
+const CoreDirector = privileged.CoreDirector;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 
@@ -365,8 +365,6 @@ pub fn setup() void {
 //);
 //}
 
-export var current_director: *Director = undefined;
-
 const Frame = extern struct {
     rax: u64,
     rbx: u64,
@@ -467,9 +465,9 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 asm volatile (
                 // User code
                     \\pushq %rcx
-                    \\movq current_director(%rip), %rcx
+                    \\movq current_core_director(%rip), %rcx
                 );
-                asm volatile (comptimePrint("movq {}(%rcx), %rcx", .{@offsetOf(Director, "fp")}));
+                asm volatile (comptimePrint("movq {}(%rcx), %rcx", .{@offsetOf(CoreDirector, "fp")}));
                 asm volatile (
                 // Is page fault?
                     \\cmpq %[page_fault], 8(%rsp)
@@ -477,23 +475,23 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                     : [page_fault] "i" (Exception.page_fault),
                 );
                 asm volatile (comptimePrint("jne {}", .{@enumToInt(Tag.save_trap)}));
-                asm volatile (comptimePrint("cmpl $0, {}(%rcx)", .{@offsetOf(Director, "disabled")}));
+                asm volatile (comptimePrint("cmpl $0, {}(%rcx)", .{@offsetOf(CoreDirector, "disabled")}));
                 asm volatile (comptimePrint("jne {}", .{@enumToInt(Tag.save_trap)}));
                 asm volatile (
                     \\pushq %rbx
                     \\movq 4 * 8(%rsp), %rbx
                 );
 
-                asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.Director, "crit_pc_low")}));
+                asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.CoreDirector, "crit_pc_low")}));
                 asm volatile (comptimePrint("jae {}f", .{@enumToInt(Tag.disabled_test)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.save_enabled)}));
                 asm volatile (
                     \\popq %rbx
                 );
-                asm volatile (comptimePrint("addq ${}, %rcx", .{@offsetOf(arch.Director, "enabled_save_area")}));
+                asm volatile (comptimePrint("addq ${}, %rcx", .{@offsetOf(arch.CoreDirector, "enabled_save_area")}));
                 asm volatile (comptimePrint("jmp {}f", .{@enumToInt(Tag.do_save)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.disabled_test)}));
-                asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.Director, "crit_pc_high")}));
+                asm volatile (comptimePrint("cmpq {}(%rcx), %rbx", .{@offsetOf(arch.CoreDirector, "crit_pc_high")}));
                 asm volatile (comptimePrint("jae {}b", .{@enumToInt(Tag.save_enabled)}));
                 asm volatile (
                     \\popq %rbx
@@ -502,7 +500,7 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 asm volatile (
                     \\addq %[trap_save_area_offset], %rcx
                     :
-                    : [trap_save_area_offset] "i" (@offsetOf(arch.Director, "trap_save_area")),
+                    : [trap_save_area_offset] "i" (@offsetOf(arch.CoreDirector, "trap_save_area")),
                 );
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.do_save)}));
                 asm volatile (
@@ -586,29 +584,29 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
 
                 asm volatile (
                     \\pushq %rdx
-                    \\movq current_director(%rip), %rdx
+                    \\movq current_core_director(%rip), %rdx
                 );
 
-                asm volatile (comptimePrint("movq {}(%rdx), %rdx", .{@offsetOf(Director, "fp")}));
-                asm volatile (comptimePrint("cmpl $0, {}(%rdx)", .{@offsetOf(Director, "disabled")}));
+                asm volatile (comptimePrint("movq {}(%rdx), %rdx", .{@offsetOf(CoreDirector, "fp")}));
+                asm volatile (comptimePrint("cmpl $0, {}(%rdx)", .{@offsetOf(CoreDirector, "disabled")}));
                 asm volatile (comptimePrint("jne {}", .{@enumToInt(Tag.irq_save_disabled)}));
                 asm volatile (
                     \\pushq %rbx
                     \\movq 24(%rsp), %rbx
                 );
 
-                asm volatile (comptimePrint("cmpq {}(%rdx), %rbx", .{@offsetOf(arch.Director, "crit_pc_low")}));
+                asm volatile (comptimePrint("cmpq {}(%rdx), %rbx", .{@offsetOf(arch.CoreDirector, "crit_pc_low")}));
                 asm volatile (comptimePrint("jae {}", .{@enumToInt(Tag.irq_disabled_test)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.irq_save_enabled)}));
                 asm volatile (
                     \\popq %rbx
                     \\addq %[enabled_area_offset], %rbx
                     :
-                    : [enabled_area_offset] "i" (@offsetOf(arch.Director, "enabled_save_area")),
+                    : [enabled_area_offset] "i" (@offsetOf(arch.CoreDirector, "enabled_save_area")),
                 );
                 asm volatile (comptimePrint("jmp {}", .{@enumToInt(Tag.irq_do_save)}));
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.irq_disabled_test)}));
-                asm volatile (comptimePrint("cmpq {}(%rdx), %rbx", .{@offsetOf(arch.Director, "crit_pc_high")}));
+                asm volatile (comptimePrint("cmpq {}(%rdx), %rbx", .{@offsetOf(arch.CoreDirector, "crit_pc_high")}));
                 asm volatile (comptimePrint("jae {}", .{@enumToInt(Tag.irq_save_enabled)}));
                 asm volatile (
                     \\popq %rbx
@@ -617,7 +615,7 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 asm volatile (
                     \\addq %[disabled_area_offset], %rdx
                     :
-                    : [disabled_area_offset] "i" (@offsetOf(arch.Director, "disabled_save_area")),
+                    : [disabled_area_offset] "i" (@offsetOf(arch.CoreDirector, "disabled_save_area")),
                 );
                 asm volatile (comptimePrint("{}:", .{@enumToInt(Tag.irq_do_save)}));
                 asm volatile (

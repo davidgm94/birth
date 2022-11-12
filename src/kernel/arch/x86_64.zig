@@ -1,7 +1,7 @@
 const common = @import("common");
 
-const RNU = @import("RNU");
-const PhysicalAddress = RNU.PhysicalAddress;
+const privileged = @import("privileged");
+const PhysicalAddress = privileged.PhysicalAddress;
 
 pub const APIC = @import("x86_64/apic.zig");
 pub const Context = @import("x86_64/context.zig");
@@ -10,7 +10,7 @@ pub const CPU = @import("x86_64/cpu.zig");
 pub const CPUID = @import("x86_64/cpuid.zig");
 pub const DefaultWriter = @import("x86_64/serial_writer.zig");
 pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
-pub const Director = @import("x86_64/director.zig");
+pub const CoreDirector = @import("x86_64/core_director.zig");
 pub const drivers = @import("x86_64/drivers.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const IDT = @import("x86_64/idt.zig");
@@ -39,3 +39,7 @@ pub const reasonable_page_size = valid_page_sizes[1];
 pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
     return @ctz(@as(u32, asked_page_size));
 }
+
+pub const idt_entry_count = 256;
+pub const idt_exception_count = 32;
+pub const dispatch_count = idt_entry_count - idt_exception_count;

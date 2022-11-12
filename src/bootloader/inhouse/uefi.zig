@@ -215,10 +215,10 @@ pub fn main() noreturn {
 
     for (program_segments) |*segment| {
         const virtual_address = VirtualAddress.new(segment.virtual & 0xffff_ffff_ffff_f000);
-        const address_misalignment = @intCast(u32, segment.virtual - virtual_address.value);
+        const address_misalignment = @intCast(u32, segment.virtual - virtual_address.value());
         const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, UEFI.page_size));
         const physical_address = PhysicalAddress.new(segments_allocation + allocated_segment_memory); // UEFI uses identity mapping
-        segment.physical = physical_address.value + address_misalignment;
+        segment.physical = physical_address.value() + address_misalignment;
         allocated_segment_memory += aligned_segment_size;
         const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
         const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_file_content.ptr) + segment.file_offset)[0..segment.size];
@@ -236,7 +236,7 @@ pub fn main() noreturn {
         const stack_page_count = 10;
         const stack_size = stack_page_count << UEFI.page_shifter;
         const stack_physical_address = PhysicalAddress.new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
-        break :blk stack_physical_address.to_higher_half_virtual_address().value + stack_size;
+        break :blk stack_physical_address.to_higher_half_virtual_address().value() + stack_size;
     };
 
     const gdt_descriptor = blk: {
@@ -251,7 +251,7 @@ pub fn main() noreturn {
         const trampoline_code_start = @ptrToInt(&load_kernel);
         const trampoline_code_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
         const code_physical_base_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, UEFI.page_size));
-        const misalignment = trampoline_code_start - code_physical_base_page.value;
+        const misalignment = trampoline_code_start - code_physical_base_page.value();
         const trampoline_size_to_map = common.align_forward(misalignment + trampoline_code_size, UEFI.page_size);
         paging.bootstrap_map(&kernel_address_space, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
     }

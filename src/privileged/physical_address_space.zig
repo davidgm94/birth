@@ -25,13 +25,13 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_s
     const allocated_region = blk: {
         while (node_ptr) |node| : (node_ptr = node.next) {
             const result_address = node.descriptor.address.aligned_forward(page_size);
-            const size_up = size + result_address.value - node.descriptor.address.value;
+            const size_up = size + result_address.value() - node.descriptor.address.value();
             if (node.descriptor.size > size_up) {
                 const allocated_region = PhysicalMemoryRegion{
                     .address = result_address,
                     .size = size,
                 };
-                node.descriptor.address.value += size_up;
+                node.descriptor.address.add_offset(size_up);
                 node.descriptor.size -= size_up;
 
                 break :blk allocated_region;

@@ -58,9 +58,9 @@ pub const MemoryMap = struct {
 
         pub fn next(it: *Iterator, memory_map: MemoryMap) ?*MemoryDescriptor {
             if (it.offset < memory_map.region.size) {
-                const descriptor_address = memory_map.region.address.value + it.offset;
+                const descriptor_address = memory_map.region.address.offset(it.offset);
                 it.offset += memory_map.descriptor_size;
-                return @intToPtr(*MemoryDescriptor, descriptor_address);
+                return @intToPtr(*MemoryDescriptor, descriptor_address.value());
             }
 
             return null;
