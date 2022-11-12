@@ -82,8 +82,9 @@ pub fn main() noreturn {
         break :blk root;
     };
 
-    var kernel_file = File.get(filesystem_root, "kernel.elf");
-    logger.debug("Got files", .{});
+    var kernel_file = File.get(filesystem_root, "kernel.elf") catch @panic("Can't read kernel file");
+    var init_file = File.get(filesystem_root, "init") catch @panic("Can't read init file");
+    const total_file_size = kernel_file.size + init_file.size;
 
     const bootstrap_memory = blk: {
         var memory_map_size: usize = 0;
@@ -94,7 +95,7 @@ pub fn main() noreturn {
         logger.debug("Expected size: {}. Actual size: {}. Descriptor version: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor), memory_map_descriptor_version });
         memory_map_size = common.align_forward(memory_map_size + UEFI.page_size, UEFI.page_size);
 
-        const size = kernel_file.size + memory_map_size;
+        const size = total_file_size + memory_map_size;
 
         //allocatePages: std.meta.FnPtr(fn (alloc_type: AllocateType, mem_type: MemoryType, pages: usize, memory: *[*]align(4096) u8) callconv(.C) Status),
         var memory: []align(UEFI.page_size) u8 = undefined;
@@ -104,13 +105,15 @@ pub fn main() noreturn {
     };
 
     const kernel_file_content = kernel_file.read(bootstrap_memory[0..kernel_file.size]);
+    const init_file_content = kernel_file.read(bootstrap_memory[kernel_file.size..][0..init_file.size]);
+    _ = init_file_content;
 
     logger.debug("Trying to get memory map", .{});
 
     var memory_manager = MemoryManager{
         .map = UEFI.MemoryMap{
             .region = .{
-                .address = VirtualAddress.new(@ptrToInt(bootstrap_memory.ptr) + kernel_file.size),
+                .address = VirtualAddress.new(@ptrToInt(bootstrap_memory.ptr) + total_file_size),
                 .size = 0,
             },
             .descriptor_size = 0,
@@ -285,6 +288,14 @@ pub fn main() noreturn {
         .memory_map = memory_manager.map.to_higher_half(),
         .counters = memory_manager.size_counters.to_higher_half(),
         .rsdp_physical_address = rsdp_physical_address,
+        .kernel_file = .{
+            .offset = 0,
+            .size = kernel_file.size,
+        },
+        .init_file = .{
+            .offset = kernel_file.size,
+            .size = init_file.size,
+        },
     };
 
     load_kernel(bootloader_information.to_higher_half_virtual_address().access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor);

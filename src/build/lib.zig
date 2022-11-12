@@ -462,7 +462,7 @@ pub const Kernel = struct {
         while (try it.next()) |module_entry| {
             if (module_entry.kind == .Directory) {
                 const module_dir = try user_programs_dir.dir.openDir(module_entry.name, .{});
-                const module_configuration_file = try module_dir.readFileAlloc(kernel.builder.allocator, "module.json", 0x1000 * 16);
+                const module_configuration_file = module_dir.readFileAlloc(kernel.builder.allocator, "module.json", 0x1000 * 16) catch return Error.module_file_not_found;
                 const module = try Module.parse(kernel.builder.allocator, module_configuration_file);
                 // TODO: change path
                 const source_file_path = try std.concatenate(kernel.builder.allocator, u8, &.{ user_programs_path, "/", module_entry.name, "/main.zig" });
@@ -515,6 +515,7 @@ pub const Kernel = struct {
 
     const Error = error{
         not_implemented,
+        module_file_not_found,
     };
 
     fn create_run_and_debug_steps(kernel: *Kernel) !void {
@@ -764,6 +765,8 @@ pub const Kernel = struct {
 
                             try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
                             try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
+                            // TODO: copy all userspace programs
+                            try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
                         },
                         .limine => {
                             const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});

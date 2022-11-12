@@ -77,6 +77,13 @@ pub const BootloaderInformation = struct {
     memory_map: MemoryMap,
     counters: []u32,
     rsdp_physical_address: PhysicalAddress,
+    kernel_file: BootstrapChunk,
+    init_file: BootstrapChunk,
+};
+
+pub const BootstrapChunk = struct {
+    offset: usize,
+    size: usize,
 };
 
 pub const MemoryCategory = enum {
@@ -105,15 +112,15 @@ pub const File = struct {
     handle: *FileProtocol,
     size: u32,
 
-    pub fn get(filesystem_root: *FileProtocol, comptime name: []const u8) File {
+    pub fn get(filesystem_root: *FileProtocol, comptime name: []const u8) !File {
         var file: *FileProtocol = undefined;
         const filename = str16(name);
-        result(@src(), filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
+        try uefi_error(filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
         const file_size = blk: {
             // TODO: figure out why it is succeeding with 16 and not with 8
             var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(filename)) + 0x100]u8 align(@alignOf(FileInfo)) = undefined;
             var file_info_size = buffer.len;
-            result(@src(), file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
+            try uefi_error(file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
             const file_info = @ptrCast(*FileInfo, &buffer);
             log.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
             break :blk @intCast(u32, common.align_forward(file_info.file_size + page_size, page_size));

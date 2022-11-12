@@ -42,8 +42,6 @@ pub fn build(b: *Build.Builder) void {
     };
 
     kernel.create() catch |err| {
-        const stack_trace = @errorReturnTrace() orelse unreachable;
-        common.std.debug.dumpStackTrace(stack_trace.*);
-        common.std.debug.panic("Kernel failed to build: {}", .{err});
+        common.std.debug.panicExtra(@errorReturnTrace(), null, "Kernel failed to build: {}", .{err});
     };
 }
