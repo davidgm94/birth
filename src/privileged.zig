@@ -70,6 +70,7 @@ pub const CoreDirector = struct {
 };
 
 pub const PhysicalAddress = enum(usize) {
+    null = 0,
     _,
 
     pub fn new(new_value: usize) PhysicalAddress {
@@ -93,7 +94,8 @@ pub const PhysicalAddress = enum(usize) {
     }
 
     pub fn is_valid(physical_address: PhysicalAddress) bool {
-        assert(physical_address.value() != 0);
+        if (physical_address == PhysicalAddress.null) return false;
+
         assert(arch.max_physical_address_bit != 0);
         const max = @as(usize, 1) << arch.max_physical_address_bit;
         assert(max > common.max_int(u32));
@@ -163,7 +165,7 @@ pub const VirtualAddress = enum(usize) {
     null = 0,
     _,
 
-    pub fn new(new_value: u64) VirtualAddress {
+    pub fn new(new_value: usize) VirtualAddress {
         const virtual_address = @intToEnum(VirtualAddress, new_value);
         assert(virtual_address.is_valid());
         return virtual_address;
@@ -178,14 +180,14 @@ pub const VirtualAddress = enum(usize) {
     }
 
     pub fn is_valid(virtual_address: VirtualAddress) bool {
-        return virtual_address.value() != 0;
+        return virtual_address != VirtualAddress.null;
     }
 
     pub fn access(virtual_address: VirtualAddress, comptime Ptr: type) Ptr {
         return @intToPtr(Ptr, virtual_address.value());
     }
 
-    pub fn offset(virtual_address: VirtualAddress, asked_offset: u64) VirtualAddress {
+    pub fn offset(virtual_address: VirtualAddress, asked_offset: usize) VirtualAddress {
         return @intToEnum(VirtualAddress, virtual_address.value() + asked_offset);
     }
 
@@ -193,19 +195,19 @@ pub const VirtualAddress = enum(usize) {
         virtual_address.* = virtual_address.offset(asked_offset);
     }
 
-    pub fn aligned_forward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
+    pub fn aligned_forward(virtual_address: VirtualAddress, alignment: usize) VirtualAddress {
         return @intToEnum(VirtualAddress, common.align_forward(virtual_address.value(), alignment));
     }
 
-    pub fn aligned_backward(virtual_address: VirtualAddress, alignment: u64) VirtualAddress {
+    pub fn aligned_backward(virtual_address: VirtualAddress, alignment: usize) VirtualAddress {
         return @intToEnum(VirtualAddress, common.align_backward(virtual_address.value(), alignment));
     }
 
-    pub fn align_forward(virtual_address: *VirtualAddress, alignment: u64) void {
+    pub fn align_forward(virtual_address: *VirtualAddress, alignment: usize) void {
         virtual_address.* = virtual_address.aligned_forward(alignment);
     }
 
-    pub fn align_backward(virtual_address: *VirtualAddress, alignment: u64) void {
+    pub fn align_backward(virtual_address: *VirtualAddress, alignment: usize) void {
         virtual_address.* = virtual_address.aligned_backward(alignment);
     }
 
