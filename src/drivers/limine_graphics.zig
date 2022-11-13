@@ -3,8 +3,8 @@ const Driver = @This();
 const common = @import("common");
 const log = common.log.scoped(.LimineGraphics);
 
-const RNU = @import("RNU");
-const Graphics = RNU.Graphics;
+const rise = @import("rise");
+const Graphics = rise.Graphics;
 
 const kernel = @import("kernel");
 

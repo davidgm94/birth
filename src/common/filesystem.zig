@@ -1,5 +1,5 @@
 pub const Type = enum(u32) {
-    RNU = 0,
+    rise = 0,
     ext2 = 1,
 };
 

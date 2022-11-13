@@ -3,13 +3,13 @@ const assert = common.assert;
 const string_eq = common.string_eq;
 const log = common.log.scoped(.ACPI);
 
-const RNU = @import("RNU");
-const DeviceManager = RNU.DeviceManager;
-const panic = RNU.panic;
-const PhysicalAddress = RNU.PhysicalAddress;
-const TODO = RNU.TODO;
-const VirtualAddress = RNU.VirtualAddress;
-const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const rise = @import("rise");
+const DeviceManager = rise.DeviceManager;
+const panic = rise.panic;
+const PhysicalAddress = rise.PhysicalAddress;
+const TODO = rise.TODO;
+const VirtualAddress = rise.VirtualAddress;
+const VirtualAddressSpace = rise.VirtualAddressSpace;
 
 const arch = @import("arch");
 const interrupts = arch.interrupts;

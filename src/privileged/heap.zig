@@ -15,7 +15,7 @@ const TODO = privileged.TODO;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
-const arch = @import("arch");
+const page_size = common.arch.page_size;
 
 pub const Region = struct {
     virtual: VirtualAddress = VirtualAddress.invalid(),
@@ -30,7 +30,7 @@ allocator: Allocator = .{
 },
 regions: [region_count]Region = [1]Region{.{}} ** region_count,
 
-const region_size = 1024 * arch.page_size;
+const region_size = 1024 * page_size;
 pub const region_count = 0x1000_0000 / region_size;
 
 fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator.Error!Allocator.Result {
@@ -85,7 +85,7 @@ fn allocate_function(allocator: *Allocator, size: u64, alignment: u64) Allocator
             .size = size,
         };
     } else {
-        const allocation_size = align_forward(size, arch.page_size);
+        const allocation_size = align_forward(size, page_size);
         const virtual_address = virtual_address_space.allocate(allocation_size, null, flags) catch |err| {
             log.err("Error allocating big chunk from VAS: {}", .{err});
             return Allocator.Error.OutOfMemory;

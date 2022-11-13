@@ -7,8 +7,6 @@ const log = common.log.scoped(.PhysicalAddressSpace);
 const privileged = @import("privileged");
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 
-const arch = @import("arch");
-
 free_list: List = .{},
 
 const AllocateError = error{
@@ -18,7 +16,7 @@ const AllocateError = error{
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion {
     log.debug("Trying to allocate {} bytes of physical memory", .{size});
-    if (!common.is_aligned(size, arch.valid_page_sizes[0])) return AllocateError.not_base_page_aligned;
+    if (!common.is_aligned(size, privileged.arch.valid_page_sizes[0])) return AllocateError.not_base_page_aligned;
 
     var node_ptr = physical_address_space.free_list.first;
 

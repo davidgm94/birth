@@ -1,4 +1,4 @@
-# RNU - Renaissance is NOT UNIX!
+# Rise
 
 An experiment of kernel for 64-bit systems which focuses on learning to build a better operating system.
 

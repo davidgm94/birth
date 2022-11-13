@@ -378,6 +378,16 @@ const Type = enum(u8) {
     DeviceID = 67,
 };
 
+pub const Size = enum(u64) {
+    l2cnode = 16384,
+    dispatcher = 1024,
+    vnode = 4096,
+    vnode_arm_l1 = 16384,
+    vnode_arm_l2 = 1024,
+    kcb = 131072,
+    mapping = 1,
+};
+
 //enum objdefines {
 //OBJSIZE_L2CNODE = 16384,
 //OBJSIZE_DISPATCHER = 1024,

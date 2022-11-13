@@ -10,13 +10,13 @@ const zero = common.zero;
 const zeroes = common.zeroes;
 const zero_slice = common.zero_slice;
 
-const RNU = @import("RNU");
-const DeviceManager = RNU.DeviceManager;
-const Disk = RNU.Disk;
-const DMA = RNU.Drivers.DMA;
-const PhysicalAddress = RNU.PhysicalAddress;
-const VirtualAddress = RNU.VirtualAddress;
-const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const rise = @import("rise");
+const DeviceManager = rise.DeviceManager;
+const Disk = rise.Disk;
+const DMA = rise.Drivers.DMA;
+const PhysicalAddress = rise.PhysicalAddress;
+const VirtualAddress = rise.VirtualAddress;
+const VirtualAddressSpace = rise.VirtualAddressSpace;
 
 const arch = @import("arch");
 

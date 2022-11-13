@@ -6,12 +6,12 @@ const assert = common.assert;
 const log = common.log.scoped(.PCI);
 const zeroes = common.zeroes;
 
-const RNU = @import("RNU");
-const DeviceManager = RNU.DeviceManager;
-const panic = RNU.panic;
-const PhysicalAddress = RNU.PhysicalAddress;
-const VirtualAddress = RNU.VirtualAddress;
-const VirtualAddressSpace = RNU.VirtualAddressSpace;
+const rise = @import("rise");
+const DeviceManager = rise.DeviceManager;
+const panic = rise.panic;
+const PhysicalAddress = rise.PhysicalAddress;
+const VirtualAddress = rise.VirtualAddress;
+const VirtualAddressSpace = rise.VirtualAddressSpace;
 
 const arch = @import("arch");
 

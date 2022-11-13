@@ -19,8 +19,7 @@ const ResourceOwner = privileged.ResourceOwner;
 const Spinlock = privileged.Spinlock;
 const VirtualAddress = privileged.VirtualAddress;
 
-const arch = @import("arch");
-const paging = arch.paging;
+const paging = privileged.arch.paging;
 
 id: u64,
 arch: paging.Specific,
@@ -71,8 +70,11 @@ const Result = struct {
 pub fn allocate_extended(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags, comptime already_locked: AlreadyLocked) !Result {
     _ = already_locked;
 
-    assert(common.is_aligned(byte_count, arch.page_size));
-    const physical_region = arch.startup.bsp_address_space.allocate(byte_count, arch.valid_page_sizes[0]) catch return Allocator.Error.OutOfMemory;
+    assert(common.is_aligned(byte_count, common.arch.page_size));
+
+    if (true) unreachable;
+    const physical_region = PhysicalMemoryRegion{ .address = PhysicalAddress.invalid(), .size = 0 };
+    //const physical_region = arch.startup.bsp_address_space.allocate(byte_count, arch.valid_page_sizes[0]) catch return Allocator.Error.OutOfMemory;
 
     const virtual_address = blk: {
         if (maybe_specific_address) |specific_address| {
@@ -119,8 +121,8 @@ pub const AlreadyLocked = enum {
 
 pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_address: PhysicalAddress, base_virtual_address: VirtualAddress, size: u64, flags: Flags, comptime already_locked: AlreadyLocked) MapError!void {
     _ = already_locked;
-    if (!is_aligned(size, arch.page_size)) {
-        panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, arch.page_size, arch.page_size });
+    if (!is_aligned(size, common.arch.page_size)) {
+        panic("Size {}, 0x{x} is not aligned to page size {}, 0x{x}", .{ size, size, common.arch.page_size, common.arch.page_size });
     }
 
     log.debug("Mapping ({}, {}) to ({}, {}) - {}", .{ base_physical_address, base_physical_address.offset(size), base_virtual_address, base_virtual_address.offset(size), flags });
@@ -166,8 +168,8 @@ pub fn map_extended(virtual_address_space: *VirtualAddressSpace, base_physical_a
     const top_virtual_address = virtual_address.offset(size);
 
     while (virtual_address.value < top_virtual_address.value) : ({
-        physical_address.value += arch.page_size;
-        virtual_address.value += arch.page_size;
+        physical_address.value += common.arch.page_size;
+        virtual_address.value += common.arch.page_size;
     }) {
         try paging.map(virtual_address_space, physical_address, virtual_address, flags.to_arch_specific());
         if (common.config.safe_slow) {

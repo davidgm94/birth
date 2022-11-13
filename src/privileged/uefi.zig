@@ -19,10 +19,9 @@ pub const uefi_error = Status.err;
 
 const str16 = common.std.unicode.utf8ToUtf16LeStringLiteral;
 
-const arch = @import("arch");
-const CPU = arch.CPU;
+const CPU_stop = privileged.arch.CPU_stop;
 pub const page_size = 0x1000;
-pub const page_shifter = arch.page_shifter(page_size);
+pub const page_shifter = common.arch.page_shifter(page_size);
 
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
@@ -100,7 +99,7 @@ pub fn result(src: common.SourceLocation, status: Status) void {
 }
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     common.std.log.scoped(.PANIC).err(format, arguments);
-    CPU.stop();
+    CPU_stop();
 }
 
 pub const File = struct {
@@ -178,4 +177,4 @@ pub const ProgramSegment = extern struct {
     },
 };
 
-pub const LoadKernelFunction = fn (bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
+pub const LoadKernelFunction = fn (bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: privileged.arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *privileged.arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;

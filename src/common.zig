@@ -349,6 +349,7 @@ pub const CustomAllocator = extern struct {
     pub const Error = error{OutOfMemory};
 };
 
+pub const arch = @import("common/arch.zig");
 /// This is done so the allocator can respect allocating from different address spaces
 pub const config = @import("common/config.zig");
 pub const Disk = @import("common/disk.zig");
@@ -358,7 +359,7 @@ pub const List = @import("common/list.zig");
 pub const Message = @import("common/message.zig");
 pub const Module = @import("common/module.zig");
 pub const QEMU = @import("common/qemu.zig");
-pub const RNUFS = @import("common/rnufs.zig");
+pub const RiseFS = @import("common/risefs.zig");
 pub const Syscall = @import("common/syscall.zig");
 pub const Graphics = @import("common/graphics.zig");
 pub const Window = @import("common/window.zig");

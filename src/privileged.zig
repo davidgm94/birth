@@ -2,10 +2,13 @@ const common = @import("common");
 const assert = common.assert;
 
 // This package provides of privileged data structures and routines to both kernel and bootloaders, for now
-const crash = @import("privileged/crash.zig");
-pub const panic = crash.panic;
-pub const panic_extended = crash.panic_extended;
+// TODO: implement properly
+//const crash = @import("privileged/crash.zig");
+//pub const panic = crash.panic;
+//pub const panic_extended = crash.panic_extended;
 
+pub const arch = @import("privileged/arch.zig");
+pub const Capabilities = @import("privileged/capabilities.zig");
 pub const Heap = @import("privileged/heap.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const PhysicalAddressSpace = @import("privileged/physical_address_space.zig");
@@ -61,8 +64,6 @@ pub const SchedulerType = enum {
 pub const CTE = struct {
     // TODO:
 };
-
-const arch = @import("arch");
 
 pub const CoreDirector = struct {
     fp: u64,
