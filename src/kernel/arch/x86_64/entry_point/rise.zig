@@ -1,6 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
 const logger = common.log.scoped(.EntryPoint);
+const cpuid = common.arch.x86_64.cpuid;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
@@ -38,10 +39,8 @@ const MemoryMap = struct {
 };
 
 export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
-    for (bootloader_information.init_file[0..10]) |byte, i| {
-        logger.debug("[{}]: 0x{x}", .{ i, byte });
-    }
     logger.debug("Hello kernel", .{});
+    arch.paging.register_physical_allocator(&kernel.physical_allocator);
     IDT.setup();
     logger.debug("Loaded IDT", .{});
 
@@ -112,15 +111,13 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     logger.debug("Finished processing memory map", .{});
 
-    _ = free_physical_regions;
-    if (true) @panic("bsp address space");
-    //arch.startup.bsp_address_space = PhysicalAddressSpace{
-    //.free_list = .{
-    //.first = &free_physical_regions[0],
-    //.last = &free_physical_regions[free_physical_regions.len - 1],
-    //.count = free_physical_regions.len,
-    //},
-    //};
+    kernel.bootstrap_address_space = PhysicalAddressSpace{
+        .free_list = .{
+            .first = &free_physical_regions[0],
+            .last = &free_physical_regions[free_physical_regions.len - 1],
+            .count = free_physical_regions.len,
+        },
+    };
 
     const apic_base = APIC.init();
 
@@ -191,7 +188,8 @@ fn spawn_module() !void {
     current_core_supervisor.is_valid = true;
     current_core_supervisor.scheduler_type = .round_robin;
 
-    Capabilities.new(.l1_cnode, arch.startup.bsp_address_space.allocate(@enumToInt(Capabilities.Size.l2cnode), arch.valid_page_sizes[0]), @enumToInt(Capabilities.Size.l2cnode), kernel.core_id, root_cn);
+    const capabiliy_root_node_allocation = try kernel.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, arch.valid_page_sizes[0]);
+    try Capabilities.new(.L1CNode, capabiliy_root_node_allocation.address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, kernel.core_id, root_cn);
 
     // create capability root node
 
@@ -227,8 +225,8 @@ var monitor_mwait: struct {
 
     pub fn is_supported(mwait: *@This()) bool {
         if (!mwait.called) {
-            const cpuid = privileged.arch.x86_64.CPUID.cpuid(1);
-            mwait.supported = cpuid.ecx & (1 << 3) != 0;
+            const result = cpuid(1);
+            mwait.supported = result.ecx & (1 << 3) != 0;
             mwait.called = true;
         }
 

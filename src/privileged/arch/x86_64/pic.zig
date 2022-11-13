@@ -1,9 +1,8 @@
 const common = @import("common");
 const log = common.log.scoped(.PIC);
 
-const arch = @import("arch");
-const x86_64 = arch.x86_64;
-const io = x86_64.io;
+const privileged = @import("privileged");
+const io = privileged.arch.x86_64.io;
 
 pub const PIC1_command = io.Ports.PIC1;
 pub const PIC2_command = io.Ports.PIC2;

@@ -391,7 +391,7 @@ const Kernel = struct {
         // Initialize package dependencies here
         common_package.dependencies = &.{common_package};
         rise_package.dependencies = &.{ common_package, rise_package, kernel_package, privileged_package };
-        kernel_package.dependencies = &.{ common_package, rise_package, kernel_package };
+        kernel_package.dependencies = &.{ common_package, rise_package, privileged_package, kernel_package };
         user_package.dependencies = &.{common_package};
         privileged_package.dependencies = &.{ common_package, privileged_package };
 
@@ -1072,7 +1072,9 @@ fn do_debug_step(step: *Step) !void {
                 _ = try qemu_process.kill();
             }
         },
-        else => @compileError("OS not supported"),
+        else => {
+            @panic("todo implement");
+        },
     }
 }
 

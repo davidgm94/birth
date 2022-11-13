@@ -378,25 +378,15 @@ const Type = enum(u8) {
     DeviceID = 67,
 };
 
-pub const Size = enum(u64) {
-    l2cnode = 16384,
-    dispatcher = 1024,
-    vnode = 4096,
-    vnode_arm_l1 = 16384,
-    vnode_arm_l2 = 1024,
-    kcb = 131072,
-    mapping = 1,
+pub const Size = struct {
+    pub const l2cnode = 16384;
+    pub const dispatcher = 1024;
+    pub const vnode = 4096;
+    pub const vnode_arm_l1 = 16384;
+    pub const vnode_arm_l2 = 1024;
+    pub const kcb = 131072;
+    pub const mapping = 1;
 };
-
-//enum objdefines {
-//OBJSIZE_L2CNODE = 16384,
-//OBJSIZE_DISPATCHER = 1024,
-//OBJSIZE_VNODE = 4096,
-//OBJSIZE_VNODE_ARM_L1 = 16384,
-//OBJSIZE_VNODE_ARM_L2 = 1024,
-//OBJSIZE_KCB = 131072,
-//OBJSIZE_MAPPING = 1
-//};
 
 pub fn new(capability_type: Type, address: PhysicalAddress, bytes: usize, object_size: usize, owner: CoreId, cte: *CTE) !void {
     assert(capability_type != .EndPointLMP);
@@ -404,8 +394,8 @@ pub fn new(capability_type: Type, address: PhysicalAddress, bytes: usize, object
     _ = cte;
     _ = address;
 
-    check_arguments(capability_type, bytes, object_size, false);
-    @panic("todo");
+    assert(check_arguments(capability_type, bytes, object_size, false));
+    @panic("capabilities new todo");
 }
 
 pub fn check_arguments(capabilities_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
@@ -413,5 +403,5 @@ pub fn check_arguments(capabilities_type: Type, bytes: usize, object_size: usize
     _ = object_size;
     _ = bytes;
     _ = exact;
-    @panic("todo");
+    @panic("capabilities check arguments todo");
 }

@@ -1,14 +1,19 @@
 const common = @import("common");
 const assert = common.assert;
+const cpuid = common.arch.x86_64.CPUID;
 
 const privileged = @import("privileged");
 const VirtualAddress = privileged.VirtualAddress;
 
 pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
+pub const APIC = @import("x86_64/apic.zig");
 pub const GDT = @import("x86_64/gdt.zig");
 pub const IDT = @import("x86_64/idt.zig");
+pub const io = @import("x86_64/io.zig");
 pub const paging = @import("x86_64/paging.zig");
+pub const PIC = @import("x86_64/pic.zig");
 pub const registers = @import("x86_64/registers.zig");
+pub const Syscall = @import("x86_64/syscall.zig");
 pub const TSS = @import("x86_64/tss.zig");
 
 pub inline fn CPU_stop() noreturn {
@@ -91,3 +96,8 @@ pub const Registers = struct {
         assert(@sizeOf(Registers) == 672);
     }
 };
+
+/// Returns the maximum number bits a physical address is allowed to have in this CPU
+pub inline fn get_max_physical_address_bit() u6 {
+    return @truncate(u6, cpuid(0x80000008).eax);
+}

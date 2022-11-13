@@ -1,12 +1,14 @@
 const common = @import("common");
 const log = common.log.scoped(.APIC);
+const cpuid = common.arch.x86_64.cpuid;
 
 const privileged = @import("privileged");
 const VirtualAddress = privileged.VirtualAddress;
 
-const arch = @import("arch");
-const IA32_APIC_BASE = arch.x86_64.registers.IA32_APIC_BASE;
-const io = arch.x86_64.io;
+const arch = privileged.arch;
+const x86_64 = privileged.arch.x86_64;
+const IA32_APIC_BASE = x86_64.registers.IA32_APIC_BASE;
+const io = x86_64.io;
 
 const ID = packed struct(u32) {
     reserved: u24,
@@ -108,7 +110,7 @@ pub fn init() VirtualAddress {
     const id_register = ID.read(apic_base);
     const id = id_register.apic_id;
     _ = id;
-    const cpuid_result = arch.x86_64.CPUID.cpuid(1);
+    const cpuid_result = cpuid(1);
 
     // TODO: x2APIC
     if (cpuid_result.ecx & 0b10000_0000_0000_0000_0000 != 0) {
