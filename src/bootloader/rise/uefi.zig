@@ -65,7 +65,7 @@ pub fn main() noreturn {
     const rsdp_physical_address = blk: {
         for (configuration_tables) |configuration_table| {
             if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
-                break :blk PhysicalAddress.new(@ptrToInt(configuration_table.vendor_table));
+                break :blk PhysicalAddress(.global).new(@ptrToInt(configuration_table.vendor_table));
             }
         }
 
@@ -113,7 +113,7 @@ pub fn main() noreturn {
     var memory_manager = MemoryManager{
         .map = UEFI.MemoryMap{
             .region = .{
-                .address = VirtualAddress.new(@ptrToInt(bootstrap_memory.ptr) + total_file_size),
+                .address = VirtualAddress(.global).new(@ptrToInt(bootstrap_memory.ptr) + total_file_size),
                 .size = 0,
             },
             .descriptor_size = 0,
@@ -200,8 +200,8 @@ pub fn main() noreturn {
     var kernel_address_space = blk: {
         logger.debug("Big chunk", .{});
         const chunk_address = memory_manager.allocate(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space >> UEFI.page_shifter) catch @panic("Unable to get physical memory to bootstrap kernel address space");
-        const kernel_address_space_physical_region = PhysicalMemoryRegion{
-            .address = PhysicalAddress.new(chunk_address),
+        const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
+            .address = PhysicalAddress(.local).new(chunk_address),
             .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
         };
         break :blk VirtualAddressSpace.initialize_kernel_address_space_bsp(kernel_address_space_physical_region);
@@ -212,11 +212,11 @@ pub fn main() noreturn {
     var allocated_segment_memory: u32 = 0;
 
     for (program_segments) |*segment| {
-        const virtual_address = VirtualAddress.new(segment.virtual & 0xffff_ffff_ffff_f000);
-        const address_misalignment = @intCast(u32, segment.virtual - virtual_address.value());
+        const virtual_address_value = segment.virtual & 0xffff_ffff_ffff_f000;
+        const address_misalignment = @intCast(u32, segment.virtual - virtual_address_value);
         const aligned_segment_size = @intCast(u32, common.align_forward(segment.size + address_misalignment, UEFI.page_size));
-        const physical_address = PhysicalAddress.new(segments_allocation + allocated_segment_memory); // UEFI uses identity mapping
-        segment.physical = physical_address.value() + address_misalignment;
+        const physical_address_value = segments_allocation + allocated_segment_memory; // UEFI uses identity mapping
+        segment.physical = physical_address_value + address_misalignment;
         allocated_segment_memory += aligned_segment_size;
         const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
         const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_file_content.ptr) + segment.file_offset)[0..segment.size];
@@ -225,7 +225,13 @@ pub fn main() noreturn {
         }
         assert(dst_slice.len >= src_slice.len);
         common.copy(u8, dst_slice, src_slice);
-        paging.bootstrap_map(&kernel_address_space, physical_address, virtual_address, aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment");
+        const core_locality: privileged.CoreLocality = switch (segment.mappings.write) {
+            true => .local,
+            false => .global,
+        };
+        switch (core_locality) {
+            inline else => |locality| paging.bootstrap_map(&kernel_address_space, locality, PhysicalAddress(locality).new(physical_address_value), VirtualAddress(locality).new(virtual_address_value), aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment"),
+        }
     }
 
     assert(allocated_segment_memory == all_segments_size);
@@ -233,13 +239,13 @@ pub fn main() noreturn {
     const stack_top = blk: {
         const stack_page_count = 10;
         const stack_size = stack_page_count << UEFI.page_shifter;
-        const stack_physical_address = PhysicalAddress.new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
+        const stack_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
         break :blk stack_physical_address.to_higher_half_virtual_address().value() + stack_size;
     };
 
     const gdt_descriptor = blk: {
         const gdt_page_count = 1;
-        const gdt_physical_address = PhysicalAddress.new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
+        const gdt_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
         const gdt_descriptor_identity = gdt_physical_address.to_identity_mapped_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
         gdt_descriptor_identity.* = gdt_physical_address.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_offset(common.config.kernel_higher_half_address);
         break :blk gdt_physical_address.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
@@ -248,18 +254,18 @@ pub fn main() noreturn {
     {
         const trampoline_code_start = @ptrToInt(&load_kernel);
         const trampoline_code_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
-        const code_physical_base_page = PhysicalAddress.new(common.align_backward(trampoline_code_start, UEFI.page_size));
+        const code_physical_base_page = PhysicalAddress(.local).new(common.align_backward(trampoline_code_start, UEFI.page_size));
         const misalignment = trampoline_code_start - code_physical_base_page.value();
         const trampoline_size_to_map = common.align_forward(misalignment + trampoline_code_size, UEFI.page_size);
-        paging.bootstrap_map(&kernel_address_space, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
+        paging.bootstrap_map(&kernel_address_space, .local, code_physical_base_page, code_physical_base_page.to_identity_mapped_virtual_address(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
     }
 
-    var bootloader_information = PhysicalAddress.new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
+    var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(common.align_forward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
 
     // map bootstrap pages
     {
-        const physical_address = PhysicalAddress.new(@ptrToInt(bootstrap_memory.ptr));
-        paging.bootstrap_map(&kernel_address_space, physical_address, physical_address.to_higher_half_virtual_address(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
+        const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootstrap_memory.ptr));
+        paging.bootstrap_map(&kernel_address_space, .local, physical_address, physical_address.to_higher_half_virtual_address(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
     }
 
     // Map all usable memory to avoid kernel delays later
@@ -269,10 +275,10 @@ pub fn main() noreturn {
     var map_iterator = memory_manager.map.iterator();
     while (map_iterator.next(memory_manager.map)) |entry| {
         if (entry.type == .ConventionalMemory) {
-            const physical_address = PhysicalAddress.new(entry.physical_start);
+            const physical_address = PhysicalAddress(.local).new(entry.physical_start);
             const virtual_address = physical_address.to_higher_half_virtual_address();
             const size = entry.number_of_pages * common.arch.valid_page_sizes[0];
-            paging.bootstrap_map(&kernel_address_space, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
+            paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
         }
     }
 

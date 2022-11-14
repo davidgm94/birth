@@ -9,10 +9,6 @@ pub const reverse_valid_page_sizes = blk: {
 pub const page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
 
-pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
-    return @ctz(@as(u32, asked_page_size));
-}
-
 pub const registers = @import("x86_64/registers.zig");
 
 pub const CPUID = extern struct {

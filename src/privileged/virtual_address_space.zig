@@ -25,9 +25,9 @@ id: u64,
 arch: paging.Specific,
 privileged: bool,
 owner: ResourceOwner = .kernel,
-heap: Heap,
-free_regions: ArrayList(Region) = .{},
-used_regions: ArrayList(Region) = .{},
+//heap: Heap,
+//free_regions: ArrayList(Region) = .{},
+//used_regions: ArrayList(Region) = .{},
 
 pub fn from_current(owner: ResourceOwner) VirtualAddressSpace {
     return paging.from_current(owner);
@@ -35,7 +35,7 @@ pub fn from_current(owner: ResourceOwner) VirtualAddressSpace {
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
 
-pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemoryRegion) VirtualAddressSpace {
+pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
     return paging.init_kernel_bsp(physical_memory_region);
 }
 
@@ -229,8 +229,8 @@ pub const Flags = packed struct {
         return common.zeroes(Flags);
     }
 
-    pub inline fn to_arch_specific(flags: Flags) paging.MemoryFlags {
-        return paging.new_flags(flags);
+    pub inline fn to_arch_specific(flags: Flags, comptime locality: privileged.CoreLocality) paging.MemoryFlags {
+        return paging.new_flags(flags, locality);
     }
 };
 

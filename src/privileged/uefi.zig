@@ -30,7 +30,7 @@ const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
 pub const MemoryMap = struct {
-    region: VirtualMemoryRegion,
+    region: VirtualMemoryRegion(.global),
     descriptor_size: u32 = @sizeOf(MemoryDescriptor),
     descriptor_version: u32 = 1,
 
@@ -75,7 +75,7 @@ pub const BootloaderInformation = struct {
     kernel_segments: []ProgramSegment,
     memory_map: MemoryMap,
     counters: []u32,
-    rsdp_physical_address: PhysicalAddress,
+    rsdp_physical_address: PhysicalAddress(.global),
     kernel_file: []const u8,
     init_file: []const u8,
 };

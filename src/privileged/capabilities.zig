@@ -1,5 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
+const valid_page_sizes = common.arch.valid_page_sizes;
+const page_mask = common.arch.page_mask;
 
 const privileged = @import("privileged");
 const CoreDirector = privileged.CoreDirector;
@@ -376,6 +378,249 @@ const Type = enum(u8) {
     Domain = 65,
     DeviceIDManager = 66,
     DeviceID = 67,
+
+    pub fn is_vnode(t: Type) bool {
+        return switch (t) {
+            .VNode_x86_64_pml5,
+            .VNode_x86_64_pml5_Mapping,
+            .VNode_x86_64_pml4,
+            .VNode_x86_64_pml4_Mapping,
+            .VNode_x86_64_pdpt,
+            .VNode_x86_64_pdpt_Mapping,
+            .VNode_x86_64_pdir,
+            .VNode_x86_64_pdir_Mapping,
+            .VNode_x86_64_ptable,
+            .VNode_x86_64_ptable_Mapping,
+            .VNode_x86_64_ept_pml4,
+            .VNode_x86_64_ept_pml4_Mapping,
+            .VNode_x86_64_ept_pdpt,
+            .VNode_x86_64_ept_pdpt_Mapping,
+            .VNode_x86_64_ept_pdir,
+            .VNode_x86_64_ept_pdir_Mapping,
+            .VNode_x86_64_ept_ptable,
+            .VNode_x86_64_ept_ptable_Mapping,
+            .VNode_VTd_root_table,
+            .VNode_VTd_root_table_Mapping,
+            .VNode_VTd_ctxt_table,
+            .VNode_VTd_ctxt_table_Mapping,
+            .VNode_x86_32_pdpt,
+            .VNode_x86_32_pdpt_Mapping,
+            .VNode_x86_32_pdir,
+            .VNode_x86_32_pdir_Mapping,
+            .VNode_x86_32_ptable,
+            .VNode_x86_32_ptable_Mapping,
+            .VNode_ARM_l1,
+            .VNode_ARM_l1_Mapping,
+            .VNode_ARM_l2,
+            .VNode_ARM_l2_Mapping,
+            .VNode_AARCH64_l0,
+            .VNode_AARCH64_l0_Mapping,
+            .VNode_AARCH64_l1,
+            .VNode_AARCH64_l1_Mapping,
+            .VNode_AARCH64_l2,
+            .VNode_AARCH64_l2_Mapping,
+            .VNode_AARCH64_l3,
+            .VNode_AARCH64_l3_Mapping,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn is_mappable(t: Type) bool {
+        return switch (t) {
+            .Frame,
+            .EndPointUMP,
+            .DevFrame,
+            .VNode_VTd_root_table,
+            .VNode_VTd_ctxt_table,
+            .VNode_x86_64_pml5,
+            .VNode_x86_64_pml4,
+            .VNode_x86_64_pdpt,
+            .VNode_x86_64_pdir,
+            .VNode_x86_64_ptable,
+            .VNode_x86_32_pdpt,
+            .VNode_x86_32_pdir,
+            .VNode_x86_32_ptable,
+            .VNode_ARM_l1,
+            .VNode_ARM_l2,
+            .VNode_AARCH64_l0,
+            .VNode_AARCH64_l1,
+            .VNode_AARCH64_l2,
+            .VNode_AARCH64_l3,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn is_mappinng(t: Type) bool {
+        return switch (t) {
+            .Frame_Mapping,
+            .EndPointUMP_Mapping,
+            .DevFrame_Mapping,
+            .VNode_VTd_root_table_Mapping,
+            .VNode_VTd_ctxt_table_Mapping,
+            .VNode_x86_64_pml5_Mapping,
+            .VNode_x86_64_pml4_Mapping,
+            .VNode_x86_64_pdpt_Mapping,
+            .VNode_x86_64_pdir_Mapping,
+            .VNode_x86_64_ptable_Mapping,
+            .VNode_x86_64_ept_pml4_Mapping,
+            .VNode_x86_64_ept_pdpt_Mapping,
+            .VNode_x86_64_ept_pdir_Mapping,
+            .VNode_x86_64_ept_ptable_Mapping,
+            .VNode_x86_32_pdpt_Mapping,
+            .VNode_x86_32_pdir_Mapping,
+            .VNode_x86_32_ptable_Mapping,
+            .VNode_ARM_l1_Mapping,
+            .VNode_ARM_l2_Mapping,
+            .VNode_AARCH64_l0_Mapping,
+            .VNode_AARCH64_l1_Mapping,
+            .VNode_AARCH64_l2_Mapping,
+            .VNode_AARCH64_l3_Mapping,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn vnode_objsize(t: Type) usize {
+        if (!t.is_vnode()) unreachable;
+
+        return switch (t) {
+            .VNode_VTd_root_table,
+            .VNode_VTd_ctxt_table,
+            .VNode_x86_64_pml5,
+            .VNode_x86_64_pml4,
+            .VNode_x86_64_pdpt,
+            .VNode_x86_64_pdir,
+            .VNode_x86_64_ptable,
+            .VNode_x86_64_ept_pml4,
+            .VNode_x86_64_ept_pdpt,
+            .VNode_x86_64_ept_pdir,
+            .VNode_x86_64_ept_ptable,
+            .VNode_x86_32_pdpt,
+            .VNode_x86_32_pdir,
+            .VNode_x86_32_ptable,
+            => 0x1000,
+            .VNode_AARCH64_l0,
+            .VNode_AARCH64_l1,
+            .VNode_AARCH64_l2,
+            .VNode_AARCH64_l3,
+            => 0x1000,
+            .VNode_ARM_l1 => 16384,
+            .VNode_ARM_l2 => 0x400,
+            else => unreachable,
+        };
+    }
+
+    pub fn get_max_object_count(t: Type, source_size: u64, object_size: u64) usize {
+        switch (t) {
+            .PhysAddr,
+            .RAM,
+            .Frame,
+            .EndPointUMP,
+            .DevFrame,
+            => {
+                if (object_size > source_size) {
+                    return 0;
+                } else {
+                    return source_size / object_size;
+                }
+            },
+            .L1CNode => {
+                if (source_size < Size.l2cnode or object_size < Size.l2cnode) {
+                    // disallow L1 CNode to be smaller than 16kB.
+                    return 0;
+                } else {
+                    return source_size / object_size;
+                }
+            },
+            .L2CNode => {
+                if (source_size < Size.l2cnode or object_size != Size.l2cnode) {
+                    // disallow L2 CNode creation if source too small or objsize wrong
+                    return 0;
+                } else {
+                    return source_size / object_size;
+                }
+            },
+            .VNode_VTd_root_table,
+            .VNode_VTd_ctxt_table,
+            .VNode_x86_64_pml5,
+            .VNode_x86_64_pml4,
+            .VNode_x86_64_pdpt,
+            .VNode_x86_64_pdir,
+            .VNode_x86_64_ptable,
+            .VNode_x86_64_ept_pml4,
+            .VNode_x86_64_ept_pdpt,
+            .VNode_x86_64_ept_pdir,
+            .VNode_x86_64_ept_ptable,
+            .VNode_x86_32_pdpt,
+            .VNode_x86_32_pdir,
+            .VNode_x86_32_ptable,
+            .VNode_ARM_l1,
+            .VNode_ARM_l2,
+            .VNode_AARCH64_l0,
+            .VNode_AARCH64_l1,
+            .VNode_AARCH64_l2,
+            .VNode_AARCH64_l3,
+            => {
+                if (source_size < t.vnode_objsize()) {
+                    return 0;
+                } else {
+                    return source_size / t.vnode_objsize();
+                }
+            },
+            .Dispatcher => {
+                if (source_size < Size.dispatcher) {
+                    return 0;
+                } else {
+                    return source_size / Size.dispatcher;
+                }
+            },
+            .KernelControlBlock => {
+                if (source_size < Size.kcb) {
+                    return 0;
+                } else {
+                    return source_size / Size.kcb;
+                }
+            },
+            .Domain => return l2_cnode_slots,
+            .Kernel,
+            .IRQTable,
+            .IRQDest,
+            .IRQSrc,
+            .IO,
+            .EndPointLMP,
+            .ID,
+            .Notify_IPI,
+            .PerfMon,
+            .IPI,
+            .ProcessManager,
+            .DeviceID,
+            .DeviceIDManager,
+            .VNode_ARM_l1_Mapping,
+            .VNode_ARM_l2_Mapping,
+            .VNode_AARCH64_l0_Mapping,
+            .VNode_AARCH64_l1_Mapping,
+            .VNode_AARCH64_l2_Mapping,
+            .VNode_AARCH64_l3_Mapping,
+            .VNode_x86_64_pml4_Mapping,
+            .VNode_x86_64_pdpt_Mapping,
+            .VNode_x86_64_pdir_Mapping,
+            .VNode_x86_64_ptable_Mapping,
+            .VNode_x86_64_ept_pml4_Mapping,
+            .VNode_x86_64_ept_pdpt_Mapping,
+            .VNode_x86_64_ept_pdir_Mapping,
+            .VNode_x86_64_ept_ptable_Mapping,
+            .VNode_x86_32_pdpt_Mapping,
+            .VNode_x86_32_pdir_Mapping,
+            .VNode_x86_32_ptable_Mapping,
+            .DevFrame_Mapping,
+            .Frame_Mapping,
+            => return 1,
+
+            else => unreachable,
+        }
+    }
 };
 
 pub const Size = struct {
@@ -388,20 +633,56 @@ pub const Size = struct {
     pub const mapping = 1;
 };
 
-pub fn new(capability_type: Type, address: PhysicalAddress, bytes: usize, object_size: usize, owner: CoreId, cte: *CTE) !void {
+pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize, object_size: usize, owner: CoreId, cte: *CTE) !void {
     assert(capability_type != .EndPointLMP);
     _ = owner;
     _ = cte;
-    _ = address;
 
     assert(check_arguments(capability_type, bytes, object_size, false));
+    assert(address == .null or check_arguments(capability_type, bytes, object_size, true));
+
+    const object_count = capability_type.get_max_object_count(bytes, object_size);
+    assert(object_count > 0);
+
     @panic("capabilities new todo");
 }
 
-pub fn check_arguments(capabilities_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
-    _ = capabilities_type;
+fn create(capability_type: Type, address: PhysicalAddress, size: u64, object_size: u64, count: usize, owner: CoreId, cte: *CTE) !void {
+    _ = address;
+    _ = size;
     _ = object_size;
-    _ = bytes;
-    _ = exact;
+    _ = owner;
+    _ = count;
+    _ = cte;
+    assert(capability_type != .null);
+    assert(!capability_type.is_mapping());
+    @panic("cap create");
+}
+
+const objbits_cte = 6;
+const l2_cnode_bits = 8;
+const l2_cnode_slots = 1 << l2_cnode_bits;
+
+pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
+    const base_mask = if (capability_type.is_vnode()) capability_type.vnode_objsize() - 1 else page_mask(valid_page_sizes[0]);
+    _ = base_mask;
+    if (capability_type.is_mappable()) {
+        @panic("mappable");
+    } else {
+        switch (capability_type) {
+            .L1CNode => {
+                if (bytes < Size.l2cnode or object_size < Size.l2cnode) return false;
+                if (exact and bytes % object_size != 0) return false;
+                return object_size % (1 << objbits_cte) == 0;
+            },
+            .L2CNode => {
+                @panic("l2cnode");
+            },
+            .Dispatcher => {
+                @panic("dispatcher");
+            },
+            else => return true,
+        }
+    }
     @panic("capabilities check arguments todo");
 }

@@ -408,8 +408,8 @@ const Frame = extern struct {
 export fn kernel_exception_handler(interrupt_number: u64, error_code: u64, save_frame: *Frame) noreturn {
     log.err("Exception 0x{x} happened with error code 0x{x}.{}", .{ interrupt_number, error_code, save_frame });
     if (interrupt_number == 0xe) {
-        const virtual_address = VirtualAddress.new(cr2.read());
-        _ = virtual_address;
+        //const virtual_address = VirtualAddress(.local).new(cr2.read());
+        //_ = virtual_address;
         @panic("PF");
         //panic("Page fault at {}", .{virtual_address});
     } else {

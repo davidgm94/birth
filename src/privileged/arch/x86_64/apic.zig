@@ -14,7 +14,7 @@ const ID = packed struct(u32) {
     reserved: u24,
     apic_id: u8,
 
-    pub fn read(apic_base: VirtualAddress) ID {
+    pub fn read(apic_base: VirtualAddress(.global)) ID {
         return apic_base.offset(@enumToInt(Register.id)).access(*volatile ID).*;
     }
 };
@@ -24,7 +24,7 @@ const TaskPriorityRegister = packed struct(u32) {
     class: u4 = 0,
     reserved: u24 = 0,
 
-    pub fn write(tpr: TaskPriorityRegister, apic_base: VirtualAddress) void {
+    pub fn write(tpr: TaskPriorityRegister, apic_base: VirtualAddress(.global)) void {
         apic_base.offset(@enumToInt(Register.tpr)).access(*volatile TaskPriorityRegister).* = tpr;
     }
 };
@@ -44,7 +44,7 @@ const LVTTimer = packed struct(u32) {
         tsc_deadline = 2,
     };
 
-    fn write(timer: LVTTimer, apic_base: VirtualAddress) void {
+    fn write(timer: LVTTimer, apic_base: VirtualAddress(.global)) void {
         apic_write(@This(), timer, Register.lvt_timer, apic_base);
     }
 };
@@ -65,22 +65,22 @@ const DivideConfigurationRegister = packed struct(u32) {
         by_1 = 0b1011,
     };
 
-    fn read(apic_base: VirtualAddress) DivideConfigurationRegister {
+    fn read(apic_base: VirtualAddress(.global)) DivideConfigurationRegister {
         return apic_read(@This(), Register.timer_div, apic_base);
     }
 
-    fn write(dcr: DivideConfigurationRegister, apic_base: VirtualAddress) void {
+    fn write(dcr: DivideConfigurationRegister, apic_base: VirtualAddress(.global)) void {
         apic_write(@This(), dcr, Register.timer_div, apic_base);
     }
 
     //fn write(
 };
 
-fn apic_read(comptime T: type, register_offset: Register, apic_base: VirtualAddress) T {
+fn apic_read(comptime T: type, register_offset: Register, apic_base: VirtualAddress(.global)) T {
     return apic_base.offset(@enumToInt(register_offset)).access(*volatile T).*;
 }
 
-fn apic_write(comptime T: type, register: T, register_offset: Register, apic_base: VirtualAddress) void {
+fn apic_write(comptime T: type, register: T, register_offset: Register, apic_base: VirtualAddress(.global)) void {
     apic_base.offset(@enumToInt(register_offset)).access(*volatile T).* = register;
 }
 
@@ -101,11 +101,11 @@ const Register = enum(u32) {
     timer_current_count = 0x390,
 };
 
-pub fn init() VirtualAddress {
+pub fn init() VirtualAddress(.global) {
     var ia32_apic_base = IA32_APIC_BASE.read();
     is_bsp = ia32_apic_base.bsp;
     const apic_base_physical_address = ia32_apic_base.get_address();
-    const apic_base = arch.paging.map_device(apic_base_physical_address, arch.page_size) catch @panic("mapping apic failed");
+    const apic_base = arch.paging.map_device(apic_base_physical_address, common.arch.page_size) catch @panic("mapping apic failed");
     log.debug("APIC base: {}", .{apic_base});
     const id_register = ID.read(apic_base);
     const id = id_register.apic_id;
@@ -154,7 +154,7 @@ fn set_divide(apic_base: VirtualAddress, divide: DivideConfigurationRegister.Div
     dcr.write(apic_base);
 }
 
-pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress) void {
+pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress(.global)) void {
     init_timer(apic_base, true, false);
     set_divide(apic_base, .by_1);
 
@@ -163,7 +163,7 @@ pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress) void {
 
 pub var is_bsp = false;
 
-pub fn calibrate_timer(apic_base: VirtualAddress) void {
+pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
     if (is_bsp) {
         //calibrate_timer_with_rtc(apic_base);
         const timer_calibration_start = read_timestamp();

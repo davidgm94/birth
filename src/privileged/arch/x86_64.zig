@@ -43,15 +43,16 @@ pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
 
 pub const CoreDirector = struct {
     base: privileged.CoreDirector,
-    crit_pc_low: VirtualAddress,
-    crit_pc_high: VirtualAddress,
-    ldt_base: VirtualAddress,
+    crit_pc_low: VirtualAddress(.local),
+    crit_pc_high: VirtualAddress(.local),
+    ldt_base: VirtualAddress(.local),
     ldt_page_count: usize,
 
     enabled_save_area: Registers,
     disabled_save_area: Registers,
     trap_save_area: Registers,
 };
+
 pub const Registers = struct {
     rax: u64,
     rbx: u64,
