@@ -1,37 +1,52 @@
 const common = @import("common");
-comptime {
-    //@compileLog("wtf");
-    if (common.os != .freestanding) @compileError("Kernel file included in not the OS");
-}
+const CustomAllocator = common.CustomAllocator;
+const valid_page_sizes = common.arch.x86_64.valid_page_sizes;
 
 const privileged = @import("privileged");
+const Capabilities = privileged.Capabilities;
+const CTE = Capabilities.CTE;
+const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 
-pub const DeviceManager = @import("kernel/device_manager.zig");
-pub const Disk = @import("kernel/disk.zig");
-pub const Drivers = @import("kernel/drivers.zig");
-pub const ELF = @import("kernel/elf.zig");
-pub const Executable = @import("kernel/executable.zig");
-pub const Filesystem = @import("kernel/filesystem.zig");
-pub const Graphics = @import("kernel/graphics.zig");
-pub const Heap = privileged.Heap;
-pub const Memory = @import("kernel/memory.zig");
-pub const Message = common.Message;
-pub const MessageQueue = @import("kernel/message_queue.zig");
-pub const PhysicalAddress = privileged.PhysicalAddress;
-pub const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-pub const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-pub const Process = @import("kernel/process.zig");
-pub const Scheduler = @import("kernel/scheduler.zig");
-pub const Spinlock = @import("kernel/spinlock.zig");
-pub const Syscall = @import("kernel/syscall.zig");
-pub const Thread = @import("kernel/thread.zig");
-pub const Timer = @import("kernel/timer.zig");
-pub const Window = @import("kernel/window.zig");
-pub const VirtualAddress = privileged.VirtualAddress;
-pub const VirtualAddressSpace = privileged.VirtualAddressSpace;
-pub const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+pub export var core_id: u8 = 0;
+pub var bootstrap_address_space = PhysicalAddressSpace{};
 
-pub const FileInMemory = struct {
-    address: VirtualAddress,
-    size: u64,
+pub fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
+    _ = allocator;
+    // TODO: proper error
+    if (!common.is_aligned(alignment, valid_page_sizes[0])) {
+        return CustomAllocator.Error.OutOfMemory;
+    }
+
+    const result = bootstrap_address_space.allocate(size, valid_page_sizes[0]) catch return CustomAllocator.Error.OutOfMemory;
+
+    return CustomAllocator.Result{
+        .address = result.address.value(),
+        .size = result.size,
+    };
+}
+
+pub fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
+    _ = allocator;
+    _ = old_memory;
+    _ = old_alignment;
+    _ = new_size;
+    @panic("todo physical_resize");
+}
+
+pub fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
+    _ = allocator;
+    _ = memory;
+    _ = alignment;
+    @panic("todo physical_free");
+}
+
+pub var physical_allocator = CustomAllocator{
+    .callback_allocate = physical_allocate,
+    .callback_resize = physical_resize,
+    .callback_free = physical_free,
 };
+
+comptime {
+    if (common.os != .freestanding) @compileError("Kernel file included non-kernel project");
+}

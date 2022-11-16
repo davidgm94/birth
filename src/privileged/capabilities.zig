@@ -1,426 +1,510 @@
 const common = @import("common");
 const assert = common.assert;
-const valid_page_sizes = common.arch.valid_page_sizes;
+const log = common.log.scoped(.Capabilities);
 const page_mask = common.arch.page_mask;
+const valid_page_sizes = common.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
 const CoreDirector = privileged.CoreDirector;
+const CoreId = privileged.CoreId;
 const CoreSupervisor = privileged.CoreSupervisor;
-const CTE = privileged.CTE;
+const MappingDatabase = privileged.MappingDatabase;
+const PassId = privileged.PassId;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 
-const Rights = packed struct(u8) {
+extern var core_id: u8;
+
+pub const Rights = packed struct(u8) {
     read: bool,
     write: bool,
     execute: bool,
     grant: bool,
     identify: bool,
     reserved: u3 = 0,
+
+    pub const all = Rights{
+        .read = true,
+        .write = true,
+        .execute = true,
+        .grant = true,
+        .identify = true,
+    };
 };
 
-pub const Capability = struct {
-    object: union(Type) {
-        @"null": void,
-        physical_address: struct {
-            base: PhysicalAddress,
-            bytes: usize,
-            pasid: PassId,
-        },
-        ram: struct {
-            base: PhysicalAddress,
-            bytes: usize,
-            pasid: PassId,
-        },
-        l1cnode: struct {
-            cnode: PhysicalAddress,
-            rights: Rights,
-            allocated_bytes: usize,
-        },
-        l2cnode: struct {
-            cnode: PhysicalAddress,
-            rights: Rights,
-        },
-        fcnode: struct {
-            cnode: PhysicalAddress,
-            rights: Rights,
-            core_id: CoreId,
-            guard_size: u8,
-            cap_addr: u32,
-        },
-        dispatcher: struct {
+pub const Capability = extern struct {
+    object: extern union {
+        @"null": void align(1),
+        physical_address: extern struct {
+            base: PhysicalAddress(.global) align(1),
+            bytes: usize align(1),
+            pasid: PassId align(1),
+        } align(1),
+        ram: extern struct {
+            base: PhysicalAddress(.global) align(1),
+            bytes: usize align(1),
+            pasid: PassId align(1),
+        } align(1),
+        l1cnode: extern struct {
+            cnode: PhysicalAddress(.local) align(1),
+            rights: Rights align(1),
+            allocated_bytes: usize align(1),
+        } align(1),
+        l2cnode: extern struct {
+            cnode: PhysicalAddress(.local) align(1),
+            rights: Rights align(1),
+        } align(1),
+        fcnode: extern struct {
+            cnode: PhysicalAddress(.global),
+            rights: Rights align(1),
+            core_id: CoreId align(1),
+            guard_size: u8 align(1),
+            cap_addr: u32 align(1),
+        } align(1),
+        dispatcher: extern struct {
             current: *CoreDirector,
-        },
-        end_point_lmp: struct {
-            listener: *CoreDirector,
-            epoffset: VirtualAddress,
-            epbufflen: u32,
-            iftype: u16,
-        },
-        frame: struct {
-            base: PhysicalAddress,
-            bytes: usize,
-            pasid: PassId,
-        },
-        frame_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        end_point_ump: struct {
-            base: PhysicalAddress,
-            bytes: usize,
-            pasid: PassId,
-            iftype: u16,
-        },
-        end_point_ump_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        device_frame: struct {
-            base: PhysicalAddress,
-            bytes: usize,
-            pasid: PassId,
-        },
-        device_frame_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        kernel: void,
-        vnode_x86_64_pml5: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_pml5_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_pml4: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_pml4_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_pdpt: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_pdpt_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_pdir: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_pdir_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_ept_pml4: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_ept_pml4_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_ept_pdpt: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_ept_pdpt_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_ept_pdir: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_ept_pdir_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_64_ept_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_64_ept_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_VTd_root_table: struct {
-            base: PhysicalAddress,
-        },
-        vnode_VTd_root_table_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_VTd_context_table: struct {
-            base: PhysicalAddress,
-        },
-        vnode_VTd_context_table_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_32_pdpt: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_32_pdpt_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_32_pdir: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_32_pdir_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_x86_32_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_x86_32_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_arm_l1_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_arm_l1_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_arm_l2_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_arm_l2_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_aarch64_l1_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_aarch64_l1_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_aarch64_l2_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_aarch64_l2_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        vnode_aarch64_l3_ptable: struct {
-            base: PhysicalAddress,
-        },
-        vnode_aarch64_l3_ptable_mapping: struct {
-            capability: *Capability,
-            ptable: *CTE,
-            entry: u16,
-            pte_count: u16,
-        },
-        irq_table: void,
-        irq_dest: struct {
-            cpu: u64,
-            vector: u64,
-        },
-        irq_src: struct {
-            start: u64,
-            end: u64,
-        },
-        io: struct {
-            start: u16,
-            end: u16,
-        },
-        notify_ipi: struct {
-            core_id: CoreId,
-            channel_id: u16,
-        },
-        id: struct {
-            core_id: CoreId,
-            core_local_id: u32,
-        },
-        performance_monitor: void,
-        kernel_control_block: *CoreSupervisor,
-        ipi: void,
-        process_manager: void,
-        domain: struct {
-            core_id: CoreId,
-            core_local_id: u32,
-        },
-        device_manager: void,
-        device_id: struct {
-            segment: u16,
-            bus: u8,
-            device: u8,
-            function: u8,
-            type: u8,
-            flags: u16,
-        },
-    },
-    rights: Rights,
+        } align(1),
+        end_point_lmp: extern struct {
+            listener: *CoreDirector align(1),
+            epoffset: VirtualAddress(.local) align(1),
+            epbufflen: u32 align(1),
+            iftype: u16 align(1),
+        } align(1),
+        frame: extern struct {
+            base: PhysicalAddress(.global) align(1),
+            bytes: usize align(1),
+            pasid: PassId align(1),
+        } align(1),
+        frame_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        end_point_ump: extern struct {
+            base: PhysicalAddress(.global) align(1),
+            bytes: usize align(1),
+            pasid: PassId align(1),
+            iftype: u16 align(1),
+        } align(1),
+        end_point_ump_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        device_frame: extern struct {
+            base: PhysicalAddress(.global) align(1),
+            bytes: usize align(1),
+            pasid: PassId align(1),
+        } align(1),
+        device_frame_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        kernel: void align(1),
+        vnode_x86_64_pml5: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_pml5_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_pml4: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_pml4_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_pdpt: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_pdpt_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_pdir: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_pdir_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_ptable: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_ptable_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_ept_pml4: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_ept_pml4_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_ept_pdpt: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_ept_pdpt_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_ept_pdir: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_ept_pdir_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_64_ept_ptable: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_64_ept_ptable_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_vtd_root_table: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_vtd_root_table_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_vtd_context_table: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_vtd_context_table_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_32_pdpt: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_32_pdpt_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_32_pdir: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_32_pdir_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_x86_32_ptable: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_x86_32_ptable_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_arm_l1: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_arm_l1_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_arm_l2: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_arm_l2_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_aarch64_l0: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_aarch64_l0_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_aarch64_l1: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_aarch64_l1_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_aarch64_l2: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_aarch64_l2_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        vnode_aarch64_l3: extern struct {
+            base: PhysicalAddress(.global) align(1),
+        } align(1),
+        vnode_aarch64_l3_mapping: extern struct {
+            capability: *Capability align(1),
+            ptable: *CTE align(1),
+            entry: u16 align(1),
+            pte_count: u16 align(1),
+        } align(1),
+        irq_table: void align(1),
+        irq_dest: extern struct {
+            cpu: u64 align(1),
+            vector: u64 align(1),
+        } align(1),
+        irq_src: extern struct {
+            start: u64 align(1),
+            end: u64 align(1),
+        } align(1),
+        io: extern struct {
+            start: u16 align(1),
+            end: u16 align(1),
+        } align(1),
+        notify_ipi: extern struct {
+            core_id: CoreId align(1),
+            channel_id: u16 align(1),
+        } align(1),
+        id: extern struct {
+            core_id: CoreId align(1),
+            core_local_id: u32 align(1),
+        } align(1),
+        performance_monitor: void align(1),
+        kernel_control_block: *CoreSupervisor align(1),
+        ipi: void align(1),
+        process_manager: void align(1),
+        domain: extern struct {
+            core_id: CoreId align(1),
+            core_local_id: u32 align(1),
+        } align(1),
+        device_id_manager: void align(1),
+        device_id: extern struct {
+            segment: u16 align(1),
+            bus: u8 align(1),
+            device: u8 align(1),
+            function: u8 align(1),
+            type: u8 align(1),
+            flags: u16 align(1),
+        } align(1),
+    } align(1),
+    type: Type align(1),
+    rights: Rights align(1),
+
+    pub fn get_address(capability: Capability) PhysicalAddress(.global) {
+        switch (capability.type) {
+            // TODO: returning global for a local makes no sense here?
+            .l1cnode => return capability.object.l1cnode.cnode.to_global(),
+            .l2cnode => return capability.object.l2cnode.cnode.to_global(),
+            else => @panic(@tagName(capability.type)),
+        }
+    }
+
+    pub fn get_size(capability: Capability) usize {
+        switch (capability.type) {
+            .l1cnode => return capability.object.l1cnode.allocated_bytes,
+            .l2cnode => return 16384,
+            else => @panic(@tagName(capability.type)),
+        }
+    }
+
+    pub fn compare(a: Capability, b: Capability, tiebreak: bool) i8 {
+        const type_root_a = a.type.get_type_root();
+        const type_root_b = b.type.get_type_root();
+        if (type_root_a != type_root_b) {
+            if (type_root_a < type_root_b) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+
+        const address_a = a.get_address().value();
+        const address_b = b.get_address().value();
+        if (address_a != address_b) {
+            if (address_a < address_b) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+
+        const size_a = a.get_size();
+        const size_b = b.get_size();
+        if (size_a != size_b) {
+            if (size_a < size_b) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+
+        if (a.type != b.type) {
+            if (@enumToInt(a.type) < @enumToInt(b.type)) {
+                return -1;
+            } else {
+                return 1;
+            }
+        }
+
+        switch (a.type) {
+            else => @panic(@tagName(a.type)),
+        }
+
+        if (tiebreak) {
+            @panic("tiebreak");
+        }
+    }
 };
 
-const PassId = u32;
-const CoreId = u8;
-const CapAddr = u32;
-
-const Type = enum(u8) {
-    Null = 0,
-    PhysAddr = 1,
-    RAM = 2,
-    L1CNode = 3,
-    L2CNode = 4,
-    FCNode = 5,
-    Dispatcher = 6,
-    EndPointLMP = 7,
-    Frame = 8,
-    Frame_Mapping = 9,
-    EndPointUMP = 10,
-    EndPointUMP_Mapping = 11,
-    DevFrame = 12,
-    DevFrame_Mapping = 13,
-    Kernel = 14,
-    VNode_x86_64_pml5 = 15,
-    VNode_x86_64_pml5_Mapping = 16,
-    VNode_x86_64_pml4 = 17,
-    VNode_x86_64_pml4_Mapping = 18,
-    VNode_x86_64_pdpt = 19,
-    VNode_x86_64_pdpt_Mapping = 20,
-    VNode_x86_64_pdir = 21,
-    VNode_x86_64_pdir_Mapping = 22,
-    VNode_x86_64_ptable = 23,
-    VNode_x86_64_ptable_Mapping = 24,
-    VNode_x86_64_ept_pml4 = 25,
-    VNode_x86_64_ept_pml4_Mapping = 26,
-    VNode_x86_64_ept_pdpt = 27,
-    VNode_x86_64_ept_pdpt_Mapping = 28,
-    VNode_x86_64_ept_pdir = 29,
-    VNode_x86_64_ept_pdir_Mapping = 30,
-    VNode_x86_64_ept_ptable = 31,
-    VNode_x86_64_ept_ptable_Mapping = 32,
-    VNode_VTd_root_table = 33,
-    VNode_VTd_root_table_Mapping = 34,
-    VNode_VTd_ctxt_table = 35,
-    VNode_VTd_ctxt_table_Mapping = 36,
-    VNode_x86_32_pdpt = 37,
-    VNode_x86_32_pdpt_Mapping = 38,
-    VNode_x86_32_pdir = 39,
-    VNode_x86_32_pdir_Mapping = 40,
-    VNode_x86_32_ptable = 41,
-    VNode_x86_32_ptable_Mapping = 42,
-    VNode_ARM_l1 = 43,
-    VNode_ARM_l1_Mapping = 44,
-    VNode_ARM_l2 = 45,
-    VNode_ARM_l2_Mapping = 46,
-    VNode_AARCH64_l0 = 47,
-    VNode_AARCH64_l0_Mapping = 48,
-    VNode_AARCH64_l1 = 49,
-    VNode_AARCH64_l1_Mapping = 50,
-    VNode_AARCH64_l2 = 51,
-    VNode_AARCH64_l2_Mapping = 52,
-    VNode_AARCH64_l3 = 53,
-    VNode_AARCH64_l3_Mapping = 54,
-    IRQTable = 55,
-    IRQDest = 56,
-    IRQSrc = 57,
-    IO = 58,
-    Notify_IPI = 59,
-    ID = 60,
-    PerfMon = 61,
-    KernelControlBlock = 62,
-    IPI = 63,
-    ProcessManager = 64,
-    Domain = 65,
-    DeviceIDManager = 66,
-    DeviceID = 67,
+pub const Type = enum(u8) {
+    null = 0,
+    physical_address = 1,
+    ram = 2,
+    l1cnode = 3,
+    l2cnode = 4,
+    fcnode = 5,
+    dispatcher = 6,
+    end_point_lmp = 7,
+    frame = 8,
+    frame_mapping = 9,
+    end_point_ump = 10,
+    end_point_ump_mapping = 11,
+    device_frame = 12,
+    device_frame_mapping = 13,
+    kernel = 14,
+    vnode_x86_64_pml5 = 15,
+    vnode_x86_64_pml5_mapping = 16,
+    vnode_x86_64_pml4 = 17,
+    vnode_x86_64_pml4_mapping = 18,
+    vnode_x86_64_pdpt = 19,
+    vnode_x86_64_pdpt_mapping = 20,
+    vnode_x86_64_pdir = 21,
+    vnode_x86_64_pdir_mapping = 22,
+    vnode_x86_64_ptable = 23,
+    vnode_x86_64_ptable_mapping = 24,
+    vnode_x86_64_ept_pml4 = 25,
+    vnode_x86_64_ept_pml4_mapping = 26,
+    vnode_x86_64_ept_pdpt = 27,
+    vnode_x86_64_ept_pdpt_mapping = 28,
+    vnode_x86_64_ept_pdir = 29,
+    vnode_x86_64_ept_pdir_mapping = 30,
+    vnode_x86_64_ept_ptable = 31,
+    vnode_x86_64_ept_ptable_mapping = 32,
+    vnode_vtd_root_table = 33,
+    vnode_vtd_root_table_mapping = 34,
+    vnode_vtd_context_table = 35,
+    vnode_vtd_context_table_mapping = 36,
+    vnode_x86_32_pdpt = 37,
+    vnode_x86_32_pdpt_mapping = 38,
+    vnode_x86_32_pdir = 39,
+    vnode_x86_32_pdir_mapping = 40,
+    vnode_x86_32_ptable = 41,
+    vnode_x86_32_ptable_mapping = 42,
+    vnode_arm_l1 = 43,
+    vnode_arm_l1_mapping = 44,
+    vnode_arm_l2 = 45,
+    vnode_arm_l2_mapping = 46,
+    vnode_aarch64_l0 = 47,
+    vnode_aarch64_l0_mapping = 48,
+    vnode_aarch64_l1 = 49,
+    vnode_aarch64_l1_mapping = 50,
+    vnode_aarch64_l2 = 51,
+    vnode_aarch64_l2_mapping = 52,
+    vnode_aarch64_l3 = 53,
+    vnode_aarch64_l3_mapping = 54,
+    irq_table = 55,
+    irq_dest = 56,
+    irq_src = 57,
+    io = 58,
+    notify_ipi = 59,
+    id = 60,
+    performance_monitor = 61,
+    kernel_control_block = 62,
+    ipi = 63,
+    process_manager = 64,
+    domain = 65,
+    device_id_manager = 66,
+    device_id = 67,
 
     pub fn is_vnode(t: Type) bool {
         return switch (t) {
-            .VNode_x86_64_pml5,
-            .VNode_x86_64_pml5_Mapping,
-            .VNode_x86_64_pml4,
-            .VNode_x86_64_pml4_Mapping,
-            .VNode_x86_64_pdpt,
-            .VNode_x86_64_pdpt_Mapping,
-            .VNode_x86_64_pdir,
-            .VNode_x86_64_pdir_Mapping,
-            .VNode_x86_64_ptable,
-            .VNode_x86_64_ptable_Mapping,
-            .VNode_x86_64_ept_pml4,
-            .VNode_x86_64_ept_pml4_Mapping,
-            .VNode_x86_64_ept_pdpt,
-            .VNode_x86_64_ept_pdpt_Mapping,
-            .VNode_x86_64_ept_pdir,
-            .VNode_x86_64_ept_pdir_Mapping,
-            .VNode_x86_64_ept_ptable,
-            .VNode_x86_64_ept_ptable_Mapping,
-            .VNode_VTd_root_table,
-            .VNode_VTd_root_table_Mapping,
-            .VNode_VTd_ctxt_table,
-            .VNode_VTd_ctxt_table_Mapping,
-            .VNode_x86_32_pdpt,
-            .VNode_x86_32_pdpt_Mapping,
-            .VNode_x86_32_pdir,
-            .VNode_x86_32_pdir_Mapping,
-            .VNode_x86_32_ptable,
-            .VNode_x86_32_ptable_Mapping,
-            .VNode_ARM_l1,
-            .VNode_ARM_l1_Mapping,
-            .VNode_ARM_l2,
-            .VNode_ARM_l2_Mapping,
-            .VNode_AARCH64_l0,
-            .VNode_AARCH64_l0_Mapping,
-            .VNode_AARCH64_l1,
-            .VNode_AARCH64_l1_Mapping,
-            .VNode_AARCH64_l2,
-            .VNode_AARCH64_l2_Mapping,
-            .VNode_AARCH64_l3,
-            .VNode_AARCH64_l3_Mapping,
+            .vnode_x86_64_pml5,
+            .vnode_x86_64_pml5_mapping,
+            .vnode_x86_64_pml4,
+            .vnode_x86_64_pml4_mapping,
+            .vnode_x86_64_pdpt,
+            .vnode_x86_64_pdpt_mapping,
+            .vnode_x86_64_pdir,
+            .vnode_x86_64_pdir_mapping,
+            .vnode_x86_64_ptable,
+            .vnode_x86_64_ptable_mapping,
+            .vnode_x86_64_ept_pml4,
+            .vnode_x86_64_ept_pml4_mapping,
+            .vnode_x86_64_ept_pdpt,
+            .vnode_x86_64_ept_pdpt_mapping,
+            .vnode_x86_64_ept_pdir,
+            .vnode_x86_64_ept_pdir_mapping,
+            .vnode_x86_64_ept_ptable,
+            .vnode_x86_64_ept_ptable_mapping,
+            .vnode_vtd_root_table,
+            .vnode_vtd_root_table_mapping,
+            .vnode_vtd_context_table,
+            .vnode_vtd_context_table_mapping,
+            .vnode_x86_32_pdpt,
+            .vnode_x86_32_pdpt_mapping,
+            .vnode_x86_32_pdir,
+            .vnode_x86_32_pdir_mapping,
+            .vnode_x86_32_ptable,
+            .vnode_x86_32_ptable_mapping,
+            .vnode_arm_l1,
+            .vnode_arm_l1_mapping,
+            .vnode_arm_l2,
+            .vnode_arm_l2_mapping,
+            .vnode_aarch64_l0,
+            .vnode_aarch64_l0_mapping,
+            .vnode_aarch64_l1,
+            .vnode_aarch64_l1_mapping,
+            .vnode_aarch64_l2,
+            .vnode_aarch64_l2_mapping,
+            .vnode_aarch64_l3,
+            .vnode_aarch64_l3_mapping,
             => true,
             else => false,
         };
@@ -428,55 +512,55 @@ const Type = enum(u8) {
 
     pub fn is_mappable(t: Type) bool {
         return switch (t) {
-            .Frame,
-            .EndPointUMP,
-            .DevFrame,
-            .VNode_VTd_root_table,
-            .VNode_VTd_ctxt_table,
-            .VNode_x86_64_pml5,
-            .VNode_x86_64_pml4,
-            .VNode_x86_64_pdpt,
-            .VNode_x86_64_pdir,
-            .VNode_x86_64_ptable,
-            .VNode_x86_32_pdpt,
-            .VNode_x86_32_pdir,
-            .VNode_x86_32_ptable,
-            .VNode_ARM_l1,
-            .VNode_ARM_l2,
-            .VNode_AARCH64_l0,
-            .VNode_AARCH64_l1,
-            .VNode_AARCH64_l2,
-            .VNode_AARCH64_l3,
+            .frame,
+            .end_point_ump,
+            .device_frame,
+            .vnode_vtd_root_table,
+            .vnode_vtd_context_table,
+            .vnode_x86_64_pml5,
+            .vnode_x86_64_pml4,
+            .vnode_x86_64_pdpt,
+            .vnode_x86_64_pdir,
+            .vnode_x86_64_ptable,
+            .vnode_x86_32_pdpt,
+            .vnode_x86_32_pdir,
+            .vnode_x86_32_ptable,
+            .vnode_arm_l1,
+            .vnode_arm_l2,
+            .vnode_aarch64_l0,
+            .vnode_aarch64_l1,
+            .vnode_aarch64_l2,
+            .vnode_aarch64_l3,
             => true,
             else => false,
         };
     }
 
-    pub fn is_mappinng(t: Type) bool {
+    pub fn is_mapping(t: Type) bool {
         return switch (t) {
-            .Frame_Mapping,
-            .EndPointUMP_Mapping,
-            .DevFrame_Mapping,
-            .VNode_VTd_root_table_Mapping,
-            .VNode_VTd_ctxt_table_Mapping,
-            .VNode_x86_64_pml5_Mapping,
-            .VNode_x86_64_pml4_Mapping,
-            .VNode_x86_64_pdpt_Mapping,
-            .VNode_x86_64_pdir_Mapping,
-            .VNode_x86_64_ptable_Mapping,
-            .VNode_x86_64_ept_pml4_Mapping,
-            .VNode_x86_64_ept_pdpt_Mapping,
-            .VNode_x86_64_ept_pdir_Mapping,
-            .VNode_x86_64_ept_ptable_Mapping,
-            .VNode_x86_32_pdpt_Mapping,
-            .VNode_x86_32_pdir_Mapping,
-            .VNode_x86_32_ptable_Mapping,
-            .VNode_ARM_l1_Mapping,
-            .VNode_ARM_l2_Mapping,
-            .VNode_AARCH64_l0_Mapping,
-            .VNode_AARCH64_l1_Mapping,
-            .VNode_AARCH64_l2_Mapping,
-            .VNode_AARCH64_l3_Mapping,
+            .frame_mapping,
+            .end_point_ump_mapping,
+            .device_frame_mapping,
+            .vnode_vtd_root_table_mapping,
+            .vnode_vtd_context_table_mapping,
+            .vnode_x86_64_pml5_mapping,
+            .vnode_x86_64_pml4_mapping,
+            .vnode_x86_64_pdpt_mapping,
+            .vnode_x86_64_pdir_mapping,
+            .vnode_x86_64_ptable_mapping,
+            .vnode_x86_64_ept_pml4_mapping,
+            .vnode_x86_64_ept_pdpt_mapping,
+            .vnode_x86_64_ept_pdir_mapping,
+            .vnode_x86_64_ept_ptable_mapping,
+            .vnode_x86_32_pdpt_mapping,
+            .vnode_x86_32_pdir_mapping,
+            .vnode_x86_32_ptable_mapping,
+            .vnode_arm_l1_mapping,
+            .vnode_arm_l2_mapping,
+            .vnode_aarch64_l0_mapping,
+            .vnode_aarch64_l1_mapping,
+            .vnode_aarch64_l2_mapping,
+            .vnode_aarch64_l3_mapping,
             => true,
             else => false,
         };
@@ -486,39 +570,39 @@ const Type = enum(u8) {
         if (!t.is_vnode()) unreachable;
 
         return switch (t) {
-            .VNode_VTd_root_table,
-            .VNode_VTd_ctxt_table,
-            .VNode_x86_64_pml5,
-            .VNode_x86_64_pml4,
-            .VNode_x86_64_pdpt,
-            .VNode_x86_64_pdir,
-            .VNode_x86_64_ptable,
-            .VNode_x86_64_ept_pml4,
-            .VNode_x86_64_ept_pdpt,
-            .VNode_x86_64_ept_pdir,
-            .VNode_x86_64_ept_ptable,
-            .VNode_x86_32_pdpt,
-            .VNode_x86_32_pdir,
-            .VNode_x86_32_ptable,
+            .vnode_vtd_root_table,
+            .vnode_vtd_context_table,
+            .vnode_x86_64_pml5,
+            .vnode_x86_64_pml4,
+            .vnode_x86_64_pdpt,
+            .vnode_x86_64_pdir,
+            .vnode_x86_64_ptable,
+            .vnode_x86_64_ept_pml4,
+            .vnode_x86_64_ept_pdpt,
+            .vnode_x86_64_ept_pdir,
+            .vnode_x86_64_ept_ptable,
+            .vnode_x86_32_pdpt,
+            .vnode_x86_32_pdir,
+            .vnode_x86_32_ptable,
             => 0x1000,
-            .VNode_AARCH64_l0,
-            .VNode_AARCH64_l1,
-            .VNode_AARCH64_l2,
-            .VNode_AARCH64_l3,
+            .vnode_aarch64_l0,
+            .vnode_aarch64_l1,
+            .vnode_aarch64_l2,
+            .vnode_aarch64_l3,
             => 0x1000,
-            .VNode_ARM_l1 => 16384,
-            .VNode_ARM_l2 => 0x400,
+            .vnode_arm_l1 => 16384,
+            .vnode_arm_l2 => 0x400,
             else => unreachable,
         };
     }
 
     pub fn get_max_object_count(t: Type, source_size: u64, object_size: u64) usize {
         switch (t) {
-            .PhysAddr,
-            .RAM,
-            .Frame,
-            .EndPointUMP,
-            .DevFrame,
+            .physical_address,
+            .ram,
+            .frame,
+            .end_point_ump,
+            .device_frame,
             => {
                 if (object_size > source_size) {
                     return 0;
@@ -526,7 +610,7 @@ const Type = enum(u8) {
                     return source_size / object_size;
                 }
             },
-            .L1CNode => {
+            .l1cnode => {
                 if (source_size < Size.l2cnode or object_size < Size.l2cnode) {
                     // disallow L1 CNode to be smaller than 16kB.
                     return 0;
@@ -534,7 +618,7 @@ const Type = enum(u8) {
                     return source_size / object_size;
                 }
             },
-            .L2CNode => {
+            .l2cnode => {
                 if (source_size < Size.l2cnode or object_size != Size.l2cnode) {
                     // disallow L2 CNode creation if source too small or objsize wrong
                     return 0;
@@ -542,26 +626,26 @@ const Type = enum(u8) {
                     return source_size / object_size;
                 }
             },
-            .VNode_VTd_root_table,
-            .VNode_VTd_ctxt_table,
-            .VNode_x86_64_pml5,
-            .VNode_x86_64_pml4,
-            .VNode_x86_64_pdpt,
-            .VNode_x86_64_pdir,
-            .VNode_x86_64_ptable,
-            .VNode_x86_64_ept_pml4,
-            .VNode_x86_64_ept_pdpt,
-            .VNode_x86_64_ept_pdir,
-            .VNode_x86_64_ept_ptable,
-            .VNode_x86_32_pdpt,
-            .VNode_x86_32_pdir,
-            .VNode_x86_32_ptable,
-            .VNode_ARM_l1,
-            .VNode_ARM_l2,
-            .VNode_AARCH64_l0,
-            .VNode_AARCH64_l1,
-            .VNode_AARCH64_l2,
-            .VNode_AARCH64_l3,
+            .vnode_vtd_root_table,
+            .vnode_vtd_context_table,
+            .vnode_x86_64_pml5,
+            .vnode_x86_64_pml4,
+            .vnode_x86_64_pdpt,
+            .vnode_x86_64_pdir,
+            .vnode_x86_64_ptable,
+            .vnode_x86_64_ept_pml4,
+            .vnode_x86_64_ept_pdpt,
+            .vnode_x86_64_ept_pdir,
+            .vnode_x86_64_ept_ptable,
+            .vnode_x86_32_pdpt,
+            .vnode_x86_32_pdir,
+            .vnode_x86_32_ptable,
+            .vnode_arm_l1,
+            .vnode_arm_l2,
+            .vnode_aarch64_l0,
+            .vnode_aarch64_l1,
+            .vnode_aarch64_l2,
+            .vnode_aarch64_l3,
             => {
                 if (source_size < t.vnode_objsize()) {
                     return 0;
@@ -569,57 +653,130 @@ const Type = enum(u8) {
                     return source_size / t.vnode_objsize();
                 }
             },
-            .Dispatcher => {
+            .dispatcher => {
                 if (source_size < Size.dispatcher) {
                     return 0;
                 } else {
                     return source_size / Size.dispatcher;
                 }
             },
-            .KernelControlBlock => {
+            .kernel_control_block => {
                 if (source_size < Size.kcb) {
                     return 0;
                 } else {
                     return source_size / Size.kcb;
                 }
             },
-            .Domain => return l2_cnode_slots,
-            .Kernel,
-            .IRQTable,
-            .IRQDest,
-            .IRQSrc,
-            .IO,
-            .EndPointLMP,
-            .ID,
-            .Notify_IPI,
-            .PerfMon,
-            .IPI,
-            .ProcessManager,
-            .DeviceID,
-            .DeviceIDManager,
-            .VNode_ARM_l1_Mapping,
-            .VNode_ARM_l2_Mapping,
-            .VNode_AARCH64_l0_Mapping,
-            .VNode_AARCH64_l1_Mapping,
-            .VNode_AARCH64_l2_Mapping,
-            .VNode_AARCH64_l3_Mapping,
-            .VNode_x86_64_pml4_Mapping,
-            .VNode_x86_64_pdpt_Mapping,
-            .VNode_x86_64_pdir_Mapping,
-            .VNode_x86_64_ptable_Mapping,
-            .VNode_x86_64_ept_pml4_Mapping,
-            .VNode_x86_64_ept_pdpt_Mapping,
-            .VNode_x86_64_ept_pdir_Mapping,
-            .VNode_x86_64_ept_ptable_Mapping,
-            .VNode_x86_32_pdpt_Mapping,
-            .VNode_x86_32_pdir_Mapping,
-            .VNode_x86_32_ptable_Mapping,
-            .DevFrame_Mapping,
-            .Frame_Mapping,
+            .domain => return l2_cnode_slots,
+            .kernel,
+            .irq_table,
+            .irq_dest,
+            .irq_src,
+            .io,
+            .end_point_lmp,
+            .id,
+            .notify_ipi,
+            .performance_monitor,
+            .ipi,
+            .process_manager,
+            .device_id,
+            .device_id_manager,
+            .vnode_arm_l1_mapping,
+            .vnode_arm_l2_mapping,
+            .vnode_aarch64_l0_mapping,
+            .vnode_aarch64_l1_mapping,
+            .vnode_aarch64_l2_mapping,
+            .vnode_aarch64_l3_mapping,
+            .vnode_x86_64_pml4_mapping,
+            .vnode_x86_64_pdpt_mapping,
+            .vnode_x86_64_pdir_mapping,
+            .vnode_x86_64_ptable_mapping,
+            .vnode_x86_64_ept_pml4_mapping,
+            .vnode_x86_64_ept_pdpt_mapping,
+            .vnode_x86_64_ept_pdir_mapping,
+            .vnode_x86_64_ept_ptable_mapping,
+            .vnode_x86_32_pdpt_mapping,
+            .vnode_x86_32_pdir_mapping,
+            .vnode_x86_32_ptable_mapping,
+            .device_frame_mapping,
+            .frame_mapping,
             => return 1,
 
             else => unreachable,
         }
+    }
+
+    pub fn get_type_root(t: Type) u8 {
+        return switch (t) {
+            .device_id => 13,
+            .device_id_manager => 13,
+            .domain => 12,
+            .process_manager => 12,
+            .ipi => 11,
+            .kernel_control_block => 1,
+            .performance_monitor => 10,
+            .id => 9,
+            .notify_ipi => 8,
+            .io => 7,
+            .irq_src => 6,
+            .irq_dest => 5,
+            .irq_table => 4,
+            .vnode_aarch64_l3_mapping => 1,
+            .vnode_aarch64_l3 => 1,
+            .vnode_aarch64_l2_mapping => 1,
+            .vnode_aarch64_l2 => 1,
+            .vnode_aarch64_l1_mapping => 1,
+            .vnode_aarch64_l1 => 1,
+            .vnode_aarch64_l0_mapping => 1,
+            .vnode_aarch64_l0 => 1,
+            .vnode_arm_l2_mapping => 1,
+            .vnode_arm_l2 => 1,
+            .vnode_arm_l1_mapping => 1,
+            .vnode_arm_l1 => 1,
+            .vnode_x86_32_ptable_mapping => 1,
+            .vnode_x86_32_ptable => 1,
+            .vnode_x86_32_pdir_mapping => 1,
+            .vnode_x86_32_pdir => 1,
+            .vnode_x86_32_pdpt_mapping => 1,
+            .vnode_x86_32_pdpt => 1,
+            .vnode_vtd_context_table_mapping => 1,
+            .vnode_vtd_context_table => 1,
+            .vnode_vtd_root_table_mapping => 1,
+            .vnode_vtd_root_table => 1,
+            .vnode_x86_64_ept_ptable_mapping => 1,
+            .vnode_x86_64_ept_ptable => 1,
+            .vnode_x86_64_ept_pdir_mapping => 1,
+            .vnode_x86_64_ept_pdir => 1,
+            .vnode_x86_64_ept_pdpt_mapping => 1,
+            .vnode_x86_64_ept_pdpt => 1,
+            .vnode_x86_64_ept_pml4_mapping => 1,
+            .vnode_x86_64_ept_pml4 => 1,
+            .vnode_x86_64_ptable_mapping => 1,
+            .vnode_x86_64_ptable => 1,
+            .vnode_x86_64_pdir_mapping => 1,
+            .vnode_x86_64_pdir => 1,
+            .vnode_x86_64_pdpt_mapping => 1,
+            .vnode_x86_64_pdpt => 1,
+            .vnode_x86_64_pml4_mapping => 1,
+            .vnode_x86_64_pml4 => 1,
+            .vnode_x86_64_pml5_mapping => 1,
+            .vnode_x86_64_pml5 => 1,
+            .kernel => 3,
+            .device_frame_mapping => 1,
+            .device_frame => 1,
+            .end_point_ump_mapping => 1,
+            .end_point_ump => 1,
+            .frame_mapping => 1,
+            .frame => 1,
+            .end_point_lmp => 1,
+            .dispatcher => 1,
+            .fcnode => 2,
+            .l2cnode => 1,
+            .l1cnode => 1,
+            .ram => 1,
+            .physical_address => 1,
+            .null => 0,
+        };
     }
 };
 
@@ -633,10 +790,52 @@ pub const Size = struct {
     pub const mapping = 1;
 };
 
-pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize, object_size: usize, owner: CoreId, cte: *CTE) !void {
-    assert(capability_type != .EndPointLMP);
-    _ = owner;
-    _ = cte;
+pub const CTE = extern struct {
+    capability: Capability,
+    padding_0: [common.align_forward(@sizeOf(Capability), 8) - @sizeOf(Capability)]u8,
+    mdb_node: MappingDatabase.Node,
+    padding_1: [common.align_forward(@sizeOf(MappingDatabase.Node), 8) - @sizeOf(MappingDatabase.Node)]u8,
+    delete_node: DeleteList,
+    padding: [
+        (1 << objbits_cte) - @sizeOf(DeleteList) -
+            common.align_forward(@sizeOf(MappingDatabase.Node), 8) -
+            common.align_forward(@sizeOf(Capability), 8)
+    ]u8,
+
+    pub fn get_cnode(cte: *CTE) PhysicalAddress(.global) {
+        return cte.capability.get_address();
+    }
+};
+
+pub const CNodeSlot = enum(Slot) {
+    task = 0,
+    page = 1,
+    base_page = 2,
+    super = 3,
+    seg = 4,
+    physical_addres = 5,
+    module = 6,
+    slot_alloc0 = 7,
+    slot_alloc1 = 8,
+    slot_alloc2 = 9,
+    root_mapping = 10,
+    arg = 11,
+    bsp_kernel_control_block = 12,
+    early_cnode = 13,
+    user = 14,
+};
+
+const DeleteList = extern struct {
+    next: ?*CTE,
+};
+
+comptime {
+    const total_size = common.align_forward(@sizeOf(Capability), 8) + common.align_forward(@sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
+    assert(total_size <= (1 << objbits_cte));
+}
+
+pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize, object_size: usize, owner: CoreId, capabilities: [*]CTE) !void {
+    assert(capability_type != .end_point_lmp);
 
     assert(check_arguments(capability_type, bytes, object_size, false));
     assert(address == .null or check_arguments(capability_type, bytes, object_size, true));
@@ -644,19 +843,82 @@ pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize
     const object_count = capability_type.get_max_object_count(bytes, object_size);
     assert(object_count > 0);
 
-    @panic("capabilities new todo");
+    try create(capability_type, address, bytes, object_size, object_count, owner, capabilities);
+
+    MappingDatabase.set_init_mapping(capabilities[0..object_count]);
 }
 
-fn create(capability_type: Type, address: PhysicalAddress, size: u64, object_size: u64, count: usize, owner: CoreId, cte: *CTE) !void {
-    _ = address;
+fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_size: u64, count: usize) !void {
+    const virtual_address = address.to_higher_half_virtual_address();
+
+    switch (capability_type) {
+        .frame,
+        .end_point_ump,
+        => {
+            common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
+        },
+        .l1cnode,
+        .l2cnode,
+        => {
+            common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
+        },
+        else => @panic(@tagName(capability_type)),
+    }
+}
+
+fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, object_size: u64, count: usize, owner: CoreId, cte_ptr: [*]CTE) !void {
     _ = size;
-    _ = object_size;
-    _ = owner;
-    _ = count;
-    _ = cte;
     assert(capability_type != .null);
     assert(!capability_type.is_mapping());
-    @panic("cap create");
+    const global_address = address.to_higher_half_virtual_address();
+    _ = global_address;
+
+    if (owner == core_id) {
+        try zero_objects(capability_type, address, object_size, count);
+    }
+
+    const ctes = cte_ptr[0..count];
+    common.zero_slice(CTE, ctes);
+
+    switch (capability_type) {
+        .l1cnode => {
+            assert(object_size >= Size.l2cnode);
+            assert(object_size % Size.l2cnode == 0);
+            log.debug("Object count: {}", .{count});
+            for (ctes) |*cte, i| {
+                cte.capability = .{
+                    .object = .{
+                        .l1cnode = .{
+                            .cnode = address.offset(i * object_size),
+                            .rights = Rights.all,
+                            .allocated_bytes = object_size,
+                        },
+                    },
+                    .rights = Rights.all,
+                    .type = .l1cnode,
+                };
+            }
+        },
+        .l2cnode => {
+            for (ctes) |*cte, i| {
+                cte.capability = .{
+                    .object = .{
+                        .l2cnode = .{
+                            .cnode = address.offset(i * object_size),
+                            .rights = Rights.all,
+                        },
+                    },
+                    .rights = Rights.all,
+                    .type = .l2cnode,
+                };
+            }
+        },
+        else => @panic(@tagName(capability_type)),
+    }
+
+    for (ctes) |*cte| {
+        cte.mdb_node.owner = owner;
+    }
 }
 
 const objbits_cte = 6;
@@ -670,19 +932,26 @@ pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, 
         @panic("mappable");
     } else {
         switch (capability_type) {
-            .L1CNode => {
+            .l1cnode, .l2cnode => {
                 if (bytes < Size.l2cnode or object_size < Size.l2cnode) return false;
                 if (exact and bytes % object_size != 0) return false;
                 return object_size % (1 << objbits_cte) == 0;
             },
-            .L2CNode => {
-                @panic("l2cnode");
-            },
-            .Dispatcher => {
+            .dispatcher => {
                 @panic("dispatcher");
             },
             else => return true,
         }
     }
     @panic("capabilities check arguments todo");
+}
+
+pub const Address = u32;
+pub const Slot = Address;
+
+pub fn locate_slot(cnode: PhysicalAddress(.local), offset: Slot) *CTE {
+    log.debug("slot = {}", .{offset});
+    const total_offset = (1 << objbits_cte) * offset;
+    log.debug("total offset: {}", .{total_offset});
+    return cnode.to_higher_half_virtual_address().offset(total_offset).access(*CTE);
 }

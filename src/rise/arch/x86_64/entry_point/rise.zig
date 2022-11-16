@@ -1,6 +1,9 @@
 const common = @import("common");
 const assert = common.assert;
 const logger = common.log.scoped(.EntryPoint);
+const cpuid = common.arch.x86_64.cpuid;
+const page_shifter = common.arch.page_shifter;
+const valid_page_sizes = common.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
@@ -9,14 +12,20 @@ const CoreSupervisor = privileged.CoreSupervisor;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
+const SpawnState = privileged.SpawnState;
 const VirtualAddress = privileged.VirtualAddress;
 const UEFI = privileged.UEFI;
 
-const arch = @import("arch");
-const CPU = arch.CPU;
-const x86_64 = arch.x86_64;
-const APIC = x86_64.APIC;
-const IDT = x86_64.IDT;
+const APIC = privileged.arch.x86_64.APIC;
+const IDT = privileged.arch.x86_64.IDT;
+const paging = privileged.arch.paging;
+const Syscall = privileged.arch.x86_64.Syscall;
+const cr0 = privileged.arch.x86_64.registers.cr0;
+const cr4 = privileged.arch.x86_64.registers.cr4;
+const IA32_EFER = privileged.arch.x86_64.registers.IA32_EFER;
+const IA32_PAT = privileged.arch.x86_64.registers.IA32_PAT;
+
+const rise = @import("rise");
 
 const MemoryMap = struct {
     const Entry = struct {
@@ -37,10 +46,8 @@ const MemoryMap = struct {
 };
 
 export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
-    for (bootloader_information.init_file[0..10]) |byte, i| {
-        logger.debug("[{}]: 0x{x}", .{ i, byte });
-    }
     logger.debug("Hello kernel", .{});
+    paging.register_physical_allocator(&rise.physical_allocator);
     IDT.setup();
     logger.debug("Loaded IDT", .{});
 
@@ -56,11 +63,11 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
         while (memory_map_iterator.next(bootloader_information.memory_map)) |entry| {
             if (entry.type == .ConventionalMemory) {
                 const used_4k_page_count = bootloader_information.counters[memory_map_conventional_entry_index];
-                const used_byte_count = used_4k_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
+                const used_byte_count = used_4k_page_count << page_shifter(valid_page_sizes[0]);
 
                 if (used_byte_count >= physical_regions_allocation_size) {
-                    const physical_address = PhysicalAddress.new(entry.physical_start + used_byte_count);
-                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(physical_regions_allocation_size, arch.valid_page_sizes[0]) >> arch.page_shifter(arch.valid_page_sizes[0]));
+                    const physical_address = PhysicalAddress(.local).new(entry.physical_start + used_byte_count);
+                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
 
                     const free_regions = physical_address.to_higher_half_virtual_address().access([*]PhysicalAddressSpace.Region)[0..entry_count];
                     memory_map_iterator.reset();
@@ -73,11 +80,11 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
                             defer memory_map_conventional_entry_index += 1;
 
                             const entry_used_page_count = bootloader_information.counters[memory_map_conventional_entry_index];
-                            const entry_used_byte_count = entry_used_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
+                            const entry_used_byte_count = entry_used_page_count << page_shifter(valid_page_sizes[0]);
 
-                            const entry_physical_address = PhysicalAddress.new(memory_map_entry.physical_start + entry_used_byte_count);
+                            const entry_physical_address = PhysicalAddress(.local).new(memory_map_entry.physical_start + entry_used_byte_count);
                             const entry_free_page_count = memory_map_entry.number_of_pages - entry_used_page_count;
-                            const entry_free_byte_count = entry_free_page_count << arch.page_shifter(arch.valid_page_sizes[0]);
+                            const entry_free_byte_count = entry_free_page_count << page_shifter(valid_page_sizes[0]);
 
                             if (entry_free_byte_count != 0) {
                                 const region = &free_regions[memory_map_conventional_entry_index];
@@ -111,7 +118,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     logger.debug("Finished processing memory map", .{});
 
-    arch.startup.bsp_address_space = PhysicalAddressSpace{
+    rise.bootstrap_address_space = PhysicalAddressSpace{
         .free_list = .{
             .first = &free_physical_regions[0],
             .last = &free_physical_regions[free_physical_regions.len - 1],
@@ -124,18 +131,18 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
     // TODO: init RTC
     // TODO: setup timer properly
     if (common.config.timeslicing) {
-        x86_64.APIC.calibrate_timer(apic_base);
+        APIC.calibrate_timer(apic_base);
     } else {
         logger.warn("Timeslicing not enabled", .{});
         @panic("todo implement no timeslicing");
     }
 
     logger.warn("TODO: Enable IPI", .{});
-    arch.x86_64.Syscall.enable(@ptrToInt(&kernel_syscall_entry_point));
+    Syscall.enable(@ptrToInt(&kernel_syscall_entry_point));
 
     // Enable no-execute protection
     {
-        var efer = arch.x86_64.registers.IA32_EFER.read();
+        var efer = IA32_EFER.read();
         efer.NXE = true;
         efer.write();
     }
@@ -157,24 +164,24 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 }
 
 fn kernel_startup() noreturn {
-    if (x86_64.APIC.is_bsp) {
+    if (APIC.is_bsp) {
         spawn_bsp_init() catch {
             @panic("Can't spawn init");
         };
     } else {
         @panic("AP initialization");
     }
-    CPU.stop();
+    privileged.arch.CPU_stop();
 }
 
 fn spawn_bsp_init() !void {
-    assert(x86_64.APIC.is_bsp);
-    try spawn_init_common();
+    assert(APIC.is_bsp);
+    try spawn_init_common(&start_spawn_state);
     @panic("Todo spawn bsp init");
 }
 
-fn spawn_init_common() !void {
-    try spawn_module();
+fn spawn_init_common(spawn_state: *SpawnState) !void {
+    try spawn_module(spawn_state);
     @panic("todo spawn_init_common");
 }
 
@@ -182,23 +189,47 @@ var core_supervisor: CoreSupervisor = undefined;
 export var current_core_supervisor = &core_supervisor;
 export var current_core_director: *CoreDirector = undefined;
 
-fn spawn_module() !void {
-    const root_cn = &current_core_supervisor.init_rootcn;
+fn spawn_module(spawn_state: *SpawnState) !void {
+    const root_cn = cnode_many_ptr(&current_core_supervisor.init_rootcn);
     try privileged.MappingDatabase.init(current_core_supervisor);
     current_core_supervisor.is_valid = true;
     current_core_supervisor.scheduler_type = .round_robin;
 
-    Capabilities.new(.l1_cnode, arch.startup.bsp_address_space.allocate(@enumToInt(Capabilities.Size.l2cnode), arch.valid_page_sizes[0]), @enumToInt(Capabilities.Size.l2cnode), core_id, root_cn);
+    try Capabilities.new(.l1cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, root_cn);
+
+    // TODO: @ArchIndependent
+    if (APIC.is_bsp) {
+        const bsp_kernel_control_block_capability = Capabilities.Capability{
+            .object = .{
+                .kernel_control_block = current_core_supervisor,
+            },
+            .rights = Capabilities.Rights.all,
+            .type = .kernel_control_block,
+        };
+        const bsp_kernel_control_block = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.CNodeSlot.bsp_kernel_control_block));
+        assert(bsp_kernel_control_block.capability.type == .null);
+        bsp_kernel_control_block.capability = bsp_kernel_control_block_capability;
+    }
+
+    spawn_state.cnodes.task = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.CNodeSlot.task));
+    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.task orelse unreachable));
 
     // create capability root node
 
     @panic("spawn_module");
 }
 
+fn cnode_many_ptr(cnode: *Capabilities.CTE) [*]Capabilities.CTE {
+    const result = @ptrCast([*]Capabilities.CTE, cnode);
+    return result;
+}
+
+pub var start_spawn_state = SpawnState{};
+
 fn configure_page_attribute_table() void {
     logger.debug("Configuring page attribute table...", .{});
     defer logger.debug("Page attribute table configured!", .{});
-    var pat = x86_64.registers.IA32_PAT.read();
+    var pat = IA32_PAT.read();
     pat.page_attributes[4] = .write_combining;
     pat.page_attributes[5] = .write_protected;
     pat.write();
@@ -207,9 +238,9 @@ fn configure_page_attribute_table() void {
 fn enable_global_pages() void {
     logger.debug("Enabling global pages...", .{});
     defer logger.debug("Global pages enabled!", .{});
-    var cr4 = x86_64.registers.cr4.read();
-    cr4.page_global_enable = true;
-    cr4.write();
+    var my_cr4 = cr4.read();
+    my_cr4.page_global_enable = true;
+    my_cr4.write();
 }
 
 fn enable_monitor_mwait() void {
@@ -224,8 +255,8 @@ var monitor_mwait: struct {
 
     pub fn is_supported(mwait: *@This()) bool {
         if (!mwait.called) {
-            const cpuid = x86_64.CPUID.cpuid(1);
-            mwait.supported = cpuid.ecx & (1 << 3) != 0;
+            const result = cpuid(1);
+            mwait.supported = result.ecx & (1 << 3) != 0;
             mwait.called = true;
         }
 
@@ -236,23 +267,23 @@ var monitor_mwait: struct {
 fn enable_performance_counters() void {
     logger.debug("Enabling performance counters...", .{});
     defer logger.debug("Performance counters enabled!", .{});
-    var cr4 = x86_64.registers.cr4.read();
-    cr4.performance_monitoring_counter_enable = true;
-    cr4.write();
+    var my_cr4 = cr4.read();
+    my_cr4.performance_monitoring_counter_enable = true;
+    my_cr4.write();
 }
 
 fn enable_fpu() void {
     logger.debug("Enabling FPU...", .{});
     defer logger.debug("FPU enabled!", .{});
-    var cr0 = x86_64.registers.cr0.read();
-    cr0.emulation = false;
-    cr0.monitor_coprocessor = true;
-    cr0.numeric_error = true;
-    cr0.task_switched = false;
-    cr0.write();
-    var cr4 = x86_64.registers.cr4.read();
-    cr4.operating_system_support_for_fx_save_restore = true;
-    cr4.write();
+    var my_cr0 = cr0.read();
+    my_cr0.emulation = false;
+    my_cr0.monitor_coprocessor = true;
+    my_cr0.numeric_error = true;
+    my_cr0.task_switched = false;
+    my_cr0.write();
+    var my_cr4 = cr4.read();
+    my_cr4.operating_system_support_for_fx_save_restore = true;
+    my_cr4.write();
 
     //const mxcsr_value: u32 = 0x1f80;
     asm volatile (
@@ -281,7 +312,7 @@ pub fn panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
         \\cli
     );
     common.log.scoped(.PANIC).err("{s}", .{message});
-    CPU.stop();
+    privileged.arch.CPU_stop();
 }
 
 const Writer = common.Writer(void, error{}, e9_write);

@@ -97,11 +97,6 @@ var rise_package = Package{
     .source = FileSource.relative("src/rise.zig"),
 };
 
-var kernel_package = Package{
-    .name = "kernel",
-    .source = FileSource.relative("src/kernel.zig"),
-};
-
 var user_package = Package{
     .name = "user",
     .source = FileSource.relative("src/user.zig"),
@@ -390,8 +385,7 @@ const Kernel = struct {
     fn create(kernel: *Kernel) !void {
         // Initialize package dependencies here
         common_package.dependencies = &.{common_package};
-        rise_package.dependencies = &.{ common_package, rise_package, kernel_package, privileged_package };
-        kernel_package.dependencies = &.{ common_package, rise_package, privileged_package, kernel_package };
+        rise_package.dependencies = &.{ common_package, rise_package, privileged_package };
         user_package.dependencies = &.{common_package};
         privileged_package.dependencies = &.{ common_package, privileged_package };
 
@@ -434,11 +428,12 @@ const Kernel = struct {
     fn create_executable(kernel: *Kernel) void {
         const target = get_target(kernel.options.arch, false);
 
+        const kernel_source_path = "src/rise/";
         switch (kernel.options.arch) {
             .x86_64 => {
                 const zig_root_file = switch (kernel.options.arch.x86_64.bootloader) {
-                    .rise => "src/kernel/arch/x86_64/entry_point/rise.zig",
-                    .limine => "src/kernel/arch/x86_64/entry_point/limine.zig",
+                    .rise => kernel_source_path ++ "arch/x86_64/entry_point/rise.zig",
+                    .limine => kernel_source_path ++ "arch/x86_64/entry_point/limine.zig",
                 };
 
                 kernel.executable = kernel.builder.addExecutable(kernel_name, zig_root_file);
@@ -452,14 +447,13 @@ const Kernel = struct {
                 kernel.executable.red_zone = false;
                 kernel.executable.omit_frame_pointer = false;
                 kernel.executable.entry_symbol_name = "kernel_entry_point";
-                kernel.executable.setLinkerScriptPath(FileSource.relative("src/kernel/arch/x86_64/linker.ld"));
+                kernel.executable.setLinkerScriptPath(FileSource.relative(kernel_source_path ++ "arch/x86_64/linker.ld"));
             },
             else => unreachable,
         }
 
         kernel.executable.addPackage(common_package);
         kernel.executable.addPackage(bootloader_package);
-        kernel.executable.addPackage(kernel_package);
         kernel.executable.addPackage(rise_package);
         kernel.executable.addPackage(privileged_package);
 

@@ -26,7 +26,7 @@ pub const CoreSupervisor = struct {
     next: ?*CoreSupervisor,
     previous: ?*CoreSupervisor,
     mdb_root: VirtualAddress(.local),
-    init_rootcn: CTE,
+    init_rootcn: Capabilities.CTE,
     scheduler_type: SchedulerType,
     scheduler_state: union(SchedulerType) {
         round_robin: RoundRobin,
@@ -34,7 +34,7 @@ pub const CoreSupervisor = struct {
     },
     kernel_offset: i64,
     irq_in_use: [arch.dispatch_count]u8, // bitmap of handed out caps
-    irq_dispatch: [arch.dispatch_count]CTE,
+    irq_dispatch: [arch.dispatch_count]Capabilities.CTE,
     pending_ram_in_use: u8,
     pending_ram: [4]RAM,
 };
@@ -57,10 +57,6 @@ pub const RBED = struct {
 pub const SchedulerType = enum {
     round_robin,
     rate_based_earliest_deadline,
-};
-
-pub const CTE = struct {
-    // TODO:
 };
 
 pub const CoreDirector = struct {
@@ -95,9 +91,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn maybe_invalid(new_value: usize) PA {
-            return PA{
-                .value = new_value,
-            };
+            return @intToEnum(PA, new_value);
         }
 
         pub fn is_valid(physical_address: PA) bool {
@@ -157,6 +151,20 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         pub fn to_higher_half_virtual_address(physical_address: PA) VirtualAddress(locality) {
             const address = VirtualAddress(locality).new(physical_address.value() + common.config.kernel_higher_half_address);
             return address;
+        }
+
+        pub fn to_global(physical_address: PA) PhysicalAddress(.global) {
+            comptime {
+                assert(locality == .local);
+            }
+            return @intToEnum(PhysicalAddress(.global), @enumToInt(physical_address));
+        }
+
+        pub fn to_local(physical_address: PA) PhysicalAddress(.local) {
+            comptime {
+                assert(locality == .global);
+            }
+            return @intToEnum(PhysicalAddress(.local), @enumToInt(physical_address));
         }
 
         pub fn format(physical_address: PA, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -292,3 +300,31 @@ pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
         }
     };
 }
+
+pub const PassId = u32;
+pub const CoreId = u8;
+pub const CapAddr = u32;
+
+const CTE = Capabilities.CTE;
+pub const SpawnState = struct {
+    cnodes: struct {
+        task: ?*CTE = null,
+        seg: ?*CTE = null,
+        super: ?*CTE = null,
+        physical_address: ?*CTE = null,
+        module: ?*CTE = null,
+        page: ?*CTE = null,
+        base_page: ?*CTE = null,
+        early_cnode: ?*CTE = null,
+        slot_alloc0: ?*CTE = null,
+        slot_alloc1: ?*CTE = null,
+        slot_alloc2: ?*CTE = null,
+    } = .{},
+    slots: struct {
+        seg: Capabilities.Slot = 0,
+        super: Capabilities.Slot = 0,
+        physical_address: Capabilities.Slot = 0,
+        module: Capabilities.Slot = 0,
+    } = .{},
+    argument_page_address: PhysicalAddress(.local) = .null,
+};
