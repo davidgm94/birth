@@ -16,8 +16,10 @@ const AllocateError = error{
 };
 
 pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion(.local) {
-    log.debug("Trying to allocate {} bytes of physical memory", .{size});
-    if (!common.is_aligned(size, valid_page_sizes[0])) return AllocateError.not_base_page_aligned;
+    if (!common.is_aligned(size, valid_page_sizes[0])) {
+        log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
+        return AllocateError.not_base_page_aligned;
+    }
 
     var node_ptr = physical_address_space.free_list.first;
 
@@ -50,8 +52,8 @@ pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_s
 
     // For now, just zero it out.
     // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys the upcoming zero flag
-    //const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
-    //common.zero(region_bytes);
+    const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
+    common.zero(region_bytes);
 
     return allocated_region;
 }

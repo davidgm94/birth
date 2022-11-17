@@ -97,14 +97,14 @@ var rise_package = Package{
     .source = FileSource.relative("src/rise.zig"),
 };
 
-var user_package = Package{
-    .name = "user",
-    .source = FileSource.relative("src/user.zig"),
-};
-
 var privileged_package = Package{
     .name = "privileged",
     .source = FileSource.relative("src/privileged.zig"),
+};
+
+var user_package = Package{
+    .name = "user",
+    .source = FileSource.relative("src/user.zig"),
 };
 
 fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {

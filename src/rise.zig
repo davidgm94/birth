@@ -4,6 +4,7 @@ const valid_page_sizes = common.arch.x86_64.valid_page_sizes;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
+const CPU_stop = privileged.arch.CPU_stop;
 const CTE = Capabilities.CTE;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
@@ -19,6 +20,9 @@ pub fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64)
     }
 
     const result = bootstrap_address_space.allocate(size, valid_page_sizes[0]) catch return CustomAllocator.Error.OutOfMemory;
+    if (!common.is_aligned(alignment, valid_page_sizes[0])) {
+        return CustomAllocator.Error.OutOfMemory;
+    }
 
     return CustomAllocator.Result{
         .address = result.address.value(),

@@ -9,6 +9,7 @@ const CoreDirector = privileged.CoreDirector;
 const CoreId = privileged.CoreId;
 const CoreSupervisor = privileged.CoreSupervisor;
 const MappingDatabase = privileged.MappingDatabase;
+const panic = privileged.panic;
 const PassId = privileged.PassId;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
@@ -332,7 +333,7 @@ pub const Capability = extern struct {
             // TODO: returning global for a local makes no sense here?
             .l1cnode => return capability.object.l1cnode.cnode.to_global(),
             .l2cnode => return capability.object.l2cnode.cnode.to_global(),
-            else => @panic(@tagName(capability.type)),
+            else => panic("get_address: {s}", .{@tagName(capability.type)}),
         }
     }
 
@@ -340,7 +341,7 @@ pub const Capability = extern struct {
         switch (capability.type) {
             .l1cnode => return capability.object.l1cnode.allocated_bytes,
             .l2cnode => return 16384,
-            else => @panic(@tagName(capability.type)),
+            else => panic("get_size: {s}", .{@tagName(capability.type)}),
         }
     }
 
@@ -384,7 +385,7 @@ pub const Capability = extern struct {
         }
 
         switch (a.type) {
-            else => @panic(@tagName(a.type)),
+            else => panic("compare: {s}", .{@tagName(a.type)}),
         }
 
         if (tiebreak) {
@@ -807,13 +808,13 @@ pub const CTE = extern struct {
     }
 };
 
-pub const CNodeSlot = enum(Slot) {
+pub const RootCNodeSlot = enum(Slot) {
     task = 0,
     page = 1,
     base_page = 2,
     super = 3,
     seg = 4,
-    physical_addres = 5,
+    physical_address = 5,
     module = 6,
     slot_alloc0 = 7,
     slot_alloc1 = 8,
@@ -823,6 +824,30 @@ pub const CNodeSlot = enum(Slot) {
     bsp_kernel_control_block = 12,
     early_cnode = 13,
     user = 14,
+};
+
+pub const TaskCNodeSlot = enum(Slot) {
+    task = 0,
+    dispatcher = 1,
+    root = 2,
+    dispatcher_frame = 4,
+    irq = 5,
+    io = 6,
+    boot_info = 7,
+    kernel_cap = 8,
+    trace_buffer = 9,
+    args_space = 10,
+    mon_urpc = 11,
+    session_id = 12,
+    fds_page = 13,
+    performance_monitor = 14,
+    system_memory = 15,
+    coreboot = 16,
+    ipi = 17,
+    process_manager = 18,
+    domaind_id = 19,
+    device_id_manager = 20,
+    user = 21,
 };
 
 const DeleteList = extern struct {
@@ -862,7 +887,9 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
         => {
             common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
         },
-        else => @panic(@tagName(capability_type)),
+        else => {
+            panic("zero_objects: {s}", .{@tagName(capability_type)});
+        },
     }
 }
 
@@ -913,7 +940,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                 };
             }
         },
-        else => @panic(@tagName(capability_type)),
+        else => panic("create: {s}", .{@tagName(capability_type)}),
     }
 
     for (ctes) |*cte| {
@@ -950,8 +977,6 @@ pub const Address = u32;
 pub const Slot = Address;
 
 pub fn locate_slot(cnode: PhysicalAddress(.local), offset: Slot) *CTE {
-    log.debug("slot = {}", .{offset});
     const total_offset = (1 << objbits_cte) * offset;
-    log.debug("total offset: {}", .{total_offset});
     return cnode.to_higher_half_virtual_address().offset(total_offset).access(*CTE);
 }

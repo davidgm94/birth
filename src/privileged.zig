@@ -328,3 +328,9 @@ pub const SpawnState = struct {
     } = .{},
     argument_page_address: PhysicalAddress(.local) = .null,
 };
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    const panic_logger = common.log.scoped(.PANIC);
+    panic_logger.err(format, arguments);
+    arch.CPU_stop();
+}

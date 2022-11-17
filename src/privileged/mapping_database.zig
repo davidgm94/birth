@@ -4,6 +4,7 @@ const CoreId = privileged.CoreId;
 const CoreSupervisor = privileged.CoreSupervisor;
 const CTE = Capabilities.CTE;
 const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
 
 pub var core_supervisor: *CoreSupervisor = undefined;
 pub var mapping_database_root: ?*CTE = null;
@@ -104,16 +105,21 @@ fn skew(maybe_node: ?*CTE) ?*CTE {
     if (maybe_node) |node| {
         if (node.mdb_node.left) |left| {
             if (node.mdb_node.level == left.mdb_node.level) {
-                @panic("skew");
-            } else {
-                return node;
+                node.mdb_node.left = left.mdb_node.right;
+                left.mdb_node.right = node;
+                update_end(node);
+                update_end(left);
+
+                if (mapping_database_root == node) {
+                    set_root(left);
+                }
+
+                return left;
             }
-        } else {
-            return node;
         }
-    } else {
-        return maybe_node;
     }
+
+    return maybe_node;
 }
 
 fn split(maybe_node: ?*CTE) ?*CTE {
@@ -128,19 +134,19 @@ fn split(maybe_node: ?*CTE) ?*CTE {
                     update_end(right);
 
                     if (mapping_database_root == node) {
-                        @panic("set_root");
+                        set_root(right);
                     }
+
                     return right;
-                } else {
-                    return node;
                 }
-            } else {
-                return node;
             }
-        } else {
-            return node;
         }
-    } else {
-        return maybe_node;
     }
+
+    return maybe_node;
+}
+
+fn set_root(new_root: *CTE) void {
+    mapping_database_root = new_root;
+    core_supervisor.mdb_root = VirtualAddress(.local).new(@ptrToInt(new_root));
 }
