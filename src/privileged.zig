@@ -11,7 +11,6 @@ pub const arch = @import("privileged/arch.zig");
 pub const Capabilities = @import("privileged/capabilities.zig");
 pub const Heap = @import("privileged/heap.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
-pub const PhysicalAddressSpace = @import("privileged/physical_address_space.zig");
 pub const UEFI = @import("privileged/uefi.zig");
 pub const VirtualAddressSpace = @import("privileged/virtual_address_space.zig");
 
@@ -238,7 +237,7 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
 }
 
 pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
-    return struct {
+    return extern struct {
         address: PhysicalAddress(locality),
         size: u64,
 
@@ -334,3 +333,91 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     panic_logger.err(format, arguments);
     arch.CPU_stop();
 }
+
+pub const PhysicalAddressSpace = extern struct {
+    free_list: List = .{},
+
+    const log = common.log.scoped(.PhysicalAddressSpace);
+    const AllocateError = error{
+        not_base_page_aligned,
+        out_of_memory,
+    };
+
+    const valid_page_sizes = common.arch.valid_page_sizes;
+
+    pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion(.local) {
+        if (size >= valid_page_sizes[0]) {
+            if (!common.is_aligned(size, valid_page_sizes[0])) {
+                log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
+                return AllocateError.not_base_page_aligned;
+            }
+
+            var node_ptr = physical_address_space.free_list.first;
+
+            const allocated_region = blk: {
+                while (node_ptr) |node| : (node_ptr = node.next) {
+                    const result_address = node.descriptor.address.aligned_forward(page_size);
+                    const size_up = size + result_address.value() - node.descriptor.address.value();
+                    if (node.descriptor.size > size_up) {
+                        const allocated_region = PhysicalMemoryRegion(.local){
+                            .address = result_address,
+                            .size = size,
+                        };
+                        node.descriptor.address.add_offset(size_up);
+                        node.descriptor.size -= size_up;
+
+                        break :blk allocated_region;
+                    } else if (node.descriptor.size == size_up) {
+                        const allocated_region = node.descriptor.offset(size_up - size);
+                        if (node.previous) |previous| previous.next = node.next;
+                        if (node.next) |next| next.previous = node.previous;
+                        if (node_ptr == physical_address_space.free_list.first) physical_address_space.free_list.first = node.next;
+                        if (node_ptr == physical_address_space.free_list.last) physical_address_space.free_list.last = node.previous;
+
+                        break :blk allocated_region;
+                    }
+                }
+
+                return AllocateError.out_of_memory;
+            };
+
+            // For now, just zero it out.
+            // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys the upcoming zero flag
+            const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
+            common.zero(region_bytes);
+
+            return allocated_region;
+        } else {
+            @panic("todo allocate non-page memory");
+        }
+    }
+
+    pub fn free(physical_address_space: *PhysicalAddressSpace, size: u64) void {
+        _ = physical_address_space;
+        _ = size;
+
+        @panic("todo free pages");
+    }
+
+    pub fn log_free_memory(physical_address_space: *PhysicalAddressSpace) void {
+        var node_ptr = physical_address_space.free_list.first;
+        var size: u64 = 0;
+        while (node_ptr) |node| : (node_ptr = node.next) {
+            size += node.descriptor.size;
+        }
+
+        log.debug("Free memory: {} bytes", .{size});
+    }
+
+    const List = extern struct {
+        first: ?*Region = null,
+        last: ?*Region = null,
+        count: u64 = 0,
+    };
+
+    pub const Region = extern struct {
+        descriptor: PhysicalMemoryRegion(.local),
+        previous: ?*Region = null,
+        next: ?*Region = null,
+    };
+};
