@@ -41,8 +41,8 @@ pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
     return @ctz(@as(u32, asked_page_size));
 }
 
-pub const CoreDirector = struct {
-    base: privileged.CoreDirector,
+pub const CoreDirectorData = extern struct {
+    base: privileged.CoreDirectorData,
     crit_pc_low: VirtualAddress(.local),
     crit_pc_high: VirtualAddress(.local),
     ldt_base: VirtualAddress(.local),
@@ -53,7 +53,7 @@ pub const CoreDirector = struct {
     trap_save_area: Registers,
 };
 
-pub const Registers = struct {
+pub const Registers = extern struct {
     rax: u64,
     rbx: u64,
     rcx: u64,
@@ -74,7 +74,7 @@ pub const Registers = struct {
     rflags: u64,
     fs: u16,
     gs: u16,
-    fxsave_area: struct {
+    fxsave_area: extern struct {
         fcw: u16,
         fsw: u16,
         ftw: u8,

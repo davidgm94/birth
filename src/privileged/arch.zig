@@ -5,7 +5,7 @@ const arch = switch (@import("builtin").cpu.arch) {
 
 pub const x86_64 = @import("arch/x86_64.zig");
 
-pub const CoreDirector = arch.CoreDirector;
+pub const CoreDirectorData = arch.CoreDirectorData;
 pub const CPU_stop = arch.CPU_stop;
 pub const paging = arch.paging;
 

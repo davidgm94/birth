@@ -13,6 +13,11 @@ pub const Heap = @import("privileged/heap.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const UEFI = @import("privileged/uefi.zig");
 pub const VirtualAddressSpace = @import("privileged/virtual_address_space.zig");
+pub const scheduler_type = SchedulerType.round_robin;
+pub const Scheduler = switch (scheduler_type) {
+    .round_robin => @import("privileged/round_robin.zig"),
+    else => @compileError("other scheduler is not supported right now"),
+};
 
 pub const ResourceOwner = enum(u2) {
     bootloader = 0,
@@ -20,17 +25,13 @@ pub const ResourceOwner = enum(u2) {
     user = 2,
 };
 
-pub const CoreSupervisor = struct {
+pub const CoreSupervisorData = extern struct {
     is_valid: bool,
-    next: ?*CoreSupervisor,
-    previous: ?*CoreSupervisor,
+    next: ?*CoreSupervisorData,
+    previous: ?*CoreSupervisorData,
     mdb_root: VirtualAddress(.local),
     init_rootcn: Capabilities.CTE,
-    scheduler_type: SchedulerType,
-    scheduler_state: union(SchedulerType) {
-        round_robin: RoundRobin,
-        rate_based_earliest_deadline: RBED,
-    },
+    scheduler_state: Scheduler.State,
     kernel_offset: i64,
     irq_in_use: [arch.dispatch_count]u8, // bitmap of handed out caps
     irq_dispatch: [arch.dispatch_count]Capabilities.CTE,
@@ -38,29 +39,54 @@ pub const CoreSupervisor = struct {
     pending_ram: [4]RAM,
 };
 
-const RAM = struct {
+const RAM = extern struct {
     base: u64,
     bytes: u64,
 };
 
-pub const RoundRobin = struct {
-    current: ?*CoreDirector,
-};
-
 pub const RBED = struct {
-    queue_head: ?*CoreDirector,
-    queue_tail: ?*CoreDirector,
+    queue_head: ?*CoreDirectorData,
+    queue_tail: ?*CoreDirectorData,
     // TODO: more stuff
 };
 
-pub const SchedulerType = enum {
+pub const SchedulerType = enum(u8) {
     round_robin,
     rate_based_earliest_deadline,
 };
 
-pub const CoreDirector = struct {
-    fp: u64,
+pub const CoreDirectorData = extern struct {
+    dispatcher_handle: usize,
     disabled: bool,
+    cspace: CTE,
+    vspace: usize,
+    dispatcher_cte: CTE,
+    faults_taken: u32,
+    is_vm_guest: bool,
+    // TODO: guest desc
+    domain_id: u64,
+    // TODO: wakeup time
+    wakeup_previous: ?*CoreDirectorData,
+    wakeup_next: ?*CoreDirectorData,
+    next: ?*CoreDirectorData,
+    previous: ?*CoreDirectorData,
+};
+
+pub const CoreDirectorSharedGeneric = extern struct {
+    disabled: u32,
+    haswork: u32,
+    udisp: VirtualAddress(.local),
+    lmp_delivered: u32,
+    lmp_seen: u32,
+    lmp_hint: VirtualAddress(.local),
+    dispatcher_run: VirtualAddress(.local),
+    dispatcher_lrpc: VirtualAddress(.local),
+    dispatcher_page_fault: VirtualAddress(.local),
+    dispatcher_page_fault_disabled: VirtualAddress(.local),
+    dispatcher_trap: VirtualAddress(.local),
+    // TODO: time
+    systime_frequency: u64,
+    core_id: CoreId,
 };
 
 pub const CoreLocality = enum {
@@ -173,7 +199,6 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
 }
 
 pub fn VirtualAddress(comptime locality: CoreLocality) type {
-    _ = locality;
     return enum(usize) {
         null = 0,
         _,
@@ -230,6 +255,12 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
             return common.is_aligned(virtual_address.value(), alignment);
         }
 
+        pub fn to_physical_address(virtual_address: VA) PhysicalAddress(locality) {
+            assert(virtual_address.value() >= common.config.kernel_higher_half_address);
+            const address = PhysicalAddress(locality).new(virtual_address.value() - common.config.kernel_higher_half_address);
+            return address;
+        }
+
         pub fn format(virtual_address: VA, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
             try common.internal_format(writer, "0x{x}", .{virtual_address.value()});
         }
@@ -257,12 +288,28 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
             };
         }
 
-        pub fn offset(physical_memory_region: PMR, asked_offset: u64) PMR {
+        pub fn offset(physical_memory_region: PMR, asked_offset: usize) PMR {
             assert(asked_offset < physical_memory_region.size);
 
             var result = physical_memory_region;
             result.address = result.address.offset(asked_offset);
             result.size -= asked_offset;
+            return result;
+        }
+
+        pub fn add_offset(physical_memory_region: *PMR, asked_offset: usize) void {
+            physical_memory_region.* = physical_memory_region.offset(asked_offset);
+        }
+
+        /// Result: chop, the rest is modified through the pointer
+        pub fn chop(physical_memory_region: *PMR, asked_offset: usize) PMR {
+            const ptr_result = physical_memory_region.offset(asked_offset);
+            const result = PMR{
+                .address = physical_memory_region.address,
+                .size = physical_memory_region.size - ptr_result.size,
+            };
+            physical_memory_region.* = ptr_result;
+
             return result;
         }
 
@@ -336,6 +383,7 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
 
 pub const PhysicalAddressSpace = extern struct {
     free_list: List = .{},
+    heap_list: List = .{},
 
     const log = common.log.scoped(.PhysicalAddressSpace);
     const AllocateError = error{
@@ -388,7 +436,23 @@ pub const PhysicalAddressSpace = extern struct {
 
             return allocated_region;
         } else {
-            @panic("todo allocate non-page memory");
+            if (physical_address_space.heap_list.last) |last| {
+                if (last.descriptor.size >= size) {
+                    const chop = last.descriptor.chop(size);
+                    return chop;
+                } else {
+                    @panic("insufficient size");
+                }
+            } else {
+                var heap_region = try physical_address_space.allocate(valid_page_sizes[1], valid_page_sizes[0]);
+                const region_ptr = heap_region.chop(@sizeOf(Region)).address.to_higher_half_virtual_address().access(*Region);
+                region_ptr.* = .{
+                    .descriptor = heap_region,
+                };
+                physical_address_space.heap_list.append(region_ptr);
+
+                return try physical_address_space.allocate(size, page_size);
+            }
         }
     }
 
@@ -413,6 +477,40 @@ pub const PhysicalAddressSpace = extern struct {
         first: ?*Region = null,
         last: ?*Region = null,
         count: u64 = 0,
+
+        pub fn append(list: *List, node: *Region) void {
+            defer list.count += 1;
+            if (list.last) |last| {
+                last.next = node;
+                node.previous = last;
+                list.last = node;
+            } else {
+                list.first = node;
+                list.last = node;
+            }
+        }
+
+        pub fn remove(list: *List, node: *Region) void {
+            if (list.first) |first| {
+                if (first == node) {
+                    list.first = node.next;
+                }
+            }
+
+            if (list.last) |last| {
+                if (last == node) {
+                    list.last = node.previous;
+                }
+            }
+
+            if (node.previous) |previous| {
+                previous.next = node.next;
+            }
+
+            if (node.next) |next| {
+                next.previous = node.previous;
+            }
+        }
     };
 
     pub const Region = extern struct {

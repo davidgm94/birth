@@ -7,8 +7,9 @@ const valid_page_sizes = common.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
-const CoreDirector = privileged.CoreDirector;
-const CoreSupervisor = privileged.CoreSupervisor;
+const CoreDirectorData = privileged.CoreDirectorData;
+const CoreSupervisorData = privileged.CoreSupervisorData;
+const CoreDirectorSharedGeneric = privileged.CoreDirectorSharedGeneric;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
@@ -181,19 +182,20 @@ fn spawn_bsp_init() !void {
 }
 
 fn spawn_init_common(spawn_state: *SpawnState) !void {
-    try spawn_module(spawn_state);
+    const core_director_data = try spawn_module(spawn_state);
+    logger.debug("Here", .{});
+    _ = core_director_data;
     @panic("todo spawn_init_common");
 }
 
-var core_supervisor: CoreSupervisor = undefined;
-export var current_core_supervisor = &core_supervisor;
-export var current_core_director: *CoreDirector = undefined;
+var core_supervisor_data: CoreSupervisorData = undefined;
+export var current_core_supervisor_data = &core_supervisor_data;
+export var current_core_director_data: *CoreDirectorData = undefined;
 
-fn spawn_module(spawn_state: *SpawnState) !void {
-    const root_cn = cnode_many_ptr(&current_core_supervisor.init_rootcn);
-    try privileged.MappingDatabase.init(current_core_supervisor);
-    current_core_supervisor.is_valid = true;
-    current_core_supervisor.scheduler_type = .round_robin;
+fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
+    const root_cn = cnode_many_ptr(&current_core_supervisor_data.init_rootcn);
+    try privileged.MappingDatabase.init(current_core_supervisor_data);
+    current_core_supervisor_data.is_valid = true;
 
     try Capabilities.new(.l1cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, root_cn);
 
@@ -201,7 +203,7 @@ fn spawn_module(spawn_state: *SpawnState) !void {
     if (APIC.is_bsp) {
         const bsp_kernel_control_block_capability = Capabilities.Capability{
             .object = .{
-                .kernel_control_block = current_core_supervisor,
+                .kernel_control_block = current_core_supervisor_data,
             },
             .rights = Capabilities.Rights.all,
             .type = .kernel_control_block,
@@ -254,7 +256,62 @@ fn spawn_module(spawn_state: *SpawnState) !void {
     const init_dcb_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
     try Capabilities.new(.dispatcher, (try rise.bootstrap_address_space.allocate(Capabilities.Size.dispatcher, valid_page_sizes[0])).address, Capabilities.Size.dispatcher, 0, rise.core_id, cnode_many_ptr(init_dcb_cte));
 
-    @panic("spawn_module");
+    const init_dispatcher_data = init_dcb_cte.capability.object.dispatcher.current;
+
+    try root_cn[0].copy_to_cnode(spawn_state.cnodes.task orelse unreachable, @enumToInt(Capabilities.TaskCNodeSlot.root), false, 0, 0);
+
+    const init_dispatcher_frame_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher_frame));
+    try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size)).address, Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size, rise.core_id, cnode_many_ptr(init_dispatcher_frame_cte));
+
+    try init_dispatcher_frame_cte.copy_to_cte(&init_dispatcher_data.dispatcher_cte, false, 0, 0);
+
+    const init_args_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.args_space));
+    try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.args_size, Capabilities.args_size)).address, Capabilities.args_size, Capabilities.args_size, rise.core_id, cnode_many_ptr(init_args_cte));
+    spawn_state.argument_page_address = init_args_cte.capability.object.frame.base.to_local();
+
+    // TODO @ArchIndependent
+    if (APIC.is_bsp) {
+        logger.warn("todo: bootloader information", .{});
+    }
+
+    const kernel_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
+    try Capabilities.new(.kernel, .null, 0, 0, rise.core_id, cnode_many_ptr(kernel_cap_cte));
+
+    const performance_monitor_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.performance_monitor));
+    try Capabilities.new(.performance_monitor, .null, 0, 0, rise.core_id, cnode_many_ptr(performance_monitor_cap_cte));
+
+    const irq_table_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.irq));
+    try Capabilities.new(.irq_table, .null, 0, 0, rise.core_id, cnode_many_ptr(irq_table_cap_cte));
+
+    const ipi_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.ipi));
+    try Capabilities.new(.ipi, .null, 0, 0, rise.core_id, cnode_many_ptr(ipi_cap_cte));
+
+    const process_manager_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.process_manager));
+    try Capabilities.new(.process_manager, .null, 0, 0, rise.core_id, cnode_many_ptr(process_manager_cap_cte));
+
+    const init_handle = init_dispatcher_frame_cte.capability.object.frame.base.to_higher_half_virtual_address();
+    //const &init_handle.access(*arch.Dispatcher).base;
+    const init_core_director = init_handle.access(*CoreDirectorSharedGeneric);
+    init_core_director.disabled = @boolToInt(true);
+    init_core_director.core_id = rise.core_id;
+
+    try root_cn[0].copy_to_cte(&init_dispatcher_data.cspace, false, 0, 0);
+
+    init_dispatcher_data.dispatcher_handle = init_handle.value();
+    init_dispatcher_data.disabled = true;
+    privileged.Scheduler.make_runnable(init_dispatcher_data);
+
+    logger.warn("todo: args", .{});
+
+    const base_page_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.base_page.?.get_cnode().to_local(), 0);
+    try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0], rise.core_id, cnode_many_ptr(base_page_cn_cte));
+    logger.debug("base page", .{});
+
+    const early_cnode_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.early_cnode.?.get_cnode().to_local(), 0);
+    try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(early_cnode_cn_cte));
+    logger.debug("early cnode", .{});
+
+    return init_dispatcher_data;
 }
 
 fn cnode_many_ptr(cnode: *Capabilities.CTE) [*]Capabilities.CTE {

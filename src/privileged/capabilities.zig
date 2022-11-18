@@ -5,9 +5,9 @@ const page_mask = common.arch.page_mask;
 const valid_page_sizes = common.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
-const CoreDirector = privileged.CoreDirector;
+const CoreDirectorData = privileged.CoreDirectorData;
 const CoreId = privileged.CoreId;
-const CoreSupervisor = privileged.CoreSupervisor;
+const CoreSupervisorData = privileged.CoreSupervisorData;
 const MappingDatabase = privileged.MappingDatabase;
 const panic = privileged.panic;
 const PassId = privileged.PassId;
@@ -63,10 +63,10 @@ pub const Capability = extern struct {
             cap_addr: u32 align(1),
         } align(1),
         dispatcher: extern struct {
-            current: *CoreDirector,
+            current: *CoreDirectorData,
         } align(1),
         end_point_lmp: extern struct {
-            listener: *CoreDirector align(1),
+            listener: *CoreDirectorData align(1),
             epoffset: VirtualAddress(.local) align(1),
             epbufflen: u32 align(1),
             iftype: u16 align(1),
@@ -308,7 +308,7 @@ pub const Capability = extern struct {
             core_local_id: u32 align(1),
         } align(1),
         performance_monitor: void align(1),
-        kernel_control_block: *CoreSupervisor align(1),
+        kernel_control_block: *CoreSupervisorData align(1),
         ipi: void align(1),
         process_manager: void align(1),
         domain: extern struct {
@@ -333,6 +333,15 @@ pub const Capability = extern struct {
             // TODO: returning global for a local makes no sense here?
             .l1cnode => return capability.object.l1cnode.cnode.to_global(),
             .l2cnode => return capability.object.l2cnode.cnode.to_global(),
+            .dispatcher => return VirtualAddress(.global).new(@ptrToInt(capability.object.dispatcher.current)).to_physical_address(),
+            .frame => return capability.object.frame.base,
+            .kernel,
+            .performance_monitor,
+            .irq_table,
+            .ipi,
+            .process_manager,
+            => return .null,
+            .ram => return capability.object.ram.base,
             else => panic("get_address: {s}", .{@tagName(capability.type)}),
         }
     }
@@ -341,11 +350,20 @@ pub const Capability = extern struct {
         switch (capability.type) {
             .l1cnode => return capability.object.l1cnode.allocated_bytes,
             .l2cnode => return 16384,
+            .dispatcher => return 1024,
+            .frame => return capability.object.frame.bytes,
+            .kernel,
+            .performance_monitor,
+            .irq_table,
+            .ipi,
+            .process_manager,
+            => return 0,
+            .ram => return capability.object.ram.bytes,
             else => panic("get_size: {s}", .{@tagName(capability.type)}),
         }
     }
 
-    pub fn compare(a: Capability, b: Capability, tiebreak: bool) i8 {
+    pub fn compare(a: *const Capability, b: *const Capability, tiebreak: bool) i8 {
         const type_root_a = a.type.get_type_root();
         const type_root_b = b.type.get_type_root();
         if (type_root_a != type_root_b) {
@@ -385,12 +403,19 @@ pub const Capability = extern struct {
         }
 
         switch (a.type) {
-            else => panic("compare: {s}", .{@tagName(a.type)}),
+            .domain, .id, .notify_ipi, .io, .irq_src, .irq_dest, .vnode_aarch64_l3_mapping, .vnode_aarch64_l2_mapping, .vnode_aarch64_l1_mapping, .vnode_aarch64_l0_mapping, .vnode_arm_l2_mapping, .vnode_arm_l1_mapping, .vnode_x86_32_ptable_mapping, .vnode_x86_32_pdir_mapping, .vnode_x86_32_pdpt_mapping, .vnode_vtd_context_table_mapping, .vnode_vtd_root_table_mapping, .vnode_x86_64_ept_ptable_mapping, .vnode_x86_64_ept_pdir_mapping, .vnode_x86_64_ept_pdpt_mapping, .vnode_x86_64_ept_pml4_mapping, .vnode_x86_64_ptable_mapping, .vnode_x86_64_pdir_mapping, .vnode_x86_64_pdpt_mapping, .vnode_x86_64_pml4_mapping, .vnode_x86_64_pml5_mapping, .device_frame_mapping, .end_point_ump_mapping, .frame_mapping, .fcnode => {
+                @panic("compare todo");
+            },
+            else => {},
         }
 
         if (tiebreak) {
-            @panic("tiebreak");
+            if (a != b) {
+                return if (@ptrToInt(a) < @ptrToInt(b)) -1 else 1;
+            }
         }
+
+        return 0;
     }
 };
 
@@ -806,6 +831,49 @@ pub const CTE = extern struct {
     pub fn get_cnode(cte: *CTE) PhysicalAddress(.global) {
         return cte.capability.get_address();
     }
+
+    const Error = error{
+        dest_type_invalid,
+        cap_not_found,
+    };
+    pub fn copy_to_cnode(source: *const CTE, destiny: *CTE, destiny_slot: Slot, mint: bool, param1: usize, param2: usize) !void {
+        assert(destiny.capability.type == .l1cnode or destiny.capability.type == .l2cnode);
+
+        if (destiny.capability.type == .l1cnode and destiny.capability.type != .l2cnode and destiny.capability.type != .kernel_control_block) {
+            return Error.dest_type_invalid;
+        }
+
+        const dst = locate_slot(destiny.capability.get_address().to_local(), destiny_slot);
+        try source.copy_to_cte(dst, mint, param1, param2);
+    }
+
+    pub fn copy_to_cte(source: *const CTE, destiny: *CTE, mint: bool, param1: usize, param2: usize) !void {
+        if (source.capability.type == .null) return Error.cap_not_found;
+
+        if (!mint) {
+            assert(param1 == 0);
+            assert(param2 == 0);
+        }
+
+        assert(!source.mdb_node.more.in_delete);
+
+        destiny.* = source.*;
+
+        destiny.mdb_node.owner = source.mdb_node.owner;
+        destiny.mdb_node.more.locked = source.mdb_node.more.locked;
+        destiny.mdb_node.more.remote_copies = source.mdb_node.more.remote_copies;
+        destiny.mdb_node.more.remote_ancs = source.mdb_node.more.remote_ancs;
+        destiny.mdb_node.more.remote_descs = source.mdb_node.more.remote_descs;
+
+        if (!mint) {
+            return try MappingDatabase.insert(destiny);
+        }
+
+        @panic("todo");
+    }
+    //errval_t caps_copy_to_cte(struct cte *dest_cte, struct cte *src_cte, bool mint,
+    //uintptr_t param1, uintptr_t param2)
+
 };
 
 pub const RootCNodeSlot = enum(Slot) {
@@ -887,18 +955,44 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
         => {
             common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
         },
-        else => {
-            panic("zero_objects: {s}", .{@tagName(capability_type)});
+        .vnode_arm_l1,
+        .vnode_arm_l2,
+        .vnode_aarch64_l0,
+        .vnode_aarch64_l1,
+        .vnode_aarch64_l2,
+        .vnode_aarch64_l3,
+        .vnode_x86_32_ptable,
+        .vnode_x86_32_pdir,
+        .vnode_x86_32_pdpt,
+        .vnode_x86_64_ptable,
+        .vnode_x86_64_pdir,
+        .vnode_x86_64_pdpt,
+        .vnode_x86_64_pml4,
+        .vnode_x86_64_ept_ptable,
+        .vnode_x86_64_ept_pdir,
+        .vnode_x86_64_ept_pdpt,
+        .vnode_x86_64_ept_pml4,
+        .vnode_x86_64_pml5,
+        .vnode_vtd_root_table,
+        .vnode_vtd_context_table,
+        => {
+            @panic("todo vnode");
         },
+        .dispatcher => {
+            common.zero(virtual_address.access([*]u8)[0 .. Size.dispatcher * count]);
+        },
+        .kernel_control_block => {
+            @panic("kernel_control_block");
+        },
+        else => log.debug("not zeroing {} bytes for type: {}", .{ object_size * count, capability_type }),
     }
 }
 
 fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, object_size: u64, count: usize, owner: CoreId, cte_ptr: [*]CTE) !void {
-    _ = size;
     assert(capability_type != .null);
     assert(!capability_type.is_mapping());
+    const global_physical_address = address.to_global();
     const global_address = address.to_higher_half_virtual_address();
-    _ = global_address;
 
     if (owner == core_id) {
         try zero_objects(capability_type, address, object_size, count);
@@ -922,7 +1016,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                         },
                     },
                     .rights = Rights.all,
-                    .type = .l1cnode,
+                    .type = capability_type,
                 };
             }
         },
@@ -936,7 +1030,74 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                         },
                     },
                     .rights = Rights.all,
-                    .type = .l2cnode,
+                    .type = capability_type,
+                };
+            }
+        },
+        .dispatcher => {
+            comptime assert(Size.dispatcher >= @sizeOf(CoreDirectorData));
+            for (ctes) |*cte, i| {
+                cte.capability = .{
+                    .object = .{
+                        .dispatcher = .{
+                            .current = global_address.offset(Size.dispatcher * i).access(*CoreDirectorData),
+                        },
+                    },
+                    .rights = Rights.all,
+                    .type = capability_type,
+                };
+            }
+        },
+        .frame => {
+            for (ctes) |*cte, i| {
+                cte.capability = .{
+                    .object = .{
+                        .frame = .{
+                            .base = global_physical_address.offset(i * object_size),
+                            .bytes = object_size,
+                            .pasid = 0,
+                        },
+                    },
+                    .rights = Rights.all,
+                    .type = capability_type,
+                };
+
+                assert(cte.capability.get_size() & base_page_mask == 0);
+            }
+        },
+        .kernel,
+        .ipi,
+        .irq_table,
+        .irq_dest,
+        .end_point_lmp,
+        .notify_ipi,
+        .performance_monitor,
+        .process_manager,
+        .device_id,
+        .device_id_manager,
+        => {
+            assert(address == .null);
+            assert(size == 0);
+            assert(object_size == 0);
+            assert(count == 1);
+            ctes[0].capability = .{
+                .object = undefined,
+                .rights = Rights.all,
+                .type = capability_type,
+            };
+        },
+        .ram => {
+            for (ctes) |*cte, i| {
+                cte.capability = .{
+                    .object = .{
+                        .frame = .{
+                            .base = global_physical_address.offset(i * object_size),
+                            .bytes = object_size,
+                            .pasid = 0,
+                        },
+                    },
+                    .rights = Rights.all,
+                    .type = capability_type,
                 };
             }
         },
@@ -950,13 +1111,19 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
 
 const objbits_cte = 6;
 const l2_cnode_bits = 8;
-const l2_cnode_slots = 1 << l2_cnode_bits;
+pub const l2_cnode_slots = 1 << l2_cnode_bits;
+const early_cnode_allocated_bits = l2_cnode_bits - 2;
+pub const early_cnode_allocated_slots = 1 << early_cnode_allocated_bits;
+const base_page_mask = page_mask(valid_page_sizes[0]);
 
 pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
-    const base_mask = if (capability_type.is_vnode()) capability_type.vnode_objsize() - 1 else page_mask(valid_page_sizes[0]);
-    _ = base_mask;
+    const base_mask = if (capability_type.is_vnode()) capability_type.vnode_objsize() - 1 else base_page_mask;
+
     if (capability_type.is_mappable()) {
-        @panic("mappable");
+        if (bytes & base_mask != 0) return false;
+        if (object_size > 0 and object_size & base_mask != 0) return false;
+        if (exact and bytes > 0 and object_size > 0) return bytes % object_size == 0;
+        return true;
     } else {
         switch (capability_type) {
             .l1cnode, .l2cnode => {
@@ -965,7 +1132,10 @@ pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, 
                 return object_size % (1 << objbits_cte) == 0;
             },
             .dispatcher => {
-                @panic("dispatcher");
+                if (bytes & (Size.dispatcher - 1) != 0) return false;
+                if (object_size > 0 and object_size != Size.dispatcher) return false;
+
+                return true;
             },
             else => return true,
         }
@@ -975,6 +1145,10 @@ pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, 
 
 pub const Address = u32;
 pub const Slot = Address;
+
+pub const dispatcher_frame_size = 1 << 19;
+pub const args_bits = 17;
+pub const args_size = 1 << args_bits;
 
 pub fn locate_slot(cnode: PhysicalAddress(.local), offset: Slot) *CTE {
     const total_offset = (1 << objbits_cte) * offset;

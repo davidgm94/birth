@@ -1,12 +1,12 @@
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
 const CoreId = privileged.CoreId;
-const CoreSupervisor = privileged.CoreSupervisor;
+const CoreSupervisorData = privileged.CoreSupervisorData;
 const CTE = Capabilities.CTE;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 
-pub var core_supervisor: *CoreSupervisor = undefined;
+pub var core_supervisor: *CoreSupervisorData = undefined;
 pub var mapping_database_root: ?*CTE = null;
 
 const Error = error{
@@ -31,7 +31,7 @@ pub const Node = extern struct {
     owner: CoreId,
 };
 
-pub fn init(given_core_supervisor: *CoreSupervisor) !void {
+pub fn init(given_core_supervisor: *CoreSupervisorData) !void {
     core_supervisor = given_core_supervisor;
     if (!core_supervisor.is_valid) {
         // Empty core supervisor
@@ -43,17 +43,21 @@ pub fn init(given_core_supervisor: *CoreSupervisor) !void {
 
 pub fn set_init_mapping(start: []CTE) void {
     for (start) |*node| {
-        insert(node, &mapping_database_root) catch unreachable;
+        insert(node) catch unreachable;
     }
 }
 
-fn insert(node: *CTE, current_ptr: *?*CTE) !void {
+pub fn insert(node: *CTE) !void {
+    try insert_extended(node, &mapping_database_root);
+}
+
+fn insert_extended(node: *CTE, current_ptr: *?*CTE) !void {
     if (current_ptr.*) |current| {
-        const compare = node.capability.compare(current.capability, true);
+        const compare = node.capability.compare(&current.capability, true);
         if (compare < 0) {
-            try insert(node, &current.mdb_node.left);
+            try insert_extended(node, &current.mdb_node.left);
         } else if (compare > 0) {
-            try insert(node, &current.mdb_node.right);
+            try insert_extended(node, &current.mdb_node.right);
         } else {
             return Error.duplicate_entry;
         }
@@ -88,12 +92,12 @@ fn update_end(cte: *CTE) void {
         }
         if (node.left) |left| {
             if (left.mdb_node.end_root == node.end_root) {
-                end = PhysicalAddress(.global).new(@max(end.value(), left.mdb_node.end.value()));
+                end = PhysicalAddress(.global).maybe_invalid(@max(end.value(), left.mdb_node.end.value()));
             }
         }
         if (node.right) |right| {
             if (right.mdb_node.end_root == node.end_root) {
-                end = PhysicalAddress(.global).new(@max(end.value(), right.mdb_node.end.value()));
+                end = PhysicalAddress(.global).maybe_invalid(@max(end.value(), right.mdb_node.end.value()));
             }
         }
 
