@@ -682,11 +682,16 @@ const Kernel = struct {
 
                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {
-                    const args = switch (common.os) {
-                        .windows => &.{ "-accel", "whpx", "-cpu", "max" },
-                        .linux => &.{ "-enable-kvm", "-cpu", "host" },
-                        .macos => {}, // Maybe find the equivalent of MacOS?
-                        else => unreachable,
+                    const args = &.{
+                        "-accel",
+                        switch (common.os) {
+                            .windows => "whpx",
+                            .linux => "kvm",
+                            .macos => "hvf",
+                            else => @compileError("OS not supported"),
+                        },
+                        "-cpu",
+                        "host",
                     };
                     try kernel.run_argument_list.appendSlice(args);
                     try kernel.debug_argument_list.appendSlice(args);
