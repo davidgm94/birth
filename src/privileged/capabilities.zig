@@ -364,6 +364,12 @@ pub const Capability = extern struct {
     }
 
     pub fn compare(a: *const Capability, b: *const Capability, tiebreak: bool) i8 {
+        const ax = @ptrToInt(a);
+        const bx = @ptrToInt(b);
+        log.debug("ax: 0x{x} bx: 0x{x}", .{ ax, bx });
+        if (bx < common.config.kernel_higher_half_address) {
+            @panic("wtf");
+        }
         const type_root_a = a.type.get_type_root();
         const type_root_b = b.type.get_type_root();
         if (type_root_a != type_root_b) {

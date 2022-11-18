@@ -200,94 +200,94 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
     try Capabilities.new(.l1cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, root_cn);
 
     // TODO: @ArchIndependent
-    if (APIC.is_bsp) {
-        const bsp_kernel_control_block_capability = Capabilities.Capability{
-            .object = .{
-                .kernel_control_block = current_core_supervisor_data,
-            },
-            .rights = Capabilities.Rights.all,
-            .type = .kernel_control_block,
-        };
-        const bsp_kernel_control_block = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.bsp_kernel_control_block));
-        assert(bsp_kernel_control_block.capability.type == .null);
-        bsp_kernel_control_block.capability = bsp_kernel_control_block_capability;
-    }
+    //if (APIC.is_bsp) {
+    //const bsp_kernel_control_block_capability = Capabilities.Capability{
+    //.object = .{
+    //.kernel_control_block = current_core_supervisor_data,
+    //},
+    //.rights = Capabilities.Rights.all,
+    //.type = .kernel_control_block,
+    //};
+    //const bsp_kernel_control_block = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.bsp_kernel_control_block));
+    //assert(bsp_kernel_control_block.capability.type == .null);
+    //bsp_kernel_control_block.capability = bsp_kernel_control_block_capability;
+    //}
 
-    logger.debug("cnode: task", .{});
+    //logger.debug("cnode: task", .{});
     spawn_state.cnodes.task = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.task));
     try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.task orelse unreachable));
 
-    logger.debug("cnode: page", .{});
-    spawn_state.cnodes.page = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.page));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.page orelse unreachable));
+    //logger.debug("cnode: page", .{});
+    //spawn_state.cnodes.page = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.page));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.page orelse unreachable));
 
-    logger.debug("cnode: base_page", .{});
-    spawn_state.cnodes.base_page = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.base_page));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.base_page orelse unreachable));
+    //logger.debug("cnode: base_page", .{});
+    //spawn_state.cnodes.base_page = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.base_page));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.base_page orelse unreachable));
 
-    logger.debug("cnode: early_cnode", .{});
-    spawn_state.cnodes.early_cnode = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.early_cnode));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.early_cnode orelse unreachable));
+    //logger.debug("cnode: early_cnode", .{});
+    //spawn_state.cnodes.early_cnode = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.early_cnode));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.early_cnode orelse unreachable));
 
-    logger.debug("cnode: super", .{});
-    spawn_state.cnodes.super = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.super));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.super orelse unreachable));
+    //logger.debug("cnode: super", .{});
+    //spawn_state.cnodes.super = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.super));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.super orelse unreachable));
 
-    logger.debug("cnode: slot_alloc", .{});
-    spawn_state.cnodes.slot_alloc0 = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.slot_alloc0));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(4 * Capabilities.Size.l2cnode, valid_page_sizes[0])).address, 4 * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.slot_alloc0 orelse unreachable));
+    //logger.debug("cnode: slot_alloc", .{});
+    //spawn_state.cnodes.slot_alloc0 = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.slot_alloc0));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(4 * Capabilities.Size.l2cnode, valid_page_sizes[0])).address, 4 * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.slot_alloc0 orelse unreachable));
 
-    logger.debug("cnode: seg", .{});
-    spawn_state.cnodes.seg = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.seg));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.seg orelse unreachable));
+    //logger.debug("cnode: seg", .{});
+    //spawn_state.cnodes.seg = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.seg));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.seg orelse unreachable));
 
-    logger.debug("cnode: physical_address", .{});
-    spawn_state.cnodes.physical_address = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.physical_address));
-    try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.physical_address orelse unreachable));
+    //logger.debug("cnode: physical_address", .{});
+    //spawn_state.cnodes.physical_address = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.physical_address));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.physical_address orelse unreachable));
 
-    // TODO @ArchIndependent
-    if (APIC.is_bsp) {
-        logger.debug("cnode: module", .{});
-        spawn_state.cnodes.module = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.module));
-        try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.module orelse unreachable));
-    }
+    //// TODO @ArchIndependent
+    //if (APIC.is_bsp) {
+    //logger.debug("cnode: module", .{});
+    //spawn_state.cnodes.module = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.module));
+    //try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.module orelse unreachable));
+    //}
 
-    logger.debug("cnode: init dcb", .{});
+    //logger.debug("cnode: init dcb", .{});
     const init_dcb_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
     try Capabilities.new(.dispatcher, (try rise.bootstrap_address_space.allocate(Capabilities.Size.dispatcher, valid_page_sizes[0])).address, Capabilities.Size.dispatcher, 0, rise.core_id, cnode_many_ptr(init_dcb_cte));
 
     const init_dispatcher_data = init_dcb_cte.capability.object.dispatcher.current;
 
-    try root_cn[0].copy_to_cnode(spawn_state.cnodes.task orelse unreachable, @enumToInt(Capabilities.TaskCNodeSlot.root), false, 0, 0);
+    //try root_cn[0].copy_to_cnode(spawn_state.cnodes.task orelse unreachable, @enumToInt(Capabilities.TaskCNodeSlot.root), false, 0, 0);
 
     const init_dispatcher_frame_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher_frame));
     try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size)).address, Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size, rise.core_id, cnode_many_ptr(init_dispatcher_frame_cte));
 
     try init_dispatcher_frame_cte.copy_to_cte(&init_dispatcher_data.dispatcher_cte, false, 0, 0);
 
-    const init_args_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.args_space));
-    try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.args_size, Capabilities.args_size)).address, Capabilities.args_size, Capabilities.args_size, rise.core_id, cnode_many_ptr(init_args_cte));
-    spawn_state.argument_page_address = init_args_cte.capability.object.frame.base.to_local();
+    //const init_args_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.args_space));
+    //try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.args_size, Capabilities.args_size)).address, Capabilities.args_size, Capabilities.args_size, rise.core_id, cnode_many_ptr(init_args_cte));
+    //spawn_state.argument_page_address = init_args_cte.capability.object.frame.base.to_local();
 
-    // TODO @ArchIndependent
-    if (APIC.is_bsp) {
-        logger.warn("todo: bootloader information", .{});
-    }
+    //// TODO @ArchIndependent
+    //if (APIC.is_bsp) {
+    //logger.warn("todo: bootloader information", .{});
+    //}
 
-    const kernel_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
-    try Capabilities.new(.kernel, .null, 0, 0, rise.core_id, cnode_many_ptr(kernel_cap_cte));
+    //const kernel_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
+    //try Capabilities.new(.kernel, .null, 0, 0, rise.core_id, cnode_many_ptr(kernel_cap_cte));
 
-    const performance_monitor_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.performance_monitor));
-    try Capabilities.new(.performance_monitor, .null, 0, 0, rise.core_id, cnode_many_ptr(performance_monitor_cap_cte));
+    //const performance_monitor_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.performance_monitor));
+    //try Capabilities.new(.performance_monitor, .null, 0, 0, rise.core_id, cnode_many_ptr(performance_monitor_cap_cte));
 
-    const irq_table_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.irq));
-    try Capabilities.new(.irq_table, .null, 0, 0, rise.core_id, cnode_many_ptr(irq_table_cap_cte));
+    //const irq_table_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.irq));
+    //try Capabilities.new(.irq_table, .null, 0, 0, rise.core_id, cnode_many_ptr(irq_table_cap_cte));
 
-    const ipi_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.ipi));
-    try Capabilities.new(.ipi, .null, 0, 0, rise.core_id, cnode_many_ptr(ipi_cap_cte));
+    //const ipi_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.ipi));
+    //try Capabilities.new(.ipi, .null, 0, 0, rise.core_id, cnode_many_ptr(ipi_cap_cte));
 
-    const process_manager_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.process_manager));
-    try Capabilities.new(.process_manager, .null, 0, 0, rise.core_id, cnode_many_ptr(process_manager_cap_cte));
+    //const process_manager_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.process_manager));
+    //try Capabilities.new(.process_manager, .null, 0, 0, rise.core_id, cnode_many_ptr(process_manager_cap_cte));
 
     const init_handle = init_dispatcher_frame_cte.capability.object.frame.base.to_higher_half_virtual_address();
     //const &init_handle.access(*arch.Dispatcher).base;
@@ -301,15 +301,15 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
     init_dispatcher_data.disabled = true;
     privileged.Scheduler.make_runnable(init_dispatcher_data);
 
-    logger.warn("todo: args", .{});
+    logger.warn("todo: enable ALL capabilities", .{});
 
-    const base_page_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.base_page.?.get_cnode().to_local(), 0);
-    try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0], rise.core_id, cnode_many_ptr(base_page_cn_cte));
-    logger.debug("base page", .{});
+    //const base_page_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.base_page.?.get_cnode().to_local(), 0);
+    //try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * valid_page_sizes[0], valid_page_sizes[0], rise.core_id, cnode_many_ptr(base_page_cn_cte));
+    //logger.debug("base page", .{});
 
-    const early_cnode_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.early_cnode.?.get_cnode().to_local(), 0);
-    try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(early_cnode_cn_cte));
-    logger.debug("early cnode", .{});
+    //const early_cnode_cn_cte = Capabilities.locate_slot(spawn_state.cnodes.early_cnode.?.get_cnode().to_local(), 0);
+    //try Capabilities.new(.ram, (try rise.bootstrap_address_space.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(early_cnode_cn_cte));
+    //logger.debug("early cnode", .{});
 
     return init_dispatcher_data;
 }
