@@ -7,3 +7,5 @@
 
 # Text files to always have LF (unix) line endings on checkout.
 *.zig text eol=lf
+
+tools/* binary

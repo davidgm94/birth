@@ -24,10 +24,10 @@ pub fn build(b: *Builder) void {
                         .smp = null,
                         .log = .{
                             .file = null,
-                            .guest_errors = true,
+                            .guest_errors = false,
                             .cpu = false,
                             .assembly = false,
-                            .interrupts = true,
+                            .interrupts = false,
                         },
                         .virtualize = true,
                         .print_command = true,
@@ -576,7 +576,7 @@ const Kernel = struct {
                         switch (kernel.options.arch.x86_64.bootloader) {
                             .rise => {
                                 try kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" });
-                                try kernel.run_argument_list.appendSlice(&.{ "-bios", "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd" });
+                                try kernel.run_argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" });
                                 try kernel.run_argument_list.appendSlice(&.{ "-L", "zig-cache/ovmf" });
                             },
                             .limine => {
@@ -682,7 +682,11 @@ const Kernel = struct {
 
                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {
-                    const args = &.{ "-enable-kvm", "-cpu", "host" };
+                    const args = switch (common.os) {
+                        .windows => &.{ "-accel", "whpx", "-cpu", "max" },
+                        .linux => &.{ "-enable-kvm", "-cpu", "host" },
+                        else => unreachable,
+                    };
                     try kernel.run_argument_list.appendSlice(args);
                     try kernel.debug_argument_list.appendSlice(args);
                 } else {
