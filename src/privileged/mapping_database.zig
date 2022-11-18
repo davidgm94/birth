@@ -55,18 +55,11 @@ pub fn insert(node: *CTE) !void {
 }
 
 fn insert_extended(node: *CTE, current_ptr: *?*CTE) !void {
-    log.debug("Current ptr: 0x{x}", .{@ptrToInt(current_ptr)});
     if (current_ptr.*) |current| {
-        log.debug("current: 0x{x}", .{@ptrToInt(current)});
         const compare = node.capability.compare(&current.capability, true);
         if (compare < 0) {
             try insert_extended(node, &current.mdb_node.left);
         } else if (compare > 0) {
-            const mright = @ptrToInt(current.mdb_node.right);
-            if (mright != 0 and mright < common.config.kernel_higher_half_address) {
-                log.debug("current: {}", .{current});
-            }
-
             try insert_extended(node, &current.mdb_node.right);
         } else {
             return Error.duplicate_entry;
@@ -144,11 +137,6 @@ fn split(maybe_node: ?*CTE) ?*CTE {
         if (node.mdb_node.right) |right| {
             if (right.mdb_node.right) |right_right| {
                 if (node.mdb_node.level == right_right.mdb_node.level) {
-                    log.debug("level: {}", .{node.mdb_node.level});
-                    //assert(node.mdb_node.left != null);
-                    if (@ptrToInt(right.mdb_node.left) < common.config.kernel_higher_half_address and right.mdb_node.left != null) {
-                        privileged.panic("0x{x}", .{@ptrToInt(right.mdb_node.left)});
-                    }
                     node.mdb_node.right = right.mdb_node.left;
                     right.mdb_node.left = node;
                     right.mdb_node.level += 1;

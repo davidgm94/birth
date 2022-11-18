@@ -685,6 +685,7 @@ const Kernel = struct {
                     const args = switch (common.os) {
                         .windows => &.{ "-accel", "whpx", "-cpu", "max" },
                         .linux => &.{ "-enable-kvm", "-cpu", "host" },
+                        .macos => {}, // Maybe find the equivalent of MacOS?
                         else => unreachable,
                     };
                     try kernel.run_argument_list.appendSlice(args);

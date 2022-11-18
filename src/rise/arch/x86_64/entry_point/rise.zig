@@ -183,9 +183,14 @@ fn spawn_bsp_init() !void {
 
 fn spawn_init_common(spawn_state: *SpawnState) !void {
     const core_director_data = try spawn_module(spawn_state);
-    logger.debug("Here", .{});
+    init_page_tables(spawn_state);
     _ = core_director_data;
     @panic("todo spawn_init_common");
+}
+
+fn init_page_tables(spawn_state: *SpawnState) void {
+    _ = spawn_state;
+    @panic("init_page_tables");
 }
 
 var core_supervisor_data: CoreSupervisorData = undefined;
