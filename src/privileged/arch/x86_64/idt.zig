@@ -526,9 +526,9 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                     \\movq %r15, 15*8(%rcx)
                 );
 
-                asm volatile (comptimePrint("mov %fs, {}(%rcx)", .{@offsetOf(x86_64.registers.Registers, "fs")}));
-                asm volatile (comptimePrint("mov %gs, {}(%rcx)", .{@offsetOf(x86_64.registers.Registers, "gs")}));
-                asm volatile (comptimePrint("fxsave {}(%rcx)", .{@offsetOf(x86_64.registers.Registers, "fxsave_area")}));
+                asm volatile (comptimePrint("mov %fs, {}(%rcx)", .{@offsetOf(x86_64.Registers, "fs")}));
+                asm volatile (comptimePrint("mov %gs, {}(%rcx)", .{@offsetOf(x86_64.Registers, "gs")}));
+                asm volatile (comptimePrint("fxsave {}(%rcx)", .{@offsetOf(x86_64.Registers, "fxsave_area")}));
                 asm volatile (
                 // vector number
                     \\popq %rdi 
@@ -641,9 +641,9 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                     \\movq %r15, 15*8(%rdx)
                 );
 
-                asm volatile (comptimePrint("mov %fs, {}(%rdx)", .{@offsetOf(x86_64.registers.Registers, "fs")}));
-                asm volatile (comptimePrint("mov %gs, {}(%rdx)", .{@offsetOf(x86_64.registers.Registers, "gs")}));
-                asm volatile (comptimePrint("fxsave {}(%rdx)", .{@offsetOf(x86_64.registers.Registers, "fxsave_area")}));
+                asm volatile (comptimePrint("mov %fs, {}(%rdx)", .{@offsetOf(x86_64.Registers, "fs")}));
+                asm volatile (comptimePrint("mov %gs, {}(%rdx)", .{@offsetOf(x86_64.Registers, "gs")}));
+                asm volatile (comptimePrint("fxsave {}(%rdx)", .{@offsetOf(x86_64.Registers, "fxsave_area")}));
 
                 asm volatile (
                     \\popq %rdi

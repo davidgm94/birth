@@ -29,7 +29,7 @@ pub fn build(b: *Builder) void {
                             .assembly = false,
                             .interrupts = false,
                         },
-                        .virtualize = true,
+                        .virtualize = false,
                         .print_command = true,
                     },
                 },

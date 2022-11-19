@@ -1,6 +1,7 @@
 const common = @import("common");
 const assert = common.assert;
 const SimpleR64 = common.arch.x86_64.registers.SimpleR64;
+const RFLAGS = common.arch.x86_64.registers.RFLAGS;
 
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
@@ -148,51 +149,6 @@ pub const cr4 = packed struct(usize) {
 /// processor. This register is available only in 64-bit mode. However, interrupt filtering continues to apply in
 /// compatibility mode.
 pub const cr8 = SimpleR64(.cr8);
-
-pub const Registers = struct {
-    rax: u64,
-    rbx: u64,
-    rcx: u64,
-    rdx: u64,
-    rsi: u64,
-    rdi: u64,
-    rbp: u64,
-    rsp: u64,
-    r8: u64,
-    r9: u64,
-    r10: u64,
-    r11: u64,
-    r12: u64,
-    r13: u64,
-    r14: u64,
-    r15: u64,
-    rip: u64,
-    rflags: u64,
-    fs: u16,
-    gs: u16,
-    fxsave_area: struct {
-        fcw: u16,
-        fsw: u16,
-        ftw: u8,
-        reserved1: u8,
-        fop: u16,
-        fpu_ip1: u32,
-        fpu_ip2: u16,
-        reserved2: u16,
-        fpu_dp1: u32,
-        fpu_dp2: u16,
-        reserved3: u16,
-        mxcsr: u32,
-        mxcsr_mask: u32,
-        st: [8][2]u64,
-        xmm: [16][2]u64,
-        reserved4: [12]u64,
-    } align(16),
-
-    comptime {
-        assert(@sizeOf(Registers) == 672);
-    }
-};
 
 pub const IA32_LSTAR = SimpleMSR(0xC0000082);
 pub const IA32_FMASK = SimpleMSR(0xC0000084);

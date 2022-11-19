@@ -200,9 +200,13 @@ fn resume_state(state: *privileged.arch.Registers) noreturn {
     asm volatile (
         \\pushq %[ss]
         \\pushq 7*8(%[registers])
+        \\pushq %[rflags]
+        \\pushq %[cs]
         :
         : [ss] "i" (@offsetOf(GDT.Table, "user_data_64")),
+          [cs] "i" (@offsetOf(GDT.Table, "user_code_64")),
           [registers] "r" (state),
+          [rflags] "r" (state.rflags.user()),
     );
     @panic("resume state");
 }

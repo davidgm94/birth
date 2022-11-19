@@ -3,7 +3,7 @@ const assert = common.assert;
 
 pub const RFLAGS = packed struct(u64) {
     CF: bool = false,
-    reserved0: bool = false,
+    reserved0: bool = true,
     PF: bool = false,
     reserved1: bool = false,
     AF: bool = false,
@@ -37,6 +37,19 @@ pub const RFLAGS = packed struct(u64) {
             \\pop %[flags]
             : [flags] "=r" (-> RFLAGS),
         );
+    }
+
+    pub fn user(rflags: RFLAGS) RFLAGS {
+        return RFLAGS{
+            .IF = true,
+            .CF = rflags.CF,
+            .PF = rflags.PF,
+            .AF = rflags.AF,
+            .ZF = rflags.ZF,
+            .SF = rflags.SF,
+            .DF = rflags.DF,
+            .OF = rflags.OF,
+        };
     }
 };
 

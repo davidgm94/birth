@@ -71,7 +71,7 @@ pub const Registers = extern struct {
     r14: u64,
     r15: u64,
     rip: u64,
-    rflags: u64,
+    rflags: common.arch.x86_64.registers.RFLAGS,
     fs: u16,
     gs: u16,
     fxsave_area: extern struct {
