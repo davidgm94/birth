@@ -1,5 +1,6 @@
 const common = @import("common");
 const assert = common.assert;
+const log = common.log.scoped(.Privileged);
 
 // This package provides of privileged data structures and routines to both kernel and bootloaders, for now
 // TODO: implement properly
@@ -9,6 +10,8 @@ const assert = common.assert;
 
 pub const arch = @import("privileged/arch.zig");
 pub const Capabilities = @import("privileged/capabilities.zig");
+pub const ELF = @import("privileged/elf.zig");
+pub const Executable = @import("privileged/executable.zig");
 pub const Heap = @import("privileged/heap.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const UEFI = @import("privileged/uefi.zig");
@@ -56,7 +59,7 @@ pub const SchedulerType = enum(u8) {
 };
 
 pub const CoreDirectorData = extern struct {
-    dispatcher_handle: usize,
+    dispatcher_handle: VirtualAddress(.local),
     disabled: bool,
     cspace: CTE,
     vspace: usize,
@@ -70,6 +73,14 @@ pub const CoreDirectorData = extern struct {
     wakeup_next: ?*CoreDirectorData,
     next: ?*CoreDirectorData,
     previous: ?*CoreDirectorData,
+
+    pub fn context_switch(core_director_data: *CoreDirectorData) void {
+        arch.paging.context_switch(core_director_data.vspace);
+        context_switch_counter += 1;
+        log.warn("implement LDT", .{});
+    }
+
+    var context_switch_counter: usize = 0;
 };
 
 pub const CoreDirectorSharedGeneric = extern struct {
@@ -87,6 +98,11 @@ pub const CoreDirectorSharedGeneric = extern struct {
     // TODO: time
     systime_frequency: u64,
     core_id: CoreId,
+
+    pub fn get_disabled_save_area(core_director_shared_generic: *CoreDirectorSharedGeneric) *arch.Registers {
+        const core_director_shared_arch = @fieldParentPtr(arch.CoreDirectorShared, "base", core_director_shared_generic);
+        return &core_director_shared_arch.disabled_save_area;
+    }
 };
 
 pub const CoreLocality = enum {
@@ -261,6 +277,20 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
             return address;
         }
 
+        pub fn to_local(virtual_address: VA) VirtualAddress(.local) {
+            comptime {
+                assert(locality == .global);
+            }
+            return @intToEnum(VirtualAddress(.local), @enumToInt(virtual_address));
+        }
+
+        pub fn to_global(virtual_address: VA) VirtualAddress(.global) {
+            comptime {
+                assert(locality == .local);
+            }
+            return @intToEnum(VirtualAddress(.global), @enumToInt(virtual_address));
+        }
+
         pub fn format(virtual_address: VA, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
             try common.internal_format(writer, "0x{x}", .{virtual_address.value()});
         }
@@ -344,6 +374,15 @@ pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
         pub fn access(virtual_memory_region: VMR, comptime T: type) []T {
             return virtual_memory_region.address.access([*]T)[0..@divExact(virtual_memory_region.size, @sizeOf(T))];
         }
+
+        pub fn offset(virtual_memory_region: VMR, asked_offset: usize) VMR {
+            assert(asked_offset < virtual_memory_region.size);
+
+            var result = virtual_memory_region;
+            result.address = result.address.offset(asked_offset);
+            result.size -= asked_offset;
+            return result;
+        }
     };
 }
 
@@ -385,7 +424,6 @@ pub const PhysicalAddressSpace = extern struct {
     free_list: List = .{},
     heap_list: List = .{},
 
-    const log = common.log.scoped(.PhysicalAddressSpace);
     const AllocateError = error{
         not_base_page_aligned,
         out_of_memory,

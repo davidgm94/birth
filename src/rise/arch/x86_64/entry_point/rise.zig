@@ -15,9 +15,11 @@ const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const SpawnState = privileged.SpawnState;
 const VirtualAddress = privileged.VirtualAddress;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const UEFI = privileged.UEFI;
 
 const APIC = privileged.arch.x86_64.APIC;
+const GDT = privileged.arch.x86_64.GDT;
 const IDT = privileged.arch.x86_64.IDT;
 const paging = privileged.arch.paging;
 const Syscall = privileged.arch.x86_64.Syscall;
@@ -161,36 +163,81 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     logger.debug("Reached to the end of the entry point", .{});
 
-    kernel_startup();
+    kernel_startup(bootloader_information.init_file);
 }
 
-fn kernel_startup() noreturn {
+fn kernel_startup(init_file: []const u8) noreturn {
     if (APIC.is_bsp) {
-        spawn_bsp_init() catch |err| {
+        const core_director_data = spawn_bsp_init(init_file) catch |err| {
             privileged.panic("Can't spawn init: {}", .{err});
         };
+
+        dispatch(core_director_data);
     } else {
         @panic("AP initialization");
     }
     privileged.arch.CPU_stop();
 }
 
-fn spawn_bsp_init() !void {
+fn dispatch(core_director_data: *CoreDirectorData) noreturn {
+    if (core_director_data != current_core_director_data) {
+        core_director_data.context_switch();
+        current_core_director_data = core_director_data;
+    }
+
+    const dispatcher_handle = core_director_data.dispatcher_handle;
+    const dispatcher = dispatcher_handle.access(*CoreDirectorSharedGeneric);
+    const disabled_area = dispatcher.get_disabled_save_area();
+    logger.warn("todo: time", .{});
+
+    switch (dispatcher.disabled != 0) {
+        true => resume_state(disabled_area),
+        false => @panic("not disabled"),
+    }
+}
+
+fn resume_state(state: *privileged.arch.Registers) noreturn {
+    asm volatile (
+        \\pushq %[ss]
+        \\pushq 7*8(%[registers])
+        :
+        : [ss] "i" (@offsetOf(GDT.Table, "user_data_64")),
+          [registers] "r" (state),
+    );
+    @panic("resume state");
+}
+
+fn spawn_bsp_init(init_file: []const u8) !*CoreDirectorData {
     assert(APIC.is_bsp);
-    try spawn_init_common(&start_spawn_state);
-    @panic("Todo spawn bsp init");
+    const core_director_data = try spawn_init_common(&start_spawn_state);
+    const executable_in_higher_half = try privileged.Executable.load_into_kernel_memory(&rise.bootstrap_address_space, init_file);
+    const entry_point = try executable_in_higher_half.load_into_user_memory(&rise.physical_allocator);
+    const init_dispatcher_x86_64 = core_director_data.dispatcher_handle.access(*privileged.arch.CoreDirectorShared);
+    init_dispatcher_x86_64.disabled_save_area.rip = entry_point;
+    logger.debug("Entry point: 0x{x}", .{entry_point});
+    logger.warn("implement capabilities", .{});
+    return core_director_data;
 }
 
-fn spawn_init_common(spawn_state: *SpawnState) !void {
+fn spawn_init_common(spawn_state: *SpawnState) !*CoreDirectorData {
     const core_director_data = try spawn_module(spawn_state);
-    init_page_tables(spawn_state);
-    _ = core_director_data;
-    @panic("todo spawn_init_common");
+    var virtual_address_space = init_page_tables(spawn_state);
+    const init_dispatcher = core_director_data.dispatcher_handle.access(*CoreDirectorSharedGeneric);
+    const init_dispatcher_x86_64 = core_director_data.dispatcher_handle.access(*privileged.arch.CoreDirectorShared);
+    core_director_data.vspace = @bitCast(usize, privileged.arch.x86_64.registers.cr3.read());
+    core_director_data.disabled = true;
+    //init_dispatcher_x86_64.enabled_save_area.set_param
+    _ = init_dispatcher_x86_64;
+    _ = init_dispatcher;
+    _ = virtual_address_space;
+    return core_director_data;
 }
 
-fn init_page_tables(spawn_state: *SpawnState) void {
+fn init_page_tables(spawn_state: *SpawnState) VirtualAddressSpace {
     _ = spawn_state;
-    @panic("init_page_tables");
+    const address_space = VirtualAddressSpace.user(&rise.bootstrap_address_space);
+    address_space.make_current();
+    return address_space;
 }
 
 var core_supervisor_data: CoreSupervisorData = undefined;
@@ -302,7 +349,7 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
 
     try root_cn[0].copy_to_cte(&init_dispatcher_data.cspace, false, 0, 0);
 
-    init_dispatcher_data.dispatcher_handle = init_handle.value();
+    init_dispatcher_data.dispatcher_handle = init_handle.to_local();
     init_dispatcher_data.disabled = true;
     privileged.Scheduler.make_runnable(init_dispatcher_data);
 
@@ -385,15 +432,8 @@ fn enable_fpu() void {
     my_cr4.operating_system_support_for_fx_save_restore = true;
     my_cr4.write();
 
-    //const mxcsr_value: u32 = 0x1f80;
-    asm volatile (
-        \\fninit
-        //\\ldmxcsr %[mxcsr_value]
-        //:
-        //: [mxcsr_value] "m" (mxcsr_value),
-    );
-
-    logger.warn("TODO: ldmxcsr is faulting with KVM", .{});
+    asm volatile ("fninit");
+    // should we ldmxcsr ?
 }
 
 pub const log_level = common.log.Level.debug;

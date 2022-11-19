@@ -5,9 +5,10 @@ const arch = switch (@import("builtin").cpu.arch) {
 
 pub const x86_64 = @import("arch/x86_64.zig");
 
-pub const CoreDirectorData = arch.CoreDirectorData;
+pub const CoreDirectorShared = arch.CoreDirectorShared;
 pub const CPU_stop = arch.CPU_stop;
 pub const paging = arch.paging;
+pub const Registers = arch.Registers;
 
 pub const dispatch_count = arch.dispatch_count;
 pub var max_physical_address_bit: u6 = 40;

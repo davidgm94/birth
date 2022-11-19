@@ -41,8 +41,8 @@ pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
     return @ctz(@as(u32, asked_page_size));
 }
 
-pub const CoreDirectorData = extern struct {
-    base: privileged.CoreDirectorData,
+pub const CoreDirectorShared = extern struct {
+    base: privileged.CoreDirectorSharedGeneric,
     crit_pc_low: VirtualAddress(.local),
     crit_pc_high: VirtualAddress(.local),
     ldt_base: VirtualAddress(.local),
@@ -95,6 +95,10 @@ pub const Registers = extern struct {
 
     comptime {
         assert(@sizeOf(Registers) == 672);
+    }
+
+    pub fn set_param(regs: *Registers, param: u64) void {
+        regs.rax = param;
     }
 };
 

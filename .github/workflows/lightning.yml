@@ -21,9 +21,7 @@ jobs:
 
       - run: zig version
       - run: zig env
-
-      - name: Build
-        run: zig build
+      - run: zig build
 
       #- name: Run Tests
         #run: zig build test

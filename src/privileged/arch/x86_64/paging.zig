@@ -37,9 +37,9 @@ const Indices = [enum_count(PageIndex)]u16;
 
 const limine_physical_allocator = CustomAllocator{};
 
-fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
     if (size == valid_page_sizes[0]) {
-        try map_4k_page(virtual_address_space, asked_physical_address, asked_virtual_address, flags, physical_allocator);
+        try map_4k_page(vas_cr3, asked_physical_address, asked_virtual_address, flags, physical_allocator);
     } else {
         const top_virtual_address = asked_virtual_address + size;
 
@@ -57,7 +57,7 @@ fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_addr
                         physical_address += reverse_page_size;
                         virtual_address += reverse_page_size;
                     }) {
-                        try map_4k_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
+                        try map_4k_page(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
                     }
 
                     break;
@@ -68,7 +68,7 @@ fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_addr
 
                     if (aligned_size_left >= reverse_page_size) {
                         if (prologue_misalignment != 0) {
-                            try map_function(virtual_address_space, asked_physical_address, asked_virtual_address, prologue_misalignment, flags, physical_allocator);
+                            try map_function(vas_cr3, asked_physical_address, asked_virtual_address, prologue_misalignment, flags, physical_allocator);
                         }
 
                         const virtual_address = aligned_page_address;
@@ -76,7 +76,7 @@ fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_addr
                         const this_page_top_physical_address = common.align_backward(physical_address + aligned_size_left, reverse_page_size);
                         const this_page_top_virtual_address = common.align_backward(virtual_address + aligned_size_left, reverse_page_size);
                         const this_huge_page_size = this_page_top_virtual_address - virtual_address;
-                        try map_generic(virtual_address_space, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
+                        try map_generic(vas_cr3, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
 
                         const epilogue_misalignment = top_virtual_address - this_page_top_virtual_address;
 
@@ -84,12 +84,12 @@ fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_addr
                             const epilogue_physical_address = this_page_top_physical_address;
                             const epilogue_virtual_address = this_page_top_virtual_address;
 
-                            try map_function(virtual_address_space, epilogue_physical_address, epilogue_virtual_address, epilogue_misalignment, flags, physical_allocator);
+                            try map_function(vas_cr3, epilogue_physical_address, epilogue_virtual_address, epilogue_misalignment, flags, physical_allocator);
                         }
 
                         break;
                     } else {
-                        try map_generic(virtual_address_space, asked_physical_address, asked_virtual_address, size, reverse_valid_page_sizes[reverse_page_index + 1], flags, physical_allocator);
+                        try map_generic(vas_cr3, asked_physical_address, asked_virtual_address, size, reverse_valid_page_sizes[reverse_page_index + 1], flags, physical_allocator);
                         @panic("else taken");
                     }
                 }
@@ -101,6 +101,7 @@ fn map_function(virtual_address_space: *VirtualAddressSpace, asked_physical_addr
 pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *CustomAllocator) !void {
     // TODO: use flags
     const flags = general_flags.to_arch_specific(locality);
+    const vas_cr3 = virtual_address_space.arch.cr3;
 
     if (common.config.safe_slow) {
         assert(size > 0);
@@ -111,11 +112,23 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
     }
 
     log.debug("Trying to map 0x{x} bytes from {} to {}", .{ size, asked_physical_address, asked_virtual_address });
-    try map_function(virtual_address_space, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
+    try map_function(vas_cr3, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
 }
 
-fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
-    log.debug("Map generic page size: 0x{x}. From {} to {}", .{ asked_page_size, asked_physical_address, asked_virtual_address });
+pub fn map_current(asked_physical_address: usize, asked_virtual_address: usize, size: usize, general_flags: VirtualAddressSpace.Flags, physical_allocator: *CustomAllocator) !void {
+    const flags = general_flags.to_arch_specific(.global);
+    const vas_cr3 = cr3.read();
+
+    // TODO: figure out page size better
+    try map_generic(vas_cr3, asked_physical_address, asked_virtual_address, size, valid_page_sizes[0], flags, physical_allocator);
+}
+
+pub fn context_switch(vas_cr3_int: usize) void {
+    const vas_cr3 = @bitCast(cr3, vas_cr3_int);
+    vas_cr3.write();
+}
+fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+    log.debug("Map generic page size: 0x{x}. From 0x{x} to 0x{x}", .{ asked_page_size, asked_physical_address, asked_virtual_address });
     const reverse_index = switch (asked_page_size) {
         reverse_valid_page_sizes[0] => 0,
         reverse_valid_page_sizes[1] => 1,
@@ -154,7 +167,7 @@ fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_addre
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map_1gb_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
+                try map_1gb_page(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
             }
         },
         // 2 MB
@@ -163,7 +176,7 @@ fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_addre
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map_2mb_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
+                try map_2mb_page(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
             }
         },
         // Smallest: 4 KB
@@ -172,56 +185,41 @@ fn map_generic(virtual_address_space: *VirtualAddressSpace, asked_physical_addre
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map_4k_page(virtual_address_space, physical_address, virtual_address, flags, physical_allocator);
+                try map_4k_page(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
             }
         },
         else => @compileError("Invalid reverse valid page size"),
     }
 }
 
-fn map_1gb_page(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
     const indices = compute_indices(virtual_address);
 
-    const pml4_table = get_pml4_table(virtual_address_space.arch.cr3);
+    const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
 
     try page_tables_map_1_gb_page(pdp_table, indices, physical_address, flags);
-
-    //if (common.config.safe_slow) {
-    //const translated_address = virtual_address_space.translate_address(virtual_address) orelse @panic("WTFASD");
-    //if (translated_address.value != physical_address.value) @panic("WTF seriously");
-    //}
 }
 
-fn map_2mb_page(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
     const indices = compute_indices(virtual_address);
 
-    const pml4_table = get_pml4_table(virtual_address_space.arch.cr3);
+    const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
     const pd_table = get_pd_table(pdp_table, indices, physical_allocator);
 
     try page_tables_map_2_mb_page(pd_table, indices, physical_address, flags);
-
-    //if (common.config.safe_slow) {
-    //const translated_address = virtual_address_space.translate_address(virtual_address) orelse @panic("WTFASD");
-    //if (translated_address.value != physical_address.value) @panic("WTF seriously");
-    //}
 }
 
-fn map_4k_page(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) MapError!void {
+fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) MapError!void {
     const indices = compute_indices(virtual_address);
 
-    const pml4_table = get_pml4_table(virtual_address_space.arch.cr3);
+    const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
     const pd_table = get_pd_table(pdp_table, indices, physical_allocator);
     const p_table = get_p_table(pd_table, indices, physical_allocator);
 
     try page_tables_map_4_kb_page(p_table, indices, physical_address, flags);
-
-    if (common.config.safe_slow) {
-        const translated_address = virtual_address_space.translate_address(virtual_address) orelse @panic("WTFASD");
-        if (translated_address.value != physical_address.value) @panic("WTF seriously");
-    }
 }
 
 fn get_pml4_table(cr3_register: cr3) *volatile PML4Table {
@@ -422,7 +420,6 @@ pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualA
     }
 
     return VirtualAddressSpace{
-        .id = 0,
         .arch = .{
             .cr3 = cr3.from_address(pml4_physical_region.address),
         },
@@ -432,31 +429,30 @@ pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualA
     };
 }
 
-//pub fn init_user(virtual_address_space: *VirtualAddressSpace) void {
-//if (common.os != .freestanding) @compileError("OS not supported"),
+pub fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
+    virtual_address_space.arch.cr3.write();
+}
 
-//const kernel = @import("kernel");
+pub fn init_user(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) void {
+    if (common.config.safe_slow) assert(virtual_address_space.privilege_level == .user);
+    const pml4_physical_region = physical_address_space.allocate(@sizeOf(PML4Table), valid_page_sizes[0]) catch @panic("Wtf");
+    virtual_address_space.arch = Specific{
+        .cr3 = cr3.from_address(pml4_physical_region.address),
+    };
 
-//if (common.config.safe_slow) assert(virtual_address_space.privilege_level == .user);
-//const pml4_table_page_count = comptime @divExact(@sizeOf(PML4Table), valid_page_sizes[0]);
-//const pml4_physical_region = kernel.physical_address_space.allocate_pages(page_size, pml4_table_page_count, .{ .zeroed = true }) orelse @panic("wtf");
-//virtual_address_space.arch = Specific{
-//.cr3 = cr3.from_address(pml4_physical_region.address),
-//};
+    const pml4_virtual_address = pml4_physical_region.address.to_higher_half_virtual_address();
+    const pml4 = pml4_virtual_address.access(*PML4Table);
+    const lower_half_pml4 = pml4[0 .. pml4.len / 2];
+    const higher_half_pml4 = pml4[0 .. pml4.len / 2];
+    zero_slice(PML4TE, lower_half_pml4);
 
-//const pml4_virtual_address = pml4_physical_region.address.to_higher_half_virtual_address();
-//const pml4 = pml4_virtual_address.access(*PML4Table);
-//const lower_half_pml4 = pml4[0 .. pml4.len / 2];
-//const higher_half_pml4 = pml4[0 .. pml4.len / 2];
-//zero_slice(PML4Entry, lower_half_pml4);
+    if (common.config.safe_slow) {
+        assert(lower_half_pml4.len == half_entry_count);
+        assert(higher_half_pml4.len == half_entry_count);
+    }
 
-//if (common.config.safe_slow) {
-//assert(lower_half_pml4.len == half_entry_count);
-//assert(higher_half_pml4.len == half_entry_count);
-//}
-
-//map_kernel_address_space_higher_half(virtual_address_space, kernel.virtual_address_space);
-//}
+    map_kernel_address_space_higher_half(virtual_address_space.arch.cr3, cr3.read());
+}
 
 const time_map = false;
 
@@ -480,7 +476,6 @@ pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
 
 pub fn from_current(owner: privileged.ResourceOwner) VirtualAddressSpace {
     return VirtualAddressSpace{
-        .id = 0,
         .arch = Specific{
             .cr3 = cr3.read(),
         },
@@ -489,14 +484,13 @@ pub fn from_current(owner: privileged.ResourceOwner) VirtualAddressSpace {
     };
 }
 
-pub fn map_kernel_address_space_higher_half(virtual_address_space: *VirtualAddressSpace, kernel_address_space: *VirtualAddressSpace) void {
-    const cr3_physical_address = virtual_address_space.arch.cr3.get_address();
+pub fn map_kernel_address_space_higher_half(new_cr3: cr3, kernel_cr3: cr3) void {
+    const cr3_physical_address = new_cr3.get_address();
     const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
     // TODO: maybe user flag is not necessary?
     const pml4 = cr3_virtual_address.access(*PML4Table);
     zero_slice(PML4TE, pml4[0..0x100]);
-    copy(PML4TE, pml4[0x100..], kernel_address_space.arch.cr3.get_address().to_higher_half_virtual_address().access(*PML4Table)[0x100..]);
-    log.debug("USER CR3: 0x{x}", .{cr3_physical_address.value});
+    copy(PML4TE, pml4[0x100..], kernel_cr3.get_address().to_higher_half_virtual_address().access(*PML4Table)[0x100..]);
 }
 
 fn compute_indices(virtual_address: u64) Indices {
@@ -521,8 +515,7 @@ pub fn register_physical_allocator(allocator: *CustomAllocator) void {
 }
 
 pub fn map_device(asked_physical_address: PhysicalAddress(.global), size: u64) !VirtualAddress(.global) {
-    var vas = from_current(.kernel);
-    try map_function(&vas, asked_physical_address.value(), asked_physical_address.to_higher_half_virtual_address().value(), size, .{
+    try map_function(cr3.read(), asked_physical_address.value(), asked_physical_address.to_higher_half_virtual_address().value(), size, .{
         .read_write = true,
         .cache_disable = true,
         .global = true,

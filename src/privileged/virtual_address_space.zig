@@ -13,6 +13,7 @@ const privileged = @import("privileged");
 const Heap = privileged.Heap;
 const panic = privileged.panic;
 const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const PrivilegeLevel = privileged.PrivilegeLevel;
 const ResourceOwner = privileged.ResourceOwner;
@@ -21,7 +22,6 @@ const VirtualAddress = privileged.VirtualAddress;
 
 const paging = privileged.arch.paging;
 
-id: u64,
 arch: paging.Specific,
 privileged: bool,
 owner: ResourceOwner = .kernel,
@@ -39,19 +39,17 @@ pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemor
     return paging.init_kernel_bsp(physical_memory_region);
 }
 
-pub fn initialize_user_address_space(virtual_address_space: *VirtualAddressSpace) void {
+pub fn user(physical_address_space: *PhysicalAddressSpace) VirtualAddressSpace {
     // TODO: defer memory free when this produces an error
     // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
-    virtual_address_space.* = VirtualAddressSpace{
-        .id = virtual_address_space.id,
+    var virtual_address_space = VirtualAddressSpace{
         .arch = undefined,
-        .privilege_level = .user,
-        .heap = Heap.new(virtual_address_space),
+        .privileged = false,
     };
 
-    paging.init_user(virtual_address_space);
+    paging.init_user(&virtual_address_space, physical_address_space);
 
-    //const graphics = virtual_address_space.translate_address() orelse unreachable;
+    return virtual_address_space;
 }
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
@@ -210,7 +208,7 @@ pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, v
     return result;
 }
 
-pub inline fn make_current(virtual_address_space: *VirtualAddressSpace) void {
+pub inline fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
     paging.make_current(virtual_address_space);
 }
 
