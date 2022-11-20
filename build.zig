@@ -5,7 +5,7 @@ pub fn build(b: *Builder) void {
         .allocator = get_allocator(),
         .options = .{
             .arch = Kernel.Options.x86_64.new(.{
-                .bootloader = .rise,
+                .bootloader = .limine,
             }),
             .run = .{
                 .disks = &.{
@@ -19,19 +19,20 @@ pub fn build(b: *Builder) void {
                     .unit = .G,
                 },
                 .emulator = .{
-                    .qemu = .{
-                        .vga = .std,
-                        .smp = null,
-                        .log = .{
-                            .file = null,
-                            .guest_errors = false,
-                            .cpu = false,
-                            .assembly = false,
-                            .interrupts = false,
-                        },
-                        .virtualize = false,
-                        .print_command = true,
-                    },
+                    //.qemu = .{
+                    //.vga = .std,
+                    //.smp = null,
+                    //.log = .{
+                    //.file = null,
+                    //.guest_errors = true,
+                    //.cpu = false,
+                    //.assembly = false,
+                    //.interrupts = true,
+                    //},
+                    //.virtualize = true,
+                    //.print_command = true,
+                    //},
+                    .bochs = .{},
                 },
             },
         },
@@ -402,7 +403,22 @@ const Kernel = struct {
         switch (kernel.options.arch) {
             .x86_64 => {
                 switch (kernel.options.arch.x86_64.bootloader) {
-                    .limine => {},
+                    .limine => {
+                        const bootloader_exe = kernel.builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
+                        bootloader_exe.setTarget(.{
+                            .cpu_arch = .x86_64,
+                            .os_tag = .freestanding,
+                            .abi = .none,
+                        });
+                        bootloader_exe.setOutputDir(cache_dir);
+                        bootloader_exe.addPackage(common_package);
+                        bootloader_exe.addPackage(privileged_package);
+                        bootloader_exe.strip = true;
+                        bootloader_exe.setBuildMode(.ReleaseSafe);
+
+                        kernel.builder.default_step.dependOn(&bootloader_exe.step);
+                        kernel.bootloader = bootloader_exe;
+                    },
                     .rise => {
                         const bootloader_exe = kernel.builder.addExecutable("BOOTX64", "src/bootloader/rise/uefi.zig");
                         bootloader_exe.setTarget(.{
@@ -431,26 +447,24 @@ const Kernel = struct {
         const kernel_source_path = "src/rise/";
         switch (kernel.options.arch) {
             .x86_64 => {
-                const zig_root_file = switch (kernel.options.arch.x86_64.bootloader) {
-                    .rise => kernel_source_path ++ "arch/x86_64/entry_point/rise.zig",
-                    .limine => kernel_source_path ++ "arch/x86_64/entry_point/limine.zig",
-                };
-
-                kernel.executable = kernel.builder.addExecutable(kernel_name, zig_root_file);
-                kernel.executable.code_model = .kernel;
+                kernel.executable = kernel.builder.addExecutable(kernel_name, "src/rise/arch/x86_64/entry_point.zig");
                 //kernel.executable.pie = true;
-                kernel.executable.force_pic = true;
-                kernel.executable.disable_stack_probing = true;
-                kernel.executable.stack_protector = false;
-                kernel.executable.strip = false;
                 kernel.executable.code_model = .kernel;
-                kernel.executable.red_zone = false;
-                kernel.executable.omit_frame_pointer = false;
-                kernel.executable.entry_symbol_name = "kernel_entry_point";
                 kernel.executable.setLinkerScriptPath(FileSource.relative(kernel_source_path ++ "arch/x86_64/linker.ld"));
             },
             else => unreachable,
         }
+
+        kernel.executable.force_pic = true;
+        kernel.executable.disable_stack_probing = true;
+        kernel.executable.stack_protector = false;
+        kernel.executable.strip = false;
+        kernel.executable.red_zone = false;
+        kernel.executable.omit_frame_pointer = false;
+        kernel.executable.entry_symbol_name = "kernel_entry_point";
+        kernel.executable.setTarget(target);
+        kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
+        kernel.executable.setOutputDir(cache_dir);
 
         kernel.executable.addPackage(common_package);
         kernel.executable.addPackage(bootloader_package);
@@ -458,10 +472,6 @@ const Kernel = struct {
         kernel.executable.addPackage(privileged_package);
 
         kernel.executable.setMainPkgPath("src");
-        kernel.executable.setTarget(target);
-        kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
-        kernel.executable.setOutputDir(cache_dir);
-        kernel.executable.emit_llvm_ir = .{ .emit_to = cache_dir ++ "kernel_llvm.ir" };
 
         kernel.builder.default_step.dependOn(&kernel.executable.step);
     }
@@ -552,6 +562,15 @@ const Kernel = struct {
         kernel.run_argument_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
+                defer {
+                    if (kernel.options.run.emulator.qemu.print_command) {
+                        for (kernel.run_argument_list.items) |arg| {
+                            print("{s} ", .{arg});
+                        }
+                        print("\n\n", .{});
+                    }
+                }
+
                 const qemu_name = try common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
                 try kernel.run_argument_list.append(qemu_name);
 
@@ -735,13 +754,9 @@ const Kernel = struct {
 
                 try kernel.debug_argument_list.append("-s");
             },
-        }
-
-        if (kernel.options.run.emulator.qemu.print_command) {
-            for (kernel.run_argument_list.items) |arg| {
-                print("{s} ", .{arg});
-            }
-            print("\n\n", .{});
+            .bochs => {
+                try kernel.run_argument_list.append("bochs");
+            },
         }
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
@@ -958,6 +973,7 @@ const Kernel = struct {
             memory: Memory,
             emulator: union(enum) {
                 qemu: QEMU,
+                bochs: Bochs,
             },
 
             const Memory = struct {
@@ -984,6 +1000,8 @@ const Kernel = struct {
                 };
             };
 
+            const Bochs = struct {};
+
             const DiskOptions = struct {
                 interface: common.Disk.Type,
                 filesystem: common.Filesystem.Type,
@@ -999,7 +1017,10 @@ const Kernel = struct {
         };
 
         fn is_virtualizing(options: Options) bool {
-            return options.run.emulator.qemu.virtualize and arch == options.arch;
+            return switch (options.run.emulator) {
+                .qemu => options.run.emulator.qemu.virtualize and arch == options.arch,
+                .bochs => false,
+            };
         }
     };
     const CPUFeatures = struct {

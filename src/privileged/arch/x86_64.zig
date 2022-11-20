@@ -87,7 +87,7 @@ pub const Registers = extern struct {
         fpu_dp2: u16,
         reserved3: u16,
         mxcsr: u32,
-        mxcsr_mask: u32,
+        mxcsr_mask: u32 = 0,
         st: [8][2]u64,
         xmm: [16][2]u64,
         reserved4: [12]u64,

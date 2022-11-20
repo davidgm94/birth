@@ -197,16 +197,41 @@ fn dispatch(core_director_data: *CoreDirectorData) noreturn {
 }
 
 fn resume_state(state: *privileged.arch.Registers) noreturn {
+    logger.debug("fxsave area address: 0x{x}", .{@ptrToInt(&state.fxsave_area)});
+    logger.debug("fxsave area: {}", .{state.fxsave_area});
     asm volatile (
         \\pushq %[ss]
         \\pushq 7*8(%[registers])
         \\pushq %[rflags]
         \\pushq %[cs]
+        \\pushq 16*8(%[registers])
+        \\fxrstor %[fxsave_area]
+        \\mov %[fs], %%fs
+        \\mov %[gs], %%gs
+        \\mov 0*8(%[registers]), %%rax
+        \\mov 2*8(%[registers]), %%rcx
+        \\mov 3*8(%[registers]), %%rdx
+        \\mov 4*8(%[registers]), %%rsi
+        \\mov 5*8(%[registers]), %%rdi
+        \\mov 6*8(%[registers]), %%rbp
+        \\mov 7*8(%[registers]), %%r8
+        \\mov 8*8(%[registers]), %%r9
+        \\mov 9*8(%[registers]), %%r10
+        \\mov 10*8(%[registers]), %%r11
+        \\mov 11*8(%[registers]), %%r12
+        \\mov 12*8(%[registers]), %%r13
+        \\mov 13*8(%[registers]), %%r14
+        \\mov 14*8(%[registers]), %%r15
+        \\mov 1*8(%[registers]), %%rbx
+        \\iretq
         :
         : [ss] "i" (@offsetOf(GDT.Table, "user_data_64")),
           [cs] "i" (@offsetOf(GDT.Table, "user_code_64")),
+          [fs] "r" (state.fs),
+          [gs] "r" (state.gs),
           [registers] "r" (state),
           [rflags] "r" (state.rflags.user()),
+          [fxsave_area] "m" (state.fxsave_area),
     );
     @panic("resume state");
 }
@@ -230,8 +255,12 @@ fn spawn_init_common(spawn_state: *SpawnState) !*CoreDirectorData {
     const init_dispatcher_x86_64 = core_director_data.dispatcher_handle.access(*privileged.arch.CoreDirectorShared);
     core_director_data.vspace = @bitCast(usize, privileged.arch.x86_64.registers.cr3.read());
     core_director_data.disabled = true;
+
+    init_dispatcher_x86_64.disabled_save_area.rdi = 0; // TODO: dispatcher_base
+    init_dispatcher_x86_64.disabled_save_area.fxsave_area.fcw = 0x037f;
+    init_dispatcher_x86_64.disabled_save_area.fxsave_area.mxcsr = 0x1f80;
+
     //init_dispatcher_x86_64.enabled_save_area.set_param
-    _ = init_dispatcher_x86_64;
     _ = init_dispatcher;
     _ = virtual_address_space;
     return core_director_data;
@@ -434,9 +463,14 @@ fn enable_fpu() void {
     my_cr0.write();
     var my_cr4 = cr4.read();
     my_cr4.operating_system_support_for_fx_save_restore = true;
+    my_cr4.operating_system_support_for_unmasked_simd_fp_exceptions = true;
     my_cr4.write();
 
     asm volatile ("fninit");
+    const status_word = asm volatile ("fnstsw %[status_word]"
+        : [status_word] "={ax}" (-> u16),
+    );
+    logger.debug("Status word: 0x{x}", .{status_word});
     // should we ldmxcsr ?
 }
 
