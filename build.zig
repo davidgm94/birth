@@ -1,50 +1,58 @@
 pub fn build(b: *Builder) void {
     const kernel = b.allocator.create(Kernel) catch unreachable;
+    const emulator = Kernel.Options.RunOptions.Emulator.qemu;
     kernel.* = Kernel{
         .builder = b,
         .allocator = get_allocator(),
         .options = .{
-            .arch = Kernel.Options.x86_64.new(.{
-                .bootloader = .limine,
-            }),
-            .run = .{
-                .disks = &.{
-                    .{
-                        .interface = .ahci,
-                        .filesystem = .rise,
-                    },
+            .arch = .{
+                .x86_64 = .{
+                    .bootloader = .rise,
+                    .boot_protocol = .bios,
                 },
+            },
+            .run = .{
                 .memory = .{
                     .amount = 4,
                     .unit = .G,
                 },
-                .emulator = .{
-                    //.qemu = .{
-                    //.vga = .std,
-                    //.smp = null,
-                    //.log = .{
-                    //.file = null,
-                    //.guest_errors = true,
-                    //.cpu = false,
-                    //.assembly = false,
-                    //.interrupts = true,
-                    //},
-                    //.virtualize = true,
-                    //.print_command = true,
-                    //},
-                    .bochs = .{},
+                .emulator = blk: {
+                    switch (emulator) {
+                        .qemu => {
+                            break :blk .{
+                                .qemu = .{
+                                    .vga = .std,
+                                    .smp = null,
+                                    .log = .{
+                                        .file = null,
+                                        .guest_errors = true,
+                                        .cpu = false,
+                                        .assembly = true,
+                                        .interrupts = true,
+                                    },
+                                    .virtualize = false,
+                                    .print_command = true,
+                                },
+                            };
+                        },
+                        .bochs => break :blk .{ .bochs = {} },
+                    }
                 },
             },
         },
     };
 
     kernel.create() catch |err| {
-        zig_std.debug.panicExtra(@errorReturnTrace(), null, "Kernel failed to build: {}", .{err});
+        zig_std.io.getStdOut().writeAll("error: ") catch unreachable;
+        zig_std.io.getStdOut().writeAll(@errorName(err)) catch unreachable;
+        zig_std.io.getStdOut().writer().writeByte('\n') catch unreachable;
+        unreachable;
     };
 }
 
 const common = @import("src/common.zig");
 const zig_std = @import("std");
+const assert = zig_std.debug.assert;
 
 comptime {
     if (os == .freestanding) @compileError("This is only meant to be imported in build.zig");
@@ -65,9 +73,6 @@ const CrossTarget = zig_std.zig.CrossTarget;
 
 const os = @import("builtin").target.os.tag;
 const arch = @import("builtin").target.cpu.arch;
-
-const print = zig_std.debug.print;
-const log = common.log;
 
 const fork = zig_std.os.fork;
 const ChildProcess = zig_std.ChildProcess;
@@ -151,19 +156,19 @@ fn resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new
     _ = old_memory;
     _ = old_alignment;
     _ = new_size;
-    @panic("todo resize");
+    unreachable;
 }
 
 fn free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
     _ = allocator;
     _ = memory;
     _ = alignment;
-    @panic("todo free");
+    unreachable;
 }
 
 fn zero_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     _ = allocator;
-    common.assert(alignment <= 0x1000);
+    assert(alignment <= 0x1000);
     const result = allocate_zero_memory(size) catch return CustomAllocator.Error.OutOfMemory;
     return CustomAllocator.Result{
         .address = @ptrToInt(result.ptr),
@@ -189,110 +194,147 @@ const Disk = struct {
 
     const BufferType = common.ArrayListAligned(u8, 0x1000);
 
-    fn access(disk: *Disk, buffer: []u8, work: common.Disk.Work, extra_context: ?*anyopaque) u64 {
-        switch (work.operation) {
-            .read => unreachable,
-            .write => unreachable,
-        }
-        _ = disk;
-        _ = extra_context;
-        _ = buffer;
-        @panic("todo disk access");
-        //const build_disk = @fieldParentPtr(Disk, "disk", disk);
-        //_ = extra_context;
-        //const sector_size = disk.sector_size;
-        ////log.debug("Disk work: {}", .{disk_work});
-        //switch (disk_work.operation) {
-        //.write => {
-        //const work_byte_size = disk_work.sector_count * sector_size;
-        //const byte_count = work_byte_size;
-        //const write_source_buffer = @intToPtr([*]const u8, buffer.virtual_address)[0..byte_count];
-        //const disk_slice_start = disk_work.sector_offset * sector_size;
-        //log.debug("Disk slice start: {}. Disk len: {}", .{ disk_slice_start, build_disk.buffer.items.len });
-        //std.assert(disk_slice_start == build_disk.buffer.items.len);
-        //build_disk.buffer.appendSliceAssumeCapacity(write_source_buffer);
-
-        //return byte_count;
-        //},
-        //.read => {
-        //const offset = disk_work.sector_offset * sector_size;
-        //const bytes = disk_work.sector_count * sector_size;
-        //const previous_len = build_disk.buffer.items.len;
-
-        //if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = build_disk.buffer.capacity;
-        //std.copy(u8, @intToPtr([*]u8, buffer.virtual_address)[0..bytes], build_disk.buffer.items[offset .. offset + bytes]);
-        //if (offset >= previous_len or offset + bytes > previous_len) build_disk.buffer.items.len = previous_len;
-
-        //return disk_work.sector_count;
-        //},
-        //}
-    }
-
-    fn new(allocator: CustomAllocator, capacity: u64) !Disk {
-        return Disk{
-            .buffer = try BufferType.initCapacity(allocator.get_allocator(), capacity),
-        };
-    }
-
-    fn create(kernel: *Kernel) void {
-        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, make);
-
-        const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
-        named_step.dependOn(&kernel.disk_step);
-
-        for (kernel.userspace_programs) |program| {
-            kernel.disk_step.dependOn(&program.step);
-        }
-    }
-
     fn make(step: *Step) !void {
         const kernel = @fieldParentPtr(Kernel, "disk_step", step);
+
+        var disk = Disk{
+            .buffer = try BufferType.initCapacity(zero_allocator.get_allocator(), 1024 * 1024 * 1024),
+        };
+
         const max_file_length = common.max_int(usize);
-
-        // TODO:
-        for (kernel.options.run.disks) |_, disk_i| {
-            var disk = try Disk.new(zero_allocator, 1024 * 1024 * 1024);
-            var filesystem = Filesystem.new(&disk);
-
-            common.assert(resource_files.len > 0);
-
-            for (resource_files) |filename| {
-                const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
-                try filesystem.write_file(kernel.allocator, filename, file_content);
-            }
-
-            common.assert(kernel.userspace_programs.len > 0);
-
-            for (kernel.userspace_programs) |program| {
-                const filename = program.out_filename;
-                common.log.debug("Exe name: {s}", .{filename});
-                const file_path = program.output_path_source.getPath();
-                common.log.debug("Exe path: {s}", .{file_path});
-                const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, common.max_int(usize));
-                try filesystem.write_file(get_allocator(), filename, file_content);
-            }
-
-            //const disk_size = build_disk.buffer.items.len;
-            //const disk_sector_count = @divFloor(disk_size, build_disk.disk.sector_size);
-            //log.debug("Disk size: {}. Disk sector count: {}", .{ disk_size, disk_sector_count });
-
-            try cwd().writeFile(kernel.builder.fmt("{s}disk{}.bin", .{ cache_dir, disk_i }), filesystem.disk.buffer.items);
-        }
-    }
-
-    fn find_userspace_program(kernel: *Kernel, userspace_program_name: []const u8) ?*LibExeObjStep {
-        for (kernel.userspace_programs) |userspace_program| {
-            const ending = ".elf";
-            common.assert(common.ends_with(u8, userspace_program.out_filename, ending));
-            const name = userspace_program.out_filename[0 .. userspace_program.out_filename.len - ending.len];
-            if (common.equal(u8, name, userspace_program_name)) {
-                return userspace_program;
-            }
+        switch (kernel.options.arch) {
+            .x86_64 => {
+                const x86_64 = kernel.options.arch.x86_64;
+                switch (x86_64.boot_protocol) {
+                    .bios => {
+                        const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
+                        disk.buffer.appendSliceAssumeCapacity(mbr_file);
+                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
+                        const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
+                        disk.buffer.appendSliceAssumeCapacity(loader_file);
+                        assert(loader_file.len < 0x200);
+                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200 - loader_file.len);
+                    },
+                    .uefi => {
+                        unreachable;
+                    },
+                }
+            },
+            else => unreachable,
         }
 
-        return null;
+        //assert(resource_files.len > 0);
+
+        //for (resource_files) |filename| {
+        //const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
+        //try filesystem.write_file(kernel.allocator, filename, file_content);
+        //}
+
+        //assert(kernel.userspace_programs.len > 0);
+
+        //for (kernel.userspace_programs) |program| {
+        //const filename = program.out_filename;
+        //const file_path = program.output_path_source.getPath();
+        //const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, max_file_length);
+        //try filesystem.write_file(get_allocator(), filename, file_content);
+        //}
+
+        // TODO: use filesystem
+        try cwd().writeFile(kernel.builder.fmt("{s}disk.bin", .{cache_dir}), disk.buffer.items);
     }
 };
+
+const MBR = extern struct {
+    bootstrap: [440]u8 = [1]u8{0} ** 440,
+    disk_signature: [4]u8,
+    copy_protection: [2]u8,
+    partition: [4]Partition,
+    boot_signature: [2]u8,
+
+    const Partition = extern struct {
+        boot_indicator: u8,
+        first_sector: [3]u8,
+        partition_type: u8,
+        last_sector: [3]u8,
+        first_lba: u32,
+        sector_count: u32,
+
+        comptime {
+            assert(@sizeOf(Partition) == 0x10);
+        }
+    };
+
+    comptime {
+        assert(@sizeOf(MBR) == 0x200);
+    }
+};
+
+const GPT = extern struct {};
+
+//const BootImage = struct {
+//fn build(step: *Step) !void {
+//const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
+
+//switch (kernel.options.arch) {
+//.x86_64 => {
+//switch (kernel.options.arch.x86_64.bootloader) {
+//.rise_uefi => {
+//var cache_dir_handle = try zig_std.fs.cwd().openDir(kernel.builder.cache_root, .{});
+//defer cache_dir_handle.close();
+//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+//const current_directory = cwd();
+//current_directory.deleteFile(Limine.image_path) catch {};
+//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+//try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
+//try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
+//// TODO: copy all userspace programs
+//try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
+//},
+//.rise_bios => {},
+//.limine => {
+//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+//const current_directory = cwd();
+//current_directory.deleteFile(Limine.image_path) catch {};
+//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+//const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
+
+//const limine_efi_bin_file = "limine-cd-efi.bin";
+//const files_to_copy_from_limine_dir = [_][]const u8{
+//"limine.cfg",
+//"limine.sys",
+//"limine-cd.bin",
+//limine_efi_bin_file,
+//};
+
+//for (files_to_copy_from_limine_dir) |filename| {
+//try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+//}
+//try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+//try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
+
+//const xorriso_executable = switch (common.os) {
+//.windows => "tools/xorriso-windows/xorriso.exe",
+//else => "xorriso",
+//};
+//var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
+//// Ignore stderr and stdout
+//xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
+//xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
+//xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
+//_ = try xorriso_process.spawnAndWait();
+
+//try Limine.installer.install(Limine.image_path, false, null);
+//},
+//}
+//},
+//else => unreachable,
+//}
+//}
+//};
 
 const Module = struct {
     type: Type,
@@ -330,18 +372,13 @@ const Module = struct {
     };
 };
 
-const CObject = struct {
-    module: Module,
-    objects: []const []const u8,
-};
-
 const UserProgram = struct {
     module: Module,
     path: []const u8,
     name: []const u8,
 
     fn make(allocator: common.Allocator, module: Module, program_name: []const u8, source_path: []const u8) UserProgram {
-        common.assert(module.type == .zig_exe);
+        assert(module.type == .zig_exe);
         _ = allocator;
         //_ = module.get_path_to_file(allocator, "main.zig");
         return UserProgram{
@@ -354,14 +391,6 @@ const UserProgram = struct {
 
 const Filesystem = struct {
     disk: *Disk,
-
-    fn new(disk: *Disk) Filesystem {
-        disk.buffer.appendSliceAssumeCapacity(&RiseFS.default_signature);
-        disk.buffer.items.len = @sizeOf(RiseFS.Superblock);
-        return Filesystem{
-            .disk = disk,
-        };
-    }
 
     fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
         try RiseFS.write_file(filesystem, allocator, filename, file_content, null);
@@ -394,7 +423,6 @@ const Kernel = struct {
         kernel.create_executable();
         try kernel.create_disassembly_step();
         try kernel.create_userspace_programs();
-        kernel.create_boot_image();
         kernel.create_disk();
         try kernel.create_run_and_debug_steps();
     }
@@ -403,29 +431,55 @@ const Kernel = struct {
         switch (kernel.options.arch) {
             .x86_64 => {
                 switch (kernel.options.arch.x86_64.bootloader) {
-                    .limine => {
-                        const bootloader_exe = kernel.builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
-                        bootloader_exe.setTarget(.{
-                            .cpu_arch = .x86_64,
-                            .os_tag = .freestanding,
-                            .abi = .none,
-                        });
-                        bootloader_exe.setOutputDir(cache_dir);
-                        bootloader_exe.addPackage(common_package);
-                        bootloader_exe.addPackage(privileged_package);
-                        bootloader_exe.strip = true;
-                        bootloader_exe.setBuildMode(.ReleaseSafe);
-
-                        kernel.builder.default_step.dependOn(&bootloader_exe.step);
-                        kernel.bootloader = bootloader_exe;
-                    },
                     .rise => {
-                        const bootloader_exe = kernel.builder.addExecutable("BOOTX64", "src/bootloader/rise/uefi.zig");
-                        bootloader_exe.setTarget(.{
-                            .cpu_arch = .x86_64,
-                            .os_tag = .uefi,
-                            .abi = .msvc,
-                        });
+                        switch (kernel.options.arch.x86_64.boot_protocol) {
+                            .uefi => {
+                                const bootloader_exe = kernel.builder.addExecutable("BOOTX64", "src/bootloader/rise/uefi.zig");
+                                bootloader_exe.setTarget(.{
+                                    .cpu_arch = .x86_64,
+                                    .os_tag = .uefi,
+                                    .abi = .msvc,
+                                });
+                                bootloader_exe.setOutputDir(cache_dir);
+                                bootloader_exe.addPackage(common_package);
+                                bootloader_exe.addPackage(privileged_package);
+                                bootloader_exe.strip = true;
+                                bootloader_exe.setBuildMode(.ReleaseSafe);
+
+                                kernel.builder.default_step.dependOn(&bootloader_exe.step);
+                                kernel.bootloader = bootloader_exe;
+                            },
+                            .bios => {
+                                const mbr = kernel.builder.addSystemCommand(&.{ "nasm", "-fbin", "src/bootloader/rise/mbr.S", "-o", "zig-cache/mbr.bin" });
+                                //const mbr = kernel.builder.addExecutable("rise.bin", null);
+                                //mbr.addAssemblyFile("src/bootloader/rise/mbr.S");
+                                //mbr.setLinkerScriptPath(FileSource.relative("src/bootloader/rise/mbr.ld"));
+                                //mbr.setTarget(get_target(.x86, false));
+                                //mbr.setOutputDir(cache_dir);
+                                //mbr.addPackage(common_package);
+                                //mbr.addPackage(privileged_package);
+                                //mbr.strip = true;
+                                //mbr.setBuildMode(kernel.builder.standardReleaseOptions());
+
+                                kernel.builder.default_step.dependOn(&mbr.step);
+                                //kernel.bootloader = bootloader_exe;
+
+                                const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios.zig");
+                                bootloader_exe.setTarget(get_target(.x86, false));
+                                bootloader_exe.setOutputDir(cache_dir);
+                                bootloader_exe.addPackage(common_package);
+                                bootloader_exe.addPackage(privileged_package);
+                                bootloader_exe.strip = true;
+                                bootloader_exe.setBuildMode(.ReleaseSmall);
+
+                                kernel.builder.default_step.dependOn(&bootloader_exe.step);
+                                kernel.bootloader = bootloader_exe;
+                            },
+                        }
+                    },
+                    .limine => {
+                        const bootloader_exe = kernel.builder.addExecutable("limine.elf", "src/bootloader/limine/limine.zig");
+                        bootloader_exe.setTarget(get_target(.x86_64, false));
                         bootloader_exe.setOutputDir(cache_dir);
                         bootloader_exe.addPackage(common_package);
                         bootloader_exe.addPackage(privileged_package);
@@ -518,10 +572,6 @@ const Kernel = struct {
             const source_path = unique_program.path;
             const program = kernel.builder.addExecutable(filename, source_path);
 
-            for (unique_program.module.dependencies) |dependency| {
-                log.debug("Dependency: {s}", .{dependency});
-            }
-
             program.setMainPkgPath("src");
             program.setTarget(get_target(kernel.options.arch, true));
             program.setOutputDir(cache_dir);
@@ -541,16 +591,23 @@ const Kernel = struct {
         kernel.userspace_programs = libexeobj_steps.toOwnedSlice();
     }
 
-    fn create_boot_image(kernel: *Kernel) void {
-        kernel.boot_image_step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, BootImage.build);
-        const bootloader_step = kernel.bootloader orelse unreachable;
-        kernel.boot_image_step.dependOn(&bootloader_step.step);
-        kernel.boot_image_step.dependOn(&kernel.executable.step);
-        kernel.boot_image_step.dependOn(kernel.builder.default_step);
-    }
+    //fn create_boot_image(kernel: *Kernel) void {
+    //kernel.boot_image_step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, BootImage.build);
+    //const bootloader_step = kernel.bootloader orelse unreachable;
+    //kernel.boot_image_step.dependOn(&bootloader_step.step);
+    //kernel.boot_image_step.dependOn(&kernel.executable.step);
+    //kernel.boot_image_step.dependOn(kernel.builder.default_step);
+    //}
 
     fn create_disk(kernel: *Kernel) void {
-        Disk.create(kernel);
+        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, Disk.make);
+
+        const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
+        named_step.dependOn(&kernel.disk_step);
+
+        for (kernel.userspace_programs) |program| {
+            kernel.disk_step.dependOn(&program.step);
+        }
     }
 
     const Error = error{
@@ -562,14 +619,14 @@ const Kernel = struct {
         kernel.run_argument_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
-                defer {
-                    if (kernel.options.run.emulator.qemu.print_command) {
-                        for (kernel.run_argument_list.items) |arg| {
-                            print("{s} ", .{arg});
-                        }
-                        print("\n\n", .{});
-                    }
-                }
+                //defer {
+                //if (kernel.options.run.emulator.qemu.print_command) {
+                //for (kernel.run_argument_list.items) |arg| {
+                //print("{s} ", .{arg});
+                //}
+                //print("\n\n", .{});
+                //}
+                //}
 
                 const qemu_name = try common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
                 try kernel.run_argument_list.append(qemu_name);
@@ -592,22 +649,9 @@ const Kernel = struct {
                 // Boot device
                 switch (kernel.options.arch) {
                     .x86_64 => {
-                        switch (kernel.options.arch.x86_64.bootloader) {
-                            .rise => {
-                                try kernel.run_argument_list.appendSlice(&.{ "-hdd", "fat:rw:./zig-cache/img_dir" });
-                                try kernel.run_argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" });
-                                try kernel.run_argument_list.appendSlice(&.{ "-L", "zig-cache/ovmf" });
-                            },
-                            .limine => {
-                                try kernel.run_argument_list.appendSlice(&.{ "-cdrom", Limine.image_path });
-                            },
+                        if (kernel.options.arch.x86_64.boot_protocol == .uefi) {
+                            try kernel.run_argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" });
                         }
-                    },
-                    .riscv64 => {
-                        try kernel.run_argument_list.append("-bios");
-                        try kernel.run_argument_list.append("default");
-                        try kernel.run_argument_list.append("-kernel");
-                        try kernel.run_argument_list.append(kernel_path);
                     },
                     else => return Error.not_implemented,
                 }
@@ -647,57 +691,9 @@ const Kernel = struct {
                 try kernel.run_argument_list.append("-global");
                 try kernel.run_argument_list.append("virtio-mmio.force-legacy=false");
 
-                for (kernel.options.run.disks) |disk, disk_i| {
-                    const disk_id = kernel.builder.fmt("disk{}", .{disk_i});
-                    const disk_path = kernel.builder.fmt("{s}{s}.bin", .{ cache_dir, disk_id });
-
-                    switch (disk.interface) {
-                        .nvme => {
-                            try kernel.run_argument_list.append("-device");
-                            const device_options = kernel.builder.fmt("nvme,drive={s},serial=1234", .{disk_id});
-                            try kernel.run_argument_list.append(device_options);
-                            try kernel.run_argument_list.append("-drive");
-                            const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
-                            try kernel.run_argument_list.append(drive_options);
-                        },
-                        .virtio => {
-                            try kernel.run_argument_list.append("-device");
-                            const device_type = switch (kernel.options.arch) {
-                                .x86_64 => "pci",
-                                .riscv64 => "device",
-                                else => return Error.not_implemented,
-                            };
-                            const device_options = kernel.builder.fmt("virtio-blk-{s},drive={s}", .{ device_type, disk_id });
-                            try kernel.run_argument_list.append(device_options);
-                            try kernel.run_argument_list.append("-drive");
-                            const drive_options = kernel.builder.fmt("file={s},if=none,id={s},format=raw", .{ disk_path, disk_id });
-                            try kernel.run_argument_list.append(drive_options);
-                        },
-                        .ide => {
-                            try kernel.run_argument_list.append("-device");
-                            common.assert(kernel.options.arch == .x86_64);
-                            try kernel.run_argument_list.append("piix3-ide,id=ide");
-
-                            try kernel.run_argument_list.append("-drive");
-                            try kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path }));
-                            try kernel.run_argument_list.append("-device");
-                            // ide bus port is hardcoded to avoid errors
-                            try kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ide.0", .{disk_id}));
-                        },
-                        .ahci => {
-                            try kernel.run_argument_list.append("-device");
-                            try kernel.run_argument_list.append("ahci,id=ahci");
-
-                            try kernel.run_argument_list.append("-drive");
-                            try kernel.run_argument_list.append(kernel.builder.fmt("id={s},file={s},format=raw,if=none", .{ disk_id, disk_path }));
-                            try kernel.run_argument_list.append("-device");
-                            // ide bus port is hardcoded to avoid errors
-                            try kernel.run_argument_list.append(kernel.builder.fmt("ide-hd,drive={s},bus=ahci.0", .{disk_id}));
-                        },
-
-                        else => unreachable,
-                    }
-                }
+                const disk_path = kernel.builder.fmt("{s}disk.bin", .{cache_dir});
+                // TODO: don't ignore system interface
+                try kernel.run_argument_list.appendSlice(&.{ "-hda", disk_path });
 
                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {
@@ -766,7 +762,7 @@ const Kernel = struct {
         run_step.dependOn(&run_command.step);
 
         switch (kernel.options.arch) {
-            .x86_64 => run_command.step.dependOn(&kernel.boot_image_step),
+            .x86_64 => run_command.step.dependOn(&kernel.disk_step),
             else => return Error.not_implemented,
         }
 
@@ -802,105 +798,23 @@ const Kernel = struct {
         debug_step.dependOn(&kernel.debug_step);
     }
 
-    const BootImage = struct {
-        fn build(step: *Step) !void {
-            const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-
-            switch (kernel.options.arch) {
-                .x86_64 => {
-                    switch (kernel.options.arch.x86_64.bootloader) {
-                        .rise => {
-                            var cache_dir_handle = try zig_std.fs.cwd().openDir(kernel.builder.cache_root, .{});
-                            defer cache_dir_handle.close();
-                            const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-                            const current_directory = cwd();
-                            current_directory.deleteFile(Limine.image_path) catch {};
-                            const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-                            const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-                            try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
-                            try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
-                            // TODO: copy all userspace programs
-                            try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
-                        },
-                        .limine => {
-                            const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-                            const current_directory = cwd();
-                            current_directory.deleteFile(Limine.image_path) catch {};
-                            const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-                            const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-                            const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
-
-                            const limine_efi_bin_file = "limine-cd-efi.bin";
-                            const files_to_copy_from_limine_dir = [_][]const u8{
-                                "limine.cfg",
-                                "limine.sys",
-                                "limine-cd.bin",
-                                limine_efi_bin_file,
-                            };
-
-                            for (files_to_copy_from_limine_dir) |filename| {
-                                log.debug("Trying to copy {s}", .{filename});
-                                try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
-                            }
-                            try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
-                            try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
-
-                            const xorriso_executable = switch (common.os) {
-                                .windows => "tools/xorriso-windows/xorriso.exe",
-                                else => "xorriso",
-                            };
-                            var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
-                            // Ignore stderr and stdout
-                            xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
-                            xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
-                            xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
-                            _ = try xorriso_process.spawnAndWait();
-
-                            try Limine.installer.install(Limine.image_path, false, null);
-                        },
-                    }
-                },
-                else => unreachable,
-            }
-        }
-    };
-
     const Options = struct {
         arch: Options.ArchSpecific,
         run: RunOptions,
 
         const x86_64 = struct {
-            bootloader: union(Bootloader) {
-                limine: void,
-                rise: void,
-            },
+            bootloader: Bootloader,
+            boot_protocol: BootProtocol,
+
+            const BootProtocol = enum {
+                bios,
+                uefi,
+            };
 
             const Bootloader = enum {
                 rise,
                 limine,
             };
-
-            fn new(context: anytype) Options.ArchSpecific {
-                return switch (context.bootloader) {
-                    .rise => .{
-                        .x86_64 = .{
-                            .bootloader = .{
-                                .rise = {},
-                            },
-                        },
-                    },
-                    .limine => .{
-                        .x86_64 = .{
-                            .bootloader = .{
-                                .limine = {},
-                            },
-                        },
-                    },
-                    else => unreachable,
-                };
-            }
         };
 
         const ArchSpecific = union(Arch) {
@@ -928,7 +842,7 @@ const Kernel = struct {
             r600,
             amdgcn,
             riscv32,
-            riscv64: void,
+            riscv64,
             sparc,
             sparc64,
             sparcel,
@@ -969,12 +883,17 @@ const Kernel = struct {
         };
 
         const RunOptions = struct {
-            disks: []const DiskOptions,
+            //disk: DiskOptions,
             memory: Memory,
-            emulator: union(enum) {
+            emulator: union(Emulator) {
                 qemu: QEMU,
                 bochs: Bochs,
             },
+
+            const Emulator = enum {
+                qemu,
+                bochs,
+            };
 
             const Memory = struct {
                 amount: u64,
@@ -1023,54 +942,37 @@ const Kernel = struct {
             };
         }
     };
-    const CPUFeatures = struct {
-        enabled: Target.Cpu.Feature.Set,
-        disabled: Target.Cpu.Feature.Set,
-
-        fn disable_fpu(features: *CPUFeatures) void {
-            const Feature = Target.x86.Feature;
-            features.disabled.addFeature(@enumToInt(Feature.x87));
-            features.disabled.addFeature(@enumToInt(Feature.mmx));
-            features.disabled.addFeature(@enumToInt(Feature.sse));
-            features.disabled.addFeature(@enumToInt(Feature.sse2));
-            features.disabled.addFeature(@enumToInt(Feature.avx));
-            features.disabled.addFeature(@enumToInt(Feature.avx2));
-
-            features.enabled.addFeature(@enumToInt(Feature.soft_float));
-        }
-    };
-    fn get_x86_base_features() CPUFeatures {
-        var features = CPUFeatures{
-            .enabled = Target.Cpu.Feature.Set.empty,
-            .disabled = Target.Cpu.Feature.Set.empty,
-        };
-
-        return features;
-    }
-    //
-    //fn CPUFeatures
 
     fn get_target(asked_arch: Arch, user: bool) CrossTarget {
-        var cpu_features = CPUFeatures{
-            .enabled = Target.Cpu.Feature.Set.empty,
-            .disabled = Target.Cpu.Feature.Set.empty,
-        };
+        var enabled_features = Target.Cpu.Feature.Set.empty;
+        var disabled_features = Target.Cpu.Feature.Set.empty;
 
         if (!user) {
-            cpu_features.disable_fpu();
+            assert(asked_arch == .x86_64 or asked_arch == .x86);
+            // disable FPU
+            const Feature = Target.x86.Feature;
+            disabled_features.addFeature(@enumToInt(Feature.x87));
+            disabled_features.addFeature(@enumToInt(Feature.mmx));
+            disabled_features.addFeature(@enumToInt(Feature.sse));
+            disabled_features.addFeature(@enumToInt(Feature.sse2));
+            disabled_features.addFeature(@enumToInt(Feature.avx));
+            disabled_features.addFeature(@enumToInt(Feature.avx2));
+
+            enabled_features.addFeature(@enumToInt(Feature.soft_float));
         }
 
         const target = CrossTarget{
             .cpu_arch = asked_arch,
             .os_tag = .freestanding,
             .abi = .none,
-            .cpu_features_add = cpu_features.enabled,
-            .cpu_features_sub = cpu_features.disabled,
+            .cpu_features_add = enabled_features,
+            .cpu_features_sub = disabled_features,
         };
 
         return target;
     }
 };
+
 fn do_debug_step(step: *Step) !void {
     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
     const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
