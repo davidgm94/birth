@@ -37,6 +37,7 @@ jc error16
 mov ax, 0x2400
 int 0x15
 switch_to_protected_mode:
+push ds
 lgdt [gdtr]
 mov eax, cr0
 or al, 1
@@ -53,7 +54,35 @@ mov gs, ax
 mov ss, ax
 xor ebp, ebp
 mov esp, 0x7c00
-jmp 0x7c00 + 0x200 + 0xb4
+mov ebx, 0x7c00 + 0x200
+mov edx, [ebx + 0x18] ; edx: entry
+mov di, [ebx + 0x2e] ; di: section entry size
+mov si, [ebx + 0x30] ; si: section count
+add ebx, [ebx + 0x20] ; ebx: section header pointer
+.loop:
+cmp dword [ebx + 0x4], 0
+je .continue
+mov eax, dword [ebx + 0xc]
+cmp eax, edx
+jg .continue
+add eax, dword [ebx + 0x14]
+cmp eax, edx
+jle .continue
+sub edx, dword [ebx + 0xc]
+add edx, dword [ebx + 0x10]
+add edx, 0x7c00 + 0x200
+jmp edx
+
+.continue:
+add ebx, edi
+dec si
+jnz .loop
+jmp error32
+
+
+error32:
+cli
+jmp $
 
 [bits 16]
 error16:

@@ -470,6 +470,8 @@ const Kernel = struct {
                                 bootloader_exe.addPackage(common_package);
                                 bootloader_exe.addPackage(privileged_package);
                                 bootloader_exe.strip = true;
+                                bootloader_exe.link_gc_sections = true;
+                                bootloader_exe.want_lto = true;
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
                                 kernel.builder.default_step.dependOn(&bootloader_exe.step);
