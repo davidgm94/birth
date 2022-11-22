@@ -24,7 +24,7 @@ pub fn build(b: *Builder) void {
                                     .vga = .std,
                                     .smp = null,
                                     .log = .{
-                                        .file = null,
+                                        .file = "logfile",
                                         .guest_errors = true,
                                         .cpu = false,
                                         .assembly = true,
@@ -208,12 +208,13 @@ const Disk = struct {
                 switch (x86_64.boot_protocol) {
                     .bios => {
                         const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
+                        assert(mbr_file.len == 0x200);
                         disk.buffer.appendSliceAssumeCapacity(mbr_file);
                         disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
                         const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
                         disk.buffer.appendSliceAssumeCapacity(loader_file);
-                        assert(loader_file.len < 0x200);
-                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200 - loader_file.len);
+                        //assert(loader_file.len < 0x200);
+                        disk.buffer.appendNTimesAssumeCapacity(0, common.align_forward(loader_file.len, 0x200) - loader_file.len);
                     },
                     .uefi => {
                         unreachable;
@@ -472,6 +473,8 @@ const Kernel = struct {
                                 bootloader_exe.strip = true;
                                 bootloader_exe.link_gc_sections = true;
                                 bootloader_exe.want_lto = true;
+                                bootloader_exe.force_pic = true;
+                                bootloader_exe.setLinkerScriptPath(FileSource.relative("src/bootloader/rise/bios.ld"));
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
                                 kernel.builder.default_step.dependOn(&bootloader_exe.step);
@@ -696,6 +699,7 @@ const Kernel = struct {
                 const disk_path = kernel.builder.fmt("{s}disk.bin", .{cache_dir});
                 // TODO: don't ignore system interface
                 try kernel.run_argument_list.appendSlice(&.{ "-hda", disk_path });
+                //&.{ "-drive", kernel.builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
 
                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {

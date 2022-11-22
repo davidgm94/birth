@@ -23,26 +23,50 @@ jc error16
 cmp bx, 0xaa55
 jne error16
 continue:
-mov ah, 0x02
-mov al, 1
-xor ch, ch
-mov cl, 3
-mov dh, 0
-mov bx, 0x7c00 + 0x200
-mov di, 0
-mov es, di
-int 0x13
-jc error16
+mov al, 1 ; sector count
+mov cl, 3 ; sector index (starts at 1)
+mov bx, 0x7c00 + 0x200 ; address
+call load_sectors16
 ; disable a20
 mov ax, 0x2400
 int 0x15
 switch_to_protected_mode:
-push ds
 lgdt [gdtr]
 mov eax, cr0
 or al, 1
 mov cr0, eax
 jmp 0x08:protected_mode_main
+
+error16:
+cli
+jmp $
+
+; al: sector count
+; cl: sector number (starting by 1)
+; bx: address
+; es segment is supposed to be loaded properly
+load_sectors16:
+mov ah, 0x02
+xor ch, ch
+xor dh, dh
+clc
+int 0x13
+jc error16
+ret
+
+unreal_mode_read_sectors:
+mov di, 0x20
+mov ds, di
+mov es, di
+mov fs, di
+mov gs, di
+mov ss, di
+jmp 0x0:.continue
+
+.continue:
+call load_sectors16
+cli
+hlt
 
 [bits 32]
 protected_mode_main:
@@ -55,39 +79,46 @@ mov ss, ax
 xor ebp, ebp
 mov esp, 0x7c00
 mov ebx, 0x7c00 + 0x200
-mov edx, [ebx + 0x18] ; edx: entry
-mov di, [ebx + 0x2e] ; di: section entry size
-mov si, [ebx + 0x30] ; si: section count
-add ebx, [ebx + 0x20] ; ebx: section header pointer
+xor ecx, ecx
+xor edx, edx
+mov cx, [ebx + 0x2a] ; cx: ph entry size
+mov dx, [ebx + 0x2c] ; cx: ph entry count
+add ebx, [ebx + 0x1c] ; ebx: ph pointer
 .loop:
-cmp dword [ebx + 0x4], 0
-je .continue
-mov eax, dword [ebx + 0xc]
-cmp eax, edx
-jg .continue
-add eax, dword [ebx + 0x14]
-cmp eax, edx
-jle .continue
-sub edx, dword [ebx + 0xc]
-add edx, dword [ebx + 0x10]
-add edx, 0x7c00 + 0x200
-jmp edx
-
+and dword [ebx], 1
+jz .continue
+push ecx
+mov ecx, [ebx + 0xc] ; ecx: address
+mov eax, [ebx + 0x10] ; esi: size
+push ebx
+lea eax, [eax + 0x1ff]
+and eax, 0xfffffe00 ; aligned size
+shr eax, 9 ; sector count
+cmp eax, 0xff
+jg error32 ; sector count too big
+mov ebx, ecx
+sub ecx, 0x8000
+shr ecx, 9
+add ecx, 4 ;0x7c00 - 1;--- 2; 0x7e00 - 3; 0x8000 - 4;
+mov edi, cr0
+and edi, 0xfffffffe
+mov cr0, edi
+jmp 0x0:unreal_mode_read_sectors
 .continue:
-add ebx, edi
-dec si
+add ebx, ecx ; add entry size to ph pointer
+dec dx ; dec an entry processed
 jnz .loop
-jmp error32
 
+;.continue:
+;add ebx, edi
+;dec si
+;jnz .loop
+;jmp error32
 
 error32:
 cli
 jmp $
 
-[bits 16]
-error16:
-cli
-jmp $
 
 gdtr:
     dw .end - .start - 1
