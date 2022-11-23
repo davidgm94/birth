@@ -43,22 +43,12 @@ pub const cr0 = packed struct(usize) {
 };
 
 export fn _start() noreturn {
-    //const vma_offset = asm volatile (
-    //\\mov %%ecx, %[result]
-    //: [result] "r" (-> usize),
-    //);
     var mycr0 = cr0.read();
     mycr0.protected_mode_enable = false;
     mycr0.write();
 
     asm volatile (
-        \\mov $0x20, %%eax
-        \\mov %%eax, %%ds
-        \\mov %%eax, %%es
-        \\mov %%eax, %%fs
-        \\mov %%eax, %%gs
-        \\mov %%eax, %%ss
-        \\jmp $0x20, $hang
+        \\jmp $0x0, $hang
     );
 
     while (true) {}

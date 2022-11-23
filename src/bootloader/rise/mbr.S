@@ -2,12 +2,12 @@ org 0x7c00
 bits 16
 
 start:
-jmp .skip_bpb
-nop
+    jmp .skip_bpb
+    nop
 
 .bpb:
 times 3-($-$$) db 0
-.bpb_oem_id:            db "LIMINE  "
+.bpb_oem_id:            db "RISE    "
 .bpb_sector_size:       dw 512
 .bpb_sects_per_cluster: db 0
 .bpb_reserved_sects:    dw 0
@@ -24,28 +24,28 @@ times 3-($-$$) db 0
 .bpb_reserved:          db 0
 .bpb_signature:         db 0
 .bpb_volume_id:         dd 0
-.bpb_volume_label:      db "LIMINE     "
+.bpb_volume_label:      db "RISE       "
 .bpb_filesystem_type:   times 8 db 0
 
 .skip_bpb:
-cli
-cld
-jmp 0x0000:initialize_cs
+    cli
+    cld
+    jmp 0x0000:initialize_cs
 
 initialize_cs:
-xor si, si
-mov ds, si
-mov es, si
-mov ss, si
-mov sp, 0x7c00
-sti
-
-mov ah, 0x41
-mov bx, 0x55aa
-int 0x13
-jc error16
-cmp bx, 0xaa55
-jne error16
+    xor si, si
+    mov ds, si
+    mov es, si
+    mov ss, si
+    mov sp, 0x7c00
+    sti
+    
+    mov ah, 0x41
+    mov bx, 0x55aa
+    int 0x13
+    jc error16
+    cmp bx, 0xaa55
+    jne error16
 
 read_sectors:
     mov ah, 0x42
@@ -101,14 +101,28 @@ protected_mode:
     mov gs, ax
     mov ss, ax
 
-    mov eax, dword [dap.pointer]
-    mov eax, [eax]
-    cli
-    hlt
+    xor eax, ecx
+    xor ebx, ebx
+    mov ebp, dword [dap.pointer]
+    mov bx, [ebp + 0x2a] ; ph entry size
+    mov ax, [ebp + 0x2c] ; ph entry count
+    mov edx, [ebp + 0x1c] ; ph offset
+    add edx, ebp
+    .loop:
+    cmp dword [edx], 1
+    jne .continue
+    mov esi, ebp
+    add esi, dword [edx + 0x4] ; elf-in-memory-source
+    mov edi, dword [edx + 0xc] ; segment physical address
+    mov ecx, dword [edx + 0x10] ; segment file size
+    rep movsb
+    .continue:
+    add edx, ebx
+    dec ax
+    jnz .loop
+    mov ebx, [ebp + 0x18]
+    jmp ebx
     
-
-
-
 times 0x1a8-($-$$) db 0
 dap:
     .size: db 0

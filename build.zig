@@ -215,7 +215,7 @@ const Disk = struct {
                         disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
                         mbr.dap = .{
                             .sector_count = @intCast(u16, common.align_forward(loader_file.len, 0x200) >> 9),
-                            .pointer = 0x9000,
+                            .pointer = 0x7e00,
                             .lba = disk.buffer.items.len >> 9,
                         };
                         //zig_std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
