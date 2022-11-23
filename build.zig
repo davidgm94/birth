@@ -294,10 +294,10 @@ const MBRBIOS = extern struct {
     jmp_code: [3]u8,
     bpb: [40]u8,
     code: [381]u8,
-    dap: DAP align(1),
+    dap: DAP align(2),
     disk_signature: [4]u8,
     disk_signature_extended: [2]u8,
-    partitions: [4]Partition align(1),
+    partitions: [4]Partition align(2),
     magic: [2]u8,
 
     comptime {
@@ -312,8 +312,6 @@ const MBRBIOS = extern struct {
         lba: u64,
     };
 };
-
-const GPT = extern struct {};
 
 //const BootImage = struct {
 //fn build(step: *Step) !void {

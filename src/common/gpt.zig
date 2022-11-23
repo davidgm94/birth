@@ -1,6 +1,6 @@
 const common = @import("../common.zig");
 const assert = common.assert;
-const expect = common.testing.expect;
+
 pub const Header = extern struct {
     signature: [8]u8 = "EFI PART".*,
     revision: u32,
@@ -16,8 +16,10 @@ pub const Header = extern struct {
     partition_entry_count: u32,
     partition_entry_size: u32,
     partition_entry_array_crc32: u32,
+};
 
+test "gpt size" {
     comptime {
         assert(@sizeOf(Header) == 0x5c);
     }
-};
+}

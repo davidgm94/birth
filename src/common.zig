@@ -360,6 +360,7 @@ pub const ELF = @import("common/elf.zig");
 pub const Filesystem = @import("common/filesystem.zig");
 pub const GPT = @import("common/gpt.zig");
 pub const List = @import("common/list.zig");
+pub const MBR = @import("common/mbr.zig");
 pub const Message = @import("common/message.zig");
 pub const Module = @import("common/module.zig");
 pub const QEMU = @import("common/qemu.zig");
@@ -370,4 +371,5 @@ pub const Window = @import("common/window.zig");
 
 test {
     _ = GPT;
+    _ = MBR;
 }
