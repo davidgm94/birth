@@ -24,7 +24,7 @@ pub fn build(b: *Builder) void {
                                     .vga = .std,
                                     .smp = null,
                                     .log = .{
-                                        .file = "logfile",
+                                        .file = null,
                                         .guest_errors = true,
                                         .cpu = false,
                                         .assembly = true,
@@ -210,8 +210,20 @@ const Disk = struct {
                         const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
                         assert(mbr_file.len == 0x200);
                         disk.buffer.appendSliceAssumeCapacity(mbr_file);
-                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
+                        const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
                         const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
+                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
+                        mbr.dap = .{
+                            .sector_count = @intCast(u16, common.align_forward(loader_file.len, 0x200) >> 9),
+                            .pointer = 0x9000,
+                            .lba = disk.buffer.items.len >> 9,
+                        };
+                        //zig_std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
+                        //if (true) unreachable;
+                        //const a = @ptrToInt(&mbr.dap.pointer);
+                        //const b = @ptrToInt(mbr);
+                        //zig_std.debug.print("A: 0x{x}\n", .{a - b});
+                        //if (true) unreachable;
                         disk.buffer.appendSliceAssumeCapacity(loader_file);
                         //assert(loader_file.len < 0x200);
                         disk.buffer.appendNTimesAssumeCapacity(0, common.align_forward(loader_file.len, 0x200) - loader_file.len);
@@ -245,29 +257,52 @@ const Disk = struct {
     }
 };
 
-const MBR = extern struct {
+const MBRUEFI = extern struct {
     bootstrap: [440]u8 = [1]u8{0} ** 440,
     disk_signature: [4]u8,
     copy_protection: [2]u8,
     partition: [4]Partition,
     boot_signature: [2]u8,
 
-    const Partition = extern struct {
-        boot_indicator: u8,
-        first_sector: [3]u8,
-        partition_type: u8,
-        last_sector: [3]u8,
-        first_lba: u32,
-        sector_count: u32,
+    comptime {
+        assert(@sizeOf(MBRUEFI) == 0x200);
+    }
+};
 
-        comptime {
-            assert(@sizeOf(Partition) == 0x10);
-        }
-    };
+const Partition = extern struct {
+    boot_indicator: u8,
+    first_sector: [3]u8,
+    partition_type: u8,
+    last_sector: [3]u8,
+    first_lba: u32,
+    sector_count: u32,
 
     comptime {
-        assert(@sizeOf(MBR) == 0x200);
+        assert(@sizeOf(Partition) == 0x10);
     }
+};
+
+const MBRBIOS = extern struct {
+    jmp_code: [3]u8,
+    bpb: [40]u8,
+    code: [381]u8,
+    dap: DAP align(1),
+    disk_signature: [4]u8,
+    disk_signature_extended: [2]u8,
+    partitions: [4]Partition align(1),
+    magic: [2]u8,
+
+    comptime {
+        assert(@sizeOf(MBRBIOS) == 0x200);
+    }
+
+    const DAP = extern struct {
+        size: u8 = 0x10,
+        unused: u8 = 0,
+        sector_count: u16,
+        pointer: u32,
+        lba: u64,
+    };
 };
 
 const GPT = extern struct {};
