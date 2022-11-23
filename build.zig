@@ -48,6 +48,14 @@ pub fn build(b: *Builder) void {
         zig_std.io.getStdOut().writer().writeByte('\n') catch unreachable;
         unreachable;
     };
+
+    const common_test = kernel.builder.addTestExe("common_test", "src/common.zig");
+    common_test.setTarget(b.standardTargetOptions(.{}));
+    common_test.setBuildMode(b.standardReleaseOptions());
+    const run_test_step = common_test.run();
+
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_test_step.step);
 }
 
 const common = @import("src/common.zig");
@@ -487,18 +495,7 @@ const Kernel = struct {
                             },
                             .bios => {
                                 const mbr = kernel.builder.addSystemCommand(&.{ "nasm", "-fbin", "src/bootloader/rise/mbr.S", "-o", "zig-cache/mbr.bin" });
-                                //const mbr = kernel.builder.addExecutable("rise.bin", null);
-                                //mbr.addAssemblyFile("src/bootloader/rise/mbr.S");
-                                //mbr.setLinkerScriptPath(FileSource.relative("src/bootloader/rise/mbr.ld"));
-                                //mbr.setTarget(get_target(.x86, false));
-                                //mbr.setOutputDir(cache_dir);
-                                //mbr.addPackage(common_package);
-                                //mbr.addPackage(privileged_package);
-                                //mbr.strip = true;
-                                //mbr.setBuildMode(kernel.builder.standardReleaseOptions());
-
                                 kernel.builder.default_step.dependOn(&mbr.step);
-                                //kernel.bootloader = bootloader_exe;
 
                                 const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios.zig");
                                 bootloader_exe.setTarget(get_target(.x86, false));

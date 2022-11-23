@@ -8,6 +8,9 @@ pub const os = builtin.os.tag;
 // BUILD
 pub const build_mode = builtin.mode;
 
+// TESTING
+pub const testing = std.testing;
+
 // META PROGRAMMING
 pub const reference_all_declarations = std.testing.refAllDecls;
 pub const Type = std.builtin.Type;
@@ -355,6 +358,7 @@ pub const config = @import("common/config.zig");
 pub const Disk = @import("common/disk.zig");
 pub const ELF = @import("common/elf.zig");
 pub const Filesystem = @import("common/filesystem.zig");
+pub const GPT = @import("common/gpt.zig");
 pub const List = @import("common/list.zig");
 pub const Message = @import("common/message.zig");
 pub const Module = @import("common/module.zig");
@@ -363,3 +367,7 @@ pub const RiseFS = @import("common/risefs.zig");
 pub const Syscall = @import("common/syscall.zig");
 pub const Graphics = @import("common/graphics.zig");
 pub const Window = @import("common/window.zig");
+
+test {
+    _ = GPT;
+}
