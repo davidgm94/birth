@@ -42,6 +42,23 @@ const BIOSParameterBlock = extern struct {
         partition_volume_label: [11]u8,
         file_system_type: [8]u8,
     };
+
+    const FAT32Extended = extern struct {
+        dos3_31: DOS3_31,
+        logical_sector_count_per_fat: u32 align(1),
+        drive_description: u16 align(1),
+        version: u16 align(1),
+        root_directory_start_cluster_count: u32 align(1),
+        logical_sector_number_of_fs_information_sector: u16 align(1),
+        first_logical_sector_number_of_fat_bootsectors_copy: u16 align(1),
+        reserved: [12]u8,
+        cf0x024: u8,
+        cf0x025: u8,
+        cf0x026: u8,
+        cf0x027: u32 align(1),
+        cf0x02b: [11]u8,
+        cf0x036: [8]u8,
+    };
 };
 
 test "bpb" {
@@ -51,5 +68,6 @@ test "bpb" {
         assert(@sizeOf(BIOSParameterBlock.DOS3_2) == 21);
         assert(@sizeOf(BIOSParameterBlock.DOS3_31) == 25);
         assert(@sizeOf(BIOSParameterBlock.Extended) == 51);
+        assert(@sizeOf(BIOSParameterBlock.FAT32Extended) == 79);
     }
 }
