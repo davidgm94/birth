@@ -7,6 +7,7 @@ PHDRS {
 
 SECTIONS {
     . = 0xa000;
+    loader_start = .;
     . = ALIGN(0x200);
     .text . : {
         *(.text*)
@@ -21,4 +22,5 @@ SECTIONS {
           *(.bss*)
   }:data
   . = ALIGN(0x200);
+  loader_end = .;
 }

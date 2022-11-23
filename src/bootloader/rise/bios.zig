@@ -1,3 +1,4 @@
+const std = @import("std");
 comptime {
     asm (
         \\.section .text
@@ -8,6 +9,7 @@ comptime {
         \\hlt
     );
 }
+
 extern fn hang() callconv(.C) noreturn;
 
 pub const cr0 = packed struct(usize) {
@@ -43,13 +45,29 @@ pub const cr0 = packed struct(usize) {
 };
 
 export fn _start() noreturn {
-    var mycr0 = cr0.read();
-    mycr0.protected_mode_enable = false;
-    mycr0.write();
-
-    asm volatile (
-        \\jmp $0x0, $hang
-    );
-
+    logger.debug("Hello loader!", .{});
     while (true) {}
+}
+
+const Writer = std.io.Writer(void, error{}, e9_write);
+const debug_writer = Writer{ .context = {} };
+fn e9_write(_: void, bytes: []const u8) error{}!usize {
+    const bytes_left = asm volatile (
+        \\cld
+        \\rep outsb
+        : [ret] "={ecx}" (-> usize),
+        : [dest] "{dx}" (0xe9),
+          [src] "{esi}" (bytes.ptr),
+          [len] "{ecx}" (bytes.len),
+    );
+    return bytes.len - bytes_left;
+}
+
+pub const logger = std.log.scoped(.Loader);
+pub const log_level = std.log.Level.debug;
+
+pub fn log(comptime level: std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+    debug_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
 }
