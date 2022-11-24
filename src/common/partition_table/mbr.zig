@@ -1,3 +1,5 @@
+const MBR = @This();
+
 const common = @import("../../common.zig");
 const assert = common.assert;
 
@@ -11,6 +13,10 @@ const BIOSParameterBlock = extern struct {
         total_logical_sector_count: u16 align(1),
         media_descriptor: u8,
         logical_sector_count_per_fat: u16 align(1),
+
+        comptime {
+            assert(@sizeOf(@This()) == 13);
+        }
     };
 
     const DOS3_0 = extern struct {
@@ -18,11 +24,19 @@ const BIOSParameterBlock = extern struct {
         physical_sectors_per_track: u16 align(1),
         disk_head_count: u16 align(1),
         hidden_sector_count_before_partition: u16 align(1),
+
+        comptime {
+            assert(@sizeOf(@This()) == 19);
+        }
     };
 
     const DOS3_2 = extern struct {
         dos3_0: DOS3_0,
         total_logical_sector_count_including_hidden: u16 align(1),
+
+        comptime {
+            assert(@sizeOf(@This()) == 21);
+        }
     };
 
     const DOS3_31 = extern struct {
@@ -31,19 +45,39 @@ const BIOSParameterBlock = extern struct {
         disk_head_count: u16 align(1),
         hidden_sector_count_before_partition: u32 align(1),
         total_logical_sector_count: u32 align(1),
+
+        comptime {
+            assert(@sizeOf(@This()) == 25);
+        }
     };
 
-    const Extended = extern struct {
+    const DOS3_4 = extern struct {
+        dos3_31: DOS3_31,
+        physical_drive_number: u8,
+        flags: u8,
+        volume_serial_number: u32,
+
+        comptime {
+            assert(@sizeOf(@This()) == 32);
+        }
+    };
+
+    const DOS4_0 = extern struct {
         dos3_31: DOS3_31,
         physical_drive_number: u8,
         reserved: u8,
         extended_boot_signature: u8,
         volume_id: u32 align(1),
         partition_volume_label: [11]u8,
-        file_system_type: [8]u8,
+        filesystem_type: [8]u8,
+
+        comptime {
+            assert(@sizeOf(@This()) == 51);
+        }
     };
 
-    const FAT32Extended = extern struct {
+    // FAT32 (60 bytes)
+    const DOS7_1_60 = extern struct {
         dos3_31: DOS3_31,
         logical_sector_count_per_fat: u32 align(1),
         drive_description: u16 align(1),
@@ -52,22 +86,60 @@ const BIOSParameterBlock = extern struct {
         logical_sector_number_of_fs_information_sector: u16 align(1),
         first_logical_sector_number_of_fat_bootsectors_copy: u16 align(1),
         reserved: [12]u8,
-        cf0x024: u8,
-        cf0x025: u8,
-        cf0x026: u8,
-        cf0x027: u32 align(1),
-        cf0x02b: [11]u8,
-        cf0x036: [8]u8,
+        drive_number: u8,
+        reserved: u8,
+        extended_boot_signature: u8,
+        serial_number: u32 align(1),
+
+        comptime {
+            assert(@sizeOf(@This()) == 60);
+        }
+    };
+
+    // FAT32 (79 bytes)
+    const DOS7_1_79 = extern struct {
+        dos3_31: DOS3_31,
+        logical_sector_count_per_fat: u32 align(1),
+        drive_description: u16 align(1),
+        version: u16 align(1),
+        root_directory_start_cluster_count: u32 align(1),
+        logical_sector_number_of_fs_information_sector: u16 align(1),
+        first_logical_sector_number_of_fat_bootsectors_copy: u16 align(1),
+        reserved: [12]u8,
+        drive_number: u8,
+        reserved1: u8,
+        extended_boot_signature: u8,
+        serial_number: u32 align(1),
+        volume_label: [11]u8,
+        filesystem_type: [8]u8,
+
+        comptime {
+            assert(@sizeOf(@This()) == 79);
+        }
     };
 };
 
-test "bpb" {
+pub const Partition = packed struct(u128) {
+    boot_indicator: u8,
+    starting_chs: u24,
+    os_type: u8,
+    ending_chs: u24,
+    starting_lba: u32,
+    size_in_lba: u32,
+
     comptime {
-        assert(@sizeOf(BIOSParameterBlock.DOS2_0) == 13);
-        assert(@sizeOf(BIOSParameterBlock.DOS3_0) == 19);
-        assert(@sizeOf(BIOSParameterBlock.DOS3_2) == 21);
-        assert(@sizeOf(BIOSParameterBlock.DOS3_31) == 25);
-        assert(@sizeOf(BIOSParameterBlock.Extended) == 51);
-        assert(@sizeOf(BIOSParameterBlock.FAT32Extended) == 79);
+        assert(@sizeOf(@This()) == 16);
     }
-}
+};
+
+pub const Struct = extern struct {
+    jmp_code: [3]u8,
+    bpb: BIOSParameterBlock.DOS7_1_79,
+    code: [364]u8,
+    partitions: [4]Partition align(2),
+    signature: [2]u8 = [_]u8{ 0x55, 0xaa },
+
+    comptime {
+        assert(@sizeOf(@This()) == 0x200);
+    }
+};

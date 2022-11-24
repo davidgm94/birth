@@ -77,7 +77,8 @@ pub const Descriptor = extern struct {
 
         if (maybe_mbr) |provided_mbr| {
             try disk.callbacks.write(disk, provided_mbr, 0);
-            const mbr = try disk.callbacks.read(disk, 0x200, 0);
+            const mbr_bytes = try disk.callbacks.read(disk, 0x200, 0);
+            const mbr = @ptrCast(*common.PartitionTable.MBR.Struct, @alignCast(@alignOf(common.PartitionTable.MBR.Struct), mbr_bytes.ptr));
             _ = mbr;
             unreachable;
         } else {
