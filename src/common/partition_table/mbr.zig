@@ -1,4 +1,4 @@
-const common = @import("../common.zig");
+const common = @import("../../common.zig");
 const assert = common.assert;
 
 const BIOSParameterBlock = extern struct {

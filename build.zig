@@ -43,9 +43,9 @@ pub fn build(b: *Builder) void {
     };
 
     kernel.create() catch |err| {
-        zig_std.io.getStdOut().writeAll("error: ") catch unreachable;
-        zig_std.io.getStdOut().writeAll(@errorName(err)) catch unreachable;
-        zig_std.io.getStdOut().writer().writeByte('\n') catch unreachable;
+        std.io.getStdOut().writeAll("error: ") catch unreachable;
+        std.io.getStdOut().writeAll(@errorName(err)) catch unreachable;
+        std.io.getStdOut().writer().writeByte('\n') catch unreachable;
         unreachable;
     };
 
@@ -59,32 +59,32 @@ pub fn build(b: *Builder) void {
 }
 
 const common = @import("src/common.zig");
-const zig_std = @import("std");
-const assert = zig_std.debug.assert;
+const std = @import("std");
+const assert = std.debug.assert;
 
 comptime {
     if (os == .freestanding) @compileError("This is only meant to be imported in build.zig");
 }
 
-const Builder = zig_std.build.Builder;
-const FileSource = zig_std.build.FileSource;
-const LibExeObjStep = zig_std.build.LibExeObjStep;
-const OptionsStep = zig_std.build.OptionsStep;
-const Package = zig_std.build.Pkg;
-const RunStep = zig_std.build.RunStep;
-const Step = zig_std.build.Step;
-const WriteFileStep = zig_std.build.WriteFileStep;
+const Builder = std.build.Builder;
+const FileSource = std.build.FileSource;
+const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
+const Package = std.build.Pkg;
+const RunStep = std.build.RunStep;
+const Step = std.build.Step;
+const WriteFileStep = std.build.WriteFileStep;
 
-const Target = zig_std.Target;
+const Target = std.Target;
 const Arch = Target.Cpu.Arch;
-const CrossTarget = zig_std.zig.CrossTarget;
+const CrossTarget = std.zig.CrossTarget;
 
 const os = @import("builtin").target.os.tag;
 const arch = @import("builtin").target.cpu.arch;
 
-const fork = zig_std.os.fork;
-const ChildProcess = zig_std.ChildProcess;
-const waitpid = zig_std.os.waitpid;
+const fork = std.os.fork;
+const ChildProcess = std.ChildProcess;
+const waitpid = std.os.waitpid;
 
 const Allocator = common.Allocator;
 const CustomAllocator = common.CustomAllocator;
@@ -124,13 +124,13 @@ var user_package = Package{
 fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     switch (os) {
         .windows => {
-            const windows = zig_std.os.windows;
+            const windows = std.os.windows;
             return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
         },
         else => {
-            const mmap = zig_std.os.mmap;
-            const PROT = zig_std.os.PROT;
-            const MAP = zig_std.os.MAP;
+            const mmap = std.os.mmap;
+            const PROT = std.os.PROT;
+            const MAP = std.os.MAP;
             return try mmap(null, bytes, PROT.READ | PROT.WRITE, MAP.PRIVATE | MAP.ANONYMOUS, -1, 0);
         },
     }
@@ -184,57 +184,98 @@ fn zero_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomA
     };
 }
 
-const cwd = zig_std.fs.cwd;
-const Dir = zig_std.fs.Dir;
-const path = zig_std.fs.path;
-const basename = zig_std.fs.path.basename;
-const dirname = zig_std.fs.path.dirname;
+const cwd = std.fs.cwd;
+const Dir = std.fs.Dir;
+const path = std.fs.path;
+const basename = std.fs.path.basename;
+const dirname = std.fs.path.dirname;
 
 fn add_qemu_debug_isa_exit(builder: *Builder, list: *common.ArrayListManaged([]const u8), qemu_debug_isa_exit: common.QEMU.ISADebugExit) !void {
     try list.append("-device");
     try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
 }
 
-const Disk = struct {
-    type: common.Disk.Type = .memory,
-    buffer: BufferType,
-    sector_size: u64 = 0x200,
+const DiskImage = extern struct {
+    descriptor: common.Disk.Descriptor,
+    buffer: *BufferType, // Pointer to work around limitation of structs not using layout modifier
 
     const BufferType = common.ArrayListAligned(u8, 0x1000);
+
+    const File = struct {
+        handle: std.fs.File,
+        size: usize,
+    };
+
+    fn get_file(file_path: []const u8) !File {
+        const handle = try cwd().openFile(file_path, .{});
+        return File{
+            .handle = handle,
+            .size = try handle.getEndPos(),
+        };
+    }
+
+    fn read(disk_descriptor: *common.Disk.Descriptor, bytes: u64, offset: u64) common.Disk.Descriptor.ReadError![]u8 {
+        const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
+        assert(disk.buffer.items.len > 0);
+        assert(disk.descriptor.partition_count == 1);
+        assert(bytes > 0);
+        if (offset + bytes >= disk.buffer.items.len) return common.Disk.Descriptor.ReadError.read_error;
+        return disk.buffer.items[offset .. offset + bytes];
+    }
+
+    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, offset: u64) common.Disk.Descriptor.WriteError!void {
+        const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
+        assert(disk.buffer.items.len > 0);
+        assert(disk.descriptor.partition_count == 1);
+        assert(bytes.len > 0);
+        if (offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
+        std.mem.copy(u8, disk.buffer.items[offset .. offset + bytes.len], bytes);
+    }
 
     fn make(step: *Step) !void {
         const kernel = @fieldParentPtr(Kernel, "disk_step", step);
 
-        var disk = Disk{
-            .buffer = try BufferType.initCapacity(zero_allocator.get_allocator(), 1024 * 1024 * 1024),
+        var disk = DiskImage{
+            .descriptor = undefined,
+            .buffer = try kernel.builder.allocator.create(BufferType),
         };
+        disk.buffer.* = try BufferType.initCapacity(zero_allocator.get_allocator(), common.Disk.Descriptor.min_size);
+        disk.buffer.items.len = disk.buffer.capacity;
 
-        const max_file_length = common.max_int(usize);
+        //const max_file_length = common.max_int(usize);
         switch (kernel.options.arch) {
             .x86_64 => {
                 const x86_64 = kernel.options.arch.x86_64;
                 switch (x86_64.boot_protocol) {
                     .bios => {
-                        const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
-                        assert(mbr_file.len == 0x200);
-                        disk.buffer.appendSliceAssumeCapacity(mbr_file);
-                        const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
-                        const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
-                        disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
-                        mbr.dap = .{
-                            .sector_count = @intCast(u16, common.align_forward(loader_file.len, 0x200) >> 9),
-                            .pointer = 0x7e00,
-                            .lba = disk.buffer.items.len >> 9,
-                        };
-                        //zig_std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
-                        //if (true) unreachable;
-                        //const a = @ptrToInt(&mbr.dap.pointer);
-                        //const b = @ptrToInt(mbr);
-                        //zig_std.debug.print("A: 0x{x}\n", .{a - b});
-                        //if (true) unreachable;
-                        disk.buffer.appendSliceAssumeCapacity(loader_file);
-                        //assert(loader_file.len < 0x200);
-                        disk.buffer.appendNTimesAssumeCapacity(0, common.align_forward(loader_file.len, 0x200) - loader_file.len);
+                        const d = try common.Disk.Descriptor.image(&disk.descriptor, &.{disk.buffer.items.len}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, .{
+                            .read = read,
+                            .write = write,
+                        });
+                        _ = d;
+
+                        unreachable;
+
+                        //const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
+                        //assert(mbr_file.len == 0x200);
+                        //disk.buffer.appendSliceAssumeCapacity(mbr_file);
+                        //const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
+                        //const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
+                        //disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
+                        //mbr.dap = .{
+                        //.sector_count = @intCast(u16, common.align_forward(loader_file.len, 0x200) >> 9),
+                        //.pointer = 0x7e00,
+                        //.lba = disk.buffer.items.len >> 9,
+                        //};
+                        ////std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
+                        ////if (true) unreachable;
+                        ////const a = @ptrToInt(&mbr.dap.pointer);
+                        ////const b = @ptrToInt(mbr);
+                        ////std.debug.print("A: 0x{x}\n", .{a - b});
+                        ////if (true) unreachable;
+                        //disk.buffer.appendSliceAssumeCapacity(loader_file);
+                        ////assert(loader_file.len < 0x200);
+                        //disk.buffer.appendNTimesAssumeCapacity(0, common.align_forward(loader_file.len, 0x200) - loader_file.len);
                     },
                     .uefi => {
                         unreachable;
@@ -278,7 +319,7 @@ const MBRUEFI = extern struct {
 };
 
 const Partition = extern struct {
-    boot_indicator: u8,
+    boot_indicator: u8 = 0,
     first_sector: [3]u8,
     partition_type: u8,
     last_sector: [3]u8,
@@ -321,7 +362,7 @@ const MBRBIOS = extern struct {
 //.x86_64 => {
 //switch (kernel.options.arch.x86_64.bootloader) {
 //.rise_uefi => {
-//var cache_dir_handle = try zig_std.fs.cwd().openDir(kernel.builder.cache_root, .{});
+//var cache_dir_handle = try std.fs.cwd().openDir(kernel.builder.cache_root, .{});
 //defer cache_dir_handle.close();
 //const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
 //const current_directory = cwd();
@@ -383,8 +424,8 @@ const Module = struct {
     dependencies: []const []const u8,
 
     fn parse(allocator: common.Allocator, file: []const u8) !Module {
-        var token_stream = zig_std.json.TokenStream.init(file);
-        const module = try zig_std.json.parse(Module, &token_stream, .{ .allocator = allocator });
+        var token_stream = std.json.TokenStream.init(file);
+        const module = try std.json.parse(Module, &token_stream, .{ .allocator = allocator });
         return module;
     }
 
@@ -432,7 +473,7 @@ const UserProgram = struct {
 };
 
 const Filesystem = struct {
-    disk: *Disk,
+    disk: *DiskImage,
 
     fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
         try RiseFS.write_file(filesystem, allocator, filename, file_content, null);
@@ -635,7 +676,7 @@ const Kernel = struct {
     //}
 
     fn create_disk(kernel: *Kernel) void {
-        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, Disk.make);
+        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, DiskImage.make);
 
         const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
         named_step.dependOn(&kernel.disk_step);

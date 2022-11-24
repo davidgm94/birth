@@ -1,5 +1,8 @@
-const common = @import("../common.zig");
+const common = @import("../../common.zig");
 const assert = common.assert;
+
+pub const reserved_partition_size = 128 * common.mb;
+pub const max_partition_count = 128;
 
 pub const Header = extern struct {
     signature: [8]u8 = "EFI PART".*,
