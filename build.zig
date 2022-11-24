@@ -728,8 +728,9 @@ const Kernel = struct {
 
                 const disk_path = kernel.builder.fmt("{s}disk.bin", .{cache_dir});
                 // TODO: don't ignore system interface
-                try kernel.run_argument_list.appendSlice(&.{ "-hda", disk_path });
-                //&.{ "-drive", kernel.builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
+                try kernel.run_argument_list.appendSlice(
+                //&.{ "-hda", disk_path });
+                &.{ "-drive", kernel.builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
 
                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
                 if (kernel.options.is_virtualizing()) {
@@ -804,7 +805,7 @@ const Kernel = struct {
 
         var gdb_script_buffer = common.ArrayListManaged(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
-            .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
+            .x86, .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
             else => return Error.not_implemented,
         }
 
