@@ -221,7 +221,7 @@ pub const Descriptor = extern struct {
                 const fat_region_lba = next_lba + volume_mbr.bpb.dos3_31.dos2_0.reserved_logical_sector_count;
                 var fat_lba: u64 = fat_region_lba;
                 while (fat_lba < volume_mbr.bpb.dos3_31.dos2_0.file_allocation_table_count * volume_mbr.bpb.logical_sector_count_per_fat + fat_region_lba) : (fat_lba += volume_mbr.bpb.logical_sector_count_per_fat) {
-                    try disk.callbacks.write(disk, common.std.mem.asBytes(clusters), fat_lba);
+                    try disk.callbacks.write(disk, common.std.mem.asBytes(&clusters), fat_lba);
                 }
             }
         } else {

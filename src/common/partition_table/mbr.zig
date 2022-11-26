@@ -114,7 +114,12 @@ const BIOSParameterBlock = extern struct {
         filesystem_type: [8]u8,
 
         pub fn get_free_cluster_count(bpb: *const DOS7_1_79) u32 {
-            return bpb.dos3_31.dos2_0.total_logical_sector_count - bpb.dos3_31.dos2_0.reserved_logical_sector_count - (bpb.logical_sector_count_per_fat * bpb.dos3_31.dos2_0.file_allocation_table_count);
+            const total_sector_count = bpb.dos3_31.total_logical_sector_count;
+            const reserved_sector_count = bpb.dos3_31.dos2_0.reserved_logical_sector_count;
+            const sector_count_per_fat = bpb.logical_sector_count_per_fat;
+            const fat_count = bpb.dos3_31.dos2_0.file_allocation_table_count;
+            common.std.debug.print("total: {}. reserved: {}. sectors per fat: {}. fat count: {}\n", .{ total_sector_count, reserved_sector_count, sector_count_per_fat, fat_count });
+            return total_sector_count - reserved_sector_count - (sector_count_per_fat * fat_count);
         }
 
         comptime {
