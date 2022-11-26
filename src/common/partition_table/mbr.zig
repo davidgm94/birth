@@ -65,7 +65,7 @@ const BIOSParameterBlock = extern struct {
     const DOS4_0 = extern struct {
         dos3_31: DOS3_31,
         physical_drive_number: u8,
-        reserved: u8,
+        reserved: u8 = 0,
         extended_boot_signature: u8,
         volume_id: u32 align(1),
         partition_volume_label: [11]u8,
@@ -85,9 +85,9 @@ const BIOSParameterBlock = extern struct {
         root_directory_start_cluster_count: u32 align(1),
         logical_sector_number_of_fs_information_sector: u16 align(1),
         first_logical_sector_number_of_fat_bootsectors_copy: u16 align(1),
-        reserved: [12]u8,
+        reserved: [12]u8 = [1]u8{0} ** 12,
         drive_number: u8,
-        reserved: u8,
+        reserved1: u8 = 0,
         extended_boot_signature: u8,
         serial_number: u32 align(1),
 
@@ -105,13 +105,17 @@ const BIOSParameterBlock = extern struct {
         root_directory_start_cluster_count: u32 align(1),
         logical_sector_number_of_fs_information_sector: u16 align(1),
         first_logical_sector_number_of_fat_bootsectors_copy: u16 align(1),
-        reserved: [12]u8,
+        reserved: [12]u8 = [1]u8{0} ** 12,
         drive_number: u8,
-        reserved1: u8,
+        reserved1: u8 = 0,
         extended_boot_signature: u8,
         serial_number: u32 align(1),
         volume_label: [11]u8,
         filesystem_type: [8]u8,
+
+        pub fn get_free_cluster_count(bpb: *const DOS7_1_79) u32 {
+            return bpb.dos3_31.dos2_0.total_logical_sector_count - bpb.dos3_31.dos2_0.reserved_logical_sector_count - (bpb.logical_sector_count_per_fat * bpb.dos3_31.dos2_0.file_allocation_table_count);
+        }
 
         comptime {
             assert(@sizeOf(@This()) == 79);
@@ -133,7 +137,7 @@ pub const Partition = packed struct(u128) {
 };
 
 pub const Struct = extern struct {
-    jmp_code: [3]u8,
+    jmp_code: [3]u8 = .{ 0xeb, 0x58, 0x90 },
     bpb: BIOSParameterBlock.DOS7_1_79,
     code: [364]u8,
     partitions: [4]Partition align(2),
