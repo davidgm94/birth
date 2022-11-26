@@ -229,15 +229,18 @@ const DiskImage = extern struct {
         return result;
     }
 
-    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64) common.Disk.Descriptor.WriteError!void {
-        const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
-        assert(disk.buffer.items.len > 0);
-        assert(disk.descriptor.partition_count == 1);
-        assert(bytes.len > 0);
-        //assert(disk.descriptor.disk_size == disk.buffer.items.len);
-        const byte_offset = sector_offset * disk.descriptor.sector_size;
-        if (byte_offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
-        std.mem.copy(u8, disk.buffer.items[byte_offset .. byte_offset + bytes.len], bytes);
+    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, options: common.Disk.Descriptor.WriteOptions) common.Disk.Descriptor.WriteError!void {
+        const need_write = !(disk_descriptor.type == .memory and options.in_memory_writings);
+        if (need_write) {
+            const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
+            assert(disk.buffer.items.len > 0);
+            assert(disk.descriptor.partition_count == 1);
+            assert(bytes.len > 0);
+            //assert(disk.descriptor.disk_size == disk.buffer.items.len);
+            const byte_offset = sector_offset * disk.descriptor.sector_size;
+            if (byte_offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
+            std.mem.copy(u8, disk.buffer.items[byte_offset .. byte_offset + bytes.len], bytes);
+        }
     }
 
     fn make(step: *Step) !void {
