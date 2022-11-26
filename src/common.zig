@@ -355,6 +355,7 @@ pub const CustomAllocator = extern struct {
 pub const arch = @import("common/arch.zig");
 /// This is done so the allocator can respect allocating from different address spaces
 pub const config = @import("common/config.zig");
+pub const CRC32 = @import("common/crc32.zig");
 pub const Disk = @import("common/disk.zig");
 pub const ELF = @import("common/elf.zig");
 pub const Filesystem = @import("common/filesystem.zig");

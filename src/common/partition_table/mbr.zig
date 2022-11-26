@@ -124,7 +124,7 @@ pub const Partition = packed struct(u128) {
     starting_chs: u24,
     os_type: u8,
     ending_chs: u24,
-    starting_lba: u32,
+    first_lba: u32,
     size_in_lba: u32,
 
     comptime {

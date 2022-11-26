@@ -199,7 +199,7 @@ const DiskImage = extern struct {
     descriptor: common.Disk.Descriptor,
     buffer: *BufferType, // Pointer to work around limitation of structs not using layout modifier
 
-    const BufferType = common.ArrayListAligned(u8, 0x1000);
+    const BufferType = common.ArrayListAligned(u8, 0x200);
 
     const File = struct {
         handle: std.fs.File,
@@ -214,22 +214,30 @@ const DiskImage = extern struct {
         };
     }
 
-    fn read(disk_descriptor: *common.Disk.Descriptor, bytes: u64, offset: u64) common.Disk.Descriptor.ReadError![]u8 {
+    fn read(disk_descriptor: *common.Disk.Descriptor, bytes: u64, sector_offset: u64) common.Disk.Descriptor.ReadError![]u8 {
         const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
         assert(disk.buffer.items.len > 0);
         assert(disk.descriptor.partition_count == 1);
         assert(bytes > 0);
-        if (offset + bytes >= disk.buffer.items.len) return common.Disk.Descriptor.ReadError.read_error;
-        return disk.buffer.items[offset .. offset + bytes];
+        //assert(disk.descriptor.disk_size == disk.buffer.items.len);
+        const byte_offset = sector_offset * disk.descriptor.sector_size;
+        if (byte_offset + bytes > disk.buffer.items.len) {
+            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ bytes, byte_offset, byte_offset + bytes, disk.buffer.items.len });
+            return common.Disk.Descriptor.ReadError.read_error;
+        }
+        const result = disk.buffer.items[byte_offset .. byte_offset + bytes];
+        return result;
     }
 
-    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, offset: u64) common.Disk.Descriptor.WriteError!void {
+    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64) common.Disk.Descriptor.WriteError!void {
         const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
         assert(disk.buffer.items.len > 0);
         assert(disk.descriptor.partition_count == 1);
         assert(bytes.len > 0);
-        if (offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
-        std.mem.copy(u8, disk.buffer.items[offset .. offset + bytes.len], bytes);
+        //assert(disk.descriptor.disk_size == disk.buffer.items.len);
+        const byte_offset = sector_offset * disk.descriptor.sector_size;
+        if (byte_offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
+        std.mem.copy(u8, disk.buffer.items[byte_offset .. byte_offset + bytes.len], bytes);
     }
 
     fn make(step: *Step) !void {
@@ -248,7 +256,7 @@ const DiskImage = extern struct {
                 const x86_64 = kernel.options.arch.x86_64;
                 switch (x86_64.boot_protocol) {
                     .bios => {
-                        const d = try common.Disk.Descriptor.image(&disk.descriptor, &.{disk.buffer.items.len}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, .{
+                        const d = try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
                             .read = read,
                             .write = write,
                         });
@@ -304,54 +312,6 @@ const DiskImage = extern struct {
         // TODO: use filesystem
         try cwd().writeFile(kernel.builder.fmt("{s}disk.bin", .{cache_dir}), disk.buffer.items);
     }
-};
-
-const MBRUEFI = extern struct {
-    bootstrap: [440]u8 = [1]u8{0} ** 440,
-    disk_signature: [4]u8,
-    copy_protection: [2]u8,
-    partition: [4]Partition,
-    boot_signature: [2]u8,
-
-    comptime {
-        assert(@sizeOf(MBRUEFI) == 0x200);
-    }
-};
-
-const Partition = extern struct {
-    boot_indicator: u8 = 0,
-    first_sector: [3]u8,
-    partition_type: u8,
-    last_sector: [3]u8,
-    first_lba: u32,
-    sector_count: u32,
-
-    comptime {
-        assert(@sizeOf(Partition) == 0x10);
-    }
-};
-
-const MBRBIOS = extern struct {
-    jmp_code: [3]u8,
-    bpb: [40]u8,
-    code: [381]u8,
-    dap: DAP align(2),
-    disk_signature: [4]u8,
-    disk_signature_extended: [2]u8,
-    partitions: [4]Partition align(2),
-    magic: [2]u8,
-
-    comptime {
-        assert(@sizeOf(MBRBIOS) == 0x200);
-    }
-
-    const DAP = extern struct {
-        size: u8 = 0x10,
-        unused: u8 = 0,
-        sector_count: u16,
-        pointer: u32,
-        lba: u64,
-    };
 };
 
 //const BootImage = struct {
