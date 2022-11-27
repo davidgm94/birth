@@ -214,18 +214,19 @@ const DiskImage = extern struct {
         };
     }
 
-    fn read(disk_descriptor: *common.Disk.Descriptor, bytes: u64, sector_offset: u64) common.Disk.Descriptor.ReadError![]u8 {
+    fn read(disk_descriptor: *common.Disk.Descriptor, sector_count: u64, sector_offset: u64) common.Disk.Descriptor.ReadError![]u8 {
         const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
         assert(disk.buffer.items.len > 0);
         assert(disk.descriptor.partition_count == 1);
-        assert(bytes > 0);
+        assert(sector_count > 0);
         //assert(disk.descriptor.disk_size == disk.buffer.items.len);
+        const byte_count = sector_count * disk.descriptor.sector_size;
         const byte_offset = sector_offset * disk.descriptor.sector_size;
-        if (byte_offset + bytes > disk.buffer.items.len) {
-            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ bytes, byte_offset, byte_offset + bytes, disk.buffer.items.len });
+        if (byte_offset + byte_count > disk.buffer.items.len) {
+            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.buffer.items.len });
             return common.Disk.Descriptor.ReadError.read_error;
         }
-        const result = disk.buffer.items[byte_offset .. byte_offset + bytes];
+        const result = disk.buffer.items[byte_offset .. byte_offset + byte_count];
         return result;
     }
 
@@ -259,11 +260,15 @@ const DiskImage = extern struct {
                 const x86_64 = kernel.options.arch.x86_64;
                 switch (x86_64.boot_protocol) {
                     .bios => {
-                        const d = try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
+                        try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
                             .read = read,
                             .write = write,
                         });
-                        _ = d;
+                        const fat32_partition = try kernel.builder.allocator.create(common.Filesystem.FAT32.Partition);
+                        fat32_partition.* = try disk.descriptor.get_partition(0);
+
+                        const r = try fat32_partition.create_file("loader.elf");
+                        _ = r;
 
                         unreachable;
 

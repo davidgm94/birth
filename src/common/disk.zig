@@ -42,7 +42,7 @@ pub const Descriptor = extern struct {
     boot_partition_index: u8,
     callbacks: Callbacks,
 
-    pub const ReadFn = fn (disk: *Disk.Descriptor, bytes: u64, offset: u64) ReadError![]u8;
+    pub const ReadFn = fn (disk: *Disk.Descriptor, sector_count: u64, sector_offset: u64) ReadError![]u8;
     pub const ReadError = error{
         read_error,
     };
@@ -88,9 +88,19 @@ pub const Descriptor = extern struct {
         // MBR
         if (maybe_mbr) |provided_mbr| {
             try disk.callbacks.write(disk, provided_mbr, 0, .{});
-            const mbr_bytes = try disk.callbacks.read(disk, @sizeOf(MBR.Struct), 0);
+            const mbr_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(MBR.Struct), disk.sector_size), 0);
             // Don't need to write back since it's a memory disk
             const mbr = @ptrCast(*MBR.Struct, @alignCast(@alignOf(MBR.Struct), mbr_bytes.ptr));
+            //mbr.bpb = MBR.BIOSParameterBlock.DOS7_1_79 {
+            //.bytes_per_logical_sector = disk.disk_size,
+            //.logical_sectors_per_cluster: u8,
+            //.reserved_logical_sector_count: u16 align(1),
+            //.file_allocation_table_count: u8,
+            //.max_fat_root_directory_entry_count: u16 align(1), // only for FAT12 and FAT16
+            //.total_logical_sector_count: u16 align(1),
+            //.media_descriptor: u8,
+            //.logical_sector_count_per_fat: u16 align(1),
+            //};
             mbr.partitions[0] = MBR.Partition{
                 .boot_indicator = 0,
                 .starting_chs = 0x200,
@@ -112,10 +122,11 @@ pub const Descriptor = extern struct {
         const last_usable_lba = disk_last_lba - backup_gpt_lba_count;
 
         var next_lba: u64 = FAT32.volumes_lba;
-        var gpt_partition_bytes = try disk.callbacks.read(disk, @sizeOf(GPT.Partition) * GPT.max_partition_count, GPT.partition_array_lba_start);
+        var gpt_partition_bytes = try disk.callbacks.read(disk, @divExact(common.align_forward(@sizeOf(GPT.Partition) * GPT.max_partition_count, disk.sector_size), disk.sector_size), GPT.partition_array_lba_start);
         const used_gpt_partitions = @ptrCast([*]GPT.Partition, @alignCast(@alignOf(GPT.Partition), gpt_partition_bytes))[0..disk.partition_count];
 
         for (used_gpt_partitions) |*partition, partition_index| {
+            common.std.debug.print("First LBA: {}\n", .{next_lba});
             const is_esp = partition_index == disk.esp_index;
             const boot_flag: u8 = @boolToInt(partition_index == disk.boot_partition_index);
             const last_lba = get_block_last_lba(next_lba, disk.partition_sizes[partition_index], disk.sector_size);
@@ -139,7 +150,7 @@ pub const Descriptor = extern struct {
         try disk.callbacks.write(disk, gpt_partition_bytes, GPT.partition_array_lba_start, .{ .in_memory_writings = true });
 
         // 2. Write GPT headers
-        const gpt_header_bytes = try disk.callbacks.read(disk, @sizeOf(GPT.Header), GPT.header_lba);
+        const gpt_header_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(GPT.Header), disk.sector_size), GPT.header_lba);
         const gpt_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), gpt_header_bytes));
         gpt_header.* = GPT.Header{
             .current_lba = GPT.header_lba,
@@ -149,16 +160,17 @@ pub const Descriptor = extern struct {
             .disk_guid = GPT.GUID.get_random(),
             .partition_entry_array_crc32 = partition_entry_array_crc32,
         };
+
         gpt_header.header_crc32 = common.CRC32.compute(gpt_header_bytes);
         try disk.callbacks.write(disk, gpt_header_bytes, GPT.header_lba, .{ .in_memory_writings = true });
 
         // 3. Write backup GPT
         const backup_gpt_partition_lba = disk.reverse_lba(backup_gpt_lba_count);
-        const backup_gpt_partition_bytes = try disk.callbacks.read(disk, @sizeOf(GPT.Partition) * GPT.max_partition_count, backup_gpt_partition_lba);
+        const backup_gpt_partition_bytes = try disk.callbacks.read(disk, @divExact(common.align_forward(@sizeOf(GPT.Partition) * GPT.max_partition_count, disk.sector_size), disk.sector_size), backup_gpt_partition_lba);
         common.copy(u8, backup_gpt_partition_bytes, gpt_partition_bytes);
         try disk.callbacks.write(disk, backup_gpt_partition_bytes, backup_gpt_partition_lba, .{ .in_memory_writings = true });
 
-        const backup_gpt_header_bytes = try disk.callbacks.read(disk, @sizeOf(GPT.Header), gpt_header.backup_lba);
+        const backup_gpt_header_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(GPT.Header), disk.sector_size), gpt_header.backup_lba);
         const backup_gpt_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), backup_gpt_header_bytes));
         backup_gpt_header.* = gpt_header.*;
 
@@ -177,15 +189,15 @@ pub const Descriptor = extern struct {
             defer next_lba = get_block_last_lba(next_lba, partition_size, disk.sector_size);
 
             // Populate MBR. TODO: this might be wrong as it overwrites other partitions?
-            const volume_mbr_bytes = try disk.callbacks.read(disk, @sizeOf(MBR.Struct), next_lba);
-            const volume_mbr = @ptrCast(*MBR.Struct, @alignCast(@alignOf(MBR.Struct), volume_mbr_bytes));
+            const partition_mbr_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(MBR.Struct), disk.sector_size), next_lba);
+            const partition_mbr = @ptrCast(*MBR.Struct, @alignCast(@alignOf(MBR.Struct), partition_mbr_bytes));
 
             const total_sector_count = @intCast(u32, @divExact(partition_size, disk.sector_size));
             const reserved_sector_count = GPT.partition_array_size;
             const sectors_per_cluster = @intCast(u8, @divExact(FAT32.get_cluster_size(partition_size), disk.sector_size));
             const fat_count = 2;
 
-            volume_mbr.* = .{
+            partition_mbr.* = .{
                 .bpb = .{
                     .dos3_31 = .{
                         .dos2_0 = .{
@@ -215,18 +227,18 @@ pub const Descriptor = extern struct {
                     .volume_label = "Partition 0".*,
                     .filesystem_type = "FAT32   ".*,
                 },
-                .code = volume_mbr.code,
-                .partitions = volume_mbr.partitions,
+                .code = partition_mbr.code,
+                .partitions = partition_mbr.partitions,
             };
 
-            try disk.callbacks.write(disk, volume_mbr_bytes, next_lba, .{ .in_memory_writings = true });
+            try disk.callbacks.write(disk, partition_mbr_bytes, next_lba, .{ .in_memory_writings = true });
 
-            const fs_info_lba = next_lba + volume_mbr.bpb.first_logical_sector_number_of_fat_bootsectors_copy;
-            const fs_info_bytes = try disk.callbacks.read(disk, @sizeOf(FAT32.FSInfo), fs_info_lba);
+            const fs_info_lba = next_lba + partition_mbr.bpb.first_logical_sector_number_of_fat_bootsectors_copy;
+            const fs_info_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(FAT32.FSInfo), disk.sector_size), fs_info_lba);
             const fs_info = @ptrCast(*FAT32.FSInfo, @alignCast(@alignOf(FAT32.FSInfo), fs_info_bytes));
 
             fs_info.* = FAT32.FSInfo{
-                .free_cluster_count = volume_mbr.bpb.get_free_cluster_count(),
+                .free_cluster_count = partition_mbr.bpb.get_free_cluster_count(),
                 .next_free_cluster = 2,
             };
 
@@ -234,19 +246,46 @@ pub const Descriptor = extern struct {
 
             // FAT region
             const clusters = [3]u32{
-                @as(u32, 0x0FFFFF00) | volume_mbr.bpb.dos3_31.dos2_0.media_descriptor,
+                @as(u32, 0x0FFFFF00) | partition_mbr.bpb.dos3_31.dos2_0.media_descriptor,
                 0x0FFFFFFF,
                 0x0FFFFFF8, // end-of-file for root directory
             };
 
-            const fat_region_lba = next_lba + volume_mbr.bpb.dos3_31.dos2_0.reserved_logical_sector_count;
+            const fat_region_lba = next_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_logical_sector_count;
             var fat_lba: u64 = fat_region_lba;
-            while (fat_lba < volume_mbr.bpb.dos3_31.dos2_0.file_allocation_table_count * volume_mbr.bpb.logical_sector_count_per_fat + fat_region_lba) : (fat_lba += volume_mbr.bpb.logical_sector_count_per_fat) {
+            while (fat_lba < partition_mbr.bpb.dos3_31.dos2_0.file_allocation_table_count * partition_mbr.bpb.logical_sector_count_per_fat + fat_region_lba) : (fat_lba += partition_mbr.bpb.logical_sector_count_per_fat) {
                 try disk.callbacks.write(disk, common.std.mem.asBytes(&clusters), fat_lba, .{});
             }
         }
+    }
 
-        @panic("todo image");
+    pub fn get_partition(disk: *Disk.Descriptor, partition_index: u8) !FAT32.Partition {
+        assert(disk.partition_count == 1);
+        assert(partition_index == 0);
+        const mbr_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(MBR.Struct), disk.sector_size), 0);
+        const mbr = @ptrCast(*MBR.Struct, @alignCast(@alignOf(MBR.Struct), mbr_bytes));
+        const partition_lba = FAT32.volumes_lba;
+        const partition_mbr_bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(MBR.Struct), disk.sector_size), partition_lba);
+        const partition_mbr = @ptrCast(*MBR.Struct, @alignCast(@alignOf(MBR.Struct), partition_mbr_bytes));
+
+        var partition_first_lba = mbr.partitions[partition_index].first_lba;
+        var partition_reserved_sector_count = partition_mbr.bpb.dos3_31.dos2_0.reserved_logical_sector_count;
+        const fat_begin_lba = partition_first_lba + partition_reserved_sector_count;
+        common.std.debug.print("FAT begin LBA: {}\n", .{fat_begin_lba});
+        var fat_count = partition_mbr.bpb.dos3_31.dos2_0.file_allocation_table_count;
+        var sectors_per_fat = partition_mbr.bpb.logical_sector_count_per_fat;
+        const cluster_begin_lba = fat_begin_lba + (fat_count * sectors_per_fat);
+        common.std.debug.print("Cluster begin LBA: {}\n", .{cluster_begin_lba});
+        const result = FAT32.Partition{
+            .mbr = mbr,
+            .partition_mbr = partition_mbr,
+            .disk = disk,
+            .index = partition_index,
+            .fat_begin_lba = fat_begin_lba,
+            .cluster_begin_lba = cluster_begin_lba,
+        };
+
+        return result;
     }
 
     fn reverse_lba(disk: *Disk.Descriptor, lba: u64) u64 {
@@ -269,17 +308,6 @@ pub const Descriptor = extern struct {
         return disk.get_gpt_lba_count() - 1;
     }
 
-    const VerifyError = error{
-        no_partitions,
-        partition_count_too_big,
-        invalid_esp_partition_index,
-        partition_size_too_small,
-        invalid_disk_size,
-        partition_size_too_big,
-        disk_size_too_small,
-        disk_size_too_big,
-    };
-
     pub fn get_required_disk_size(disk: Disk.Descriptor) !u64 {
         var size: u64 = GPT.reserved_partition_size;
 
@@ -287,7 +315,6 @@ pub const Descriptor = extern struct {
             if (partition_size < FAT32.minimum_partition_size) return VerifyError.partition_size_too_small;
             if (partition_size > FAT32.maximum_partition_size) return VerifyError.partition_size_too_big;
             size += partition_size;
-            common.std.debug.print("Disk size: {}. Partition size: {}\n", .{ size, partition_size });
         }
 
         return size;
@@ -300,6 +327,17 @@ pub const Descriptor = extern struct {
         if (disk.disk_size < Disk.Descriptor.min_size) return VerifyError.disk_size_too_small;
         if (disk.disk_size > Disk.Descriptor.max_size) return VerifyError.disk_size_too_big;
     }
+
+    const VerifyError = error{
+        no_partitions,
+        partition_count_too_big,
+        invalid_esp_partition_index,
+        partition_size_too_small,
+        invalid_disk_size,
+        partition_size_too_big,
+        disk_size_too_small,
+        disk_size_too_big,
+    };
 
     pub const min_partition_size = FAT32.minimum_partition_size;
     pub const min_size = FAT32.minimum_partition_size + GPT.reserved_partition_size;
