@@ -369,6 +369,21 @@ pub const Syscall = @import("common/syscall.zig");
 pub const Graphics = @import("common/graphics.zig");
 pub const Window = @import("common/window.zig");
 
+pub fn diff(file1: []const u8, file2: []const u8) void {
+    assert(file1.len == file2.len);
+    var different_bytes: u64 = 0;
+    for (file1) |byte1, index| {
+        const byte2 = file2[index];
+        const is_different_byte = byte1 != byte2;
+        different_bytes += @boolToInt(is_different_byte);
+        if (is_different_byte) {
+            log.debug("Byte [0x{x}] is different: 0x{x} != 0x{x}", .{ index, byte1, byte2 });
+        }
+    }
+
+    log.debug("Total different bytes: 0x{x}", .{different_bytes});
+}
+
 test {
     _ = Filesystem;
     _ = PartitionTable;

@@ -144,7 +144,7 @@ fn get_allocator() CustomAllocator {
     };
 }
 
-const zero_allocator = CustomAllocator{
+var zero_allocator = CustomAllocator{
     .callback_allocate = zero_allocate,
     .callback_resize = resize,
     .callback_free = free,
@@ -197,7 +197,7 @@ fn add_qemu_debug_isa_exit(builder: *Builder, list: *common.ArrayListManaged([]c
 
 const DiskImage = extern struct {
     descriptor: common.Disk.Descriptor,
-    buffer: *BufferType, // Pointer to work around limitation of structs not using layout modifier
+    buffer_ptr: [*]u8,
 
     const BufferType = common.ArrayListAligned(u8, 0x200);
 
@@ -205,6 +205,10 @@ const DiskImage = extern struct {
         handle: std.fs.File,
         size: usize,
     };
+
+    inline fn get_buffer(disk_image: *DiskImage) []u8 {
+        return disk_image.buffer_ptr[0..disk_image.descriptor.disk_size];
+    }
 
     fn get_file(file_path: []const u8) !File {
         const handle = try cwd().openFile(file_path, .{});
@@ -216,43 +220,53 @@ const DiskImage = extern struct {
 
     fn read(disk_descriptor: *common.Disk.Descriptor, sector_count: u64, sector_offset: u64) common.Disk.Descriptor.ReadError![]u8 {
         const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
-        assert(disk.buffer.items.len > 0);
-        assert(disk.descriptor.partition_count == 1);
+        assert(disk.descriptor.disk_size > 0);
         assert(sector_count > 0);
         //assert(disk.descriptor.disk_size == disk.buffer.items.len);
         const byte_count = sector_count * disk.descriptor.sector_size;
         const byte_offset = sector_offset * disk.descriptor.sector_size;
-        if (byte_offset + byte_count > disk.buffer.items.len) {
-            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.buffer.items.len });
+        if (byte_offset + byte_count > disk.descriptor.disk_size) {
+            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.descriptor.disk_size });
             return common.Disk.Descriptor.ReadError.read_error;
         }
-        const result = disk.buffer.items[byte_offset .. byte_offset + byte_count];
+        const result = disk.get_buffer()[byte_offset .. byte_offset + byte_count];
         return result;
     }
 
     fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, options: common.Disk.Descriptor.WriteOptions) common.Disk.Descriptor.WriteError!void {
         const need_write = !(disk_descriptor.type == .memory and options.in_memory_writings);
+        common.log.debug("need write: {}", .{need_write});
         if (need_write) {
             const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
-            assert(disk.buffer.items.len > 0);
-            assert(disk.descriptor.partition_count == 1);
+            assert(disk.descriptor.disk_size > 0);
+            //assert(disk.descriptor.partition_count == 1);
             assert(bytes.len > 0);
             //assert(disk.descriptor.disk_size == disk.buffer.items.len);
             const byte_offset = sector_offset * disk.descriptor.sector_size;
-            if (byte_offset + bytes.len > disk.buffer.items.len) return common.Disk.Descriptor.WriteError.write_error;
-            std.mem.copy(u8, disk.buffer.items[byte_offset .. byte_offset + bytes.len], bytes);
+            if (byte_offset + bytes.len > disk.descriptor.disk_size) return common.Disk.Descriptor.WriteError.write_error;
+            std.mem.copy(u8, disk.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
         }
     }
+
+    const GPT = common.PartitionTable.GPT;
 
     fn make(step: *Step) !void {
         const kernel = @fieldParentPtr(Kernel, "disk_step", step);
 
+        const disk_bytes = try zero_allocator.allocate_bytes(64 * 1024 * 1024, 0x200);
+        const disk_size = @divExact(disk_bytes.size, 0x200);
+        common.log.debug("Disk size: 0x{x}", .{disk_size});
         var disk = DiskImage{
-            .descriptor = undefined,
-            .buffer = try kernel.builder.allocator.create(BufferType),
+            .descriptor = .{
+                .type = .memory,
+                .callbacks = .{
+                    .read = read,
+                    .write = write,
+                },
+                .disk_size = disk_bytes.size,
+            },
+            .buffer_ptr = @intToPtr([*]u8, disk_bytes.address),
         };
-        disk.buffer.* = try BufferType.initCapacity(zero_allocator.get_allocator(), common.Disk.Descriptor.min_size);
-        disk.buffer.items.len = disk.buffer.capacity;
 
         //const max_file_length = common.max_int(usize);
         switch (kernel.options.arch) {
@@ -260,17 +274,46 @@ const DiskImage = extern struct {
                 const x86_64 = kernel.options.arch.x86_64;
                 switch (x86_64.boot_protocol) {
                     .bios => {
-                        try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
-                            .read = read,
-                            .write = write,
-                        });
-                        const fat32_partition = try kernel.builder.allocator.create(common.Filesystem.FAT32.Partition);
-                        fat32_partition.* = try disk.descriptor.get_partition(0);
-
-                        const r = try fat32_partition.create_file("loader.elf");
-                        _ = r;
-
+                        const write_options = common.Disk.Descriptor.WriteOptions{
+                            .in_memory_writings = true,
+                        };
+                        const barebones_hdd = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", 0xffff_ffff_ffff_ffff);
+                        const barebones_mbr = @ptrCast(*align(1) common.PartitionTable.MBR.Struct, barebones_hdd);
+                        common.std.debug.print("MBR: {}\n", .{barebones_mbr});
+                        const barebones_gpt_header = @ptrCast(*align(1) common.PartitionTable.GPT.Header, barebones_hdd[0x200..]);
+                        common.std.debug.print("GPT header: {}\n", .{barebones_gpt_header});
+                        const barebones_partitions = @ptrCast([*]align(1) common.PartitionTable.GPT.Partition, barebones_hdd[0x400..])[0..128];
+                        common.std.debug.print("GPT partitions:\n", .{});
+                        for (barebones_partitions[0..1]) |partition| {
+                            common.std.debug.print("{}\n", .{partition});
+                        }
+                        const gpt_header = try GPT.create(&disk.descriptor, write_options);
+                        const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
+                        gpt_first_partition.compare(&barebones_partitions[0]);
+                        const alternate_gpt_header = try disk.descriptor.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
+                        const barebones_backup_header_offset = barebones_gpt_header.backup_lba * 0x200;
+                        common.log.debug("Barebones offset: 0x{x}", .{barebones_backup_header_offset});
+                        const barebones_alternate_gpt_header = @ptrCast(*align(1) const GPT.Header, barebones_hdd[barebones_gpt_header.backup_lba * 0x200 ..]);
+                        alternate_gpt_header.compare(barebones_alternate_gpt_header);
+                        alternate_gpt_header.compare(gpt_header);
+                        common.diff(barebones_hdd, disk.get_buffer());
+                        try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
+                        //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
+                        //.read = read,
+                        //.write = write,
+                        //});
+
+                        //try disk.descriptor.verify();
+                        //try cwd().writeFile("zig-cache/disk_image.bin", disk.get_buffer());
+
+                        //const fat32_partition = try kernel.builder.allocator.create(common.Filesystem.FAT32.Partition);
+
+                        //fat32_partition.* = try disk.descriptor.get_partition(0);
+
+                        //const r = try fat32_partition.create_file("loader.elf");
+                        //_ = r;
+                        //
 
                         //const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
                         //assert(mbr_file.len == 0x200);
