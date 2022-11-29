@@ -2,6 +2,9 @@ const GPT = @This();
 
 const common = @import("../../common.zig");
 const assert = common.assert;
+const kb = common.kb;
+const mb = common.mb;
+const gb = common.gb;
 const CRC32 = common.CRC32;
 const Disk = common.Disk;
 const log = common.log.scoped(.GPT);
@@ -272,6 +275,63 @@ pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesy
     _ = filesystem;
 
     return gpt_first_partition;
+}
+
+// https://support.microsoft.com/en-us/topic/default-cluster-size-for-ntfs-fat-and-exfat-9772e6f1-e31a-00d7-e18f-73169155af95
+// Last consulted: 28-11-22
+pub fn get_cluster_size(fat_partition_size: u64) u64 {
+    return if (fat_partition_size < 32 * mb)
+        unreachable
+    else if (fat_partition_size < 64 * mb)
+        0x200
+    else if (fat_partition_size < 128 * mb)
+        1 * kb
+    else if (fat_partition_size < 256 * mb)
+        2 * kb
+    else if (fat_partition_size < 8 * gb)
+        4 * kb
+    else if (fat_partition_size < 16 * gb)
+        8 * kb
+    else if (fat_partition_size < 32 * gb)
+        16 * kb
+    else
+        unreachable;
+}
+
+pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common.Filesystem.Type, write_options: Disk.Descriptor.WriteOptions) !void {
+    _ = filesystem;
+    _ = write_options;
+    const header = try get_header(disk);
+    if (partition_index < header.partition_entry_count) {
+        const partition_entry_size = header.partition_entry_size;
+        assert(disk.sector_size >= partition_entry_size);
+        const partition_entry_array_lba = header.partition_array_lba;
+        assert(disk.sector_size % partition_entry_size == 0);
+        const partition_entry_per_sector_count = @divExact(disk.sector_size, partition_entry_size);
+        const partition_entry_lba = (partition_index / partition_entry_per_sector_count) + partition_entry_array_lba;
+        const partition_offset_from_lba = partition_index % partition_entry_per_sector_count;
+        const partition_entry_sector = try disk.callbacks.read(disk, 1, partition_entry_lba);
+        const partition_entry = @ptrCast(*GPT.Partition, @alignCast(@alignOf(GPT.Partition), partition_entry_sector[partition_offset_from_lba..]));
+        const partition_lba_start = partition_entry.first_lba;
+        //const partition_lba_end = partition_entry.first_lba;
+        //const lba_count = partition_lba_end - partition_lba_start;
+        const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
+        //fat_partition_mbr.* = MBR.Struct{
+        //.bpb = .{
+        //.dos3_31 = .{
+        //.dos2_0 = .{
+        //.jmp_code = .{ 0xeb, 0x58, 0x90 },
+        //.oem_identifier = "rise_efi",
+        //.sector_size = disk.sector_size,
+        //.cluster_sector_count = @divExact(get_cluster_size(lba_count * disk.sector_size), disk.sector_size),
+        //},
+        //},
+        //},
+        //};
+        log.debug("partition mbr: {}", .{fat_partition_mbr});
+    } else {
+        @panic("wtf");
+    }
 }
 
 pub fn get_header(disk: *Disk.Descriptor) !*GPT.Header {

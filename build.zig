@@ -288,15 +288,26 @@ const DiskImage = extern struct {
                             common.std.debug.print("{}\n", .{partition});
                         }
                         const gpt_header = try GPT.create(&disk.descriptor, write_options);
+                        // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID
+                        // Then add a function to modify GUID
                         const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
-                        gpt_first_partition.compare(&barebones_partitions[0]);
-                        const alternate_gpt_header = try disk.descriptor.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
-                        const barebones_backup_header_offset = barebones_gpt_header.backup_lba * 0x200;
-                        common.log.debug("Barebones offset: 0x{x}", .{barebones_backup_header_offset});
-                        const barebones_alternate_gpt_header = @ptrCast(*align(1) const GPT.Header, barebones_hdd[barebones_gpt_header.backup_lba * 0x200 ..]);
-                        alternate_gpt_header.compare(barebones_alternate_gpt_header);
-                        alternate_gpt_header.compare(gpt_header);
-                        common.diff(barebones_hdd, disk.get_buffer());
+                        _ = gpt_first_partition;
+                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
+                        const index = 0x800 * 0x200;
+                        common.log.debug("index: 0x{x}", .{index});
+                        const barebones_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index..]);
+                        const fat_partition_mbr = try disk.descriptor.read_typed_sectors(common.PartitionTable.MBR.Struct, 0x800);
+                        fat_partition_mbr.compare(barebones_fat_partition_mbr);
+                        //gpt_first_partition.compare(&barebones_partitions[0]);
+                        //const alternate_gpt_header = try disk.descriptor.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
+                        //const barebones_backup_header_offset = barebones_gpt_header.backup_lba * 0x200;
+                        //common.log.debug("Barebones offset: 0x{x}", .{barebones_backup_header_offset});
+                        //const barebones_alternate_gpt_header = @ptrCast(*align(1) const GPT.Header, barebones_hdd[barebones_gpt_header.backup_lba * 0x200 ..]);
+                        //alternate_gpt_header.compare(barebones_alternate_gpt_header);
+                        //alternate_gpt_header.compare(gpt_header);
+
+                        //common.diff(barebones_hdd, disk.get_buffer());
+
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
                         //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{

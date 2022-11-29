@@ -8,7 +8,7 @@ const Disk = common.Disk.Descriptor;
 pub const BIOSParameterBlock = extern struct {
     pub const DOS2_0 = extern struct {
         jmp_code: [3]u8 = .{ 0xeb, 0x58, 0x90 },
-        oem_identifier: [8]u8 = "MSWIN4.1".*,
+        oem_identifier: [8]u8,
         sector_size: u16 align(1),
         cluster_sector_count: u8,
         reserved_sector_count: u16,
@@ -106,6 +106,11 @@ pub const Struct = extern struct {
 
     comptime {
         assert(@sizeOf(@This()) == 0x200);
+    }
+
+    pub fn compare(mbr: *Struct, other: *align(1) const Struct) void {
+        log.debug("My FAT MBR:\n{}\n", .{mbr});
+        log.debug("Expected FAT MBR:\n{}\n", .{other});
     }
 
     pub fn verify(mbr: *const Struct, disk: *Disk) VerificationError!void {
