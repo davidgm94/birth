@@ -3,7 +3,6 @@ pub fn build(b: *Builder) void {
     const emulator = Kernel.Options.RunOptions.Emulator.qemu;
     kernel.* = Kernel{
         .builder = b,
-        .allocator = get_allocator(),
         .options = .{
             .arch = .{
                 .x86_64 = .{
@@ -86,8 +85,6 @@ const fork = std.os.fork;
 const ChildProcess = std.ChildProcess;
 const waitpid = std.os.waitpid;
 
-const Allocator = common.Allocator;
-const CustomAllocator = common.CustomAllocator;
 const RiseFS = common.RiseFS;
 
 const cache_dir = "zig-cache/";
@@ -134,54 +131,6 @@ fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
             return try mmap(null, bytes, PROT.READ | PROT.WRITE, MAP.PRIVATE | MAP.ANONYMOUS, -1, 0);
         },
     }
-}
-
-fn get_allocator() CustomAllocator {
-    return CustomAllocator{
-        .callback_allocate = allocate,
-        .callback_resize = resize,
-        .callback_free = free,
-    };
-}
-
-var zero_allocator = CustomAllocator{
-    .callback_allocate = zero_allocate,
-    .callback_resize = resize,
-    .callback_free = free,
-};
-
-fn allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
-    const kernel = @fieldParentPtr(Kernel, "allocator", allocator);
-    const result = try kernel.builder.allocator.allocBytes(@intCast(u29, alignment), size, 0, 0);
-    return CustomAllocator.Result{
-        .address = @ptrToInt(result.ptr),
-        .size = result.len,
-    };
-}
-
-fn resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
-    _ = allocator;
-    _ = old_memory;
-    _ = old_alignment;
-    _ = new_size;
-    unreachable;
-}
-
-fn free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
-    _ = allocator;
-    _ = memory;
-    _ = alignment;
-    unreachable;
-}
-
-fn zero_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
-    _ = allocator;
-    assert(alignment <= 0x1000);
-    const result = allocate_zero_memory(size) catch return CustomAllocator.Error.OutOfMemory;
-    return CustomAllocator.Result{
-        .address = @ptrToInt(result.ptr),
-        .size = result.len,
-    };
 }
 
 const cwd = std.fs.cwd;
@@ -235,7 +184,6 @@ const DiskImage = extern struct {
 
     fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, options: common.Disk.Descriptor.WriteOptions) common.Disk.Descriptor.WriteError!void {
         const need_write = !(disk_descriptor.type == .memory and options.in_memory_writings);
-        common.log.debug("need write: {}", .{need_write});
         if (need_write) {
             const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
             assert(disk.descriptor.disk_size > 0);
@@ -253,9 +201,9 @@ const DiskImage = extern struct {
     fn make(step: *Step) !void {
         const kernel = @fieldParentPtr(Kernel, "disk_step", step);
 
-        const disk_bytes = try zero_allocator.allocate_bytes(64 * 1024 * 1024, 0x200);
-        const disk_size = @divExact(disk_bytes.size, 0x200);
-        common.log.debug("Disk size: 0x{x}", .{disk_size});
+        const disk_bytes = try allocate_zero_memory(64 * 1024 * 1024);
+        const disk_sector_count = @divExact(disk_bytes.len, 0x200);
+        common.log.debug("Disk size: 0x{x}", .{disk_sector_count});
         var disk = DiskImage{
             .descriptor = .{
                 .type = .memory,
@@ -263,9 +211,9 @@ const DiskImage = extern struct {
                     .read = read,
                     .write = write,
                 },
-                .disk_size = disk_bytes.size,
+                .disk_size = disk_bytes.len,
             },
-            .buffer_ptr = @intToPtr([*]u8, disk_bytes.address),
+            .buffer_ptr = disk_bytes.ptr,
         };
 
         //const max_file_length = common.max_int(usize);
@@ -280,9 +228,9 @@ const DiskImage = extern struct {
                         const barebones_hdd = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", 0xffff_ffff_ffff_ffff);
                         const barebones_mbr = @ptrCast(*align(1) common.PartitionTable.MBR.Struct, barebones_hdd);
                         common.std.debug.print("MBR: {}\n", .{barebones_mbr});
-                        const barebones_gpt_header = @ptrCast(*align(1) common.PartitionTable.GPT.Header, barebones_hdd[0x200..]);
+                        const barebones_gpt_header = @ptrCast(*align(1) GPT.Header, barebones_hdd[0x200..]);
                         common.std.debug.print("GPT header: {}\n", .{barebones_gpt_header});
-                        const barebones_partitions = @ptrCast([*]align(1) common.PartitionTable.GPT.Partition, barebones_hdd[0x400..])[0..128];
+                        const barebones_partitions = @ptrCast([*]align(1) GPT.Partition, barebones_hdd[0x400..])[0..128];
                         common.std.debug.print("GPT partitions:\n", .{});
                         for (barebones_partitions[0..1]) |partition| {
                             common.std.debug.print("{}\n", .{partition});
@@ -292,12 +240,13 @@ const DiskImage = extern struct {
                         // Then add a function to modify GUID
                         const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
                         _ = gpt_first_partition;
-                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
                         const index = 0x800 * 0x200;
                         common.log.debug("index: 0x{x}", .{index});
+                        const barebones_fat_fs_info = @ptrCast(*align(1) const common.Filesystem.FAT32.FSInfo, barebones_hdd[index + 0x200 ..]);
                         const barebones_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index..]);
-                        const fat_partition_mbr = try disk.descriptor.read_typed_sectors(common.PartitionTable.MBR.Struct, 0x800);
-                        fat_partition_mbr.compare(barebones_fat_partition_mbr);
+                        const barebones_alternative_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index + 0xc00 ..]);
+                        //const fat_partition_mbr = try disk.descriptor.read_typed_sectors(common.PartitionTable.MBR.Struct, 0x800);
+                        //fat_partition_mbr.compare(barebones_fat_partition_mbr);
                         //gpt_first_partition.compare(&barebones_partitions[0]);
                         //const alternate_gpt_header = try disk.descriptor.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
                         //const barebones_backup_header_offset = barebones_gpt_header.backup_lba * 0x200;
@@ -306,8 +255,10 @@ const DiskImage = extern struct {
                         //alternate_gpt_header.compare(barebones_alternate_gpt_header);
                         //alternate_gpt_header.compare(gpt_header);
 
+                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
                         //common.diff(barebones_hdd, disk.get_buffer());
-
+                        common.log.debug("FS info: {}", .{barebones_fat_fs_info});
+                        common.log.debug("mbr:\n{}\n\n\nalternative mbr:\n{}\n\n", .{ barebones_fat_partition_mbr, barebones_alternative_fat_partition_mbr });
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
                         //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
@@ -494,13 +445,13 @@ const UserProgram = struct {
     }
 };
 
-const Filesystem = struct {
-    disk: *DiskImage,
+//const Filesystem = struct {
+//disk: *DiskImage,
 
-    fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
-        try RiseFS.write_file(filesystem, allocator, filename, file_content, null);
-    }
-};
+//fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
+//try RiseFS.write_file(filesystem, allocator, filename, file_content, null);
+//}
+//};
 
 const Kernel = struct {
     builder: *Builder,
@@ -515,7 +466,6 @@ const Kernel = struct {
     run_argument_list: common.ArrayListManaged([]const u8) = undefined,
     debug_argument_list: common.ArrayListManaged([]const u8) = undefined,
     gdb_script: *WriteFileStep = undefined,
-    allocator: CustomAllocator,
 
     fn create(kernel: *Kernel) !void {
         // Initialize package dependencies here
@@ -686,7 +636,7 @@ const Kernel = struct {
             libexeobj_steps.appendAssumeCapacity(program);
         }
 
-        kernel.userspace_programs = libexeobj_steps.toOwnedSlice();
+        kernel.userspace_programs = libexeobj_steps.items;
     }
 
     //fn create_boot_image(kernel: *Kernel) void {

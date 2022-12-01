@@ -7,6 +7,7 @@ const mb = common.mb;
 const gb = common.gb;
 const CRC32 = common.CRC32;
 const Disk = common.Disk;
+const FAT32 = common.Filesystem.FAT32;
 const log = common.log.scoped(.GPT);
 const MBR = common.PartitionTable.MBR;
 const GUID = common.std.os.uefi.Guid;
@@ -299,8 +300,8 @@ pub fn get_cluster_size(fat_partition_size: u64) u64 {
 }
 
 pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common.Filesystem.Type, write_options: Disk.Descriptor.WriteOptions) !void {
-    _ = filesystem;
     _ = write_options;
+    assert(filesystem == .fat32);
     const header = try get_header(disk);
     if (partition_index < header.partition_entry_count) {
         const partition_entry_size = header.partition_entry_size;
@@ -313,9 +314,15 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
         const partition_entry_sector = try disk.callbacks.read(disk, 1, partition_entry_lba);
         const partition_entry = @ptrCast(*GPT.Partition, @alignCast(@alignOf(GPT.Partition), partition_entry_sector[partition_offset_from_lba..]));
         const partition_lba_start = partition_entry.first_lba;
+        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, partition_lba_start);
+        fs_info.* = .{
+            .free_cluster_count = 126943,
+            .next_free_cluster = 2,
+        };
+        log.debug("Fs info: {}", .{fs_info});
         //const partition_lba_end = partition_entry.first_lba;
         //const lba_count = partition_lba_end - partition_lba_start;
-        const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
+        //const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
         //fat_partition_mbr.* = MBR.Struct{
         //.bpb = .{
         //.dos3_31 = .{
@@ -324,11 +331,21 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
         //.oem_identifier = "rise_efi",
         //.sector_size = disk.sector_size,
         //.cluster_sector_count = @divExact(get_cluster_size(lba_count * disk.sector_size), disk.sector_size),
+        //.reserved_sector_count = 32,
+        //.fat_count = 2,
+        //.root_entry_count = 0,
+        //.total_sector_count_16 = 0,
+        //.media_descriptor = 0xf8,
+        //.fat_sector_count_16 = 0,
         //},
+        //.physical_sectors_per_track = 32,
+        //.disk_head_count = 8,
+        //.hidden_sector_count = partition_lba_start, // TODO: is this right?
+        //.total_sector_count_32 = lba_count,
         //},
         //},
         //};
-        log.debug("partition mbr: {}", .{fat_partition_mbr});
+        //log.debug("partition mbr: {}", .{fat_partition_mbr});
     } else {
         @panic("wtf");
     }

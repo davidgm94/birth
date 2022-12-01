@@ -22,6 +22,15 @@ pub const FSInfo = extern struct {
     next_free_cluster: u32,
     reserved1: [12]u8 = [1]u8{0} ** 12,
     trail_signature: u32 = 0xaa550000,
+
+    pub fn format(fsinfo: *const FSInfo, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try common.internal_format(writer, "FSInfo:\n", .{});
+        try common.internal_format(writer, "\tLead signature: 0x{x}\n", .{fsinfo.lead_signature});
+        try common.internal_format(writer, "\tOther signature: 0x{x}\n", .{fsinfo.signature});
+        try common.internal_format(writer, "\tFree cluster count: {}\n", .{fsinfo.free_cluster_count});
+        try common.internal_format(writer, "\tNext free cluster: {}\n", .{fsinfo.next_free_cluster});
+        try common.internal_format(writer, "\tTrail signature: 0x{x}\n", .{fsinfo.trail_signature});
+    }
 };
 
 const FATType = enum(u8) {
