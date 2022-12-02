@@ -207,7 +207,7 @@ pub fn create(disk: *Disk.Descriptor, write_options: Disk.Descriptor.WriteOption
         .backup_lba = secondary_header_lba,
         .first_usable_lba = partition_array_lba_start + partition_array_sector_count,
         .last_usable_lba = secondary_header_lba - header_lba - partition_array_sector_count,
-        .disk_guid = get_random_guid(),
+        .disk_guid = limine_disk_guid,
         .partition_array_lba = partition_array_lba_start,
         .partition_array_crc32 = 0,
     };
@@ -240,6 +240,24 @@ const efi_guid = GUID{
     .node = .{ 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b },
 };
 
+const limine_disk_guid = GUID{
+    .time_low = 0x46997205,
+    .time_mid = 0x546b,
+    .time_high_and_version = 0x4a24,
+    .clock_seq_high_and_reserved = 0x9e,
+    .clock_seq_low = 0xca,
+    .node = .{ 0xe9, 0xa8, 0xf1, 0x83, 0xa1, 0xe0 },
+};
+
+const limine_unique_partition_guid = GUID{
+    .time_low = 0xf7a7b3a2,
+    .time_mid = 0x2173,
+    .time_high_and_version = 0x4429,
+    .clock_seq_high_and_reserved = 0xb7,
+    .clock_seq_low = 0xfe,
+    .node = .{ 0x72, 0x2e, 0x84, 0xae, 0xc8, 0xc2 },
+};
+
 pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, write_options: Disk.Descriptor.WriteOptions) !*GPT.Partition {
     // TODO: check if we are not overwriting a partition
     const gpt_header = try get_header(disk);
@@ -252,7 +270,7 @@ pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesy
     assert(partition_name.len <= gpt_first_partition.partition_name.len);
     gpt_first_partition.* = GPT.Partition{
         .partition_type_guid = efi_guid,
-        .unique_partition_guid = get_random_guid(),
+        .unique_partition_guid = limine_unique_partition_guid,
         .first_lba = lba_start,
         .last_lba = lba_end,
         .attributes = .{},
@@ -281,6 +299,7 @@ pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesy
 // https://support.microsoft.com/en-us/topic/default-cluster-size-for-ntfs-fat-and-exfat-9772e6f1-e31a-00d7-e18f-73169155af95
 // Last consulted: 28-11-22
 pub fn get_cluster_size(fat_partition_size: u64) u64 {
+    log.debug("fat partition size: 0x{x}", .{fat_partition_size});
     return if (fat_partition_size < 32 * mb)
         unreachable
     else if (fat_partition_size < 64 * mb)
@@ -299,10 +318,17 @@ pub fn get_cluster_size(fat_partition_size: u64) u64 {
         unreachable;
 }
 
+pub const Barebones = struct {
+    fat_partition_mbr: *align(1) const MBR.Struct,
+    fs_info: *align(1) const FAT32.FSInfo,
+    fat_entries: []align(1) const u32,
+};
+
 pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common.Filesystem.Type, write_options: Disk.Descriptor.WriteOptions) !void {
-    _ = write_options;
     assert(filesystem == .fat32);
+
     const header = try get_header(disk);
+
     if (partition_index < header.partition_entry_count) {
         const partition_entry_size = header.partition_entry_size;
         assert(disk.sector_size >= partition_entry_size);
@@ -313,39 +339,91 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
         const partition_offset_from_lba = partition_index % partition_entry_per_sector_count;
         const partition_entry_sector = try disk.callbacks.read(disk, 1, partition_entry_lba);
         const partition_entry = @ptrCast(*GPT.Partition, @alignCast(@alignOf(GPT.Partition), partition_entry_sector[partition_offset_from_lba..]));
+
         const partition_lba_start = partition_entry.first_lba;
-        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, partition_lba_start);
-        fs_info.* = .{
-            .free_cluster_count = 126943,
-            .next_free_cluster = 2,
+        const partition_lba_end = partition_entry.last_lba;
+        const lba_count = partition_lba_end - partition_lba_start;
+
+        const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
+        fat_partition_mbr.* = MBR.Struct{
+            .bpb = .{
+                .dos3_31 = .{
+                    .dos2_0 = .{
+                        .jmp_code = .{ 0xeb, 0x58, 0x90 },
+                        .oem_identifier = "mkfs.fat".*,
+                        .sector_size = disk.sector_size,
+                        .cluster_sector_count = @intCast(u8, @divExact(get_cluster_size(lba_count * disk.sector_size), disk.sector_size)),
+                        .reserved_sector_count = 32,
+                        .fat_count = 2,
+                        .root_entry_count = 0,
+                        .total_sector_count_16 = 0,
+                        .media_descriptor = 0xf8,
+                        .fat_sector_count_16 = 0,
+                    },
+                    .physical_sectors_per_track = 32,
+                    .disk_head_count = 8,
+                    .hidden_sector_count = @intCast(u32, partition_lba_start), // TODO: is this right?
+                    .total_sector_count_32 = @intCast(u32, lba_count) - 30, // TODO compute right
+                },
+                .fat_sector_count_32 = 992,
+                .drive_description = 0,
+                .version = .{ 0, 0 },
+                .root_directory_cluster_offset = 2,
+                .fs_info_sector = 1,
+                .backup_boot_record_sector = 6,
+                .drive_number = 0x80,
+                .extended_boot_signature = 0x29,
+                .serial_number = 0x15304130,
+                .volume_label = "NO NAME    ".*,
+                .filesystem_type = "FAT32   ".*,
+            },
+            .code = [_]u8{
+                0xe, 0x1f, 0xbe, 0x77, 0x7c, 0xac, 0x22, 0xc0, 0x74, 0xb, 0x56, 0xb4, 0xe, 0xbb, 0x7, 0x0, 0xcd, 0x10, 0x5e, 0xeb, 0xf0, 0x32, 0xe4, 0xcd, 0x16, 0xcd, 0x19, 0xeb, 0xfe, 0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x64, 0x69, 0x73, 0x6b, 0x2e, 0x20, 0x20, 0x50, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x20, 0x69, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x66, 0x6c, 0x6f, 0x70, 0x70, 0x79, 0x20, 0x61, 0x6e, 0x64, 0xd, 0xa, 0x70, 0x72, 0x65, 0x73, 0x73, 0x20, 0x61, 0x6e, 0x79, 0x20, 0x6b, 0x65, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x74, 0x72, 0x79, 0x20, 0x61, 0x67, 0x61, 0x69, 0x6e, 0x20, 0x2e, 0x2e, 0x2e, 0x20, 0xd, 0xa,
+            } ++ [1]u8{0} ** 227,
+            // This should be zero
+            .partitions = common.zeroes([4]MBR.Partition),
         };
-        log.debug("Fs info: {}", .{fs_info});
-        //const partition_lba_end = partition_entry.first_lba;
-        //const lba_count = partition_lba_end - partition_lba_start;
-        //const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
-        //fat_partition_mbr.* = MBR.Struct{
-        //.bpb = .{
-        //.dos3_31 = .{
-        //.dos2_0 = .{
-        //.jmp_code = .{ 0xeb, 0x58, 0x90 },
-        //.oem_identifier = "rise_efi",
-        //.sector_size = disk.sector_size,
-        //.cluster_sector_count = @divExact(get_cluster_size(lba_count * disk.sector_size), disk.sector_size),
-        //.reserved_sector_count = 32,
-        //.fat_count = 2,
-        //.root_entry_count = 0,
-        //.total_sector_count_16 = 0,
-        //.media_descriptor = 0xf8,
-        //.fat_sector_count_16 = 0,
-        //},
-        //.physical_sectors_per_track = 32,
-        //.disk_head_count = 8,
-        //.hidden_sector_count = partition_lba_start, // TODO: is this right?
-        //.total_sector_count_32 = lba_count,
-        //},
-        //},
-        //};
-        //log.debug("partition mbr: {}", .{fat_partition_mbr});
+
+        try disk.write_typed_sectors(MBR.Struct, fat_partition_mbr, partition_array_lba_start, write_options);
+
+        const backup_boot_record_sector = partition_lba_start + fat_partition_mbr.bpb.backup_boot_record_sector;
+        const backup_boot_record = try disk.read_typed_sectors(MBR.Struct, backup_boot_record_sector);
+        backup_boot_record.* = fat_partition_mbr.*;
+        try disk.write_typed_sectors(MBR.Struct, backup_boot_record, backup_boot_record_sector, write_options);
+
+        const fs_info_lba = partition_lba_start + fat_partition_mbr.bpb.fs_info_sector;
+        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba);
+        fs_info.* = .{
+            .lead_signature = 0x41615252,
+            .signature = 0x61417272,
+            .free_cluster_count = fat_partition_mbr.bpb.dos3_31.total_sector_count_32 - 2017, // TODO: compute,
+            .next_free_cluster = @intCast(u32, fs_info_lba - partition_lba_start + 1),
+            .trail_signature = 0xaa550000,
+        };
+        try disk.write_typed_sectors(FAT32.FSInfo, fs_info, fs_info_lba, write_options);
+
+        const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
+        const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba);
+        backup_fs_info.* = fs_info.*;
+        try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, write_options);
+
+        assert(disk.sector_size == 0x200);
+        const FATEntrySector = [0x200 / @sizeOf(u32)]u32;
+        const fat_entry_lba = partition_lba_start + fat_partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
+        const fat_entry_first_sector = try disk.read_typed_sectors(FATEntrySector, fat_entry_lba);
+        const fat_entries = fat_entry_first_sector[0..3];
+        fat_entries[0] = 0xffffff8;
+        fat_entries[1] = 0xfffffff;
+        fat_entries[2] = 0xffffff8;
+        try disk.write_typed_sectors(FATEntrySector, fat_entry_first_sector, fat_entry_lba, write_options);
+
+        const backup_fat_entry_lba = fat_entry_lba + fat_partition_mbr.bpb.fat_sector_count_32;
+        const backup_fat_entry_first_sector = try disk.read_typed_sectors(FATEntrySector, backup_fat_entry_lba);
+        const backup_fat_entries = backup_fat_entry_first_sector[0..3];
+        backup_fat_entries[0] = 0xffffff8;
+        backup_fat_entries[1] = 0xfffffff;
+        backup_fat_entries[2] = 0xffffff8;
+        try disk.write_typed_sectors(FATEntrySector, backup_fat_entry_first_sector, backup_fat_entry_lba, write_options);
     } else {
         @panic("wtf");
     }

@@ -240,11 +240,7 @@ const DiskImage = extern struct {
                         // Then add a function to modify GUID
                         const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
                         _ = gpt_first_partition;
-                        const index = 0x800 * 0x200;
-                        common.log.debug("index: 0x{x}", .{index});
-                        const barebones_fat_fs_info = @ptrCast(*align(1) const common.Filesystem.FAT32.FSInfo, barebones_hdd[index + 0x200 ..]);
-                        const barebones_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index..]);
-                        const barebones_alternative_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index + 0xc00 ..]);
+                        //const barebones_alternative_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index + 0xc00 ..]);
                         //const fat_partition_mbr = try disk.descriptor.read_typed_sectors(common.PartitionTable.MBR.Struct, 0x800);
                         //fat_partition_mbr.compare(barebones_fat_partition_mbr);
                         //gpt_first_partition.compare(&barebones_partitions[0]);
@@ -256,9 +252,9 @@ const DiskImage = extern struct {
                         //alternate_gpt_header.compare(gpt_header);
 
                         try GPT.format(&disk.descriptor, 0, .fat32, write_options);
-                        //common.diff(barebones_hdd, disk.get_buffer());
-                        common.log.debug("FS info: {}", .{barebones_fat_fs_info});
-                        common.log.debug("mbr:\n{}\n\n\nalternative mbr:\n{}\n\n", .{ barebones_fat_partition_mbr, barebones_alternative_fat_partition_mbr });
+                        common.diff(barebones_hdd, disk.get_buffer());
+                        //common.log.debug("FS info: {}", .{barebones_fat_fs_info});
+                        //common.log.debug("mbr:\n{}\n\n\nalternative mbr:\n{}\n\n", .{ barebones_fat_partition_mbr, barebones_alternative_fat_partition_mbr });
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
                         //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{

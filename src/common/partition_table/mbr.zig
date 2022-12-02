@@ -261,7 +261,7 @@ pub const Struct = extern struct {
         try common.internal_format(writer, "\tRoot directory cluster offset: {}\n", .{bpb_7_1_79.root_directory_cluster_offset});
         try common.internal_format(writer, "\tFS info sector: {}\n", .{bpb_7_1_79.fs_info_sector});
         try common.internal_format(writer, "\tBackup boot record sector: {}\n", .{bpb_7_1_79.backup_boot_record_sector});
-        try common.internal_format(writer, "\tDriver number: {}\n", .{bpb_7_1_79.drive_number});
+        try common.internal_format(writer, "\tDrive number: {}\n", .{bpb_7_1_79.drive_number});
         try common.internal_format(writer, "\tExtended boot signature: {}\n", .{bpb_7_1_79.extended_boot_signature});
         try common.internal_format(writer, "\tSerial number: {}\n", .{bpb_7_1_79.serial_number});
         try common.internal_format(writer, "\tVolume label: {s}\n", .{bpb_7_1_79.volume_label});
