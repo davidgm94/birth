@@ -35,7 +35,7 @@ pub const Rights = packed struct(u8) {
 
 pub const Capability = extern struct {
     object: extern union {
-        @"null": void align(1),
+        null: void align(1),
         physical_address: extern struct {
             base: PhysicalAddress(.global) align(1),
             bytes: usize align(1),
@@ -818,14 +818,14 @@ pub const Size = struct {
 
 pub const CTE = extern struct {
     capability: Capability,
-    padding_0: [common.align_forward(@sizeOf(Capability), 8) - @sizeOf(Capability)]u8,
+    padding_0: [common.align_forward(u8, @sizeOf(Capability), 8) - @sizeOf(Capability)]u8,
     mdb_node: MappingDatabase.Node,
-    padding_1: [common.align_forward(@sizeOf(MappingDatabase.Node), 8) - @sizeOf(MappingDatabase.Node)]u8,
+    padding_1: [common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) - @sizeOf(MappingDatabase.Node)]u8,
     delete_node: DeleteList,
     padding: [
         (1 << objbits_cte) - @sizeOf(DeleteList) -
-            common.align_forward(@sizeOf(MappingDatabase.Node), 8) -
-            common.align_forward(@sizeOf(Capability), 8)
+            common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) -
+            common.align_forward(u8, @sizeOf(Capability), 8)
     ]u8,
 
     pub fn get_cnode(cte: *CTE) PhysicalAddress(.global) {
@@ -923,7 +923,7 @@ const DeleteList = extern struct {
 };
 
 comptime {
-    const total_size = common.align_forward(@sizeOf(Capability), 8) + common.align_forward(@sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
+    const total_size = common.align_forward(u8, @sizeOf(Capability), 8) + common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
     assert(total_size <= (1 << objbits_cte));
 }
 

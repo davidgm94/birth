@@ -62,7 +62,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
                     break;
                 } else {
-                    const aligned_page_address = common.align_forward(asked_virtual_address, reverse_page_size);
+                    const aligned_page_address = common.align_forward(usize, asked_virtual_address, reverse_page_size);
                     const prologue_misalignment = aligned_page_address - asked_virtual_address;
                     const aligned_size_left = size - prologue_misalignment;
 

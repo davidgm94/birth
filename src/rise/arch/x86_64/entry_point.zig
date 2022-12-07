@@ -70,7 +70,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
                 if (used_byte_count >= physical_regions_allocation_size) {
                     const physical_address = PhysicalAddress(.local).new(entry.physical_start + used_byte_count);
-                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
+                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(u64, physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
 
                     const free_regions = physical_address.to_higher_half_virtual_address().access([*]PhysicalAddressSpace.Region)[0..entry_count];
                     memory_map_iterator.reset();

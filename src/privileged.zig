@@ -170,7 +170,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn aligned_forward(physical_address: PA, alignment: usize) PA {
-            return @intToEnum(PA, common.align_forward(physical_address.value(), alignment));
+            return @intToEnum(PA, common.align_forward(usize, physical_address.value(), alignment));
         }
 
         pub fn aligned_backward(physical_address: PA, alignment: usize) PA {

@@ -89,33 +89,33 @@ pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
-pub inline fn string_eq(a: []const u8, b: []const u8) bool {
+pub fn string_eq(a: []const u8, b: []const u8) bool {
     return equal(u8, a, b);
 }
 
-pub inline fn string_starts_with(str: []const u8, slice: []const u8) bool {
+pub fn string_starts_with(str: []const u8, slice: []const u8) bool {
     return starts_with(u8, str, slice);
 }
 
-pub inline fn string_ends_with(str: []const u8, slice: []const u8) bool {
+pub fn string_ends_with(str: []const u8, slice: []const u8) bool {
     return ends_with(u8, str, slice);
 }
 
-pub inline fn align_forward(n: u64, alignment: u64) u64 {
-    const mask: u64 = alignment - 1;
+pub fn align_forward(comptime T: type, n: T, alignment: T) T {
+    const mask: @TypeOf(n) = alignment - 1;
     const result = (n + mask) & ~mask;
     return result;
 }
 
-pub inline fn align_backward(n: u64, alignment: u64) u64 {
+pub fn align_backward(n: u64, alignment: u64) u64 {
     return n & ~(alignment - 1);
 }
 
-pub inline fn is_aligned(n: u64, alignment: u64) bool {
+pub fn is_aligned(n: u64, alignment: u64) bool {
     return n & (alignment - 1) == 0;
 }
 
-pub inline fn read_int_big(comptime T: type, slice: []const u8) T {
+pub fn read_int_big(comptime T: type, slice: []const u8) T {
     return internal_read_int_big(T, slice[0..@sizeOf(T)]);
 }
 pub fn copy(comptime T: type, dst: []T, src: []const T) void {
@@ -126,17 +126,17 @@ pub fn copy(comptime T: type, dst: []T, src: []const T) void {
     @memcpy(dst_ptr, src_ptr, bytes_to_copy);
 }
 
-pub inline fn set_byte(slice: []u8, value: u8) void {
+pub fn set_byte(slice: []u8, value: u8) void {
     @memset(slice.ptr, value, slice.len);
 }
 
-pub inline fn zero_typed_address(address: u64, comptime T: type) *T {
+pub fn zero_typed_address(address: u64, comptime T: type) *T {
     const result = @intToPtr(*T, address);
     result.* = zeroes(T);
     return result;
 }
 
-pub inline fn zero_range(address: u64, size: u64) void {
+pub fn zero_range(address: u64, size: u64) void {
     zero(@intToPtr([*]u8, address)[0..size]);
 }
 
@@ -144,13 +144,13 @@ pub fn zero(bytes: []u8) void {
     set_byte(bytes, 0);
 }
 
-pub inline fn zero_slice(comptime T: type, slice: []T) void {
+pub fn zero_slice(comptime T: type, slice: []T) void {
     for (slice) |*elem| {
         elem.* = zeroes(T);
     }
 }
 
-pub inline fn zeroes(comptime T: type) T {
+pub fn zeroes(comptime T: type) T {
     var result: T = undefined;
     zero(as_bytes(&result));
     return result;

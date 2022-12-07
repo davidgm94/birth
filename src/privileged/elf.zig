@@ -53,7 +53,7 @@ pub fn load_into_kernel_memory(physical_address_space: *PhysicalAddressSpace, fi
                 const page_size = valid_page_sizes[0];
                 const misalignment = ph.virtual_address & (page_size - 1);
                 const base_virtual_address = VirtualAddress(.local).new(ph.virtual_address - misalignment);
-                const segment_size = align_forward(ph.size_in_memory + misalignment, page_size);
+                const segment_size = align_forward(usize, ph.size_in_memory + misalignment, page_size);
 
                 if (misalignment != 0) {
                     return Error.program_header_not_page_aligned;

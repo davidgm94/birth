@@ -226,35 +226,20 @@ const DiskImage = extern struct {
                             .in_memory_writings = true,
                         };
                         const barebones_hdd = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", 0xffff_ffff_ffff_ffff);
-                        const barebones_mbr = @ptrCast(*align(1) common.PartitionTable.MBR.Struct, barebones_hdd);
-                        common.std.debug.print("MBR: {}\n", .{barebones_mbr});
-                        const barebones_gpt_header = @ptrCast(*align(1) GPT.Header, barebones_hdd[0x200..]);
-                        common.std.debug.print("GPT header: {}\n", .{barebones_gpt_header});
-                        const barebones_partitions = @ptrCast([*]align(1) GPT.Partition, barebones_hdd[0x400..])[0..128];
-                        common.std.debug.print("GPT partitions:\n", .{});
-                        for (barebones_partitions[0..1]) |partition| {
-                            common.std.debug.print("{}\n", .{partition});
-                        }
                         const gpt_header = try GPT.create(&disk.descriptor, write_options);
                         // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID
                         // Then add a function to modify GUID
                         const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
                         _ = gpt_first_partition;
-                        //const barebones_alternative_fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[index + 0xc00 ..]);
-                        //const fat_partition_mbr = try disk.descriptor.read_typed_sectors(common.PartitionTable.MBR.Struct, 0x800);
-                        //fat_partition_mbr.compare(barebones_fat_partition_mbr);
-                        //gpt_first_partition.compare(&barebones_partitions[0]);
-                        //const alternate_gpt_header = try disk.descriptor.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
-                        //const barebones_backup_header_offset = barebones_gpt_header.backup_lba * 0x200;
-                        //common.log.debug("Barebones offset: 0x{x}", .{barebones_backup_header_offset});
-                        //const barebones_alternate_gpt_header = @ptrCast(*align(1) const GPT.Header, barebones_hdd[barebones_gpt_header.backup_lba * 0x200 ..]);
-                        //alternate_gpt_header.compare(barebones_alternate_gpt_header);
-                        //alternate_gpt_header.compare(gpt_header);
-
                         try GPT.format(&disk.descriptor, 0, .fat32, write_options);
+                        const barebones_partition_lba_offset = 0x800 * 0x200;
+                        try GPT.mkdir(&disk.descriptor, 0, "/EFI/BOOT", write_options, .{
+                            .raw_bytes = barebones_hdd,
+                            .fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[barebones_partition_lba_offset..]),
+                            .fs_info = @ptrCast(*align(1) const common.Filesystem.FAT32.FSInfo, barebones_hdd[barebones_partition_lba_offset + 0x200 ..]),
+                            .fat_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.Entry, barebones_hdd[barebones_partition_lba_offset + (32 * 0x200) ..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.Entry)],
+                        });
                         common.diff(barebones_hdd, disk.get_buffer());
-                        //common.log.debug("FS info: {}", .{barebones_fat_fs_info});
-                        //common.log.debug("mbr:\n{}\n\n\nalternative mbr:\n{}\n\n", .{ barebones_fat_partition_mbr, barebones_alternative_fat_partition_mbr });
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
                         //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
