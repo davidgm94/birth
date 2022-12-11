@@ -259,21 +259,21 @@ const efi_guid = GUID{
 };
 
 const limine_disk_guid = GUID{
-    .time_low = 0x46997205,
-    .time_mid = 0x546b,
-    .time_high_and_version = 0x4a24,
-    .clock_seq_high_and_reserved = 0x9e,
-    .clock_seq_low = 0xca,
-    .node = .{ 0xe9, 0xa8, 0xf1, 0x83, 0xa1, 0xe0 },
+    .time_low = 0xD2CB8A76,
+    .time_mid = 0xACB3,
+    .time_high_and_version = 0x4D4D,
+    .clock_seq_high_and_reserved = 0x93,
+    .clock_seq_low = 0x55,
+    .node = .{ 0xAC, 0xAE, 0xA4, 0x6B, 0x46, 0x92 },
 };
 
 const limine_unique_partition_guid = GUID{
-    .time_low = 0xf7a7b3a2,
-    .time_mid = 0x2173,
-    .time_high_and_version = 0x4429,
-    .clock_seq_high_and_reserved = 0xb7,
-    .clock_seq_low = 0xfe,
-    .node = .{ 0x72, 0x2e, 0x84, 0xae, 0xc8, 0xc2 },
+    .time_low = 0x26D6E02E,
+    .time_mid = 0xEED8,
+    .time_high_and_version = 0x4802,
+    .clock_seq_high_and_reserved = 0xba,
+    .clock_seq_low = 0xa2,
+    .node = .{ 0xE5, 0xAA, 0x43, 0x7F, 0xC2, 0xC5 },
 };
 
 pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, write_options: Disk.Descriptor.WriteOptions) !*GPT.Partition {
@@ -341,6 +341,7 @@ pub const Barebones = struct {
     fat_partition_mbr: *align(1) const MBR.Struct,
     fs_info: *align(1) const FAT32.FSInfo,
     fat_entries: []align(1) const FAT32.Entry,
+    root_fat_directory_entries: []align(1) const FAT32.DirectoryEntry,
 };
 
 fn cdiv(a: u32, b: u32) u32 {
@@ -451,7 +452,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
         .lead_signature = 0x41615252,
         .signature = 0x61417272,
         .free_cluster_count = fat_partition_mbr.bpb.dos3_31.total_sector_count_32 - 2017, // TODO: compute,
-        .next_free_cluster = FAT32.starting_cluster,
+        .last_allocated_cluster = fat_partition_mbr.bpb.root_directory_cluster_offset,
         .trail_signature = 0xaa550000,
     };
     try disk.write_typed_sectors(FAT32.FSInfo, fs_info, fs_info_lba, write_options);
@@ -461,9 +462,9 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     backup_fs_info.* = fs_info.*;
     try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, write_options);
 
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved, 0, write_options);
+    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved_and_should_not_be_used_eof, 0, write_options);
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated, 1, write_options); // reserved | media_type
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved, 2, write_options);
+    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved_and_should_not_be_used_eof, 2, write_options);
 }
 
 fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize, write_options: Disk.Descriptor.WriteOptions) !void {
@@ -481,14 +482,22 @@ fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, 
     }
 }
 
-const FATEntrySector = [0x200 / @sizeOf(FAT32.Entry)]FAT32.Entry;
+const FATEntrySector = [@divExact(0x200, @sizeOf(FAT32.Entry))]FAT32.Entry;
+const FATDirectoryEntrySector = [@divExact(0x200, @sizeOf(FAT32.DirectoryEntry))]FAT32.DirectoryEntry;
 
 const GetPartitionError = error{
     invalid_index,
 };
 
+fn allocate_clusters(fs_info: *FAT32.FSInfo, fat_entries: []FAT32.Entry, cluster_count: u32) u32 {
+    const cluster = fs_info.last_allocated_cluster + 1;
+    fat_entries[cluster].allocate();
+    fs_info.allocate(cluster_count);
+    return cluster;
+}
+
 pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []const u8, write_options: Disk.Descriptor.WriteOptions, barebones: Barebones) !void {
-    _ = absolute_path;
+    _ = write_options;
     //log.debug("Barebones partition mbr: {}", .{barebones.fat_partition_mbr});
     const gpt_header = try get_header(disk);
     const partition_entry = try gpt_header.get_partition(disk, partition_index);
@@ -496,14 +505,106 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     //const partition_end_lba = partition_entry.last_lba;
 
     const partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_start_lba);
-    try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.allocated, 3, write_options);
-    try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.reserved, 4, write_options);
-    _ = barebones;
+    //try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.allocated, 3, write_options);
+    //try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.reserved, 4, write_options);
+    const fs_info_sector = partition_start_lba + partition_mbr.bpb.fs_info_sector;
+    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector);
+    log.debug("My FS info: {}\nBarebones FS info: {}\n", .{ fs_info, barebones.fs_info });
+    // Root directory empty
 
-    //const real_data_lba = partition_fat_lba + (partition_mbr.bpb.fat_sector_count_32 * partition_mbr.bpb.dos3_31.dos2_0.fat_count);
-    //const cluster_sector_count = partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
-    //const read_data_lba = real_data_lba + ((2 - FAT32.starting_cluster) * cluster_sector_count);
-    ////const read_data = try disk.callbacks.read(disk, cluster_sector_count, read_data_lba);
+    const fat_lba = partition_start_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
+    const fat_entries = try disk.read_typed_sectors(FATEntrySector, fat_lba);
+    const root_cluster = partition_mbr.bpb.root_directory_cluster_offset;
+
+    const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
+    const cluster_sector_count = partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
+    const data_lba = fat_lba + (partition_mbr.bpb.fat_sector_count_32 * partition_mbr.bpb.dos3_31.dos2_0.fat_count);
+
+    for (barebones.fat_entries) |entry| {
+        if (entry.value == 0) break;
+        log.debug("Barebones FAT entry: {}", .{entry.get_type(max_valid_cluster_number)});
+    }
+
+    log.debug("Root FAT dir entries: {}", .{barebones.root_fat_directory_entries.len});
+    for (barebones.root_fat_directory_entries) |entry| {
+        if (entry.is_free()) break;
+        log.debug("Barebones FAT dir entry: {}", .{entry});
+    }
+
+    assert(absolute_path[0] == '/');
+
+    const root_cluster_sector = data_lba + cluster_sector_count * (root_cluster - root_cluster);
+    var upper_cluster = root_cluster;
+    var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+
+    dir_token: while (dir_tokenizer.next()) |entry_name| {
+        assert(entry_name.len <= 8);
+        log.debug("Looking for/creating {s}", .{entry_name});
+
+        var fat_entry = &fat_entries[upper_cluster - root_cluster];
+
+        while (!fat_entry.is_free()) : ({
+            upper_cluster += 1;
+            fat_entry = &fat_entries[upper_cluster - root_cluster];
+        }) {
+            log.debug("Upper cluster: {}", .{upper_cluster});
+            const upper_dir_lba = ((upper_cluster - root_cluster) * cluster_sector_count) + root_cluster_sector;
+            const fat_directory_entries = try disk.read_typed_sectors(FATDirectoryEntrySector, upper_dir_lba);
+
+            for (fat_directory_entries) |*entry| {
+                log.debug("Entry: {}", .{entry});
+                if (entry.is_free()) {
+                    const directory_cluster = allocate_clusters(fs_info, fat_entries, 1);
+                    entry.* = .{
+                        .name = blk: {
+                            var name: [11]u8 = [1]u8{0} ** 11;
+                            common.copy(u8, &name, entry_name);
+                            break :blk name;
+                        },
+                        .attributes = .{
+                            .read_only = false,
+                            .hidden = false,
+                            .system = false,
+                            .volume_id = false,
+                            .directory = true,
+                            .archive = false,
+                        },
+                        .creation_time_tenth = 169,
+                        .creation_time = 37518,
+                        .creation_date = 21897,
+                        .first_cluster_high = @truncate(u16, directory_cluster >> 16),
+                        .first_cluster_low = @truncate(u16, directory_cluster),
+                        .last_access_date = 21897,
+                        .last_write_time = 37518,
+                        .last_write_date = 21897,
+                        .file_size = 0,
+                    };
+
+                    upper_cluster = directory_cluster;
+
+                    log.debug("My entry: {}. Barebones: {}", .{ entry, barebones.root_fat_directory_entries[0] });
+                    continue :dir_token;
+                } else unreachable;
+            }
+        }
+    }
+
+    //var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+    //while (dir_tokenizer.next()) |next_dir| {
+    //log.debug("Next dir: {s}", .{next_dir});
+
+    //// TODO: this is inmutable, substitute
+    ////var sector_i: u16 = 0;
+    ////while (sector_i < cluster_sector_count) : (sector_i += 1) {
+    ////const lba = cluster_lba + sector_i;
+    ////const sector_data = try disk.read_typed_sectors(FATDirectoryEntrySector, lba);
+    ////for (sector_data) |directory_entry| {
+    ////if (directory_entry.name[0] == 0) break;
+    ////log.debug("Directory entry: {}", .{directory_entry});
+    ////}
+    ////}
+    //}
+
     //const read_data_byte_offset = read_data_lba * 0x200;
     //log.debug("Offset: 0x{x}", .{read_data_byte_offset});
     //const read_data = barebones.raw_bytes[read_data_byte_offset..][0..0x200];
@@ -511,6 +612,16 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     //log.debug("Read data[{}]: 0x{x}", .{ read_byte_index, read_byte });
     //}
     //log.debug("String: {s}", .{read_data[0..11]});
+    //unreachable;
+}
+
+fn mkdir_assume_dir_exists(disk: *Disk.Descriptor, partition_index: usize, containing_path: []const u8, name: []const u8, write_options: Disk.Descriptor.WriteOptions) !void {
+    _ = disk;
+    _ = partition_index;
+    _ = containing_path;
+    _ = name;
+    _ = write_options;
+    unreachable;
 }
 
 fn compare_fat_entries(my_fat_entries: []const FAT32.Entry, barebones_fat_entries: []align(1) const FAT32.Entry) void {

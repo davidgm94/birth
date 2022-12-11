@@ -233,11 +233,16 @@ const DiskImage = extern struct {
                         _ = gpt_first_partition;
                         try GPT.format(&disk.descriptor, 0, .fat32, write_options);
                         const barebones_partition_lba_offset = 0x800 * 0x200;
+                        const barebones_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[barebones_partition_lba_offset..]);
+                        const fat_index = barebones_partition_lba_offset + (32 * 0x200);
+                        const barebones_root_fat_dir_entry_index = fat_index + (barebones_partition_mbr.bpb.fat_sector_count_32 * barebones_partition_mbr.bpb.dos3_31.dos2_0.fat_count * 0x200);
+                        std.log.debug("Fat index: 0x{x}. Dir index: 0x{x}", .{ fat_index, barebones_root_fat_dir_entry_index });
                         try GPT.mkdir(&disk.descriptor, 0, "/EFI/BOOT", write_options, .{
                             .raw_bytes = barebones_hdd,
-                            .fat_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[barebones_partition_lba_offset..]),
+                            .fat_partition_mbr = barebones_partition_mbr,
                             .fs_info = @ptrCast(*align(1) const common.Filesystem.FAT32.FSInfo, barebones_hdd[barebones_partition_lba_offset + 0x200 ..]),
-                            .fat_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.Entry, barebones_hdd[barebones_partition_lba_offset + (32 * 0x200) ..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.Entry)],
+                            .fat_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.Entry, barebones_hdd[fat_index..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.Entry)],
+                            .root_fat_directory_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.DirectoryEntry, barebones_hdd[barebones_root_fat_dir_entry_index..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.DirectoryEntry)],
                         });
                         common.diff(barebones_hdd, disk.get_buffer());
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
