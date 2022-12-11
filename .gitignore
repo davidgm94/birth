@@ -4,5 +4,3 @@ logfile
 debug_disk
 .gdb_history
 bochsout.txt
-barebones.hdd
-loopback_dev
