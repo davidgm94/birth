@@ -27,9 +27,12 @@ pub const FSInfo = extern struct {
     reserved1: [12]u8 = [1]u8{0} ** 12,
     trail_signature: u32 = 0xaa550000,
 
-    pub inline fn allocate(fs_info: *FSInfo, cluster_count: u32) void {
+    /// Returns first cluster to be used
+    pub fn allocate_clusters(fs_info: *FSInfo, cluster_count: u32) u32 {
+        const result = fs_info.last_allocated_cluster + 1;
         fs_info.last_allocated_cluster += cluster_count;
         fs_info.free_cluster_count -= cluster_count;
+        return result;
     }
 
     pub fn format(fsinfo: *const FSInfo, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -71,17 +74,45 @@ pub fn compute_cluster_sector_count(total_size: u64, sector_size: u16) u8 {
     return @intCast(u8, @divExact(get_cluster_size(total_size), sector_size));
 }
 
+pub const Date = packed struct(u16) {
+    day: u5,
+    month: u4,
+    year: u7,
+
+    pub fn new(day: u5, month: u4, year: u12) Date {
+        return Date{
+            .day = day,
+            .month = month,
+            .year = @intCast(u7, year - 1980),
+        };
+    }
+};
+
+pub const Time = packed struct(u16) {
+    seconds_2_factor: u5,
+    minutes: u6,
+    hours: u5,
+
+    pub fn new(seconds: u6, minutes: u6, hours: u5) Time {
+        return Time{
+            .seconds_2_factor = @intCast(u5, seconds / 2),
+            .minutes = minutes,
+            .hours = hours,
+        };
+    }
+};
+
 pub const DirectoryEntry = extern struct {
     name: [11]u8,
     attributes: Attributes,
     nt_reserved: u8 = 0,
     creation_time_tenth: u8,
-    creation_time: u16,
-    creation_date: u16,
-    last_access_date: u16,
+    creation_time: Time,
+    creation_date: Date,
+    last_access_date: Date,
     first_cluster_high: u16,
-    last_write_time: u16,
-    last_write_date: u16,
+    last_write_time: Time,
+    last_write_date: Date,
     first_cluster_low: u16,
     file_size: u32,
 
@@ -145,10 +176,6 @@ pub const Entry = packed struct(u32) {
             .reserved_and_should_not_be_used_eof, .allocated_and_eof => true,
             .bad_cluster, .reserved_and_should_not_be_used, .allocated, .free => false,
         };
-    }
-
-    pub fn allocate(entry: *Entry) void {
-        entry.* = get_entry(.allocated);
     }
 
     pub fn get_type(entry: Entry, max_valid_cluster_number: u32) Type {

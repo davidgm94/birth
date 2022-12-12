@@ -21,6 +21,19 @@ pub const BIOSParameterBlock = extern struct {
         comptime {
             assert(@sizeOf(@This()) == 24);
         }
+
+        fn compare(bpb_2_0: *const DOS2_0, other: *align(1) const DOS2_0) void {
+            if (!common.equal(u8, &bpb_2_0.jmp_code, &other.jmp_code)) log.debug("Jump code differs: {any}, {any}", .{ bpb_2_0.jmp_code, other.jmp_code });
+            if (!common.equal(u8, &bpb_2_0.oem_identifier, &other.oem_identifier)) log.debug("OEM identifier differs: {any}, {any}", .{ bpb_2_0.oem_identifier, other.oem_identifier });
+            if (bpb_2_0.sector_size != other.sector_size) log.debug("Sector size differs: {}, {}", .{ bpb_2_0.sector_size, other.sector_size });
+            if (bpb_2_0.cluster_sector_count != other.cluster_sector_count) log.debug("Cluster sector count differs: {}, {}", .{ bpb_2_0.cluster_sector_count, other.cluster_sector_count });
+            if (bpb_2_0.reserved_sector_count != other.reserved_sector_count) log.debug("Reserved sector count differs: {}, {}", .{ bpb_2_0.reserved_sector_count, other.reserved_sector_count });
+            if (bpb_2_0.fat_count != other.fat_count) log.debug("FAT count differs: {}, {}", .{ bpb_2_0.fat_count, other.fat_count });
+            if (bpb_2_0.root_entry_count != other.root_entry_count) log.debug("Root entry count differs: {}, {}", .{ bpb_2_0.root_entry_count, other.root_entry_count });
+            if (bpb_2_0.total_sector_count_16 != other.total_sector_count_16) log.debug("Total sector count(16) differs: {}, {}", .{ bpb_2_0.total_sector_count_16, other.total_sector_count_16 });
+            if (bpb_2_0.media_descriptor != other.media_descriptor) log.debug("Media descriptor differs: {}, {}", .{ bpb_2_0.media_descriptor, other.media_descriptor });
+            if (bpb_2_0.fat_sector_count_16 != other.fat_sector_count_16) log.debug("FAT sector count (16) differs: {}, {}", .{ bpb_2_0.fat_sector_count_16, other.fat_sector_count_16 });
+        }
     };
 
     pub const DOS3_31 = extern struct {
@@ -29,6 +42,15 @@ pub const BIOSParameterBlock = extern struct {
         disk_head_count: u16,
         hidden_sector_count: u32,
         total_sector_count_32: u32,
+
+        fn compare(bpb_3_31: *align(1) const DOS3_31, other: *align(1) const DOS3_31) void {
+            bpb_3_31.dos2_0.compare(&other.dos2_0);
+
+            if (bpb_3_31.physical_sectors_per_track != other.physical_sectors_per_track) log.debug("Physical sectors per track differs: {}, {}", .{ bpb_3_31.physical_sectors_per_track, other.physical_sectors_per_track });
+            if (bpb_3_31.disk_head_count != other.disk_head_count) log.debug("Disk head count differs: {}, {}", .{ bpb_3_31.disk_head_count, other.disk_head_count });
+            if (bpb_3_31.hidden_sector_count != other.hidden_sector_count) log.debug("Hidden sector count differs: {}, {}", .{ bpb_3_31.hidden_sector_count, other.hidden_sector_count });
+            if (bpb_3_31.total_sector_count_32 != other.total_sector_count_32) log.debug("Total sector count differs: {}, {}", .{ bpb_3_31.total_sector_count_32, other.total_sector_count_32 });
+        }
 
         comptime {
             assert(@sizeOf(@This()) == 36);
@@ -57,6 +79,22 @@ pub const BIOSParameterBlock = extern struct {
             const sector_count_per_fat = bpb.fat_sector_count_32;
             const fat_count = bpb.dos3_31.dos2_0.fat_count;
             return total_sector_count - reserved_sector_count - (sector_count_per_fat * fat_count);
+        }
+
+        fn compare(this: *const DOS7_1_79, other: *align(1) const DOS7_1_79) void {
+            this.dos3_31.compare(&other.dos3_31);
+
+            if (this.fat_sector_count_32 != other.fat_sector_count_32) log.debug("FAT sector count (32) differs: {}, {}", .{ this.fat_sector_count_32, other.fat_sector_count_32 });
+            if (this.drive_description != other.drive_description) log.debug("Drive description differs: {}, {}", .{ this.drive_description, other.drive_description });
+            if (!common.equal(u8, &this.version, &other.version)) log.debug("Version differs: {any}, {any}", .{ this.version, other.version });
+            if (this.root_directory_cluster_offset != other.root_directory_cluster_offset) log.debug("Root directory cluster differs: {}, {}", .{ this.root_directory_cluster_offset, other.root_directory_cluster_offset });
+            if (this.fs_info_sector != other.fs_info_sector) log.debug("FS info differs: {}, {}", .{ this.fs_info_sector, other.fs_info_sector });
+            if (this.backup_boot_record_sector != other.backup_boot_record_sector) log.debug("Backup boot record sector differs: {}, {}", .{ this.backup_boot_record_sector, other.backup_boot_record_sector });
+            if (this.drive_number != other.drive_number) log.debug("Drive number differs: {}, {}", .{ this.drive_number, other.drive_number });
+            if (this.extended_boot_signature != other.extended_boot_signature) log.debug("Extended boot signature differs: {}, {}", .{ this.extended_boot_signature, other.extended_boot_signature });
+            if (this.serial_number != other.serial_number) log.debug("Serial number differs: 0x{x}, 0x{x}", .{ this.serial_number, other.serial_number });
+            if (!common.equal(u8, &this.volume_label, &other.volume_label)) log.debug("Volume label differs: {s}, {s}", .{ this.volume_label, other.volume_label });
+            if (!common.equal(u8, &this.filesystem_type, &other.filesystem_type)) log.debug("Filesystem type differs: {s}, {s}", .{ this.filesystem_type, other.filesystem_type });
         }
 
         comptime {
@@ -109,8 +147,23 @@ pub const Struct = extern struct {
     }
 
     pub fn compare(mbr: *Struct, other: *align(1) const Struct) void {
-        log.debug("My FAT MBR:\n{}\n", .{mbr});
-        log.debug("Expected FAT MBR:\n{}\n", .{other});
+        log.debug("Comparing MBRs...", .{});
+        mbr.bpb.compare(&other.bpb);
+
+        if (!common.equal(u8, &mbr.code, &other.code)) {
+            unreachable;
+        }
+
+        for (mbr.partitions) |this_partition, partition_i| {
+            const other_partition = other.partitions[partition_i];
+
+            if (this_partition.boot_indicator != other_partition.boot_indicator) log.debug("Mismatch: {}, .{}", .{ this_partition.boot_indicator, other_partition.boot_indicator });
+            if (this_partition.starting_chs != other_partition.starting_chs) log.debug("Mismatch: {}, .{}", .{ this_partition.starting_chs, other_partition.starting_chs });
+            if (this_partition.os_type != other_partition.os_type) log.debug("Mismatch: {}, .{}", .{ this_partition.os_type, other_partition.os_type });
+            if (this_partition.ending_chs != other_partition.ending_chs) log.debug("Mismatch: {}, .{}", .{ this_partition.ending_chs, other_partition.ending_chs });
+            if (this_partition.first_lba != other_partition.first_lba) log.debug("Mismatch: {}, .{}", .{ this_partition.first_lba, other_partition.first_lba });
+            if (this_partition.size_in_lba != other_partition.size_in_lba) log.debug("Mismatch: {}, .{}", .{ this_partition.size_in_lba, other_partition.size_in_lba });
+        }
     }
 
     pub fn verify(mbr: *const Struct, disk: *Disk) VerificationError!void {

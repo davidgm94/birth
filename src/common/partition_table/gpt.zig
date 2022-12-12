@@ -276,6 +276,9 @@ const limine_unique_partition_guid = GUID{
     .node = .{ 0xE5, 0xAA, 0x43, 0x7F, 0xC2, 0xC5 },
 };
 
+const limine_date = FAT32.Date.new(9, 12, 2022);
+const limine_time = FAT32.Time.new(28, 20, 18);
+
 pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, write_options: Disk.Descriptor.WriteOptions) !*GPT.Partition {
     // TODO: check if we are not overwriting a partition
     const gpt_header = try get_header(disk);
@@ -428,7 +431,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
             .backup_boot_record_sector = FAT32.backup_boot_record_sector,
             .drive_number = 0x80,
             .extended_boot_signature = 0x29,
-            .serial_number = 0x15304130,
+            .serial_number = 0xc6da2516,
             .volume_label = "NO NAME    ".*,
             .filesystem_type = "FAT32   ".*,
         },
@@ -463,7 +466,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, write_options);
 
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved_and_should_not_be_used_eof, 0, write_options);
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated, 1, write_options); // reserved | media_type
+    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated_and_eof, 1, write_options); // reserved | media_type
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved_and_should_not_be_used_eof, 2, write_options);
 }
 
@@ -482,6 +485,12 @@ fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, 
     }
 }
 
+fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, fs_info: *FAT32.FSInfo, partition_lba_start: u64, write_options: Disk.Descriptor.WriteOptions) !u32 {
+    const cluster = fs_info.allocate_clusters(1);
+    try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated_and_eof, cluster, write_options);
+    return cluster;
+}
+
 const FATEntrySector = [@divExact(0x200, @sizeOf(FAT32.Entry))]FAT32.Entry;
 const FATDirectoryEntrySector = [@divExact(0x200, @sizeOf(FAT32.DirectoryEntry))]FAT32.DirectoryEntry;
 
@@ -489,15 +498,31 @@ const GetPartitionError = error{
     invalid_index,
 };
 
-fn allocate_clusters(fs_info: *FAT32.FSInfo, fat_entries: []FAT32.Entry, cluster_count: u32) u32 {
-    const cluster = fs_info.last_allocated_cluster + 1;
-    fat_entries[cluster].allocate();
-    fs_info.allocate(cluster_count);
-    return cluster;
+const dot_entry_name: [11]u8 = ".".* ++ ([1]u8{' '} ** 10);
+const dot_dot_entry_name: [11]u8 = "..".* ++ ([1]u8{' '} ** 9);
+
+fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: FAT32.DirectoryEntry, insert: struct {
+    cluster: u32,
+    root_cluster: u32,
+    cluster_sector_count: u16,
+    root_cluster_sector: u64,
+}) !void {
+    const cluster_dir_lba = (insert.cluster - insert.root_cluster) * insert.cluster_sector_count + insert.root_cluster_sector;
+    assert(insert.cluster_sector_count == 1);
+    const fat_directory_entries = try disk.read_typed_sectors(FATDirectoryEntrySector, cluster_dir_lba);
+
+    for (fat_directory_entries) |*entry| {
+        log.debug("Entry: {}", .{entry});
+        if (entry.is_free()) {
+            entry.* = desired_entry;
+            return;
+        }
+    }
+
+    unreachable;
 }
 
 pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []const u8, write_options: Disk.Descriptor.WriteOptions, barebones: Barebones) !void {
-    _ = write_options;
     //log.debug("Barebones partition mbr: {}", .{barebones.fat_partition_mbr});
     const gpt_header = try get_header(disk);
     const partition_entry = try gpt_header.get_partition(disk, partition_index);
@@ -505,8 +530,6 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     //const partition_end_lba = partition_entry.last_lba;
 
     const partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_start_lba);
-    //try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.allocated, 3, write_options);
-    //try write_fat_entry_slow(disk, partition_mbr, partition_start_lba, FAT32.Entry.reserved, 4, write_options);
     const fs_info_sector = partition_start_lba + partition_mbr.bpb.fs_info_sector;
     const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector);
     log.debug("My FS info: {}\nBarebones FS info: {}\n", .{ fs_info, barebones.fs_info });
@@ -514,11 +537,17 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
 
     const fat_lba = partition_start_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
     const fat_entries = try disk.read_typed_sectors(FATEntrySector, fat_lba);
+    const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
+    for (fat_entries) |fat_entry| {
+        if (fat_entry.value == 0) break;
+        log.debug("Fat entry: {}", .{fat_entry.get_type(max_valid_cluster_number)});
+    }
+
     const root_cluster = partition_mbr.bpb.root_directory_cluster_offset;
 
-    const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
     const cluster_sector_count = partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
     const data_lba = fat_lba + (partition_mbr.bpb.fat_sector_count_32 * partition_mbr.bpb.dos3_31.dos2_0.fat_count);
+    log.debug("Data LBA: 0x{x}", .{data_lba});
 
     for (barebones.fat_entries) |entry| {
         if (entry.value == 0) break;
@@ -537,91 +566,66 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     var upper_cluster = root_cluster;
     var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
 
-    dir_token: while (dir_tokenizer.next()) |entry_name| {
+    while (dir_tokenizer.next()) |entry_name| {
         assert(entry_name.len <= 8);
         log.debug("Looking for/creating {s}", .{entry_name});
 
-        var fat_entry = &fat_entries[upper_cluster - root_cluster];
+        //const cluster_sector = directory_cluster * cluster_sector_count;
+        const directory_cluster = try allocate_fat_entry(disk, partition_mbr, fs_info, partition_start_lba, write_options);
+        log.debug("Directory cluster: {}", .{directory_cluster});
 
-        while (!fat_entry.is_free()) : ({
-            upper_cluster += 1;
-            fat_entry = &fat_entries[upper_cluster - root_cluster];
-        }) {
-            log.debug("Upper cluster: {}", .{upper_cluster});
-            const upper_dir_lba = ((upper_cluster - root_cluster) * cluster_sector_count) + root_cluster_sector;
-            const fat_directory_entries = try disk.read_typed_sectors(FATDirectoryEntrySector, upper_dir_lba);
+        log.debug("Upper cluster: {}", .{upper_cluster});
+        const entry = FAT32.DirectoryEntry{
+            .name = blk: {
+                var name: [11]u8 = [1]u8{' '} ** 11;
+                common.copy(u8, &name, entry_name);
+                break :blk name;
+            },
+            .attributes = .{
+                .read_only = false,
+                .hidden = false,
+                .system = false,
+                .volume_id = false,
+                .directory = true,
+                .archive = false,
+            },
+            .creation_time_tenth = 169,
+            .creation_time = limine_time,
+            .creation_date = limine_date,
+            .first_cluster_high = @truncate(u16, directory_cluster >> 16),
+            .first_cluster_low = @truncate(u16, directory_cluster),
+            .last_access_date = limine_date,
+            .last_write_time = .{ .seconds_2_factor = 14, .minutes = 20, .hours = 18 },
+            .last_write_date = limine_date,
+            .file_size = 0,
+        };
 
-            for (fat_directory_entries) |*entry| {
-                log.debug("Entry: {}", .{entry});
-                if (entry.is_free()) {
-                    const directory_cluster = allocate_clusters(fs_info, fat_entries, 1);
-                    entry.* = .{
-                        .name = blk: {
-                            var name: [11]u8 = [1]u8{0} ** 11;
-                            common.copy(u8, &name, entry_name);
-                            break :blk name;
-                        },
-                        .attributes = .{
-                            .read_only = false,
-                            .hidden = false,
-                            .system = false,
-                            .volume_id = false,
-                            .directory = true,
-                            .archive = false,
-                        },
-                        .creation_time_tenth = 169,
-                        .creation_time = 37518,
-                        .creation_date = 21897,
-                        .first_cluster_high = @truncate(u16, directory_cluster >> 16),
-                        .first_cluster_low = @truncate(u16, directory_cluster),
-                        .last_access_date = 21897,
-                        .last_write_time = 37518,
-                        .last_write_date = 21897,
-                        .file_size = 0,
-                    };
+        var dot_entry = entry;
+        dot_entry.name = dot_entry_name;
+        var dot_dot_entry = entry;
+        dot_dot_entry.name = dot_dot_entry_name;
 
-                    upper_cluster = directory_cluster;
+        try insert_directory_entry_slow(disk, entry, .{
+            .cluster = upper_cluster,
+            .root_cluster = root_cluster,
+            .cluster_sector_count = cluster_sector_count,
+            .root_cluster_sector = root_cluster_sector,
+        });
+        try insert_directory_entry_slow(disk, entry, .{
+            .cluster = upper_cluster + 1,
+            .root_cluster = root_cluster,
+            .cluster_sector_count = cluster_sector_count,
+            .root_cluster_sector = root_cluster_sector,
+        });
+        try insert_directory_entry_slow(disk, entry, .{
+            .cluster = upper_cluster + 1,
+            .root_cluster = root_cluster,
+            .cluster_sector_count = cluster_sector_count,
+            .root_cluster_sector = root_cluster_sector,
+        });
 
-                    log.debug("My entry: {}. Barebones: {}", .{ entry, barebones.root_fat_directory_entries[0] });
-                    continue :dir_token;
-                } else unreachable;
-            }
-        }
+        upper_cluster = directory_cluster;
     }
-
-    //var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
-    //while (dir_tokenizer.next()) |next_dir| {
-    //log.debug("Next dir: {s}", .{next_dir});
-
-    //// TODO: this is inmutable, substitute
-    ////var sector_i: u16 = 0;
-    ////while (sector_i < cluster_sector_count) : (sector_i += 1) {
-    ////const lba = cluster_lba + sector_i;
-    ////const sector_data = try disk.read_typed_sectors(FATDirectoryEntrySector, lba);
-    ////for (sector_data) |directory_entry| {
-    ////if (directory_entry.name[0] == 0) break;
-    ////log.debug("Directory entry: {}", .{directory_entry});
-    ////}
-    ////}
-    //}
-
-    //const read_data_byte_offset = read_data_lba * 0x200;
-    //log.debug("Offset: 0x{x}", .{read_data_byte_offset});
-    //const read_data = barebones.raw_bytes[read_data_byte_offset..][0..0x200];
-    //for (read_data) |read_byte, read_byte_index| {
-    //log.debug("Read data[{}]: 0x{x}", .{ read_byte_index, read_byte });
-    //}
-    //log.debug("String: {s}", .{read_data[0..11]});
-    //unreachable;
-}
-
-fn mkdir_assume_dir_exists(disk: *Disk.Descriptor, partition_index: usize, containing_path: []const u8, name: []const u8, write_options: Disk.Descriptor.WriteOptions) !void {
-    _ = disk;
-    _ = partition_index;
-    _ = containing_path;
-    _ = name;
-    _ = write_options;
-    unreachable;
 }
 
 fn compare_fat_entries(my_fat_entries: []const FAT32.Entry, barebones_fat_entries: []align(1) const FAT32.Entry) void {
