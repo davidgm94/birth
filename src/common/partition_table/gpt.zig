@@ -511,9 +511,10 @@ fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: FAT32.Dire
     assert(insert.cluster_sector_count == 1);
     const fat_directory_entries = try disk.read_typed_sectors(FATDirectoryEntrySector, cluster_dir_lba);
 
-    for (fat_directory_entries) |*entry| {
-        log.debug("Entry: {}", .{entry});
+    for (fat_directory_entries) |*entry, entry_index| {
+        //log.debug("Entry: {}", .{entry});
         if (entry.is_free()) {
+            log.debug("Inserting entry {s} in cluster {}. Cluster dir LBA: 0x{x}. Entry index: {}", .{ desired_entry.name, insert.cluster, cluster_dir_lba, entry_index });
             entry.* = desired_entry;
             return;
         }
@@ -566,7 +567,9 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     var upper_cluster = root_cluster;
     var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
 
+    var directories: u64 = 0;
     while (dir_tokenizer.next()) |entry_name| {
+        defer directories += 1;
         assert(entry_name.len <= 8);
         log.debug("Looking for/creating {s}", .{entry_name});
 
@@ -604,6 +607,7 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
         dot_entry.name = dot_entry_name;
         var dot_dot_entry = entry;
         dot_dot_entry.name = dot_dot_entry_name;
+        dot_dot_entry.set_first_cluster(if (upper_cluster == root_cluster) 0 else upper_cluster);
 
         try insert_directory_entry_slow(disk, entry, .{
             .cluster = upper_cluster,
@@ -611,13 +615,13 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
             .cluster_sector_count = cluster_sector_count,
             .root_cluster_sector = root_cluster_sector,
         });
-        try insert_directory_entry_slow(disk, entry, .{
+        try insert_directory_entry_slow(disk, dot_entry, .{
             .cluster = upper_cluster + 1,
             .root_cluster = root_cluster,
             .cluster_sector_count = cluster_sector_count,
             .root_cluster_sector = root_cluster_sector,
         });
-        try insert_directory_entry_slow(disk, entry, .{
+        try insert_directory_entry_slow(disk, dot_dot_entry, .{
             .cluster = upper_cluster + 1,
             .root_cluster = root_cluster,
             .cluster_sector_count = cluster_sector_count,

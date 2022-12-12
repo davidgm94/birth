@@ -144,6 +144,11 @@ pub const DirectoryEntry = extern struct {
         };
     }
 
+    pub fn set_first_cluster(entry: *DirectoryEntry, cluster: u32) void {
+        entry.first_cluster_low = @truncate(u16, cluster);
+        entry.first_cluster_high = @truncate(u16, cluster >> 16);
+    }
+
     pub const Attributes = packed struct(u8) {
         read_only: bool,
         hidden: bool,
