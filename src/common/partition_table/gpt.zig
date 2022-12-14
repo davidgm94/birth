@@ -632,6 +632,16 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     }
 }
 
+pub fn add_file(disk: *Disk.Descriptor, partition_index: usize, file_absolute_path: []const u8, file_content: []const u8, write_options: Disk.Descriptor.WriteOptions, barebones: Barebones) !void {
+    _ = disk;
+    _ = partition_index;
+    _ = file_absolute_path;
+    _ = file_content;
+    _ = write_options;
+    _ = barebones;
+    unreachable;
+}
+
 fn compare_fat_entries(my_fat_entries: []const FAT32.Entry, barebones_fat_entries: []align(1) const FAT32.Entry) void {
     for (my_fat_entries) |fat_entry, fat_entry_index| {
         const barebones_fat_entry = barebones_fat_entries[fat_entry_index];
