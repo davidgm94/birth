@@ -4,6 +4,8 @@ const common = @import("../../common.zig");
 const assert = common.assert;
 const log = common.log.scoped(.MBR);
 const Disk = common.Disk.Descriptor;
+const GPT = common.PartitionTable.GPT;
+const FAT32 = common.Filesystem.FAT32;
 
 pub const BIOSParameterBlock = extern struct {
     pub const DOS2_0 = extern struct {
@@ -144,6 +146,10 @@ pub const Struct = extern struct {
 
     comptime {
         assert(@sizeOf(@This()) == 0x200);
+    }
+
+    pub fn get_fs_info(mbr: *const MBR.Struct, disk: *Disk, gpt_partition: *const GPT.Partition) !*FAT32.FSInfo {
+        return try disk.read_typed_sectors(FAT32.FSInfo, gpt_partition.first_lba + mbr.bpb.fs_info_sector);
     }
 
     pub fn compare(mbr: *Struct, other: *align(1) const Struct) void {

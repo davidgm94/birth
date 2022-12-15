@@ -1,3 +1,41 @@
+const common = @import("src/common.zig");
+const std = @import("std");
+const assert = std.debug.assert;
+
+const Builder = std.build.Builder;
+const FileSource = std.build.FileSource;
+const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
+const Package = std.build.Pkg;
+const RunStep = std.build.RunStep;
+const Step = std.build.Step;
+const WriteFileStep = std.build.WriteFileStep;
+
+const Target = std.Target;
+const Arch = Target.Cpu.Arch;
+const CrossTarget = std.zig.CrossTarget;
+
+const os = @import("builtin").target.os.tag;
+const arch = @import("builtin").target.cpu.arch;
+
+const fork = std.os.fork;
+const ChildProcess = std.ChildProcess;
+const waitpid = std.os.waitpid;
+
+const cwd = std.fs.cwd;
+const Dir = std.fs.Dir;
+const path = std.fs.path;
+const basename = std.fs.path.basename;
+const dirname = std.fs.path.dirname;
+
+const RiseFS = common.RiseFS;
+
+const cache_dir = "zig-cache/";
+const kernel_name = "kernel.elf";
+const kernel_path = cache_dir ++ kernel_name;
+
+const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
+
 pub fn build(b: *Builder) void {
     const kernel = b.allocator.create(Kernel) catch unreachable;
     const emulator = Kernel.Options.RunOptions.Emulator.qemu;
@@ -57,42 +95,6 @@ pub fn build(b: *Builder) void {
     test_step.dependOn(&run_test_step.step);
 }
 
-const common = @import("src/common.zig");
-const std = @import("std");
-const assert = std.debug.assert;
-
-comptime {
-    if (os == .freestanding) @compileError("This is only meant to be imported in build.zig");
-}
-
-const Builder = std.build.Builder;
-const FileSource = std.build.FileSource;
-const LibExeObjStep = std.build.LibExeObjStep;
-const OptionsStep = std.build.OptionsStep;
-const Package = std.build.Pkg;
-const RunStep = std.build.RunStep;
-const Step = std.build.Step;
-const WriteFileStep = std.build.WriteFileStep;
-
-const Target = std.Target;
-const Arch = Target.Cpu.Arch;
-const CrossTarget = std.zig.CrossTarget;
-
-const os = @import("builtin").target.os.tag;
-const arch = @import("builtin").target.cpu.arch;
-
-const fork = std.os.fork;
-const ChildProcess = std.ChildProcess;
-const waitpid = std.os.waitpid;
-
-const RiseFS = common.RiseFS;
-
-const cache_dir = "zig-cache/";
-const kernel_name = "kernel.elf";
-const kernel_path = cache_dir ++ kernel_name;
-
-const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
-
 var common_package = Package{
     .name = "common",
     .source = FileSource.relative("src/common.zig"),
@@ -132,12 +134,6 @@ fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
         },
     }
 }
-
-const cwd = std.fs.cwd;
-const Dir = std.fs.Dir;
-const path = std.fs.path;
-const basename = std.fs.path.basename;
-const dirname = std.fs.path.dirname;
 
 fn add_qemu_debug_isa_exit(builder: *Builder, list: *common.ArrayListManaged([]const u8), qemu_debug_isa_exit: common.QEMU.ISADebugExit) !void {
     try list.append("-device");
@@ -216,7 +212,19 @@ const DiskImage = extern struct {
             .buffer_ptr = disk_bytes.ptr,
         };
 
-        //const max_file_length = common.max_int(usize);
+        const barebones_disk_memory = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", common.max_int(usize));
+        var barebones_disk_image = DiskImage{
+            .descriptor = .{
+                .type = .memory,
+                .callbacks = .{
+                    .read = read,
+                    .write = write,
+                },
+                .disk_size = barebones_disk_memory.len,
+            },
+            .buffer_ptr = barebones_disk_memory.ptr,
+        };
+
         switch (kernel.options.arch) {
             .x86_64 => {
                 const x86_64 = kernel.options.arch.x86_64;
@@ -225,28 +233,34 @@ const DiskImage = extern struct {
                         const write_options = common.Disk.Descriptor.WriteOptions{
                             .in_memory_writings = true,
                         };
-                        const barebones_hdd = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", 0xffff_ffff_ffff_ffff);
-                        const gpt_header = try GPT.create(&disk.descriptor, write_options);
-                        // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID
-                        // Then add a function to modify GUID
-                        const gpt_first_partition = try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, write_options);
-                        _ = gpt_first_partition;
-                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
-                        const barebones_partition_lba_offset = 0x800 * 0x200;
-                        const barebones_partition_mbr = @ptrCast(*align(1) const common.PartitionTable.MBR.Struct, barebones_hdd[barebones_partition_lba_offset..]);
-                        const fat_index = barebones_partition_lba_offset + (32 * 0x200);
-                        const barebones_root_fat_dir_entry_index = fat_index + (barebones_partition_mbr.bpb.fat_sector_count_32 * barebones_partition_mbr.bpb.dos3_31.dos2_0.fat_count * 0x200);
-                        const barebones = GPT.Barebones{
-                            .raw_bytes = barebones_hdd,
-                            .fat_partition_mbr = barebones_partition_mbr,
-                            .fs_info = @ptrCast(*align(1) const common.Filesystem.FAT32.FSInfo, barebones_hdd[barebones_partition_lba_offset + 0x200 ..]),
-                            .fat_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.Entry, barebones_hdd[fat_index..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.Entry)],
-                            .root_fat_directory_entries = @ptrCast([*]align(1) common.Filesystem.FAT32.DirectoryEntry, barebones_hdd[barebones_root_fat_dir_entry_index..].ptr)[0 .. 0x200 / @sizeOf(common.Filesystem.FAT32.DirectoryEntry)],
+                        const barebones = blk: {
+                            const barebones_disk = &barebones_disk_image.descriptor;
+                            const gpt_header = try GPT.Header.get(barebones_disk);
+                            const gpt_partition = try gpt_header.get_partition(barebones_disk, 0);
+                            const mbr_partition = try common.Filesystem.FAT32.get_mbr(barebones_disk, gpt_partition);
+                            const fs_info = try mbr_partition.get_fs_info(barebones_disk, gpt_partition);
+                            const fat_entries = try common.Filesystem.FAT32.get_cluster_entries(barebones_disk, gpt_partition, mbr_partition, 0);
+                            const fat_directory_entries = try common.Filesystem.FAT32.get_directory_entries(barebones_disk, gpt_partition, mbr_partition, 0);
+
+                            break :blk GPT.Barebones{
+                                .disk = barebones_disk,
+                                .gpt_header = gpt_header,
+                                .gpt_partition = gpt_partition,
+                                .fat_partition_mbr = mbr_partition,
+                                .fs_info = fs_info,
+                                .fat_entries = fat_entries,
+                                .root_fat_directory_entries = fat_directory_entries,
+                            };
                         };
-                        std.log.debug("Fat index: 0x{x}. Dir index: 0x{x}", .{ fat_index, barebones_root_fat_dir_entry_index });
+                        const gpt_header = try GPT.create(&disk.descriptor, barebones.gpt_header, write_options);
+                        // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
+                        try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, barebones.gpt_partition, write_options);
+                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
                         try GPT.mkdir(&disk.descriptor, 0, "/EFI/BOOT", write_options, barebones);
                         try GPT.add_file(&disk.descriptor, 0, "/foo", "a\n", write_options, barebones);
-                        common.diff(barebones_hdd, disk.get_buffer());
+
+                        common.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
+
                         try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
                         unreachable;
                         //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{

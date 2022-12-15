@@ -1,3 +1,5 @@
+const FAT32 = @This();
+
 const common = @import("../../common.zig");
 const assert = common.assert;
 const Disk = common.Disk.Descriptor;
@@ -116,6 +118,8 @@ pub const DirectoryEntry = extern struct {
     first_cluster_low: u16,
     file_size: u32,
 
+    pub const Sector = [@divExact(0x200, @sizeOf(FAT32.DirectoryEntry))]FAT32.DirectoryEntry;
+
     pub fn format(entry: *const DirectoryEntry, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         try common.internal_format(writer, "Directory entry:\n", .{});
         try common.internal_format(writer, "\tName: {s}\n", .{entry.name});
@@ -171,6 +175,8 @@ pub const DirectoryEntry = extern struct {
 pub const Entry = packed struct(u32) {
     value: u28,
     reserved: u4 = 0,
+
+    pub const Sector = [@divExact(0x200, @sizeOf(FAT32.Entry))]FAT32.Entry;
 
     pub fn is_free(entry: Entry) bool {
         return entry.value == value_free;
@@ -250,4 +256,24 @@ pub fn get_cluster_count(mbr: *const MBR.Struct) u32 {
 
 pub fn get_maximum_valid_cluster_number(mbr: *const MBR.Struct) u32 {
     return get_cluster_count(mbr) + 1;
+}
+
+pub fn get_mbr(disk: *Disk, gpt_partition: *const GPT.Partition) !*MBR.Struct {
+    return try disk.read_typed_sectors(MBR.Struct, gpt_partition.first_lba);
+}
+
+pub fn get_cluster_entry_lba(gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct) u64 {
+    return gpt_partition.first_lba + mbr_partition.bpb.dos3_31.dos2_0.reserved_sector_count;
+}
+
+pub fn get_cluster_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct, lba_offset: u64) ![]FAT32.Entry {
+    assert(disk.sector_size == 0x200);
+    const cluster_entry_lba = get_cluster_entry_lba(gpt_partition, mbr_partition);
+    return try disk.read_typed_sectors(Entry.Sector, cluster_entry_lba + lba_offset);
+}
+
+pub fn get_directory_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct, lba_offset: u64) ![]FAT32.DirectoryEntry {
+    const cluster_entry_lba = get_cluster_entry_lba(gpt_partition, mbr_partition);
+    const cluster_entry_lba_count = mbr_partition.bpb.fat_sector_count_32 * mbr_partition.bpb.dos3_31.dos2_0.fat_count;
+    return try disk.read_typed_sectors(DirectoryEntry.Sector, cluster_entry_lba + cluster_entry_lba_count + lba_offset);
 }

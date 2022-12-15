@@ -126,6 +126,10 @@ pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 0x200);
     }
+
+    pub fn get(disk: *Disk.Descriptor) !*GPT.Header {
+        return try disk.read_typed_sectors(GPT.Header, 1);
+    }
 };
 
 var prng = common.std.rand.DefaultPrng.init(0);
@@ -197,7 +201,7 @@ pub const Partition = extern struct {
     }
 };
 
-pub fn create(disk: *Disk.Descriptor, write_options: Disk.Descriptor.WriteOptions) !*GPT.Header {
+pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_options: Disk.Descriptor.WriteOptions) !*GPT.Header {
     // 1. Create MBR fake partition
     const mbr = try disk.read_typed_sectors(MBR.Struct, master_boot_record_lba);
     mbr.partitions[0] = MBR.Partition{
@@ -225,7 +229,7 @@ pub fn create(disk: *Disk.Descriptor, write_options: Disk.Descriptor.WriteOption
         .backup_lba = secondary_header_lba,
         .first_usable_lba = partition_array_lba_start + partition_array_sector_count,
         .last_usable_lba = secondary_header_lba - header_lba - partition_array_sector_count,
-        .disk_guid = limine_disk_guid,
+        .disk_guid = if (copy_gpt_header) |gpth| gpth.disk_guid else get_random_guid(),
         .partition_array_lba = partition_array_lba_start,
         .partition_array_crc32 = 0,
     };
@@ -279,7 +283,7 @@ const limine_unique_partition_guid = GUID{
 const limine_date = FAT32.Date.new(9, 12, 2022);
 const limine_time = FAT32.Time.new(28, 20, 18);
 
-pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, write_options: Disk.Descriptor.WriteOptions) !*GPT.Partition {
+pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
     // TODO: check if we are not overwriting a partition
     const gpt_header = try get_header(disk);
     const gpt_partition_table_lba = gpt_header.partition_array_lba;
@@ -291,7 +295,7 @@ pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesy
     assert(partition_name.len <= gpt_first_partition.partition_name.len);
     gpt_first_partition.* = GPT.Partition{
         .partition_type_guid = efi_guid,
-        .unique_partition_guid = limine_unique_partition_guid,
+        .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
         .first_lba = lba_start,
         .last_lba = lba_end,
         .attributes = .{},
@@ -313,8 +317,6 @@ pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesy
     try disk.write_typed_sectors(GPT.Header, backup_gpt_header, gpt_header.backup_lba, write_options);
     // TODO: check filesystem specific stuff
     _ = filesystem;
-
-    return gpt_first_partition;
 }
 
 // https://support.microsoft.com/en-us/topic/default-cluster-size-for-ntfs-fat-and-exfat-9772e6f1-e31a-00d7-e18f-73169155af95
@@ -340,7 +342,9 @@ pub fn get_cluster_size(fat_partition_size: u64) u64 {
 }
 
 pub const Barebones = struct {
-    raw_bytes: []const u8,
+    disk: *Disk.Descriptor,
+    gpt_header: *const GPT.Header,
+    gpt_partition: *const GPT.Partition,
     fat_partition_mbr: *align(1) const MBR.Struct,
     fs_info: *align(1) const FAT32.FSInfo,
     fat_entries: []align(1) const FAT32.Entry,
@@ -374,6 +378,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     var fat_data_sector_count: u32 = undefined;
     var fat_length_32: u32 = undefined;
     var cluster_count_32: u32 = undefined;
+
     while (true) {
         assert(cluster_size > 0);
         fat_data_sector_count = total_sector_count_32 - common.align_forward(u32, FAT32.reserved_sector_count, cluster_size);
@@ -478,10 +483,10 @@ fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, 
 
     while (fat_index < fat_entry_count) : (fat_index += 1) {
         const fat_entry_lba = fat_entries_lba + (fat_index * fat_entry_sector_count) + (fat_entry_index * @sizeOf(u32) / disk.sector_size);
-        const fat_entry_sector = try disk.read_typed_sectors(FATEntrySector, fat_entry_lba);
+        const fat_entry_sector = try disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba);
         const fat_entry_sector_index = fat_entry_index % disk.sector_size;
         fat_entry_sector[fat_entry_sector_index] = fat_entry;
-        try disk.write_typed_sectors(FATEntrySector, fat_entry_sector, fat_entry_lba, write_options);
+        try disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, write_options);
     }
 }
 
@@ -490,9 +495,6 @@ fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, fs
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated_and_eof, cluster, write_options);
     return cluster;
 }
-
-const FATEntrySector = [@divExact(0x200, @sizeOf(FAT32.Entry))]FAT32.Entry;
-const FATDirectoryEntrySector = [@divExact(0x200, @sizeOf(FAT32.DirectoryEntry))]FAT32.DirectoryEntry;
 
 const GetPartitionError = error{
     invalid_index,
@@ -509,7 +511,7 @@ fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: FAT32.Dire
 }) !void {
     const cluster_dir_lba = (insert.cluster - insert.root_cluster) * insert.cluster_sector_count + insert.root_cluster_sector;
     assert(insert.cluster_sector_count == 1);
-    const fat_directory_entries = try disk.read_typed_sectors(FATDirectoryEntrySector, cluster_dir_lba);
+    const fat_directory_entries = try disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cluster_dir_lba);
 
     for (fat_directory_entries) |*entry, entry_index| {
         //log.debug("Entry: {}", .{entry});
@@ -537,7 +539,7 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     // Root directory empty
 
     const fat_lba = partition_start_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
-    const fat_entries = try disk.read_typed_sectors(FATEntrySector, fat_lba);
+    const fat_entries = try disk.read_typed_sectors(FAT32.Entry.Sector, fat_lba);
     const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
     for (fat_entries) |fat_entry| {
         if (fat_entry.value == 0) break;
@@ -639,7 +641,7 @@ pub fn add_file(disk: *Disk.Descriptor, partition_index: usize, file_absolute_pa
     _ = file_content;
     _ = write_options;
     _ = barebones;
-    unreachable;
+    log.warn("TODO: add_file", .{});
 }
 
 fn compare_fat_entries(my_fat_entries: []const FAT32.Entry, barebones_fat_entries: []align(1) const FAT32.Entry) void {
