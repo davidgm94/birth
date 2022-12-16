@@ -15,8 +15,9 @@ const Target = std.Target;
 const Arch = Target.Cpu.Arch;
 const CrossTarget = std.zig.CrossTarget;
 
-const os = @import("builtin").target.os.tag;
-const arch = @import("builtin").target.cpu.arch;
+const builtin = @import("builtin");
+const os = builtin.target.os.tag;
+const arch = builtin.target.cpu.arch;
 
 const fork = std.os.fork;
 const ChildProcess = std.ChildProcess;
@@ -28,7 +29,12 @@ const path = std.fs.path;
 const basename = std.fs.path.basename;
 const dirname = std.fs.path.dirname;
 
-const RiseFS = common.RiseFS;
+const PartitionTable = common.PartitionTable;
+const GPT = PartitionTable.GPT;
+const MBR = PartitionTable.MBR;
+
+const Filesystem = common.Filesystem;
+const FAT32 = Filesystem.FAT32;
 
 const cache_dir = "zig-cache/";
 const kernel_name = "kernel.elf";
@@ -192,8 +198,6 @@ const DiskImage = extern struct {
         }
     }
 
-    const GPT = common.PartitionTable.GPT;
-
     fn make(step: *Step) !void {
         const kernel = @fieldParentPtr(Kernel, "disk_step", step);
 
@@ -252,9 +256,9 @@ const DiskImage = extern struct {
                                 .root_fat_directory_entries = fat_directory_entries,
                             };
                         };
-                        const gpt_header = try GPT.create(&disk.descriptor, barebones.gpt_header, write_options);
+                        const gpt_cache = try GPT.create(&disk.descriptor, barebones.gpt_header, write_options);
                         // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
-                        try GPT.add_partition(&disk.descriptor, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), .fat32, 0x800, gpt_header.last_usable_lba, barebones.gpt_partition, write_options);
+                        try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition, write_options);
                         try GPT.format(&disk.descriptor, 0, .fat32, write_options);
                         try GPT.mkdir(&disk.descriptor, 0, "/EFI/BOOT", write_options, barebones);
                         try GPT.add_file(&disk.descriptor, 0, "/foo", "a\n", write_options, barebones);
@@ -446,14 +450,6 @@ const UserProgram = struct {
         };
     }
 };
-
-//const Filesystem = struct {
-//disk: *DiskImage,
-
-//fn write_file(filesystem: *Filesystem, allocator: CustomAllocator, filename: []const u8, file_content: []const u8) !void {
-//try RiseFS.write_file(filesystem, allocator, filename, file_content, null);
-//}
-//};
 
 const Kernel = struct {
     builder: *Builder,

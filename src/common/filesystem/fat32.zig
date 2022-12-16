@@ -237,7 +237,7 @@ pub const Entry = packed struct(u32) {
     };
 };
 
-pub fn get_data_sector_count(mbr: *const MBR.Struct) u32 {
+pub fn get_data_sector_count(mbr: *const MBR.Partition) u32 {
     const fat_sector_count = mbr.bpb.fat_sector_count_32;
     const total_sector_count = mbr.bpb.dos3_31.total_sector_count_32;
     const fat_count = mbr.bpb.dos3_31.dos2_0.fat_count;
@@ -246,7 +246,7 @@ pub fn get_data_sector_count(mbr: *const MBR.Struct) u32 {
     return total_sector_count - (reserved_sectors + (fat_count * fat_sector_count));
 }
 
-pub fn get_cluster_count(mbr: *const MBR.Struct) u32 {
+pub fn get_cluster_count(mbr: *const MBR.Partition) u32 {
     const data_sector_count = get_data_sector_count(mbr);
     const cluster_sector_count = mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
 
@@ -254,25 +254,25 @@ pub fn get_cluster_count(mbr: *const MBR.Struct) u32 {
     return cluster_count;
 }
 
-pub fn get_maximum_valid_cluster_number(mbr: *const MBR.Struct) u32 {
+pub fn get_maximum_valid_cluster_number(mbr: *const MBR.Partition) u32 {
     return get_cluster_count(mbr) + 1;
 }
 
-pub fn get_mbr(disk: *Disk, gpt_partition: *const GPT.Partition) !*MBR.Struct {
-    return try disk.read_typed_sectors(MBR.Struct, gpt_partition.first_lba);
+pub fn get_mbr(disk: *Disk, gpt_partition: *const GPT.Partition) !*MBR.Partition {
+    return try disk.read_typed_sectors(MBR.Partition, gpt_partition.first_lba);
 }
 
-pub fn get_cluster_entry_lba(gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct) u64 {
+pub fn get_cluster_entry_lba(gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Partition) u64 {
     return gpt_partition.first_lba + mbr_partition.bpb.dos3_31.dos2_0.reserved_sector_count;
 }
 
-pub fn get_cluster_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct, lba_offset: u64) ![]FAT32.Entry {
+pub fn get_cluster_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Partition, lba_offset: u64) ![]FAT32.Entry {
     assert(disk.sector_size == 0x200);
     const cluster_entry_lba = get_cluster_entry_lba(gpt_partition, mbr_partition);
     return try disk.read_typed_sectors(Entry.Sector, cluster_entry_lba + lba_offset);
 }
 
-pub fn get_directory_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Struct, lba_offset: u64) ![]FAT32.DirectoryEntry {
+pub fn get_directory_entries(disk: *Disk, gpt_partition: *const GPT.Partition, mbr_partition: *const MBR.Partition, lba_offset: u64) ![]FAT32.DirectoryEntry {
     const cluster_entry_lba = get_cluster_entry_lba(gpt_partition, mbr_partition);
     const cluster_entry_lba_count = mbr_partition.bpb.fat_sector_count_32 * mbr_partition.bpb.dos3_31.dos2_0.fat_count;
     return try disk.read_typed_sectors(DirectoryEntry.Sector, cluster_entry_lba + cluster_entry_lba_count + lba_offset);

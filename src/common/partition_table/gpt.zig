@@ -33,13 +33,12 @@ pub const Header = extern struct {
     last_usable_lba: u64,
     disk_guid: GUID,
     partition_array_lba: u64,
-    partition_entry_count: u32 = max_partition_count,
+    partition_entry_count: u32,
     partition_entry_size: u32 = @sizeOf(Partition),
     partition_array_crc32: u32,
     reserved1: [420]u8 = [1]u8{0} ** 420,
 
-    pub fn update_crc32(header: *Header, disk: *Disk.Descriptor) !void {
-        header.partition_array_crc32 = CRC32.compute(try disk.callbacks.read(disk, get_partition_array_sector_count(disk), partition_array_lba_start));
+    pub fn update_crc32(header: *Header) void {
         header.header_crc32 = 0;
         header.header_crc32 = CRC32.compute(common.as_bytes(header)[0..header.header_size]);
     }
@@ -60,6 +59,10 @@ pub const Header = extern struct {
         } else {
             return GetPartitionError.invalid_index;
         }
+    }
+
+    pub fn get_partition_count_in_sector(header: *const Header, disk: *const Disk.Descriptor) u32 {
+        return @divExact(disk.sector_size, header.partition_entry_size);
     }
 
     pub fn format(header: *const Header, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -122,6 +125,84 @@ pub const Header = extern struct {
             log.debug("Partition array CRC32 mismatch: {}, {}", .{ header.partition_array_crc32, other.partition_array_crc32 });
         }
     }
+
+    pub const Cache = extern struct {
+        mbr: *MBR.Partition,
+        header: *GPT.Header,
+        partition_entries: [*]GPT.Partition,
+        disk: *Disk.Descriptor,
+
+        pub fn get_free_partition_slot(cache: Cache) !*GPT.Partition {
+            assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
+            for (cache.partition_entries[0..cache.header.partition_entry_count]) |*partition_entry| {
+                if (partition_entry.first_lba == 0 and partition_entry.last_lba == 0) {
+                    return partition_entry;
+                }
+            }
+
+            unreachable;
+        }
+
+        pub fn get_partition_index(cache: Cache, partition: *GPT.Partition) u32 {
+            assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
+            return @divExact(@intCast(u32, @ptrToInt(partition) - @ptrToInt(cache.partition_entries)), cache.header.partition_entry_size);
+        }
+
+        pub fn get_partition_sector(cache: Cache, partition: *GPT.Partition) u32 {
+            return get_partition_index(cache, partition) / cache.header.get_partition_count_in_sector(cache.disk);
+        }
+
+        pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
+            assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
+            partition.* = new_value;
+            const partition_entries = cache.partition_entries[0..cache.header.partition_entry_count];
+            const partition_entry_bytes = common.std.mem.sliceAsBytes(partition_entries);
+            cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
+            cache.header.update_crc32();
+
+            var backup_gpt_header: GPT.Header = undefined;
+            switch (cache.disk.type) {
+                .memory => {
+                    backup_gpt_header = cache.header.*;
+                    backup_gpt_header.header_lba = cache.header.backup_lba;
+                    backup_gpt_header.backup_lba = cache.header.header_lba;
+                    backup_gpt_header.update_crc32();
+                },
+                else => {
+                    unreachable; // TODO
+                },
+            }
+
+            const partition_entry_sector_offset = cache.get_partition_sector(partition);
+            const partition_entry_byte_offset = partition_entry_sector_offset * cache.disk.sector_size;
+            // Only commit to disk the modified sector
+            try cache.disk.write_slice(u8, partition_entry_bytes[partition_entry_byte_offset .. partition_entry_byte_offset + cache.disk.sector_size], cache.header.partition_array_lba + partition_entry_sector_offset, write_options);
+            try cache.disk.write_typed_sectors(GPT.Header, cache.header, cache.header.header_lba, write_options);
+            try cache.disk.write_typed_sectors(GPT.Header, &backup_gpt_header, backup_gpt_header.header_lba, write_options);
+        }
+
+        pub fn add_partition(cache: Cache, comptime filesystem: common.Filesystem.Type, partition_name: []const u16, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
+            // TODO: check if we are not overwriting a partition
+            // TODO: check filesystem specific stuff
+            const new_partition_entry = try cache.get_free_partition_slot();
+            assert(partition_name.len <= new_partition_entry.partition_name.len);
+            try update_partition_entry(cache, new_partition_entry, GPT.Partition{
+                .partition_type_guid = switch (filesystem) {
+                    .fat32 => efi_guid,
+                    else => unreachable,
+                },
+                .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
+                .first_lba = lba_start,
+                .last_lba = lba_end,
+                .attributes = .{},
+                .partition_name = blk: {
+                    var name = [1]u16{0} ** 36;
+                    common.copy(u16, &name, partition_name);
+                    break :blk name;
+                },
+            }, write_options);
+        }
+    };
 
     comptime {
         assert(@sizeOf(Header) == 0x200);
@@ -201,10 +282,10 @@ pub const Partition = extern struct {
     }
 };
 
-pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_options: Disk.Descriptor.WriteOptions) !*GPT.Header {
+pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_options: Disk.Descriptor.WriteOptions) !GPT.Header.Cache {
     // 1. Create MBR fake partition
-    const mbr = try disk.read_typed_sectors(MBR.Struct, master_boot_record_lba);
-    mbr.partitions[0] = MBR.Partition{
+    const mbr = try disk.read_typed_sectors(MBR.Partition, master_boot_record_lba);
+    mbr.partitions[0] = MBR.LegacyPartition{
         .boot_indicator = 0,
         .starting_chs = 0x200,
         .os_type = 0xee,
@@ -213,13 +294,15 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_opt
         .size_in_lba = @intCast(u32, @divExact(disk.disk_size, disk.sector_size) - 1),
     };
     mbr.signature = .{ 0x55, 0xaa };
-    try disk.write_typed_sectors(MBR.Struct, mbr, master_boot_record_lba, write_options);
+    try disk.write_typed_sectors(MBR.Partition, mbr, master_boot_record_lba, write_options);
 
     // 2. Write GPT header
-    const partition_array_sector_count = get_partition_array_sector_count(disk);
+    const partition_count = max_partition_count;
+    const partition_array_sector_count = @divExact(@sizeOf(Partition) * partition_count, disk.sector_size);
     const gpt_header = try get_header(disk);
     const primary_header_lba = GPT.header_lba;
     const secondary_header_lba = mbr.partitions[0].size_in_lba;
+    const partition_entries = try disk.read_slice(GPT.Partition, partition_count, partition_array_lba_start);
     gpt_header.* = GPT.Header{
         .signature = "EFI PART".*,
         .revision = .{ 0, 0, 1, 0 },
@@ -231,9 +314,11 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_opt
         .last_usable_lba = secondary_header_lba - header_lba - partition_array_sector_count,
         .disk_guid = if (copy_gpt_header) |gpth| gpth.disk_guid else get_random_guid(),
         .partition_array_lba = partition_array_lba_start,
-        .partition_array_crc32 = 0,
+        .partition_entry_count = partition_count,
+        .partition_array_crc32 = CRC32.compute(common.std.mem.sliceAsBytes(partition_entries)),
     };
-    try gpt_header.update_crc32(disk);
+
+    gpt_header.update_crc32();
     try disk.write_typed_sectors(GPT.Header, gpt_header, primary_header_lba, write_options);
 
     const backup_gpt_header = try disk.read_typed_sectors(GPT.Header, secondary_header_lba);
@@ -241,15 +326,15 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_opt
     backup_gpt_header.partition_array_lba = secondary_header_lba - header_lba - partition_array_sector_count + 1;
     backup_gpt_header.header_lba = gpt_header.backup_lba;
     backup_gpt_header.backup_lba = gpt_header.header_lba;
-    try backup_gpt_header.update_crc32(disk);
+    backup_gpt_header.update_crc32();
     try disk.write_typed_sectors(GPT.Header, backup_gpt_header, secondary_header_lba, write_options);
 
-    return gpt_header;
-}
-
-pub fn get_partition_array_sector_count(disk: *Disk.Descriptor) u64 {
-    const partition_array_sector_count = @divExact(@sizeOf(Partition) * max_partition_count, disk.sector_size);
-    return partition_array_sector_count;
+    return .{
+        .mbr = mbr,
+        .header = gpt_header,
+        .disk = disk,
+        .partition_entries = partition_entries.ptr,
+    };
 }
 
 const efi_guid = GUID{
@@ -283,42 +368,6 @@ const limine_unique_partition_guid = GUID{
 const limine_date = FAT32.Date.new(9, 12, 2022);
 const limine_time = FAT32.Time.new(28, 20, 18);
 
-pub fn add_partition(disk: *Disk.Descriptor, partition_name: []const u16, filesystem: common.Filesystem.Type, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
-    // TODO: check if we are not overwriting a partition
-    const gpt_header = try get_header(disk);
-    const gpt_partition_table_lba = gpt_header.partition_array_lba;
-    const gpt_first_partition_bytes = try disk.callbacks.read(disk, 1, gpt_partition_table_lba);
-    const gpt_first_partition = @ptrCast(*GPT.Partition, @alignCast(@alignOf(GPT.Partition), gpt_first_partition_bytes.ptr));
-    assert(gpt_first_partition.first_lba == 0 and gpt_first_partition.last_lba == 0);
-    assert(gpt_header.first_usable_lba <= lba_start);
-    assert(gpt_header.last_usable_lba >= lba_end);
-    assert(partition_name.len <= gpt_first_partition.partition_name.len);
-    gpt_first_partition.* = GPT.Partition{
-        .partition_type_guid = efi_guid,
-        .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
-        .first_lba = lba_start,
-        .last_lba = lba_end,
-        .attributes = .{},
-        .partition_name = common.zeroes([36]u16),
-    };
-    common.copy(u16, &gpt_first_partition.partition_name, partition_name);
-    try gpt_header.update_crc32(disk);
-    try disk.write_typed_sectors(GPT.Header, gpt_header, header_lba, write_options);
-    try disk.callbacks.write(disk, gpt_first_partition_bytes, gpt_partition_table_lba, write_options);
-    const backup_gpt_header = try disk.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
-    const backup_partition_array_lba = backup_gpt_header.partition_array_lba;
-    try disk.callbacks.write(disk, gpt_first_partition_bytes, backup_partition_array_lba, .{});
-    // We have to write to memory here mandatorily
-    backup_gpt_header.* = gpt_header.*;
-    backup_gpt_header.backup_lba = gpt_header.header_lba;
-    backup_gpt_header.header_lba = gpt_header.backup_lba;
-    backup_gpt_header.partition_array_lba = backup_partition_array_lba;
-    try backup_gpt_header.update_crc32(disk);
-    try disk.write_typed_sectors(GPT.Header, backup_gpt_header, gpt_header.backup_lba, write_options);
-    // TODO: check filesystem specific stuff
-    _ = filesystem;
-}
-
 // https://support.microsoft.com/en-us/topic/default-cluster-size-for-ntfs-fat-and-exfat-9772e6f1-e31a-00d7-e18f-73169155af95
 // Last consulted: 28-11-22
 pub fn get_cluster_size(fat_partition_size: u64) u64 {
@@ -342,18 +391,19 @@ pub fn get_cluster_size(fat_partition_size: u64) u64 {
 }
 
 pub const Barebones = struct {
-    disk: *Disk.Descriptor,
+    disk: *const Disk.Descriptor,
     gpt_header: *const GPT.Header,
     gpt_partition: *const GPT.Partition,
-    fat_partition_mbr: *align(1) const MBR.Struct,
-    fs_info: *align(1) const FAT32.FSInfo,
-    fat_entries: []align(1) const FAT32.Entry,
-    root_fat_directory_entries: []align(1) const FAT32.DirectoryEntry,
+    fat_partition_mbr: *const MBR.Partition,
+    fs_info: *const FAT32.FSInfo,
+    fat_entries: []const FAT32.Entry,
+    root_fat_directory_entries: []const FAT32.DirectoryEntry,
 };
 
 fn cdiv(a: u32, b: u32) u32 {
     return (a + b - 1) / b;
 }
+
 const min_cluster_32 = 65525;
 const max_cluster_32 = 268435446;
 
@@ -367,7 +417,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     const partition_lba_start = gpt_partition.first_lba;
     const partition_lba_end = gpt_partition.last_lba;
 
-    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_lba_start);
+    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_lba_start);
 
     const sectors_per_track = 32;
     const total_sector_count_32 = @intCast(u32, common.align_backward(partition_lba_end - partition_lba_start, sectors_per_track));
@@ -408,7 +458,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     log.debug("Cluster size: {}. FAT data sector count: {}. FAT sector count: {}", .{ cluster_size, fat_data_sector_count, fat_length_32 });
     const reserved_sector_count = common.align_forward(u16, FAT32.reserved_sector_count, cluster_size);
 
-    fat_partition_mbr.* = MBR.Struct{
+    fat_partition_mbr.* = MBR.Partition{
         .bpb = .{
             .dos3_31 = .{
                 .dos2_0 = .{
@@ -444,15 +494,15 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
             0xe, 0x1f, 0xbe, 0x77, 0x7c, 0xac, 0x22, 0xc0, 0x74, 0xb, 0x56, 0xb4, 0xe, 0xbb, 0x7, 0x0, 0xcd, 0x10, 0x5e, 0xeb, 0xf0, 0x32, 0xe4, 0xcd, 0x16, 0xcd, 0x19, 0xeb, 0xfe, 0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x64, 0x69, 0x73, 0x6b, 0x2e, 0x20, 0x20, 0x50, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x20, 0x69, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x66, 0x6c, 0x6f, 0x70, 0x70, 0x79, 0x20, 0x61, 0x6e, 0x64, 0xd, 0xa, 0x70, 0x72, 0x65, 0x73, 0x73, 0x20, 0x61, 0x6e, 0x79, 0x20, 0x6b, 0x65, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x74, 0x72, 0x79, 0x20, 0x61, 0x67, 0x61, 0x69, 0x6e, 0x20, 0x2e, 0x2e, 0x2e, 0x20, 0xd, 0xa,
         } ++ [1]u8{0} ** 227,
         // This should be zero
-        .partitions = common.zeroes([4]MBR.Partition),
+        .partitions = common.zeroes([4]MBR.LegacyPartition),
     };
 
-    try disk.write_typed_sectors(MBR.Struct, fat_partition_mbr, partition_array_lba_start, write_options);
+    try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, partition_array_lba_start, write_options);
 
     const backup_boot_record_sector = partition_lba_start + fat_partition_mbr.bpb.backup_boot_record_sector;
-    const backup_boot_record = try disk.read_typed_sectors(MBR.Struct, backup_boot_record_sector);
+    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector);
     backup_boot_record.* = fat_partition_mbr.*;
-    try disk.write_typed_sectors(MBR.Struct, backup_boot_record, backup_boot_record_sector, write_options);
+    try disk.write_typed_sectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, write_options);
 
     const fs_info_lba = partition_lba_start + fat_partition_mbr.bpb.fs_info_sector;
     const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba);
@@ -475,7 +525,7 @@ pub fn format(disk: *Disk.Descriptor, partition_index: usize, filesystem: common
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.reserved_and_should_not_be_used_eof, 2, write_options);
 }
 
-fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize, write_options: Disk.Descriptor.WriteOptions) !void {
+fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize, write_options: Disk.Descriptor.WriteOptions) !void {
     const fat_entries_lba = partition_lba_start + fat_partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
     const fat_entry_count = fat_partition_mbr.bpb.dos3_31.dos2_0.fat_count;
     const fat_entry_sector_count = fat_partition_mbr.bpb.fat_sector_count_32;
@@ -490,7 +540,7 @@ fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, 
     }
 }
 
-fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Struct, fs_info: *FAT32.FSInfo, partition_lba_start: u64, write_options: Disk.Descriptor.WriteOptions) !u32 {
+fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition, fs_info: *FAT32.FSInfo, partition_lba_start: u64, write_options: Disk.Descriptor.WriteOptions) !u32 {
     const cluster = fs_info.allocate_clusters(1);
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated_and_eof, cluster, write_options);
     return cluster;
@@ -532,7 +582,7 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     const partition_start_lba = partition_entry.first_lba;
     //const partition_end_lba = partition_entry.last_lba;
 
-    const partition_mbr = try disk.read_typed_sectors(MBR.Struct, partition_start_lba);
+    const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_start_lba);
     const fs_info_sector = partition_start_lba + partition_mbr.bpb.fs_info_sector;
     const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector);
     log.debug("My FS info: {}\nBarebones FS info: {}\n", .{ fs_info, barebones.fs_info });

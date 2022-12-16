@@ -130,16 +130,6 @@ pub fn set_byte(slice: []u8, value: u8) void {
     @memset(slice.ptr, value, slice.len);
 }
 
-pub fn zero_typed_address(address: u64, comptime T: type) *T {
-    const result = @intToPtr(*T, address);
-    result.* = zeroes(T);
-    return result;
-}
-
-pub fn zero_range(address: u64, size: u64) void {
-    zero(@intToPtr([*]u8, address)[0..size]);
-}
-
 pub fn zero(bytes: []u8) void {
     set_byte(bytes, 0);
 }
