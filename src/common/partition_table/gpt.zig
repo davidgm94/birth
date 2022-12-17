@@ -132,11 +132,11 @@ pub const Header = extern struct {
         partition_entries: [*]GPT.Partition,
         disk: *Disk.Descriptor,
 
-        pub fn get_free_partition_slot(cache: Cache) !*GPT.Partition {
+        pub fn get_free_partition_slot(cache: Cache) !usize {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
-            for (cache.partition_entries[0..cache.header.partition_entry_count]) |*partition_entry| {
+            for (cache.partition_entries[0..cache.header.partition_entry_count]) |*partition_entry, partition_index| {
                 if (partition_entry.first_lba == 0 and partition_entry.last_lba == 0) {
-                    return partition_entry;
+                    return partition_index;
                 }
             }
 
@@ -152,41 +152,35 @@ pub const Header = extern struct {
             return get_partition_index(cache, partition) / cache.header.get_partition_count_in_sector(cache.disk);
         }
 
-        pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
+        pub inline fn update_partition_entry(cache: Cache, partition_index: usize, new_value: GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
-            partition.* = new_value;
             const partition_entries = cache.partition_entries[0..cache.header.partition_entry_count];
             const partition_entry_bytes = common.std.mem.sliceAsBytes(partition_entries);
+            const partition = &partition_entries[partition_index];
+            partition.* = new_value;
             cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
             cache.header.update_crc32();
 
-            var backup_gpt_header: GPT.Header = undefined;
-            switch (cache.disk.type) {
-                .memory => {
-                    backup_gpt_header = cache.header.*;
-                    backup_gpt_header.header_lba = cache.header.backup_lba;
-                    backup_gpt_header.backup_lba = cache.header.header_lba;
-                    backup_gpt_header.update_crc32();
-                },
-                else => {
-                    unreachable; // TODO
-                },
-            }
+            const backup_gpt_header = try cache.disk.read_typed_sectors(GPT.Header, cache.header.backup_lba);
+            backup_gpt_header.partition_array_crc32 = cache.header.partition_array_crc32;
+            backup_gpt_header.update_crc32();
 
             const partition_entry_sector_offset = cache.get_partition_sector(partition);
             const partition_entry_byte_offset = partition_entry_sector_offset * cache.disk.sector_size;
             // Only commit to disk the modified sector
-            try cache.disk.write_slice(u8, partition_entry_bytes[partition_entry_byte_offset .. partition_entry_byte_offset + cache.disk.sector_size], cache.header.partition_array_lba + partition_entry_sector_offset, write_options);
+            const partition_entry_modified_sector_bytes = partition_entry_bytes[partition_entry_byte_offset .. partition_entry_byte_offset + cache.disk.sector_size];
+            try cache.disk.write_slice(u8, partition_entry_modified_sector_bytes, cache.header.partition_array_lba + partition_entry_sector_offset, write_options);
+            // Force write because for memory disk we only hold a pointer to the main partition entry array
+            try cache.disk.write_slice(u8, partition_entry_modified_sector_bytes, backup_gpt_header.partition_array_lba + partition_entry_sector_offset, write_options.forced_write());
             try cache.disk.write_typed_sectors(GPT.Header, cache.header, cache.header.header_lba, write_options);
-            try cache.disk.write_typed_sectors(GPT.Header, &backup_gpt_header, backup_gpt_header.header_lba, write_options);
+            try cache.disk.write_typed_sectors(GPT.Header, backup_gpt_header, backup_gpt_header.header_lba, write_options);
         }
 
         pub fn add_partition(cache: Cache, comptime filesystem: common.Filesystem.Type, partition_name: []const u16, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition, write_options: Disk.Descriptor.WriteOptions) !void {
             // TODO: check if we are not overwriting a partition
             // TODO: check filesystem specific stuff
-            const new_partition_entry = try cache.get_free_partition_slot();
-            assert(partition_name.len <= new_partition_entry.partition_name.len);
-            try update_partition_entry(cache, new_partition_entry, GPT.Partition{
+            const new_partition_index = try cache.get_free_partition_slot();
+            try update_partition_entry(cache, new_partition_index, GPT.Partition{
                 .partition_type_guid = switch (filesystem) {
                     .fat32 => efi_guid,
                     else => unreachable,
@@ -210,6 +204,10 @@ pub const Header = extern struct {
 
     pub fn get(disk: *Disk.Descriptor) !*GPT.Header {
         return try disk.read_typed_sectors(GPT.Header, 1);
+    }
+
+    pub fn get_backup(gpt_header: *GPT.Header, disk: *Disk.Descriptor) !*GPT.Header {
+        return try disk.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
     }
 };
 
@@ -293,6 +291,7 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_opt
         .first_lba = master_boot_record_lba + 1,
         .size_in_lba = @intCast(u32, @divExact(disk.disk_size, disk.sector_size) - 1),
     };
+    log.debug("Size in LBA: 0x{x}", .{mbr.partitions[0].size_in_lba});
     mbr.signature = .{ 0x55, 0xaa };
     try disk.write_typed_sectors(MBR.Partition, mbr, master_boot_record_lba, write_options);
 
@@ -321,13 +320,12 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header, write_opt
     gpt_header.update_crc32();
     try disk.write_typed_sectors(GPT.Header, gpt_header, primary_header_lba, write_options);
 
-    const backup_gpt_header = try disk.read_typed_sectors(GPT.Header, secondary_header_lba);
-    backup_gpt_header.* = gpt_header.*;
+    var backup_gpt_header = gpt_header.*;
     backup_gpt_header.partition_array_lba = secondary_header_lba - header_lba - partition_array_sector_count + 1;
     backup_gpt_header.header_lba = gpt_header.backup_lba;
     backup_gpt_header.backup_lba = gpt_header.header_lba;
     backup_gpt_header.update_crc32();
-    try disk.write_typed_sectors(GPT.Header, backup_gpt_header, secondary_header_lba, write_options);
+    try disk.write_typed_sectors(GPT.Header, &backup_gpt_header, secondary_header_lba, write_options.forced_write());
 
     return .{
         .mbr = mbr,
@@ -393,6 +391,7 @@ pub fn get_cluster_size(fat_partition_size: u64) u64 {
 pub const Barebones = struct {
     disk: *const Disk.Descriptor,
     gpt_header: *const GPT.Header,
+    backup_gpt_header: *const GPT.Header,
     gpt_partition: *const GPT.Partition,
     fat_partition_mbr: *const MBR.Partition,
     fs_info: *const FAT32.FSInfo,
@@ -566,7 +565,8 @@ fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: FAT32.Dire
     for (fat_directory_entries) |*entry, entry_index| {
         //log.debug("Entry: {}", .{entry});
         if (entry.is_free()) {
-            log.debug("Inserting entry {s} in cluster {}. Cluster dir LBA: 0x{x}. Entry index: {}", .{ desired_entry.name, insert.cluster, cluster_dir_lba, entry_index });
+            _ = entry_index;
+            //log.debug("Inserting entry {s} in cluster {}. Cluster dir LBA: 0x{x}. Entry index: {}", .{ desired_entry.name, insert.cluster, cluster_dir_lba, entry_index });
             entry.* = desired_entry;
             return;
         }
@@ -585,16 +585,16 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_start_lba);
     const fs_info_sector = partition_start_lba + partition_mbr.bpb.fs_info_sector;
     const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector);
-    log.debug("My FS info: {}\nBarebones FS info: {}\n", .{ fs_info, barebones.fs_info });
+    //log.debug("My FS info: {}\nBarebones FS info: {}\n", .{ fs_info, barebones.fs_info });
     // Root directory empty
 
     const fat_lba = partition_start_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
-    const fat_entries = try disk.read_typed_sectors(FAT32.Entry.Sector, fat_lba);
-    const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
-    for (fat_entries) |fat_entry| {
-        if (fat_entry.value == 0) break;
-        log.debug("Fat entry: {}", .{fat_entry.get_type(max_valid_cluster_number)});
-    }
+    //const fat_entries = try disk.read_typed_sectors(FAT32.Entry.Sector, fat_lba);
+    //const max_valid_cluster_number = FAT32.get_maximum_valid_cluster_number(partition_mbr);
+    //for (fat_entries) |fat_entry| {
+    //if (fat_entry.value == 0) break;
+    //log.debug("Fat entry: {}", .{fat_entry.get_type(max_valid_cluster_number)});
+    //}
 
     const root_cluster = partition_mbr.bpb.root_directory_cluster_offset;
 
@@ -602,16 +602,17 @@ pub fn mkdir(disk: *Disk.Descriptor, partition_index: usize, absolute_path: []co
     const data_lba = fat_lba + (partition_mbr.bpb.fat_sector_count_32 * partition_mbr.bpb.dos3_31.dos2_0.fat_count);
     log.debug("Data LBA: 0x{x}", .{data_lba});
 
-    for (barebones.fat_entries) |entry| {
-        if (entry.value == 0) break;
-        log.debug("Barebones FAT entry: {}", .{entry.get_type(max_valid_cluster_number)});
-    }
+    //for (barebones.fat_entries) |entry| {
+    //if (entry.value == 0) break;
+    //log.debug("Barebones FAT entry: {}", .{entry.get_type(max_valid_cluster_number)});
+    //}
+    _ = barebones;
 
-    log.debug("Root FAT dir entries: {}", .{barebones.root_fat_directory_entries.len});
-    for (barebones.root_fat_directory_entries) |entry| {
-        if (entry.is_free()) break;
-        log.debug("Barebones FAT dir entry: {}", .{entry});
-    }
+    //log.debug("Root FAT dir entries: {}", .{barebones.root_fat_directory_entries.len});
+    //for (barebones.root_fat_directory_entries) |entry| {
+    //if (entry.is_free()) break;
+    //log.debug("Barebones FAT dir entry: {}", .{entry});
+    //}
 
     assert(absolute_path[0] == '/');
 

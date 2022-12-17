@@ -187,6 +187,7 @@ const DiskImage = extern struct {
     fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, options: common.Disk.Descriptor.WriteOptions) common.Disk.Descriptor.WriteError!void {
         const need_write = !(disk_descriptor.type == .memory and options.in_memory_writings);
         if (need_write) {
+            std.log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
             const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
             assert(disk.descriptor.disk_size > 0);
             //assert(disk.descriptor.partition_count == 1);
@@ -240,6 +241,7 @@ const DiskImage = extern struct {
                         const barebones = blk: {
                             const barebones_disk = &barebones_disk_image.descriptor;
                             const gpt_header = try GPT.Header.get(barebones_disk);
+                            const backup_gpt_header = try gpt_header.get_backup(barebones_disk);
                             const gpt_partition = try gpt_header.get_partition(barebones_disk, 0);
                             const mbr_partition = try common.Filesystem.FAT32.get_mbr(barebones_disk, gpt_partition);
                             const fs_info = try mbr_partition.get_fs_info(barebones_disk, gpt_partition);
@@ -249,6 +251,7 @@ const DiskImage = extern struct {
                             break :blk GPT.Barebones{
                                 .disk = barebones_disk,
                                 .gpt_header = gpt_header,
+                                .backup_gpt_header = backup_gpt_header,
                                 .gpt_partition = gpt_partition,
                                 .fat_partition_mbr = mbr_partition,
                                 .fs_info = fs_info,

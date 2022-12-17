@@ -57,6 +57,12 @@ pub const Descriptor = extern struct {
     pub const WriteOptions = packed struct(u64) {
         in_memory_writings: bool = false,
         reserved: u63 = 0,
+
+        pub fn forced_write(write_options: WriteOptions) WriteOptions {
+            var new_options = write_options;
+            new_options.in_memory_writings = false;
+            return new_options;
+        }
     };
 
     pub inline fn read_typed_sectors(disk: *Disk.Descriptor, comptime T: type, sector_offset: u64) !*T {
