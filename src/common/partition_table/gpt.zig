@@ -400,28 +400,6 @@ const limine_unique_partition_guid = GUID{
     .node = .{ 0xE5, 0xAA, 0x43, 0x7F, 0xC2, 0xC5 },
 };
 
-// https://support.microsoft.com/en-us/topic/default-cluster-size-for-ntfs-fat-and-exfat-9772e6f1-e31a-00d7-e18f-73169155af95
-// Last consulted: 28-11-22
-pub fn get_cluster_size(fat_partition_size: u64) u64 {
-    log.debug("fat partition size: 0x{x}", .{fat_partition_size});
-    return if (fat_partition_size < 32 * mb)
-        unreachable
-    else if (fat_partition_size < 64 * mb)
-        0x200
-    else if (fat_partition_size < 128 * mb)
-        1 * kb
-    else if (fat_partition_size < 256 * mb)
-        2 * kb
-    else if (fat_partition_size < 8 * gb)
-        4 * kb
-    else if (fat_partition_size < 16 * gb)
-        8 * kb
-    else if (fat_partition_size < 32 * gb)
-        16 * kb
-    else
-        unreachable;
-}
-
 const FilesystemCacheTypes = blk: {
     var types: [Filesystem.Type.count]type = undefined;
     types[@enumToInt(Filesystem.Type.rise)] = void;

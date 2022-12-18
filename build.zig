@@ -249,6 +249,8 @@ const DiskImage = extern struct {
                         const gpt_partition_cache = try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
                         const fat_cache = try gpt_partition_cache.format(.fat32);
                         try fat_cache.mkdir("/EFI/BOOT");
+                        const foo_entry = try barebones.fat_partition.get_directory_entry("/foo");
+                        _ = foo_entry;
                         try fat_cache.add_file("/foo", "a\n");
 
                         common.diff(barebones_disk_image.get_buffer(), disk.get_buffer());

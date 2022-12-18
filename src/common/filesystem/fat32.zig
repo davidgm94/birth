@@ -72,10 +72,6 @@ pub fn get_cluster_size(size: u64) u16 {
     return 32 * kb;
 }
 
-pub fn compute_cluster_sector_count(total_size: u64, sector_size: u16) u8 {
-    return @intCast(u8, @divExact(get_cluster_size(total_size), sector_size));
-}
-
 pub const Date = packed struct(u16) {
     day: u5,
     month: u4,
@@ -500,22 +496,17 @@ pub const Cache = extern struct {
     }
 
     pub fn mkdir(cache: Cache, absolute_path: []const u8) !void {
-        const disk = cache.disk;
-        const partition_mbr = cache.mbr;
-        const fs_info = cache.fs_info;
-        const partition_range = cache.partition_range;
+        const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
 
-        const fat_lba = cache.partition_range.first_lba + partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
+        const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
 
-        const root_cluster = partition_mbr.bpb.root_directory_cluster_offset;
-
-        const cluster_sector_count = partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
-        const data_lba = fat_lba + (partition_mbr.bpb.fat_sector_count_32 * partition_mbr.bpb.dos3_31.dos2_0.fat_count);
+        const cluster_sector_count = cache.mbr.bpb.dos3_31.dos2_0.cluster_sector_count;
+        const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
         log.debug("Data LBA: 0x{x}", .{data_lba});
 
         assert(absolute_path[0] == '/');
 
-        const root_cluster_sector = data_lba + cluster_sector_count * (root_cluster - root_cluster);
+        const root_cluster_sector = data_lba;
         var upper_cluster = root_cluster;
         var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
 
@@ -525,8 +516,8 @@ pub const Cache = extern struct {
             assert(entry_name.len <= 8);
             log.debug("Looking for/creating {s}", .{entry_name});
 
-            //const cluster_sector = directory_cluster * cluster_sector_count;
-            const directory_cluster = try allocate_fat_entry(disk, partition_mbr, fs_info, partition_range.first_lba);
+            //const cluster_sector = root_cluster_sector + cluster_to_sectors(upper_cluster);
+            const directory_cluster = try allocate_fat_entry(cache.disk, cache.mbr, cache.fs_info, cache.partition_range.first_lba);
             log.debug("Directory cluster: {}", .{directory_cluster});
 
             log.debug("Upper cluster: {}", .{upper_cluster});
@@ -561,19 +552,19 @@ pub const Cache = extern struct {
             dot_dot_entry.name = dot_dot_entry_name;
             dot_dot_entry.set_first_cluster(if (upper_cluster == root_cluster) 0 else upper_cluster);
 
-            try insert_directory_entry_slow(disk, entry, .{
+            try insert_directory_entry_slow(cache.disk, entry, .{
                 .cluster = upper_cluster,
                 .root_cluster = root_cluster,
                 .cluster_sector_count = cluster_sector_count,
                 .root_cluster_sector = root_cluster_sector,
             });
-            try insert_directory_entry_slow(disk, dot_entry, .{
+            try insert_directory_entry_slow(cache.disk, dot_entry, .{
                 .cluster = upper_cluster + 1,
                 .root_cluster = root_cluster,
                 .cluster_sector_count = cluster_sector_count,
                 .root_cluster_sector = root_cluster_sector,
             });
-            try insert_directory_entry_slow(disk, dot_dot_entry, .{
+            try insert_directory_entry_slow(cache.disk, dot_dot_entry, .{
                 .cluster = upper_cluster + 1,
                 .root_cluster = root_cluster,
                 .cluster_sector_count = cluster_sector_count,
@@ -589,5 +580,59 @@ pub const Cache = extern struct {
         _ = absolute_path;
         _ = file_content;
         log.warn("TODO: add_file", .{});
+    }
+
+    pub fn get_directory_entry(cache: Cache, absolute_path: []const u8) !*FAT32.DirectoryEntry {
+        const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
+
+        const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
+
+        const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
+        log.debug("Data LBA: 0x{x}", .{data_lba});
+
+        assert(absolute_path[0] == '/');
+
+        const root_cluster_sector = data_lba;
+        var upper_cluster = root_cluster;
+        var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+        var directories: u64 = 0;
+        while (dir_tokenizer.next()) |entry_name| {
+            defer directories += 1;
+            assert(entry_name.len <= 8);
+            log.debug("Looking for/creating {s}", .{entry_name});
+            const is_last = dir_tokenizer.peek() == null;
+
+            const normalized_name = blk: {
+                var name = [1]u8{' '} ** 11;
+                _ = common.std.ascii.upperString(&name, entry_name);
+
+                break :blk name;
+            };
+
+            const cluster_sector = root_cluster_sector + cache.cluster_to_sectors(upper_cluster - root_cluster);
+            log.debug("Cluster sector: 0x{x}. Root cluster: 0x{x}", .{ cluster_sector, root_cluster_sector });
+            const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector);
+            for (directory_entries_in_cluster) |*directory_entry| {
+                log.debug("Entry name: {s}. Attributes: {}", .{ directory_entry.name, directory_entry.attributes });
+                if (directory_entry.name[0] != ' ' and directory_entry.name[0] != 0) {
+                    for (directory_entry.name) |byte, i| {
+                        log.debug("Name[{}]: 0x{x}", .{ i, byte });
+                    }
+                }
+                if (common.string_eq(&directory_entry.name, &normalized_name)) {
+                    log.debug("Equal!", .{});
+                    if (is_last) return directory_entry else break;
+                }
+            }
+
+            unreachable;
+            //upper_cluster = directory_cluster;
+        }
+
+        unreachable;
+    }
+
+    pub inline fn cluster_to_sectors(cache: Cache, cluster_count: u32) u32 {
+        return cache.mbr.bpb.dos3_31.dos2_0.cluster_sector_count * cluster_count;
     }
 };
