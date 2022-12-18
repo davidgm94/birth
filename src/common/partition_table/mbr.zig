@@ -7,6 +7,8 @@ const Disk = common.Disk.Descriptor;
 const GPT = common.PartitionTable.GPT;
 const FAT32 = common.Filesystem.FAT32;
 
+pub const default_lba = 0;
+
 pub const BIOSParameterBlock = extern struct {
     pub const DOS2_0 = extern struct {
         jmp_code: [3]u8 = .{ 0xeb, 0x58, 0x90 },

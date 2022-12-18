@@ -35,7 +35,7 @@ pub const Operation = enum(u1) {
 pub const Descriptor = extern struct {
     type: Type,
     disk_size: u64,
-    partition_sizes: [GPT.max_partition_count]u64 = [1]u64{0} ** GPT.max_partition_count,
+    partition_sizes: [GPT.default_max_partition_count]u64 = [1]u64{0} ** GPT.default_max_partition_count,
     sector_size: u16 = 0x200,
     partition_count: u8 = 0,
     callbacks: Callbacks,
@@ -44,7 +44,7 @@ pub const Descriptor = extern struct {
     pub const ReadError = error{
         read_error,
     };
-    pub const WriteFn = fn (disk: *Disk.Descriptor, bytes: []const u8, offset: u64, options: WriteOptions) WriteError!void;
+    pub const WriteFn = fn (disk: *Disk.Descriptor, bytes: []const u8, offset: u64, commit_memory_to_disk: bool) WriteError!void;
     pub const WriteError = error{
         write_error,
     };
@@ -54,17 +54,6 @@ pub const Descriptor = extern struct {
         write: *const WriteFn,
     };
 
-    pub const WriteOptions = packed struct(u64) {
-        in_memory_writings: bool = false,
-        reserved: u63 = 0,
-
-        pub fn forced_write(write_options: WriteOptions) WriteOptions {
-            var new_options = write_options;
-            new_options.in_memory_writings = false;
-            return new_options;
-        }
-    };
-
     pub inline fn read_typed_sectors(disk: *Disk.Descriptor, comptime T: type, sector_offset: u64) !*T {
         const bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(T), disk.sector_size), sector_offset);
         // Don't need to write back since it's a memory disk
@@ -72,8 +61,8 @@ pub const Descriptor = extern struct {
         return result;
     }
 
-    pub inline fn write_typed_sectors(disk: *Disk.Descriptor, comptime T: type, content: *T, sector_offset: u64, write_options: WriteOptions) !void {
-        try disk.callbacks.write(disk, common.as_bytes(content), sector_offset, write_options);
+    pub inline fn write_typed_sectors(disk: *Disk.Descriptor, comptime T: type, content: *T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+        try disk.callbacks.write(disk, common.as_bytes(content), sector_offset, commit_memory_to_disk);
     }
 
     pub inline fn read_slice(disk: *Disk.Descriptor, comptime T: type, len: usize, sector_offset: u64) ![]T {
@@ -84,8 +73,8 @@ pub const Descriptor = extern struct {
         return result;
     }
 
-    pub inline fn write_slice(disk: *Disk.Descriptor, comptime T: type, slice: []const T, sector_offset: u64, write_options: WriteOptions) !void {
-        try disk.callbacks.write(disk, common.slice_as_bytes(slice), sector_offset, write_options);
+    pub inline fn write_slice(disk: *Disk.Descriptor, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+        try disk.callbacks.write(disk, common.slice_as_bytes(slice), sector_offset, commit_memory_to_disk);
     }
 
     pub fn verify(disk: *Disk.Descriptor) !void {
@@ -93,4 +82,9 @@ pub const Descriptor = extern struct {
         try mbr.verify(disk);
         unreachable;
     }
+};
+
+pub const PartitionRange = extern struct {
+    first_lba: u64,
+    last_lba: u64,
 };

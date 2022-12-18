@@ -184,8 +184,8 @@ const DiskImage = extern struct {
         return result;
     }
 
-    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, options: common.Disk.Descriptor.WriteOptions) common.Disk.Descriptor.WriteError!void {
-        const need_write = !(disk_descriptor.type == .memory and options.in_memory_writings);
+    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) common.Disk.Descriptor.WriteError!void {
+        const need_write = !(disk_descriptor.type == .memory and !commit_memory_to_disk);
         if (need_write) {
             std.log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
             const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
@@ -235,36 +235,21 @@ const DiskImage = extern struct {
                 const x86_64 = kernel.options.arch.x86_64;
                 switch (x86_64.boot_protocol) {
                     .bios => {
-                        const write_options = common.Disk.Descriptor.WriteOptions{
-                            .in_memory_writings = true,
-                        };
                         const barebones = blk: {
-                            const barebones_disk = &barebones_disk_image.descriptor;
-                            const gpt_header = try GPT.Header.get(barebones_disk);
-                            const backup_gpt_header = try gpt_header.get_backup(barebones_disk);
-                            const gpt_partition = try gpt_header.get_partition(barebones_disk, 0);
-                            const mbr_partition = try common.Filesystem.FAT32.get_mbr(barebones_disk, gpt_partition);
-                            const fs_info = try mbr_partition.get_fs_info(barebones_disk, gpt_partition);
-                            const fat_entries = try common.Filesystem.FAT32.get_cluster_entries(barebones_disk, gpt_partition, mbr_partition, 0);
-                            const fat_directory_entries = try common.Filesystem.FAT32.get_directory_entries(barebones_disk, gpt_partition, mbr_partition, 0);
-
-                            break :blk GPT.Barebones{
-                                .disk = barebones_disk,
-                                .gpt_header = gpt_header,
-                                .backup_gpt_header = backup_gpt_header,
-                                .gpt_partition = gpt_partition,
-                                .fat_partition_mbr = mbr_partition,
-                                .fs_info = fs_info,
-                                .fat_entries = fat_entries,
-                                .root_fat_directory_entries = fat_directory_entries,
+                            const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.descriptor, 0);
+                            const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
+                            break :blk Barebones{
+                                .gpt_partition_cache = gpt_partition_cache,
+                                .fat_partition = fat_partition,
                             };
                         };
-                        const gpt_cache = try GPT.create(&disk.descriptor, barebones.gpt_header, write_options);
+
+                        const gpt_cache = try GPT.create(&disk.descriptor, barebones.gpt_partition_cache.gpt.header);
                         // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
-                        try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition, write_options);
-                        try GPT.format(&disk.descriptor, 0, .fat32, write_options);
-                        try GPT.mkdir(&disk.descriptor, 0, "/EFI/BOOT", write_options, barebones);
-                        try GPT.add_file(&disk.descriptor, 0, "/foo", "a\n", write_options, barebones);
+                        const gpt_partition_cache = try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
+                        const fat_cache = try gpt_partition_cache.format(.fat32);
+                        try fat_cache.mkdir("/EFI/BOOT");
+                        try fat_cache.add_file("/foo", "a\n");
 
                         common.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
 
@@ -1061,4 +1046,9 @@ const Limine = struct {
     const installables_path = base_path ++ "/installables";
     const image_path = cache_dir ++ "universal.iso";
     const installer = @import("src/bootloader/limine/installer.zig");
+};
+
+const Barebones = extern struct {
+    gpt_partition_cache: GPT.Partition.Cache,
+    fat_partition: FAT32.Cache,
 };
