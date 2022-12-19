@@ -116,6 +116,12 @@ pub const DirectoryEntry = extern struct {
 
     pub const Sector = [@divExact(0x200, @sizeOf(FAT32.DirectoryEntry))]FAT32.DirectoryEntry;
 
+    pub const Chain = extern struct {
+        previous: ?*DirectoryEntry = null,
+        next: ?*DirectoryEntry = null,
+        current: *DirectoryEntry,
+    };
+
     pub fn format(entry: *const DirectoryEntry, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         try common.internal_format(writer, "Directory entry:\n", .{});
         try common.internal_format(writer, "\tName: {s}\n", .{entry.name});
@@ -576,10 +582,51 @@ pub const Cache = extern struct {
     }
 
     pub fn add_file(cache: Cache, absolute_path: []const u8, file_content: []const u8) !void {
-        _ = cache;
-        _ = absolute_path;
         _ = file_content;
-        log.warn("TODO: add_file", .{});
+        const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
+
+        const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
+
+        const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
+        log.debug("Data LBA: 0x{x}", .{data_lba});
+
+        assert(absolute_path[0] == '/');
+
+        const root_cluster_sector = data_lba;
+        var upper_cluster = root_cluster;
+        var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+        var directories: u64 = 0;
+
+        while (dir_tokenizer.next()) |entry_name| {
+            defer directories += 1;
+            log.debug("Looking for/creating {s}", .{entry_name});
+            const is_directory = dir_tokenizer.peek() != null;
+            _ = is_directory;
+
+            const normalized_name = normalize_name(entry_name);
+
+            const cluster_sector = root_cluster_sector + cache.cluster_to_sectors(upper_cluster - root_cluster);
+            log.debug("Cluster sector: 0x{x}. Root cluster: 0x{x}", .{ cluster_sector, root_cluster_sector });
+            const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector);
+
+            for (directory_entries_in_cluster) |*directory_entry| {
+                log.debug("Entry name: {s}. Attributes: {}", .{ directory_entry.name, directory_entry.attributes });
+                if (directory_entry.name[0] != ' ' and directory_entry.name[0] != 0) {
+                    for (directory_entry.name) |byte, i| {
+                        log.debug("Name[{}]: 0x{x}", .{ i, byte });
+                    }
+                }
+                if (common.string_eq(&directory_entry.name, &normalized_name)) {
+                    log.debug("Equal!", .{});
+                    unreachable;
+                }
+            }
+
+            unreachable;
+            //upper_cluster = directory_cluster;
+        }
+
+        unreachable;
     }
 
     pub fn get_directory_entry(cache: Cache, absolute_path: []const u8) !*FAT32.DirectoryEntry {
@@ -598,20 +645,15 @@ pub const Cache = extern struct {
         var directories: u64 = 0;
         while (dir_tokenizer.next()) |entry_name| {
             defer directories += 1;
-            assert(entry_name.len <= 8);
             log.debug("Looking for/creating {s}", .{entry_name});
             const is_last = dir_tokenizer.peek() == null;
 
-            const normalized_name = blk: {
-                var name = [1]u8{' '} ** 11;
-                _ = common.std.ascii.upperString(&name, entry_name);
-
-                break :blk name;
-            };
+            const normalized_name = normalize_name(entry_name);
 
             const cluster_sector = root_cluster_sector + cache.cluster_to_sectors(upper_cluster - root_cluster);
             log.debug("Cluster sector: 0x{x}. Root cluster: 0x{x}", .{ cluster_sector, root_cluster_sector });
             const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector);
+
             for (directory_entries_in_cluster) |*directory_entry| {
                 log.debug("Entry name: {s}. Attributes: {}", .{ directory_entry.name, directory_entry.attributes });
                 if (directory_entry.name[0] != ' ' and directory_entry.name[0] != 0) {
@@ -636,3 +678,12 @@ pub const Cache = extern struct {
         return cache.mbr.bpb.dos3_31.dos2_0.cluster_sector_count * cluster_count;
     }
 };
+
+pub inline fn normalize_name(name: []const u8) [11]u8 {
+    assert(name.len <= 8);
+
+    var result = [1]u8{' '} ** 11;
+    _ = common.std.ascii.upperString(&result, name);
+
+    return result;
+}
