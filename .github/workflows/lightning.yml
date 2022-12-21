@@ -26,7 +26,6 @@ jobs:
 
       - run: zig version
       - run: zig env
-      - run: zig fmt --check src/*.zig build.zig
       - run: zig build
       - run: zig build test
 
