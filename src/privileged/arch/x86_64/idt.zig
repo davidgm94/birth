@@ -396,7 +396,7 @@ const Frame = extern struct {
             const value = @field(frame, field.name);
             const args = .{ name, value };
 
-            switch (field.field_type) {
+            switch (field.type) {
                 u64 => try common.internal_format(writer, "\t{s}: 0x{x}\n", args),
                 RFLAGS => try common.internal_format(writer, "\t{s}: {}\n", args),
                 else => @compileError("Type not supported"),
