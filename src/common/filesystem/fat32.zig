@@ -465,7 +465,7 @@ fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition,
 const dot_entry_name: [11]u8 = ".".* ++ ([1]u8{' '} ** 10);
 const dot_dot_entry_name: [11]u8 = "..".* ++ ([1]u8{' '} ** 9);
 
-fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: anytype, insert: struct { cluster: u32, root_cluster: u32, cluster_sector_count: u16, root_cluster_sector: u64 }) !u32 {
+fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: anytype, insert: struct { cluster: u32, root_cluster: u32, cluster_sector_count: u16, root_cluster_sector: u64 }) !EntryResult(@TypeOf(desired_entry)) {
     const EntryType = @TypeOf(desired_entry);
     comptime assert(EntryType == DirectoryEntry or EntryType == LongNameEntry);
     comptime assert(@sizeOf(EntryType) == 32);
@@ -478,7 +478,11 @@ fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: anytype, i
         if (entry.is_free()) {
             //log.debug("Inserting entry {s} in cluster {}. Cluster dir LBA: 0x{x}. Entry index: {}", .{ desired_entry.name, insert.cluster, cluster_dir_lba, entry_index });
             entry.* = desired_entry;
-            return @intCast(u32, entry_index);
+            return EntryResult(EntryType){
+                .cluster = insert.cluster,
+                .entry_starting_index = @intCast(u32, entry_index),
+                .directory_entry = entry,
+            };
         }
     }
 
@@ -640,12 +644,7 @@ pub const Cache = extern struct {
         not_found,
     };
 
-    const DirectoryEntryResult = extern struct {
-        cluster: u32,
-        entry_starting_index: u32,
-    };
-
-    pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, not_found_policy: GetNotFoundPolicy, entry_copy: ?*FAT32.DirectoryEntry) !DirectoryEntryResult {
+    pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, not_found_policy: GetNotFoundPolicy, entry_copy: ?*FAT32.DirectoryEntry) !EntryResult(DirectoryEntry) {
         const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
 
         const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
@@ -694,7 +693,7 @@ pub const Cache = extern struct {
                                     const chop_count = chop_index + 1;
                                     const chop_slice = file.content[chop_element_count * chop_index ..];
 
-                                    const first_entry = try insert_directory_entry_slow(cache.disk, LongNameEntry{
+                                    _ = try insert_directory_entry_slow(cache.disk, LongNameEntry{
                                         .sequence_number = .{
                                             .number = @intCast(u5, chop_index),
                                             .last_logical = true,
@@ -717,7 +716,7 @@ pub const Cache = extern struct {
                                         unreachable;
                                     }
 
-                                    _ = try insert_directory_entry_slow(cache.disk, FAT32.DirectoryEntry{
+                                    const entry = try insert_directory_entry_slow(cache.disk, FAT32.DirectoryEntry{
                                         .name = if (entry_name.len < 10) pack_string(entry_name, .{
                                             .len = 11,
                                             .fill_with = ' ',
@@ -732,14 +731,22 @@ pub const Cache = extern struct {
                                             .archive = false,
                                         },
                                         .creation_time_tenth = if (entry_copy) |copy| copy.creation_time_tenth else unreachable,
+                                        .creation_time = if (entry_copy) |copy| copy.creation_time else unreachable,
+                                        .creation_date = if (entry_copy) |copy| copy.creation_date else unreachable,
+                                        .last_access_date = if (entry_copy) |copy| copy.last_access_date else unreachable,
+                                        .first_cluster_high = @truncate(u16, upper_cluster >> 16),
+                                        .last_write_time = if (entry_copy) |copy| copy.last_write_time else unreachable,
+                                        .last_write_date = if (entry_copy) |copy| copy.last_write_date else unreachable,
+                                        .first_cluster_low = @truncate(u16, upper_cluster),
+                                        .file_size = @intCast(u32, file.content.len),
                                     }, .{
                                         .cluster = upper_cluster,
                                         .root_cluster = root_cluster,
-                                        .cluster_sector_count = cache.cluster_to_sectors(1),
+                                        .cluster_sector_count = @intCast(u16, cache.cluster_to_sectors(1)),
                                         .root_cluster_sector = root_cluster_sector,
                                     });
 
-                                    if (is_last) return .{ .cluster = upper_cluster, .entry_starting_index = first_entry } else {
+                                    if (is_last) return entry else {
                                         unreachable;
                                     }
                                 },
@@ -763,7 +770,7 @@ pub const Cache = extern struct {
                             log.debug("Normal entry: {s}. Name: {s}", .{ &normal_entry.name, &normalized_name });
                             if (common.string_eq(&normal_entry.name, &normalized_name)) {
                                 if (is_last) {
-                                    return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index) };
+                                    return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index), .directory_entry = normal_entry };
                                 } else {
                                     unreachable;
                                 }
@@ -778,7 +785,7 @@ pub const Cache = extern struct {
                             log.debug("Equal!", .{});
                             if (is_last) {
                                 log.debug("Found!", .{});
-                                return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, entry_index) };
+                                return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, entry_index), .directory_entry = directory_entry };
                             } else continue :entry_loop;
                         }
                     }
@@ -847,4 +854,12 @@ pub inline fn long_name_chop(name: []const u8, comptime start: usize, comptime e
         .fill_with = 0,
         .upper = false,
     });
+}
+
+fn EntryResult(comptime EntryType: type) type {
+    return extern struct {
+        cluster: u32,
+        entry_starting_index: u32,
+        directory_entry: *EntryType,
+    };
 }

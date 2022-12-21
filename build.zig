@@ -250,7 +250,7 @@ const DiskImage = extern struct {
                         const fat_cache = try gpt_partition_cache.format(.fat32);
                         try fat_cache.mkdir("/EFI/BOOT");
                         const foo_entry = try barebones.fat_partition.get_directory_entry("/foo", .fail, null);
-                        try fat_cache.add_file("/foo", "a\n", foo_entry);
+                        try fat_cache.add_file("/foo", "a\n", foo_entry.directory_entry);
 
                         common.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
 
