@@ -1,6 +1,7 @@
 # Rise
 
 ![Build status](https://img.shields.io/github/actions/workflow/status/davidgm94/rise/lightning.yml?branch=main)
+![Lines of code](https://img.shields.io/tokei/lines/github/davidgm94/rise)
 
 An experiment of kernel for 64-bit systems which focuses on learning to build a better operating system.
 
