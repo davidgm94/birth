@@ -426,30 +426,32 @@ pub fn generate_test_gpt_image(image_path: []const u8, byte_count: usize, alloca
 }
 
 test "Create partition table" {
-    const original_image_path = "barebones.hdd";
-    const byte_count = 64 * mb;
-    const sector_size = 0x200;
+    if (lib.os == .linux) {
+        const original_image_path = "barebones.hdd";
+        const byte_count = 64 * mb;
+        const sector_size = 0x200;
 
-    // Using an arena allocator because it doesn't care about memory leaks
-    var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
-    defer arena_allocator.deinit();
+        // Using an arena allocator because it doesn't care about memory leaks
+        var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
+        defer arena_allocator.deinit();
 
-    var allocator = arena_allocator.allocator();
+        var allocator = arena_allocator.allocator();
 
-    try generate_test_gpt_image(original_image_path, byte_count, allocator);
+        try generate_test_gpt_image(original_image_path, byte_count, allocator);
 
-    var original_disk_image = try Disk.Image.from_file(original_image_path, sector_size, allocator);
-    try lib.cwd().deleteFile(original_image_path);
+        var original_disk_image = try Disk.Image.from_file(original_image_path, sector_size, allocator);
+        try lib.cwd().deleteFile(original_image_path);
 
-    const original_disk = &original_disk_image.disk;
-    const original_gpt_cache = try GPT.Header.Cache.load(original_disk);
+        const original_disk = &original_disk_image.disk;
+        const original_gpt_cache = try GPT.Header.Cache.load(original_disk);
 
-    var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
-    const disk = &disk_image.disk;
-    const gpt_cache = try GPT.create(disk, original_gpt_cache.header);
-    _ = gpt_cache;
+        var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
+        const disk = &disk_image.disk;
+        const gpt_cache = try GPT.create(disk, original_gpt_cache.header);
+        _ = gpt_cache;
 
-    try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_disk_image.get_buffer());
+        try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_disk_image.get_buffer());
+    }
 }
 
 //fn make(step: *lib.build.Step) !void {
