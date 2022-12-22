@@ -1,29 +1,50 @@
-pub const std = @import("std");
+const std = @import("std");
+pub const build = std.build;
 const builtin = @import("builtin");
 
-pub const Cpu = std.Target.Cpu;
+pub const arch = @import("lib/arch.zig");
+/// This is done so the allocator can respect allocating from different address spaces
+pub const config = @import("lib/config.zig");
+pub const CRC32 = @import("lib/crc32.zig");
+const disk_file = @import("lib/disk.zig");
+pub const Disk = disk_file.Disk;
+pub const ELF = @import("lib/elf.zig");
+pub const Filesystem = @import("lib/filesystem.zig");
+pub const List = @import("lib/list.zig");
+pub const Message = @import("lib/message.zig");
+pub const Module = @import("lib/module.zig");
+pub const PartitionTable = @import("lib/partition_table.zig");
+pub const QEMU = @import("lib/qemu.zig");
+pub const Syscall = @import("lib/syscall.zig");
+pub const Graphics = @import("lib/graphics.zig");
+pub const Window = @import("lib/window.zig");
+
+pub const Target = std.Target;
+pub const Cpu = Target.Cpu;
+pub const CrossTarget = std.zig.CrossTarget;
+
 pub const cpu = builtin.cpu;
 pub const os = builtin.os.tag;
-
-// BUILD
 pub const build_mode = builtin.mode;
 
-// TESTING
-pub const testing = std.testing;
+pub const assert = std.debug.assert;
+
+pub const uefi = std.os.uefi;
 
 // META PROGRAMMING
-pub const reference_all_declarations = std.testing.refAllDecls;
+pub const refAllDecls = std.testing.refAllDecls;
 pub const Type = std.builtin.Type;
 pub const fields = std.meta.fields;
-pub const enum_values = std.enums.values;
+pub const enumValues = std.enums.values;
 pub const IntType = std.meta.Int;
+
 // MATH
-pub const max_int = std.math.maxInt;
+pub const maxInt = std.math.maxInt;
 pub const max = std.math.max;
 pub const min = std.math.min;
-pub const div_ceil = std.math.divCeil;
+pub const divCeil = std.math.divCeil;
 pub const clamp = std.math.clamp;
-pub const is_power_of_two = std.math.isPowerOfTwo;
+pub const isPowerOfTwo = std.math.isPowerOfTwo;
 pub const mul = std.math.mul;
 
 // MEMORY ALLOCATION
@@ -57,31 +78,60 @@ pub const AtomicOrder = std.builtin.AtomicOrder;
 // LOG
 pub const log = std.log;
 
-// STDIO
-pub const Writer = std.io.Writer;
+// FORMAT
+pub const format = std.fmt.format;
+pub const FormatOptions = std.fmt.FormatOptions;
 pub const bufPrint = std.fmt.bufPrint;
 pub const allocPrint = std.fmt.allocPrint;
+pub const comptimePrint = std.fmt.comptimePrint;
+
+// IO
+pub const Writer = std.io.Writer;
+pub const getStdOut = std.io.getStdOut;
+pub const getStdIn = std.io.getStdIn;
 
 // MEMORY MANIPULATION
+pub const copy = std.mem.copy;
 pub const equal = std.mem.eql;
 pub const length = std.mem.len;
-pub const starts_with = std.mem.startsWith;
-pub const ends_with = std.mem.endsWith;
-pub const last_index_of = std.mem.lastIndexOf;
-pub const as_bytes = std.mem.asBytes;
-pub const internal_read_int_big = std.mem.readIntBig;
-pub const read_int_slice_big_endian = std.mem.readIntSliceBig;
-pub const concatenate = std.mem.concat;
-pub const slice_as_bytes = std.mem.sliceAsBytes;
-pub const bytes_as_slice = std.mem.bytesAsSlice;
+pub const startsWith = std.mem.startsWith;
+pub const endsWith = std.mem.endsWith;
+pub const lastIndexOf = std.mem.lastIndexOf;
+pub const asBytes = std.mem.asBytes;
+pub const readIntBig = std.mem.readIntBig;
+pub const readIntSliceBig = std.mem.readIntSliceBig;
+pub const concat = std.mem.concat;
+pub const sliceAsBytes = std.mem.sliceAsBytes;
+pub const bytesAsSlice = std.mem.bytesAsSlice;
+pub const alignForward = std.mem.alignForward;
+pub const alignForwardGeneric = std.mem.alignForwardGeneric;
+pub const alignBackward = std.mem.alignBackward;
+pub const alignBackwardGeneric = std.mem.alignBackwardGeneric;
+pub const isAligned = std.mem.isAligned;
+pub const reverse = std.mem.reverse;
+
+pub fn zero(slice: []u8) void {
+    @memset(slice.ptr, 0, slice.len);
+}
+
+pub fn zeroes(comptime T: type) T {
+    var result: T = undefined;
+    const slice = asBytes(&result);
+    zero(slice);
+    return result;
+}
 
 // TEST
 pub const expect = std.testing.expect;
-pub const expect_equal = std.testing.expectEqual;
+pub const expectEqual = std.testing.expectEqual;
 
-// INTERNAL
-pub const internal_format = std.fmt.format;
-pub const InternalFormatOptions = std.fmt.FormatOptions;
+// FILESYSTEM
+pub const cwd = std.fs.cwd;
+
+pub const ChildProcess = std.ChildProcess;
+
+// JSON
+pub const json = std.json;
 
 // SIZES
 pub const kb = 1024;
@@ -89,88 +139,14 @@ pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
-pub fn string_eq(a: []const u8, b: []const u8) bool {
-    return equal(u8, a, b);
-}
+// POSIX
+pub const posix = std.os;
 
-pub fn string_starts_with(str: []const u8, slice: []const u8) bool {
-    return starts_with(u8, str, slice);
-}
-
-pub fn string_ends_with(str: []const u8, slice: []const u8) bool {
-    return ends_with(u8, str, slice);
-}
-
-pub fn align_forward(comptime T: type, n: T, alignment: T) T {
-    const mask: @TypeOf(n) = alignment - 1;
-    const result = (n + mask) & ~mask;
-    return result;
-}
-
-pub fn align_backward(n: u64, alignment: u64) u64 {
-    return n & ~(alignment - 1);
-}
-
-pub fn is_aligned(n: u64, alignment: u64) bool {
-    return n & (alignment - 1) == 0;
-}
-
-pub fn read_int_big(comptime T: type, slice: []const u8) T {
-    return internal_read_int_big(T, slice[0..@sizeOf(T)]);
-}
-pub fn copy(comptime T: type, dst: []T, src: []const T) void {
-    assert(src.len <= dst.len);
-    const dst_ptr = @ptrCast([*]u8, dst.ptr);
-    const src_ptr = @ptrCast([*]const u8, src.ptr);
-    const bytes_to_copy = @sizeOf(T) * src.len;
-    @memcpy(dst_ptr, src_ptr, bytes_to_copy);
-}
-
-pub fn set_byte(slice: []u8, value: u8) void {
-    @memset(slice.ptr, value, slice.len);
-}
-
-pub fn zero(bytes: []u8) void {
-    set_byte(bytes, 0);
-}
-
-pub fn zero_slice(comptime T: type, slice: []T) void {
-    for (slice) |*elem| {
-        elem.* = zeroes(T);
-    }
-}
-
-pub fn zeroes(comptime T: type) T {
-    var result: T = undefined;
-    zero(as_bytes(&result));
-    return result;
-}
-
-pub fn assert(condition: bool) void {
-    if (!condition) unreachable;
-}
-
-pub fn cstr_len(cstr: [*:0]const u8) u64 {
-    var len: u64 = 0;
-    while (cstr[len] != 0) : (len += 1) {}
-    return len;
-}
-
-/// @Hack This currently works to determine if the code is being executed at compile time or at run time.
-pub fn is_comptime() bool {
-    var a: bool = false;
-    return @TypeOf(@boolToInt(a)) == comptime_int;
-}
-
-pub fn is_same_packed_size(comptime A: type, comptime B: type) bool {
-    return @bitSizeOf(A) == @bitSizeOf(B) and @sizeOf(A) == @sizeOf(B);
-}
-
-pub fn enum_count(comptime E: type) usize {
+pub fn enumCount(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
 }
 
-pub fn field_size(comptime T: type, field_name: []const u8) comptime_int {
+pub fn fieldSize(comptime T: type, field_name: []const u8) comptime_int {
     var foo: T = undefined;
     return @sizeOf(@TypeOf(@field(foo, field_name)));
 }
@@ -222,7 +198,7 @@ pub const CustomAllocator = extern struct {
             // This if block is a workaround (see comment above)
             return @intToPtr([*]T, @ptrToInt(byte_slice.ptr))[0..@divExact(byte_slice.len, @sizeOf(T))];
         } else {
-            return bytes_as_slice(T, @alignCast(a, byte_slice));
+            return bytesAsSlice(T, @alignCast(a, byte_slice));
         }
     }
 
@@ -237,14 +213,14 @@ pub const CustomAllocator = extern struct {
             return @as([*]align(new_alignment) T, undefined)[0..0];
         }
 
-        const old_byte_slice = slice_as_bytes(old_mem);
+        const old_byte_slice = sliceAsBytes(old_mem);
         const byte_count = mul(usize, @sizeOf(T), new_n) catch return Error.OutOfMemory;
         // Note: can't set shrunk memory to undefined as memory shouldn't be modified on realloc failure
 
         const len_align: u29 = 0;
         _ = len_align;
 
-        if (is_aligned(@ptrToInt(old_byte_slice.ptr), new_alignment)) {
+        if (isAligned(@ptrToInt(old_byte_slice.ptr), new_alignment)) {
             if (byte_count <= old_byte_slice.len) {
                 @panic("todo shrink");
                 //const shrunk_len = allocator.shrinkBytes(old_byte_slice, Slice.alignment, byte_count, len_align);
@@ -254,7 +230,7 @@ pub const CustomAllocator = extern struct {
             if (allocator.callback_resize(allocator, old_byte_slice, Slice.alignment, byte_count)) |resized_len| {
                 // TODO: https://github.com/ziglang/zig/issues/4298
                 @memset(old_byte_slice.ptr + byte_count, undefined, resized_len - byte_count);
-                return bytes_as_slice(T, @alignCast(new_alignment, old_byte_slice.ptr[0..resized_len]));
+                return bytesAsSlice(T, @alignCast(new_alignment, old_byte_slice.ptr[0..resized_len]));
             }
         }
 
@@ -269,7 +245,7 @@ pub const CustomAllocator = extern struct {
         @memset(old_byte_slice.ptr, undefined, old_byte_slice.len);
         allocator.callback_free(allocator, old_byte_slice, Slice.alignment);
 
-        return bytes_as_slice(T, @alignCast(new_alignment, new_mem));
+        return bytesAsSlice(T, @alignCast(new_alignment, new_mem));
     }
 
     pub fn free(allocator: *CustomAllocator, old_mem: anytype) void {
@@ -323,9 +299,6 @@ pub const CustomAllocator = extern struct {
         @panic("TODO free");
     }
 
-    //pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;
-    //pub const AllocatorResizeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize;
-    //pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void;
     pub const AllocateFunction = fn (allocator: *CustomAllocator, size: u64, alignment: u64) Error!Result;
     pub const ResizeFunction = fn (allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize;
     pub const FreeFunction = fn (allocator: *CustomAllocator, memory: []u8, alignment: u29) void;
@@ -342,23 +315,6 @@ pub const CustomAllocator = extern struct {
     pub const Error = error{OutOfMemory};
 };
 
-pub const arch = @import("common/arch.zig");
-/// This is done so the allocator can respect allocating from different address spaces
-pub const config = @import("common/config.zig");
-pub const CRC32 = @import("common/crc32.zig");
-pub const Disk = @import("common/disk.zig");
-pub const ELF = @import("common/elf.zig");
-pub const Filesystem = @import("common/filesystem.zig");
-pub const List = @import("common/list.zig");
-pub const Message = @import("common/message.zig");
-pub const Module = @import("common/module.zig");
-pub const PartitionTable = @import("common/partition_table.zig");
-pub const QEMU = @import("common/qemu.zig");
-pub const RiseFS = @import("common/risefs.zig");
-pub const Syscall = @import("common/syscall.zig");
-pub const Graphics = @import("common/graphics.zig");
-pub const Window = @import("common/window.zig");
-
 pub fn diff(file1: []const u8, file2: []const u8) void {
     assert(file1.len == file2.len);
     var different_bytes: u64 = 0;
@@ -372,6 +328,23 @@ pub fn diff(file1: []const u8, file2: []const u8) void {
     }
 
     log.debug("Total different bytes: 0x{x}", .{different_bytes});
+}
+
+pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
+    switch (os) {
+        .windows => {
+            const windows = std.os.windows;
+            return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
+        },
+        // Assume all systems are POSIX
+        else => {
+            const mmap = std.os.mmap;
+            const PROT = std.os.PROT;
+            const MAP = std.os.MAP;
+            return try mmap(null, bytes, PROT.READ | PROT.WRITE, MAP.PRIVATE | MAP.ANONYMOUS, -1, 0);
+        },
+        .freestanding => @compileError("Not implemented yet"),
+    }
 }
 
 test {

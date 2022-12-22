@@ -1,9 +1,9 @@
-const common = @import("common");
+const lib = @import("lib");
 
 pub const valid_page_sizes = [3]comptime_int{ 0x1000, 0x1000 * 0x200, 0x1000 * 0x200 * 0x200 };
 pub const reverse_valid_page_sizes = blk: {
     var reverse = valid_page_sizes;
-    common.std.mem.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
+    lib.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
     break :blk reverse;
 };
 pub const page_size = valid_page_sizes[0];

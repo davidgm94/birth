@@ -1,6 +1,6 @@
-const common = @import("common");
-const assert = common.assert;
-const cpuid = common.arch.x86_64.CPUID;
+const lib = @import("lib");
+const assert = lib.assert;
+const cpuid = lib.arch.x86_64.CPUID;
 
 const privileged = @import("privileged");
 const VirtualAddress = privileged.VirtualAddress;
@@ -31,7 +31,7 @@ pub const dispatch_count = IDT.entry_count - IDT.exception_count;
 pub const valid_page_sizes = [3]comptime_int{ 0x1000, 0x1000 * 0x200, 0x1000 * 0x200 * 0x200 };
 pub const reverse_valid_page_sizes = blk: {
     var reverse = valid_page_sizes;
-    common.std.mem.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
+    lib.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
     break :blk reverse;
 };
 pub const page_size = valid_page_sizes[0];
@@ -71,7 +71,7 @@ pub const Registers = extern struct {
     r14: u64,
     r15: u64,
     rip: u64,
-    rflags: common.arch.x86_64.registers.RFLAGS,
+    rflags: lib.arch.x86_64.registers.RFLAGS,
     fs: u16,
     gs: u16,
     fxsave_area: extern struct {

@@ -1,10 +1,10 @@
-const common = @import("common");
-const assert = common.assert;
-const enum_count = common.enum_count;
-const log = common.log.scoped(.Syscall);
+const lib = @import("lib");
+const assert = lib.assert;
+const enumCount = lib.enumCount;
+const log = lib.log.scoped(.Syscall);
 
 comptime {
-    if (common.os != .freestanding) @compileError("This file should not be imported in build.zig");
+    if (lib.os != .freestanding) @compileError("This file should not be imported in build.zig");
 }
 
 pub const Options = packed struct(u8) {
@@ -25,7 +25,7 @@ pub const Type = enum(u1) {
 pub const ExecutionMode = enum(u1) {
     blocking,
     non_blocking,
-    const count = enum_count(@This());
+    const count = enumCount(@This());
 };
 
 pub const services = blk: {
@@ -78,13 +78,13 @@ pub const services = blk: {
     add_service_descriptor(Service{
         .id = .get_framebuffer,
         .Parameters = void,
-        .Result = *common.Graphics.DrawingArea,
+        .Result = *lib.Graphics.DrawingArea,
         .Error = error{},
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .send_message,
         .Parameters = struct {
-            message: common.Message,
+            message: lib.Message,
         },
         .Result = void,
         .Error = error{
@@ -94,13 +94,13 @@ pub const services = blk: {
     add_service_descriptor(Service{
         .id = .receive_message,
         .Parameters = void,
-        .Result = common.Message,
+        .Result = lib.Message,
         .Error = error{},
     }, &service_descriptors);
     add_service_descriptor(Service{
         .id = .create_plain_window,
         .Parameters = struct {
-            user_window: *common.Window,
+            user_window: *lib.Window,
         },
         .Result = void,
         .Error = error{},
@@ -226,8 +226,8 @@ pub const Submission = struct {
                 break :blk {};
             },
             .send_message => blk: {
-                if (submission.arguments[0] < common.Message.count) {
-                    const message_id = @intToEnum(common.Message.ID, submission.arguments[0]);
+                if (submission.arguments[0] < lib.Message.count) {
+                    const message_id = @intToEnum(lib.Message.ID, submission.arguments[0]);
                     const message_context = @intToPtr(?*anyopaque, submission.arguments[1]);
                     break :blk .{ .message = .{ .id = message_id, .context = message_context } };
                 } else {
@@ -236,7 +236,7 @@ pub const Submission = struct {
             },
             .create_plain_window => blk: {
                 break :blk .{
-                    .user_window = @intToPtr(*common.Window, submission.arguments[0]),
+                    .user_window = @intToPtr(*lib.Window, submission.arguments[0]),
                 };
             },
         };
@@ -278,7 +278,7 @@ pub const Manager = struct {
 pub const Syscall = struct {
     id: ID,
 
-    pub const count = enum_count(ID);
+    pub const count = enumCount(ID);
     pub const ID = enum(Submission.Input.IDIntType) {
         ask_syscall_manager = 0,
         flush_syscall_manager = 1,
@@ -314,7 +314,7 @@ pub const Service = struct {
         send_message = 6,
         create_plain_window = 7,
     };
-    pub const count = enum_count(ID);
+    pub const count = enumCount(ID);
 
     pub fn from_id(comptime id: ID) Service {
         return services[@enumToInt(id)];

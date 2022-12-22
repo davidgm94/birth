@@ -1,9 +1,10 @@
 const IDT = @This();
 
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.IDT);
-const RFLAGS = common.arch.x86_64.registers.RFLAGS;
+const lib = @import("lib");
+const assert = lib.assert;
+const log = lib.log.scoped(.IDT);
+const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
+const comptimePrint = lib.comptimePrint;
 
 const privileged = @import("privileged");
 const CoreDirectorData = privileged.CoreDirectorData;
@@ -389,16 +390,16 @@ const Frame = extern struct {
     cs: u64,
     ss: u64,
 
-    pub fn format(frame: *const Frame, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(frame: *const Frame, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         try writer.writeAll("\n");
-        inline for (common.fields(Frame)) |field| {
+        inline for (lib.fields(Frame)) |field| {
             const name = field.name;
             const value = @field(frame, field.name);
             const args = .{ name, value };
 
             switch (field.type) {
-                u64 => try common.internal_format(writer, "\t{s}: 0x{x}\n", args),
-                RFLAGS => try common.internal_format(writer, "\t{s}: {}\n", args),
+                u64 => try lib.format(writer, "\t{s}: 0x{x}\n", args),
+                RFLAGS => try lib.format(writer, "\t{s}: {}\n", args),
                 else => @compileError("Type not supported"),
             }
         }
@@ -449,8 +450,6 @@ pub fn get_handler(comptime interrupt_number: u64) HandlerPrototype {
                 :
                 : [interrupt_number] "i" (interrupt_number),
             );
-
-            const comptimePrint = common.std.fmt.comptimePrint;
 
             if (is_exception) {
                 const Tag = enum(u8) {

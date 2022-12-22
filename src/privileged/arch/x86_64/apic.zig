@@ -1,6 +1,7 @@
-const common = @import("common");
-const log = common.log.scoped(.APIC);
-const cpuid = common.arch.x86_64.cpuid;
+const lib = @import("lib");
+const log = lib.log.scoped(.APIC);
+const cpuid = lib.arch.x86_64.cpuid;
+const maxInt = lib.maxInt;
 
 const privileged = @import("privileged");
 const VirtualAddress = privileged.VirtualAddress;
@@ -105,7 +106,7 @@ pub fn init() VirtualAddress(.global) {
     var ia32_apic_base = IA32_APIC_BASE.read();
     is_bsp = ia32_apic_base.bsp;
     const apic_base_physical_address = ia32_apic_base.get_address();
-    const apic_base = arch.paging.map_device(apic_base_physical_address, common.arch.page_size) catch @panic("mapping apic failed");
+    const apic_base = arch.paging.map_device(apic_base_physical_address, lib.arch.page_size) catch @panic("mapping apic failed");
     log.debug("APIC base: {}", .{apic_base});
     const id_register = ID.read(apic_base);
     const id = id_register.apic_id;
@@ -170,7 +171,7 @@ pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
         var times_i: u64 = 0;
         const times = 8;
 
-        apic_write(u32, common.max_int(u32), Register.timer_initcnt, apic_base);
+        apic_write(u32, lib.maxInt(u32), Register.timer_initcnt, apic_base);
 
         while (times_i < times) : (times_i += 1) {
             io.write(u8, io.Ports.PIT_command, 0x30);
@@ -183,7 +184,7 @@ pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
             }
         }
 
-        const ticks_per_ms = (common.max_int(u32) - apic_read(u32, .timer_current_count, apic_base)) >> 4;
+        const ticks_per_ms = (maxInt(u32) - apic_read(u32, .timer_current_count, apic_base)) >> 4;
         const timer_calibration_end = read_timestamp();
         const timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
         log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });

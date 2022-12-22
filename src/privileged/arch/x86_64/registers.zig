@@ -1,7 +1,7 @@
-const common = @import("common");
-const assert = common.assert;
-const SimpleR64 = common.arch.x86_64.registers.SimpleR64;
-const RFLAGS = common.arch.x86_64.registers.RFLAGS;
+const lib = @import("lib");
+const assert = lib.assert;
+const SimpleR64 = lib.arch.x86_64.registers.SimpleR64;
+const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;

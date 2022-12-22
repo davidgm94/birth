@@ -1,9 +1,10 @@
-const common = @import("common");
-const assert = common.assert;
-const logger = common.log.scoped(.EntryPoint);
-const cpuid = common.arch.x86_64.cpuid;
-const page_shifter = common.arch.page_shifter;
-const valid_page_sizes = common.arch.valid_page_sizes;
+const lib = @import("lib");
+const assert = lib.assert;
+const alignForward = lib.alignForward;
+const logger = lib.log.scoped(.EntryPoint);
+const cpuid = lib.arch.x86_64.cpuid;
+const page_shifter = lib.arch.page_shifter;
+const valid_page_sizes = lib.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
@@ -70,7 +71,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
                 if (used_byte_count >= physical_regions_allocation_size) {
                     const physical_address = PhysicalAddress(.local).new(entry.physical_start + used_byte_count);
-                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, common.align_forward(u64, physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
+                    bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, alignForward(physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
 
                     const free_regions = physical_address.to_higher_half_virtual_address().access([*]PhysicalAddressSpace.Region)[0..entry_count];
                     memory_map_iterator.reset();
@@ -133,7 +134,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
 
     // TODO: init RTC
     // TODO: setup timer properly
-    if (common.config.timeslicing) {
+    if (lib.config.timeslicing) {
         APIC.calibrate_timer(apic_base);
     } else {
         logger.warn("Timeslicing not enabled", .{});
@@ -474,9 +475,9 @@ fn enable_fpu() void {
     // should we ldmxcsr ?
 }
 
-pub const log_level = common.log.Level.debug;
+pub const log_level = lib.log.Level.debug;
 
-pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
     writer.writeAll(prefix) catch unreachable;
@@ -485,15 +486,15 @@ pub fn log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLitera
     writer.writeByte('\n') catch unreachable;
 }
 
-pub fn panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
+pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     asm volatile (
         \\cli
     );
-    common.log.scoped(.PANIC).err("{s}", .{message});
+    lib.log.scoped(.PANIC).err("{s}", .{message});
     privileged.arch.CPU_stop();
 }
 
-const Writer = common.Writer(void, error{}, e9_write);
+const Writer = lib.Writer(void, error{}, e9_write);
 const writer = Writer{ .context = {} };
 fn e9_write(_: void, bytes: []const u8) error{}!usize {
     const bytes_left = asm volatile (

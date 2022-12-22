@@ -1,39 +1,35 @@
-const common = @import("src/common.zig");
-const std = @import("std");
-const assert = std.debug.assert;
+const lib = @import("src/lib.zig");
+const assert = lib.assert;
 
-const Builder = std.build.Builder;
-const FileSource = std.build.FileSource;
-const LibExeObjStep = std.build.LibExeObjStep;
-const OptionsStep = std.build.OptionsStep;
-const Package = std.build.Pkg;
-const RunStep = std.build.RunStep;
-const Step = std.build.Step;
-const WriteFileStep = std.build.WriteFileStep;
+// Build imports
+const Builder = lib.build.Builder;
+const FileSource = lib.build.FileSource;
+const LibExeObjStep = lib.build.LibExeObjStep;
+const OptionsStep = lib.build.OptionsStep;
+const Package = lib.build.Pkg;
+const RunStep = lib.build.RunStep;
+const Step = lib.build.Step;
+const WriteFileStep = lib.build.WriteFileStep;
 
-const Target = std.Target;
+const Target = lib.Target;
 const Arch = Target.Cpu.Arch;
-const CrossTarget = std.zig.CrossTarget;
+const CrossTarget = lib.CrossTarget;
 
-const builtin = @import("builtin");
-const os = builtin.target.os.tag;
-const arch = builtin.target.cpu.arch;
+const ChildProcess = lib.ChildProcess;
 
-const fork = std.os.fork;
-const ChildProcess = std.ChildProcess;
-const waitpid = std.os.waitpid;
+const fork = lib.posix.fork;
+const waitpid = lib.posix.waitpid;
 
-const cwd = std.fs.cwd;
-const Dir = std.fs.Dir;
-const path = std.fs.path;
-const basename = std.fs.path.basename;
-const dirname = std.fs.path.dirname;
+const cwd = lib.cwd;
+const Dir = lib.Dir;
+const basename = lib.path.basename;
+const dirname = lib.path.dirname;
 
-const PartitionTable = common.PartitionTable;
+const PartitionTable = lib.PartitionTable;
 const GPT = PartitionTable.GPT;
 const MBR = PartitionTable.MBR;
 
-const Filesystem = common.Filesystem;
+const Filesystem = lib.Filesystem;
 const FAT32 = Filesystem.FAT32;
 
 const cache_dir = "zig-cache/";
@@ -86,24 +82,31 @@ pub fn build(b: *Builder) void {
     };
 
     kernel.create() catch |err| {
-        std.io.getStdOut().writeAll("error: ") catch unreachable;
-        std.io.getStdOut().writeAll(@errorName(err)) catch unreachable;
-        std.io.getStdOut().writer().writeByte('\n') catch unreachable;
+        lib.getStdOut().writeAll("error: ") catch unreachable;
+        lib.getStdOut().writeAll(@errorName(err)) catch unreachable;
+        lib.getStdOut().writer().writeByte('\n') catch unreachable;
         unreachable;
     };
 
-    const common_test = kernel.builder.addTestExe("common_test", "src/common.zig");
-    common_test.setTarget(b.standardTargetOptions(.{}));
-    common_test.setBuildMode(b.standardReleaseOptions());
-    const run_test_step = common_test.run();
-
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_test_step.step);
+
+    const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
+        .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
+    };
+
+    for (native_tests) |native_test| {
+        const test_exe = b.addTestExe(native_test.name, native_test.zig_source_file);
+        test_exe.setTarget(b.standardTargetOptions(.{}));
+        test_exe.setBuildMode(b.standardReleaseOptions());
+        test_exe.setOutputDir("zig-cache");
+        const run_test_step = test_exe.run();
+        test_step.dependOn(&run_test_step.step);
+    }
 }
 
-var common_package = Package{
-    .name = "common",
-    .source = FileSource.relative("src/common.zig"),
+var lib_package = Package{
+    .name = "lib",
+    .source = FileSource.relative("src/lib.zig"),
 };
 
 var bootloader_package = Package{
@@ -126,201 +129,10 @@ var user_package = Package{
     .source = FileSource.relative("src/user.zig"),
 };
 
-fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
-    switch (os) {
-        .windows => {
-            const windows = std.os.windows;
-            return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
-        },
-        else => {
-            const mmap = std.os.mmap;
-            const PROT = std.os.PROT;
-            const MAP = std.os.MAP;
-            return try mmap(null, bytes, PROT.READ | PROT.WRITE, MAP.PRIVATE | MAP.ANONYMOUS, -1, 0);
-        },
-    }
-}
-
-fn add_qemu_debug_isa_exit(builder: *Builder, list: *common.ArrayListManaged([]const u8), qemu_debug_isa_exit: common.QEMU.ISADebugExit) !void {
+fn add_qemu_debug_isa_exit(builder: *Builder, list: *lib.ArrayListManaged([]const u8), qemu_debug_isa_exit: lib.QEMU.ISADebugExit) !void {
     try list.append("-device");
     try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
 }
-
-const DiskImage = extern struct {
-    descriptor: common.Disk.Descriptor,
-    buffer_ptr: [*]u8,
-
-    const BufferType = common.ArrayListAligned(u8, 0x200);
-
-    const File = struct {
-        handle: std.fs.File,
-        size: usize,
-    };
-
-    inline fn get_buffer(disk_image: *DiskImage) []u8 {
-        return disk_image.buffer_ptr[0..disk_image.descriptor.disk_size];
-    }
-
-    fn get_file(file_path: []const u8) !File {
-        const handle = try cwd().openFile(file_path, .{});
-        return File{
-            .handle = handle,
-            .size = try handle.getEndPos(),
-        };
-    }
-
-    fn read(disk_descriptor: *common.Disk.Descriptor, sector_count: u64, sector_offset: u64) common.Disk.Descriptor.ReadError![]u8 {
-        const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
-        assert(disk.descriptor.disk_size > 0);
-        assert(sector_count > 0);
-        //assert(disk.descriptor.disk_size == disk.buffer.items.len);
-        const byte_count = sector_count * disk.descriptor.sector_size;
-        const byte_offset = sector_offset * disk.descriptor.sector_size;
-        if (byte_offset + byte_count > disk.descriptor.disk_size) {
-            std.debug.print("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.descriptor.disk_size });
-            return common.Disk.Descriptor.ReadError.read_error;
-        }
-        const result = disk.get_buffer()[byte_offset .. byte_offset + byte_count];
-        return result;
-    }
-
-    fn write(disk_descriptor: *common.Disk.Descriptor, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) common.Disk.Descriptor.WriteError!void {
-        const need_write = !(disk_descriptor.type == .memory and !commit_memory_to_disk);
-        if (need_write) {
-            std.log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
-            const disk = @fieldParentPtr(DiskImage, "descriptor", disk_descriptor);
-            assert(disk.descriptor.disk_size > 0);
-            //assert(disk.descriptor.partition_count == 1);
-            assert(bytes.len > 0);
-            //assert(disk.descriptor.disk_size == disk.buffer.items.len);
-            const byte_offset = sector_offset * disk.descriptor.sector_size;
-            if (byte_offset + bytes.len > disk.descriptor.disk_size) return common.Disk.Descriptor.WriteError.write_error;
-            std.mem.copy(u8, disk.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
-        }
-    }
-
-    fn make(step: *Step) !void {
-        const kernel = @fieldParentPtr(Kernel, "disk_step", step);
-
-        const disk_bytes = try allocate_zero_memory(64 * 1024 * 1024);
-        const disk_sector_count = @divExact(disk_bytes.len, 0x200);
-        common.log.debug("Disk size: 0x{x}", .{disk_sector_count});
-        var disk = DiskImage{
-            .descriptor = .{
-                .type = .memory,
-                .callbacks = .{
-                    .read = read,
-                    .write = write,
-                },
-                .disk_size = disk_bytes.len,
-            },
-            .buffer_ptr = disk_bytes.ptr,
-        };
-
-        const barebones_disk_memory = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", common.max_int(usize));
-        var barebones_disk_image = DiskImage{
-            .descriptor = .{
-                .type = .memory,
-                .callbacks = .{
-                    .read = read,
-                    .write = write,
-                },
-                .disk_size = barebones_disk_memory.len,
-            },
-            .buffer_ptr = barebones_disk_memory.ptr,
-        };
-
-        switch (kernel.options.arch) {
-            .x86_64 => {
-                const x86_64 = kernel.options.arch.x86_64;
-                switch (x86_64.boot_protocol) {
-                    .bios => {
-                        const barebones = blk: {
-                            const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.descriptor, 0);
-                            const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
-                            break :blk Barebones{
-                                .gpt_partition_cache = gpt_partition_cache,
-                                .fat_partition = fat_partition,
-                            };
-                        };
-
-                        const gpt_cache = try GPT.create(&disk.descriptor, barebones.gpt_partition_cache.gpt.header);
-                        // TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
-                        const gpt_partition_cache = try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
-                        const fat_cache = try gpt_partition_cache.format(.fat32);
-                        try fat_cache.mkdir("/EFI/BOOT");
-                        const foo_entry = try barebones.fat_partition.get_directory_entry("/foo", .fail, null);
-                        try fat_cache.add_file("/foo", "a\n", foo_entry.directory_entry);
-
-                        common.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
-
-                        try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
-                        unreachable;
-                        //try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
-                        //.read = read,
-                        //.write = write,
-                        //});
-
-                        //try disk.descriptor.verify();
-                        //try cwd().writeFile("zig-cache/disk_image.bin", disk.get_buffer());
-
-                        //const fat32_partition = try kernel.builder.allocator.create(common.Filesystem.FAT32.Partition);
-
-                        //fat32_partition.* = try disk.descriptor.get_partition(0);
-
-                        //const r = try fat32_partition.create_file("loader.elf");
-                        //_ = r;
-                        //
-
-                        //const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
-                        //assert(mbr_file.len == 0x200);
-                        //disk.buffer.appendSliceAssumeCapacity(mbr_file);
-                        //const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
-                        //const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
-                        //disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
-                        //mbr.dap = .{
-                        //.sector_count = @intCast(u16, common.align_forward(loader_file.len, 0x200) >> 9),
-                        //.pointer = 0x7e00,
-                        //.lba = disk.buffer.items.len >> 9,
-                        //};
-                        ////std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
-                        ////if (true) unreachable;
-                        ////const a = @ptrToInt(&mbr.dap.pointer);
-                        ////const b = @ptrToInt(mbr);
-                        ////std.debug.print("A: 0x{x}\n", .{a - b});
-                        ////if (true) unreachable;
-                        //disk.buffer.appendSliceAssumeCapacity(loader_file);
-                        ////assert(loader_file.len < 0x200);
-                        //disk.buffer.appendNTimesAssumeCapacity(0, common.align_forward(loader_file.len, 0x200) - loader_file.len);
-                    },
-                    .uefi => {
-                        unreachable;
-                    },
-                }
-            },
-            else => unreachable,
-        }
-
-        //assert(resource_files.len > 0);
-
-        //for (resource_files) |filename| {
-        //const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
-        //try filesystem.write_file(kernel.allocator, filename, file_content);
-        //}
-
-        //assert(kernel.userspace_programs.len > 0);
-
-        //for (kernel.userspace_programs) |program| {
-        //const filename = program.out_filename;
-        //const file_path = program.output_path_source.getPath();
-        //const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, max_file_length);
-        //try filesystem.write_file(get_allocator(), filename, file_content);
-        //}
-
-        // TODO: use filesystem
-        try cwd().writeFile(kernel.builder.fmt("{s}disk.bin", .{cache_dir}), disk.buffer.items);
-    }
-};
 
 //const BootImage = struct {
 //fn build(step: *Step) !void {
@@ -391,9 +203,9 @@ const Module = struct {
     type: Type,
     dependencies: []const []const u8,
 
-    fn parse(allocator: common.Allocator, file: []const u8) !Module {
-        var token_stream = std.json.TokenStream.init(file);
-        const module = try std.json.parse(Module, &token_stream, .{ .allocator = allocator });
+    fn parse(allocator: lib.Allocator, file: []const u8) !Module {
+        var token_stream = lib.json.TokenStream.init(file);
+        const module = try lib.json.parse(Module, &token_stream, .{ .allocator = allocator });
         return module;
     }
 
@@ -401,15 +213,15 @@ const Module = struct {
         return &source_file.module.module;
     }
 
-    fn get_path_to_file(module: Module, allocator: common.Allocator, file: []const u8) []const u8 {
-        const directory_length = common.last_index_of(u8, module.path, "module.zig") orelse unreachable;
+    fn get_path_to_file(module: Module, allocator: lib.Allocator, file: []const u8) []const u8 {
+        const directory_length = lib.last_index_of(u8, module.path, "module.zig") orelse unreachable;
         const directory_path = module.path[0..directory_length];
-        const path_to_file = try common.concatenate(allocator, u8, &.{ directory_path, file });
+        const path_to_file = try lib.concatenate(allocator, u8, &.{ directory_path, file });
         return path_to_file;
     }
 
     fn get_program_name(module: Module) []const u8 {
-        const directory_length = common.last_index_of(u8, module.path, "module.zig") orelse unreachable;
+        const directory_length = lib.last_index_of(u8, module.path, "module.zig") orelse unreachable;
         const directory_path = module.path[0..directory_length];
         const directory_name = basename(directory_path);
         return directory_name;
@@ -428,7 +240,7 @@ const UserProgram = struct {
     path: []const u8,
     name: []const u8,
 
-    fn make(allocator: common.Allocator, module: Module, program_name: []const u8, source_path: []const u8) UserProgram {
+    fn make(allocator: lib.Allocator, module: Module, program_name: []const u8, source_path: []const u8) UserProgram {
         assert(module.type == .zig_exe);
         _ = allocator;
         //_ = module.get_path_to_file(allocator, "main.zig");
@@ -450,16 +262,16 @@ const Kernel = struct {
     disk_count: u64 = 0,
     disk_step: Step = undefined,
     debug_step: Step = undefined,
-    run_argument_list: common.ArrayListManaged([]const u8) = undefined,
-    debug_argument_list: common.ArrayListManaged([]const u8) = undefined,
+    run_argument_list: lib.ArrayListManaged([]const u8) = undefined,
+    debug_argument_list: lib.ArrayListManaged([]const u8) = undefined,
     gdb_script: *WriteFileStep = undefined,
 
     fn create(kernel: *Kernel) !void {
         // Initialize package dependencies here
-        common_package.dependencies = &.{common_package};
-        rise_package.dependencies = &.{ common_package, rise_package, privileged_package };
-        user_package.dependencies = &.{common_package};
-        privileged_package.dependencies = &.{ common_package, privileged_package };
+        lib_package.dependencies = &.{lib_package};
+        rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
+        user_package.dependencies = &.{lib_package};
+        privileged_package.dependencies = &.{ lib_package, privileged_package };
 
         kernel.create_bootloader();
         kernel.create_executable();
@@ -483,7 +295,7 @@ const Kernel = struct {
                                     .abi = .msvc,
                                 });
                                 bootloader_exe.setOutputDir(cache_dir);
-                                bootloader_exe.addPackage(common_package);
+                                bootloader_exe.addPackage(lib_package);
                                 bootloader_exe.addPackage(privileged_package);
                                 bootloader_exe.strip = true;
                                 bootloader_exe.setBuildMode(.ReleaseSafe);
@@ -498,7 +310,7 @@ const Kernel = struct {
                                 const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios.zig");
                                 bootloader_exe.setTarget(get_target(.x86, false));
                                 bootloader_exe.setOutputDir(cache_dir);
-                                bootloader_exe.addPackage(common_package);
+                                bootloader_exe.addPackage(lib_package);
                                 bootloader_exe.addPackage(privileged_package);
                                 bootloader_exe.strip = true;
                                 bootloader_exe.link_gc_sections = true;
@@ -516,7 +328,7 @@ const Kernel = struct {
                         const bootloader_exe = kernel.builder.addExecutable("limine.elf", "src/bootloader/limine/limine.zig");
                         bootloader_exe.setTarget(get_target(.x86_64, false));
                         bootloader_exe.setOutputDir(cache_dir);
-                        bootloader_exe.addPackage(common_package);
+                        bootloader_exe.addPackage(lib_package);
                         bootloader_exe.addPackage(privileged_package);
                         bootloader_exe.strip = true;
                         bootloader_exe.setBuildMode(.ReleaseSafe);
@@ -555,7 +367,7 @@ const Kernel = struct {
         kernel.executable.setBuildMode(kernel.builder.standardReleaseOptions());
         kernel.executable.setOutputDir(cache_dir);
 
-        kernel.executable.addPackage(common_package);
+        kernel.executable.addPackage(lib_package);
         kernel.executable.addPackage(bootloader_package);
         kernel.executable.addPackage(rise_package);
         kernel.executable.addPackage(privileged_package);
@@ -566,7 +378,7 @@ const Kernel = struct {
     }
 
     fn create_disassembly_step(kernel: *Kernel) !void {
-        var arg_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        var arg_list = lib.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         const main_args = &.{ "llvm-objdump", kernel_path };
         const common_flags = &.{ "-d", "-S" };
         try arg_list.appendSlice(main_args);
@@ -587,20 +399,20 @@ const Kernel = struct {
         const user_programs_dir = try cwd().openIterableDir(user_programs_path, .{});
         var it = user_programs_dir.iterate();
 
-        var unique_programs = common.ArrayListManaged(UserProgram).init(kernel.builder.allocator);
+        var unique_programs = lib.ArrayListManaged(UserProgram).init(kernel.builder.allocator);
         while (try it.next()) |module_entry| {
             if (module_entry.kind == .Directory) {
                 const module_dir = try user_programs_dir.dir.openDir(module_entry.name, .{});
                 const module_configuration_file = module_dir.readFileAlloc(kernel.builder.allocator, "module.json", 0x1000 * 16) catch return Error.module_file_not_found;
                 const module = try Module.parse(kernel.builder.allocator, module_configuration_file);
                 // TODO: change path
-                const source_file_path = try common.concatenate(kernel.builder.allocator, u8, &.{ user_programs_path, "/", module_entry.name, "/main.zig" });
+                const source_file_path = try lib.concat(kernel.builder.allocator, u8, &.{ user_programs_path, "/", module_entry.name, "/main.zig" });
                 const unique_program = UserProgram.make(kernel.builder.allocator, module, module_entry.name, source_file_path);
                 try unique_programs.append(unique_program);
             }
         }
 
-        var libexeobj_steps = try common.ArrayListManaged(*LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len);
+        var libexeobj_steps = try lib.ArrayListManaged(*LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len);
 
         for (unique_programs.items) |unique_program| {
             const filename = unique_program.name;
@@ -615,7 +427,7 @@ const Kernel = struct {
             program.setLinkerScriptPath(FileSource.relative(linker_script_path));
             program.entry_symbol_name = "user_entry_point";
 
-            program.addPackage(common_package);
+            program.addPackage(lib_package);
             program.addPackage(user_package);
 
             kernel.builder.default_step.dependOn(&program.step);
@@ -626,16 +438,8 @@ const Kernel = struct {
         kernel.userspace_programs = libexeobj_steps.items;
     }
 
-    //fn create_boot_image(kernel: *Kernel) void {
-    //kernel.boot_image_step = Step.init(.custom, "_inhouse_image_", kernel.builder.allocator, BootImage.build);
-    //const bootloader_step = kernel.bootloader orelse unreachable;
-    //kernel.boot_image_step.dependOn(&bootloader_step.step);
-    //kernel.boot_image_step.dependOn(&kernel.executable.step);
-    //kernel.boot_image_step.dependOn(kernel.builder.default_step);
-    //}
-
     fn create_disk(kernel: *Kernel) void {
-        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, DiskImage.make);
+        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, disk_image_make);
 
         const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
         named_step.dependOn(&kernel.disk_step);
@@ -645,13 +449,18 @@ const Kernel = struct {
         }
     }
 
+    fn disk_image_make(step: *Step) !void {
+        _ = step;
+        @panic("Disk image step to be implemented");
+    }
+
     const Error = error{
         not_implemented,
         module_file_not_found,
     };
 
     fn create_run_and_debug_steps(kernel: *Kernel) !void {
-        kernel.run_argument_list = common.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        kernel.run_argument_list = lib.ArrayListManaged([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
                 //defer {
@@ -663,7 +472,7 @@ const Kernel = struct {
                 //}
                 //}
 
-                const qemu_name = try common.concatenate(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
+                const qemu_name = try lib.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
                 try kernel.run_argument_list.append(qemu_name);
 
                 if (!kernel.options.is_virtualizing()) {
@@ -736,7 +545,7 @@ const Kernel = struct {
                 if (kernel.options.is_virtualizing()) {
                     const args = &.{
                         "-accel",
-                        switch (common.os) {
+                        switch (lib.os) {
                             .windows => "whpx",
                             .linux => "kvm",
                             .macos => "hvf",
@@ -749,7 +558,7 @@ const Kernel = struct {
                     try kernel.debug_argument_list.appendSlice(args);
                 } else {
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
-                        var log_what = common.ArrayListManaged(u8).init(kernel.builder.allocator);
+                        var log_what = lib.ArrayListManaged(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) try log_what.appendSlice("guest_errors,");
                         if (log_options.cpu) try log_what.appendSlice("cpu,");
                         if (log_options.interrupts) try log_what.appendSlice("int,");
@@ -777,7 +586,7 @@ const Kernel = struct {
                 }
 
                 try add_qemu_debug_isa_exit(kernel.builder, &kernel.run_argument_list, switch (kernel.options.arch) {
-                    .x86_64 => common.QEMU.x86_64_debug_exit,
+                    .x86_64 => lib.QEMU.x86_64_debug_exit,
                     else => return Error.not_implemented,
                 });
 
@@ -803,7 +612,7 @@ const Kernel = struct {
             else => return Error.not_implemented,
         }
 
-        var gdb_script_buffer = common.ArrayListManaged(u8).init(kernel.builder.allocator);
+        var gdb_script_buffer = lib.ArrayListManaged(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
             .x86, .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
             else => return Error.not_implemented,
@@ -959,8 +768,8 @@ const Kernel = struct {
             const Bochs = struct {};
 
             const DiskOptions = struct {
-                interface: common.Disk.Type,
-                filesystem: common.Filesystem.Type,
+                interface: lib.Disk.Type,
+                filesystem: lib.Filesystem.Type,
             };
 
             const LogOptions = struct {
@@ -974,7 +783,7 @@ const Kernel = struct {
 
         fn is_virtualizing(options: Options) bool {
             return switch (options.run.emulator) {
-                .qemu => options.run.emulator.qemu.virtualize and arch == options.arch,
+                .qemu => options.run.emulator.qemu.virtualize and lib.cpu.arch == options.arch,
                 .bochs => false,
             };
         }
@@ -1013,11 +822,11 @@ const Kernel = struct {
 fn do_debug_step(step: *Step) !void {
     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
     const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
-    switch (common.os) {
+    switch (lib.os) {
         .linux, .macos => {
             const first_pid = try fork();
             if (first_pid == 0) {
-                switch (common.os) {
+                switch (lib.os) {
                     .linux => {
                         var debugger_process = ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
                         _ = try debugger_process.spawnAndWait();
@@ -1047,9 +856,4 @@ const Limine = struct {
     const installables_path = base_path ++ "/installables";
     const image_path = cache_dir ++ "universal.iso";
     const installer = @import("src/bootloader/limine/installer.zig");
-};
-
-const Barebones = extern struct {
-    gpt_partition_cache: GPT.Partition.Cache,
-    fat_partition: FAT32.Cache,
 };

@@ -1,4 +1,4 @@
-const common = @import("../common.zig");
+const common = @import("../lib.zig");
 const log = common.log.scoped(.Module);
 
 const len = 64;

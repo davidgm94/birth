@@ -1,11 +1,11 @@
-const common = @import("../../common.zig");
+const lib = @import("../../lib.zig");
 
-const Graphics = common.Graphics;
+const Graphics = lib.Graphics;
 const DrawingArea = Graphics.DrawingArea;
 const Point = Graphics.Point;
 
-const assert = common.assert;
-const log = common.log.scoped(.Rectangle);
+const assert = lib.assert;
+const log = lib.log.scoped(.Rectangle);
 
 pub const Int = u32;
 pub const side_count = 4;
@@ -121,7 +121,7 @@ test "clip" {
         const b = a;
         const expected = Clip{ .intersection = a, .clip = false };
         const result = clip(a, b);
-        try common.expect_equal(expected.clip, result.clip);
+        try lib.expect_equal(expected.clip, result.clip);
         try equal(expected.intersection, result.intersection);
     }
     {
@@ -130,14 +130,14 @@ test "clip" {
         const expected = Clip{ .intersection = a, .clip = false };
         const result = clip(a, b);
         try equal(expected.intersection, result.intersection);
-        try common.expect_equal(expected.clip, result.clip);
+        try lib.expect_equal(expected.clip, result.clip);
     }
 }
 
 fn equal(a: Rectangle, b: Rectangle) !void {
     var i: u64 = 0;
     while (i < side_count) : (i += 1) {
-        try common.expect_equal(a[i], b[i]);
+        try lib.expect_equal(a[i], b[i]);
     }
 }
 
@@ -146,6 +146,6 @@ fn test_two_rectangles(a: Rectangle, b: Rectangle, expected: Rectangle, comptime
 
     var i: u64 = 0;
     while (i < side_count) : (i += 1) {
-        try common.expect_equal(result[i], expected[i]);
+        try lib.expect_equal(result[i], expected[i]);
     }
 }

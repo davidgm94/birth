@@ -1,10 +1,10 @@
-const common = @import("common");
-const assert = common.assert;
-const ExecutionMode = common.Syscall.ExecutionMode;
-const QueueDescriptor = common.Syscall.Manager.QueueDescriptor;
-const Service = common.Syscall.Service;
-const Submission = common.Syscall.Submission;
-const Syscall = common.Syscall.Syscall;
+const lib = @import("lib");
+const assert = lib.assert;
+const ExecutionMode = lib.Syscall.ExecutionMode;
+const QueueDescriptor = lib.Syscall.Manager.QueueDescriptor;
+const Service = lib.Syscall.Service;
+const Submission = lib.Syscall.Submission;
+const Syscall = lib.Syscall.Syscall;
 
 pub const Manager = struct {
     buffer: []u8,
@@ -42,12 +42,12 @@ pub const Manager = struct {
                             return @intToPtr([*]u8, ptr)[0..size];
                         },
                         .get_framebuffer => {
-                            const framebuffer = @intToPtr(*common.DrawingAreaDescriptor, result.a);
+                            const framebuffer = @intToPtr(*lib.DrawingAreaDescriptor, result.a);
                             return framebuffer;
                         },
                         .receive_message => {
-                            const message = common.Message{
-                                .id = @intToEnum(common.Message.ID, result.a),
+                            const message = lib.Message{
+                                .id = @intToEnum(lib.Message.ID, result.a),
                                 .context = @intToPtr(?*anyopaque, result.b),
                             };
                             return message;

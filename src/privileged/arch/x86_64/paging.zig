@@ -1,12 +1,13 @@
-const common = @import("common");
-const assert = common.assert;
-const copy = common.copy;
-const CustomAllocator = common.CustomAllocator;
-const enum_count = common.enum_count;
-const is_aligned = common.is_aligned;
-const log = common.log.scoped(.VAS);
-const zeroes = common.zeroes;
-const zero_slice = common.zero_slice;
+const lib = @import("lib");
+const alignForward = lib.alignForward;
+const alignBackward = lib.alignBackward;
+const isAligned = lib.isAligned;
+const assert = lib.assert;
+const copy = lib.copy;
+const CustomAllocator = lib.CustomAllocator;
+const enumCount = lib.enumCount;
+const log = lib.log.scoped(.VAS);
+const zeroes = lib.zeroes;
 
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
@@ -18,8 +19,8 @@ const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const TranslationResult = VirtualAddressSpace.TranslationResult;
 
-const valid_page_sizes = common.arch.valid_page_sizes;
-const reverse_valid_page_sizes = common.arch.reverse_valid_page_sizes;
+const valid_page_sizes = lib.arch.valid_page_sizes;
+const reverse_valid_page_sizes = lib.arch.reverse_valid_page_sizes;
 
 const cr3 = privileged.arch.x86_64.registers.cr3;
 
@@ -28,12 +29,12 @@ const higher_half_entry_index = 512 / 2;
 pub const Specific = struct {
     cr3: cr3 = undefined,
 
-    pub fn format(specific: Specific, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try common.internal_format(writer, "{}", .{specific.cr3});
+    pub fn format(specific: Specific, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.internal_format(writer, "{}", .{specific.cr3});
     }
 };
 
-const Indices = [enum_count(PageIndex)]u16;
+const Indices = [enumCount(PageIndex)]u16;
 
 const limine_physical_allocator = CustomAllocator{};
 
@@ -62,7 +63,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
                     break;
                 } else {
-                    const aligned_page_address = common.align_forward(usize, asked_virtual_address, reverse_page_size);
+                    const aligned_page_address = alignForward(asked_virtual_address, reverse_page_size);
                     const prologue_misalignment = aligned_page_address - asked_virtual_address;
                     const aligned_size_left = size - prologue_misalignment;
 
@@ -73,8 +74,8 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
                         const virtual_address = aligned_page_address;
                         const physical_address = asked_physical_address + prologue_misalignment;
-                        const this_page_top_physical_address = common.align_backward(physical_address + aligned_size_left, reverse_page_size);
-                        const this_page_top_virtual_address = common.align_backward(virtual_address + aligned_size_left, reverse_page_size);
+                        const this_page_top_physical_address = alignBackward(physical_address + aligned_size_left, reverse_page_size);
+                        const this_page_top_virtual_address = alignBackward(virtual_address + aligned_size_left, reverse_page_size);
                         const this_huge_page_size = this_page_top_virtual_address - virtual_address;
                         try map_generic(vas_cr3, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
 
@@ -103,12 +104,12 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
     const flags = general_flags.to_arch_specific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
 
-    if (common.config.safe_slow) {
+    if (lib.config.safe_slow) {
         assert(size > 0);
         assert(asked_virtual_address.is_valid());
         assert(asked_physical_address.is_valid());
-        assert(is_aligned(asked_virtual_address.value, valid_page_sizes[0]));
-        assert(is_aligned(asked_physical_address.value, valid_page_sizes[0]));
+        assert(isAligned(asked_virtual_address.value, valid_page_sizes[0]));
+        assert(isAligned(asked_physical_address.value, valid_page_sizes[0]));
     }
 
     log.debug("Trying to map 0x{x} bytes from {} to {}", .{ size, asked_physical_address, asked_virtual_address });
@@ -138,21 +139,21 @@ fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
     _ = reverse_index;
 
     if (true) {
-        if (!common.is_aligned(asked_physical_address, asked_page_size)) {
+        if (!isAligned(asked_physical_address, asked_page_size)) {
             log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
             @panic("Misalignment");
         }
-        if (!common.is_aligned(asked_virtual_address, asked_page_size)) {
+        if (!isAligned(asked_virtual_address, asked_page_size)) {
             @panic("wtf 2");
         }
-        if (!common.is_aligned(size, asked_page_size)) {
+        if (!isAligned(size, asked_page_size)) {
             log.debug("Asked size: 0x{x}. Asked page size: 0x{x}", .{ size, asked_page_size });
             @panic("wtf 3");
         }
     } else {
-        assert(common.is_aligned(asked_physical_address, asked_page_size));
-        assert(common.is_aligned(asked_virtual_address, asked_page_size));
-        assert(common.is_aligned(size, asked_page_size));
+        assert(isAligned(asked_physical_address, asked_page_size));
+        assert(isAligned(asked_virtual_address, asked_page_size));
+        assert(isAligned(size, asked_page_size));
     }
 
     var virtual_address = asked_virtual_address;
@@ -224,13 +225,13 @@ fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags:
 
 fn get_pml4_table(cr3_register: cr3) *volatile PML4Table {
     const pml4_physical_address = cr3_register.get_address();
-    const pml4_virtual_address = switch (common.os) {
+    const pml4_virtual_address = switch (lib.os) {
         .freestanding => pml4_physical_address.to_higher_half_virtual_address(),
         .uefi => pml4_physical_address.to_identity_mapped_virtual_address(),
         else => @compileError("OS not supported"),
     };
 
-    if (common.config.safe_slow) {
+    if (lib.config.safe_slow) {
         assert(pml4_virtual_address.is_valid());
     }
 
@@ -259,7 +260,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (common.os) {
+    const table_virtual_address = switch (lib.os) {
         .freestanding => table_physical_address.to_higher_half_virtual_address(),
         .uefi => table_physical_address.to_identity_mapped_virtual_address(),
         else => @compileError("OS not supported"),
@@ -270,7 +271,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
         log.debug("check pdp table valid: {}", .{is_valid});
     }
 
-    if (common.config.safe_slow) assert(is_valid);
+    if (lib.config.safe_slow) assert(is_valid);
 
     return table_virtual_address.access(*volatile PDPTable);
 }
@@ -297,7 +298,7 @@ fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, ph
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address, valid_page_sizes[2]));
+    assert(isAligned(physical_address, valid_page_sizes[2]));
 
     entry_pointer.* = @bitCast(PDPTE, get_page_entry(PDPTE_1GB, physical_address, flags));
 }
@@ -308,7 +309,7 @@ fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, phys
 
     if (entry_value.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address, valid_page_sizes[1]));
+    assert(isAligned(physical_address, valid_page_sizes[1]));
 
     entry_pointer.* = @bitCast(PDTE, get_page_entry(PDTE_2MB, physical_address, flags));
 }
@@ -318,7 +319,7 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(common.is_aligned(physical_address, valid_page_sizes[0]));
+    assert(isAligned(physical_address, valid_page_sizes[0]));
 
     entry_pointer.* = @bitCast(PTE, get_page_entry(PTE, physical_address, flags));
 }
@@ -349,12 +350,12 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (common.os) {
+    const table_virtual_address = switch (lib.os) {
         .freestanding => table_physical_address.to_higher_half_virtual_address(),
         .uefi => table_physical_address.to_identity_mapped_virtual_address(),
         else => @compileError("OS not supported"),
     };
-    if (common.config.safe_slow) assert(table_virtual_address.is_valid());
+    if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
     return table_virtual_address.access(*volatile PDTable);
 }
 
@@ -383,13 +384,13 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (common.os) {
+    const table_virtual_address = switch (lib.os) {
         .freestanding => table_physical_address.to_higher_half_virtual_address(),
         .uefi => table_physical_address.to_identity_mapped_virtual_address(),
         else => @compileError("OS not supported"),
     };
 
-    if (common.config.safe_slow) assert(table_virtual_address.is_valid());
+    if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
 
     return table_virtual_address.access(*volatile PTable);
 }
@@ -401,7 +402,7 @@ pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeO
 pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
     const pml4_physical_region = allocation_region.take_slice(@sizeOf(PML4Table));
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
-    const pml4_entries = switch (common.os) {
+    const pml4_entries = switch (lib.os) {
         .freestanding => pml4_physical_region.to_higher_half_virtual_address().access(PML4TE),
         .uefi => pml4_physical_region.to_identity_mapped_virtual_address().access(PML4TE),
         else => @compileError("OS not supported"),
@@ -434,7 +435,7 @@ pub fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
 }
 
 pub fn init_user(virtual_address_space: *VirtualAddressSpace, physical_address_space: *PhysicalAddressSpace) void {
-    if (common.config.safe_slow) assert(virtual_address_space.privilege_level == .user);
+    if (lib.config.safe_slow) assert(virtual_address_space.privilege_level == .user);
     const pml4_physical_region = physical_address_space.allocate(@sizeOf(PML4Table), valid_page_sizes[0]) catch @panic("Wtf");
     virtual_address_space.arch = Specific{
         .cr3 = cr3.from_address(pml4_physical_region.address),
@@ -444,9 +445,11 @@ pub fn init_user(virtual_address_space: *VirtualAddressSpace, physical_address_s
     const pml4 = pml4_virtual_address.access(*PML4Table);
     const lower_half_pml4 = pml4[0 .. pml4.len / 2];
     const higher_half_pml4 = pml4[0 .. pml4.len / 2];
-    zero_slice(PML4TE, lower_half_pml4);
+    for (lower_half_pml4) |*pml4e| {
+        pml4e.* = zeroes(PML4TE);
+    }
 
-    if (common.config.safe_slow) {
+    if (lib.config.safe_slow) {
         assert(lower_half_pml4.len == half_entry_count);
         assert(higher_half_pml4.len == half_entry_count);
     }
@@ -489,7 +492,9 @@ pub fn map_kernel_address_space_higher_half(new_cr3: cr3, kernel_cr3: cr3) void 
     const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
     // TODO: maybe user flag is not necessary?
     const pml4 = cr3_virtual_address.access(*PML4Table);
-    zero_slice(PML4TE, pml4[0..0x100]);
+    for (pml4[0..0x100]) |*entry| {
+        entry.* = zeroes(PML4TE);
+    }
     copy(PML4TE, pml4[0x100..], kernel_cr3.get_address().to_higher_half_virtual_address().access(*PML4Table)[0x100..]);
 }
 

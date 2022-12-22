@@ -1,6 +1,10 @@
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.Privileged);
+const lib = @import("lib");
+const assert = lib.assert;
+const log = lib.log.scoped(.Privileged);
+const isAligned = lib.isAligned;
+const alignForward = lib.alignForward;
+const alignBackward = lib.alignBackward;
+const maxInt = lib.maxInt;
 
 // This package provides of privileged data structures and routines to both kernel and bootloaders, for now
 // TODO: implement properly
@@ -140,7 +144,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
 
             assert(arch.max_physical_address_bit != 0);
             const max = @as(usize, 1) << arch.max_physical_address_bit;
-            assert(max > common.max_int(u32));
+            assert(max > maxInt(u32));
 
             return physical_address.value() <= max;
         }
@@ -154,7 +158,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn is_aligned(physical_address: PA, alignment: usize) bool {
-            return common.is_aligned(physical_address.value(), alignment);
+            return lib.is_aligned(physical_address.value(), alignment);
         }
 
         pub fn belongs_to_region(physical_address: PA, region: PhysicalMemoryRegion) bool {
@@ -170,11 +174,11 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn aligned_forward(physical_address: PA, alignment: usize) PA {
-            return @intToEnum(PA, common.align_forward(usize, physical_address.value(), alignment));
+            return @intToEnum(PA, alignForward(physical_address.value(), alignment));
         }
 
         pub fn aligned_backward(physical_address: PA, alignment: usize) PA {
-            return @intToEnum(PA, common.align_backward(physical_address.value(), alignment));
+            return @intToEnum(PA, alignBackward(physical_address.value(), alignment));
         }
 
         pub fn align_forward(physical_address: *PA, alignment: usize) void {
@@ -190,7 +194,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn to_higher_half_virtual_address(physical_address: PA) VirtualAddress(locality) {
-            const address = VirtualAddress(locality).new(physical_address.value() + common.config.kernel_higher_half_address);
+            const address = VirtualAddress(locality).new(physical_address.value() + lib.config.kernel_higher_half_address);
             return address;
         }
 
@@ -208,8 +212,8 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             return @intToEnum(PhysicalAddress(.local), @enumToInt(physical_address));
         }
 
-        pub fn format(physical_address: PA, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-            try common.internal_format(writer, "0x{x}", .{physical_address.value()});
+        pub fn format(physical_address: PA, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+            try lib.internal_format(writer, "0x{x}", .{physical_address.value()});
         }
     };
 }
@@ -252,11 +256,11 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn aligned_forward(virtual_address: VA, alignment: usize) VA {
-            return @intToEnum(VA, common.align_forward(virtual_address.value(), alignment));
+            return @intToEnum(VA, lib.align_forward(virtual_address.value(), alignment));
         }
 
         pub fn aligned_backward(virtual_address: VA, alignment: usize) VA {
-            return @intToEnum(VA, common.align_backward(virtual_address.value(), alignment));
+            return @intToEnum(VA, lib.align_backward(virtual_address.value(), alignment));
         }
 
         pub fn align_forward(virtual_address: *VA, alignment: usize) void {
@@ -268,12 +272,12 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn is_aligned(virtual_address: VA, alignment: usize) bool {
-            return common.is_aligned(virtual_address.value(), alignment);
+            return lib.is_aligned(virtual_address.value(), alignment);
         }
 
         pub fn to_physical_address(virtual_address: VA) PhysicalAddress(locality) {
-            assert(virtual_address.value() >= common.config.kernel_higher_half_address);
-            const address = PhysicalAddress(locality).new(virtual_address.value() - common.config.kernel_higher_half_address);
+            assert(virtual_address.value() >= lib.config.kernel_higher_half_address);
+            const address = PhysicalAddress(locality).new(virtual_address.value() - lib.config.kernel_higher_half_address);
             return address;
         }
 
@@ -291,8 +295,8 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
             return @intToEnum(VirtualAddress(.global), @enumToInt(virtual_address));
         }
 
-        pub fn format(virtual_address: VA, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-            try common.internal_format(writer, "0x{x}", .{virtual_address.value()});
+        pub fn format(virtual_address: VA, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+            try lib.format(writer, "0x{x}", .{virtual_address.value()});
         }
     };
 }
@@ -415,7 +419,7 @@ pub const SpawnState = struct {
 };
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    const panic_logger = common.log.scoped(.PANIC);
+    const panic_logger = lib.log.scoped(.PANIC);
     panic_logger.err(format, arguments);
     arch.CPU_stop();
 }
@@ -429,11 +433,11 @@ pub const PhysicalAddressSpace = extern struct {
         out_of_memory,
     };
 
-    const valid_page_sizes = common.arch.valid_page_sizes;
+    const valid_page_sizes = lib.arch.valid_page_sizes;
 
     pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion(.local) {
         if (size >= valid_page_sizes[0]) {
-            if (!common.is_aligned(size, valid_page_sizes[0])) {
+            if (!isAligned(size, valid_page_sizes[0])) {
                 log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
                 return AllocateError.not_base_page_aligned;
             }
@@ -470,7 +474,7 @@ pub const PhysicalAddressSpace = extern struct {
             // For now, just zero it out.
             // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys the upcoming zero flag
             const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
-            common.zero(region_bytes);
+            lib.zero(region_bytes);
 
             return allocated_region;
         } else {

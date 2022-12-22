@@ -1,5 +1,5 @@
-const common = @import("../common.zig");
-const assert = common.assert;
+const lib = @import("../lib.zig");
+const assert = lib.assert;
 
 pub const FileHeader = extern struct {
     // e_ident
@@ -59,7 +59,7 @@ pub const FileHeader = extern struct {
 
     pub fn is_valid(file_header: *const FileHeader) bool {
         if (file_header.magic != FileHeader.magic) return false;
-        if (!common.string_eq(&file_header.elf_id, FileHeader.elf_signature)) return false;
+        if (!lib.equal(u8, &file_header.elf_id, FileHeader.elf_signature)) return false;
 
         return true;
     }
@@ -76,7 +76,7 @@ pub const ProgramHeader = extern struct {
     alignment: u64 = 0,
 
     const Type = enum(u32) {
-        @"null" = 0,
+        null = 0,
         load = 1,
         dynamic = 2,
         interpreter = 3,
@@ -120,7 +120,7 @@ pub const SectionHeader = extern struct {
 
     // type
     const ID = enum(u32) {
-        @"null" = 0,
+        null = 0,
         program_data = 1,
         symbol_table = 2,
         string_table = 3,

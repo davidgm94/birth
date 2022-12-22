@@ -1,8 +1,8 @@
 const GDT = @This();
 
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.GDT);
+const lib = @import("lib");
+const assert = lib.assert;
+const log = lib.log.scoped(.GDT);
 
 const privileged = @import("privileged");
 const DescriptorTable = privileged.arch.x86_64.DescriptorTable;

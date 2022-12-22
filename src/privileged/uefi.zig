@@ -1,8 +1,9 @@
-const common = @import("common");
-const assert = common.assert;
-const CustomAllocator = common.CustomAllocator;
-const log = common.log.scoped(.UEFI);
-const uefi = common.std.os.uefi;
+const lib = @import("lib");
+const alignForward = lib.alignForward;
+const assert = lib.assert;
+const CustomAllocator = lib.CustomAllocator;
+const log = lib.log.scoped(.UEFI);
+const uefi = lib.uefi;
 
 pub const BootServices = uefi.tables.BootServices;
 pub const ConfigurationTable = uefi.tables.ConfigurationTable;
@@ -17,11 +18,11 @@ pub const Status = uefi.Status;
 pub const SystemTable = uefi.tables.SystemTable;
 pub const uefi_error = Status.err;
 
-const str16 = common.std.unicode.utf8ToUtf16LeStringLiteral;
+const str16 = lib.std.unicode.utf8ToUtf16LeStringLiteral;
 
 const CPU_stop = privileged.arch.CPU_stop;
 pub const page_size = 0x1000;
-pub const page_shifter = common.arch.page_shifter(page_size);
+pub const page_shifter = lib.arch.page_shifter(page_size);
 
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
@@ -38,7 +39,7 @@ pub const MemoryMap = struct {
         counters: []u32 = &.{},
 
         pub fn to_higher_half(size_counters: SizeCounters) []u32 {
-            return @intToPtr([*]u32, @ptrToInt(size_counters.counters.ptr) + common.config.kernel_higher_half_address)[0..size_counters.counters.len];
+            return @intToPtr([*]u32, @ptrToInt(size_counters.counters.ptr) + lib.config.kernel_higher_half_address)[0..size_counters.counters.len];
         }
     };
 
@@ -48,7 +49,7 @@ pub const MemoryMap = struct {
 
     pub fn to_higher_half(memory_map: MemoryMap) MemoryMap {
         var map = memory_map;
-        map.region.address = memory_map.region.address.offset(common.config.kernel_higher_half_address);
+        map.region.address = memory_map.region.address.offset(lib.config.kernel_higher_half_address);
         return map;
     }
 
@@ -89,16 +90,16 @@ pub const MemoryCategory = enum {
     memory_map,
     junk,
 
-    const count = common.enum_count(@This());
+    const count = lib.enum_count(@This());
 };
 
-pub fn result(src: common.SourceLocation, status: Status) void {
+pub fn result(src: lib.SourceLocation, status: Status) void {
     uefi_error(status) catch |err| {
         panic("UEFI error {} at {s}:{}:{} in function {s}", .{ err, src.file, src.line, src.column, src.fn_name });
     };
 }
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    common.std.log.scoped(.PANIC).err(format, arguments);
+    lib.std.log.scoped(.PANIC).err(format, arguments);
     CPU_stop();
 }
 
@@ -117,7 +118,7 @@ pub const File = struct {
             try uefi_error(file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
             const file_info = @ptrCast(*FileInfo, &buffer);
             log.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
-            break :blk @intCast(u32, common.align_forward(file_info.file_size + page_size, page_size));
+            break :blk @intCast(u32, alignForward(file_info.file_size + page_size, page_size));
         };
 
         return File{

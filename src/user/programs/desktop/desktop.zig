@@ -1,8 +1,8 @@
 const Desktop = @This();
 
-const common = @import("common");
-const Message = common.Message;
-const Window = common.Window;
+const lib = @import("lib");
+const Message = lib.Message;
+const Window = lib.Window;
 
 const user = @import("user");
 const panic = user.panic;
@@ -21,7 +21,7 @@ fn create_plain_window() !*Window {
     return window;
 }
 
-pub var window_buffer: common.List.BufferList(Window, 64, false) = .{};
+pub var window_buffer: lib.List.BufferList(Window, 64, false) = .{};
 
 pub fn send_message(desktop: *Desktop, message: Message) void {
     switch (message.id) {

@@ -1,9 +1,9 @@
-const common = @import("common");
-const Allocator = common.CustomAllocator;
-const assert = common.assert;
-const div_ceil = common.div_ceil;
-const log = common.log.scoped(.List);
-const zeroes = common.zeroes;
+const lib = @import("lib");
+const Allocator = lib.CustomAllocator;
+const assert = lib.assert;
+const div_ceil = lib.div_ceil;
+const log = lib.log.scoped(.List);
+const zeroes = lib.zeroes;
 
 /// This list works when you are having multiple lists of the same type
 pub fn ListItem(comptime T: type) type {
@@ -197,7 +197,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
 pub fn BufferList(comptime T: type, comptime preset_buffer_size: comptime_int, comptime has_id: bool) type {
     assert(preset_buffer_size % @bitSizeOf(u8) == 0);
-    const Bitset = common.Bitset(preset_buffer_size / @bitSizeOf(u8));
+    const Bitset = lib.Bitset(preset_buffer_size / @bitSizeOf(u8));
 
     return struct {
         len: u64 = 0,

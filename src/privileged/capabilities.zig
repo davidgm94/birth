@@ -1,8 +1,9 @@
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.Capabilities);
-const page_mask = common.arch.page_mask;
-const valid_page_sizes = common.arch.valid_page_sizes;
+const lib = @import("lib");
+const alignForward = lib.alignForward;
+const assert = lib.assert;
+const log = lib.log.scoped(.Capabilities);
+const page_mask = lib.arch.page_mask;
+const valid_page_sizes = lib.arch.valid_page_sizes;
 
 const privileged = @import("privileged");
 const CoreDirectorData = privileged.CoreDirectorData;
@@ -818,14 +819,14 @@ pub const Size = struct {
 
 pub const CTE = extern struct {
     capability: Capability,
-    padding_0: [common.align_forward(u8, @sizeOf(Capability), 8) - @sizeOf(Capability)]u8,
+    padding_0: [alignForward(@sizeOf(Capability), 8) - @sizeOf(Capability)]u8,
     mdb_node: MappingDatabase.Node,
-    padding_1: [common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) - @sizeOf(MappingDatabase.Node)]u8,
+    padding_1: [alignForward(@sizeOf(MappingDatabase.Node), 8) - @sizeOf(MappingDatabase.Node)]u8,
     delete_node: DeleteList,
     padding: [
         (1 << objbits_cte) - @sizeOf(DeleteList) -
-            common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) -
-            common.align_forward(u8, @sizeOf(Capability), 8)
+            alignForward(@sizeOf(MappingDatabase.Node), 8) -
+            alignForward(@sizeOf(Capability), 8)
     ]u8,
 
     pub fn get_cnode(cte: *CTE) PhysicalAddress(.global) {
@@ -923,7 +924,7 @@ const DeleteList = extern struct {
 };
 
 comptime {
-    const total_size = common.align_forward(u8, @sizeOf(Capability), 8) + common.align_forward(u8, @sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
+    const total_size = alignForward(@sizeOf(Capability), 8) + alignForward(@sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
     assert(total_size <= (1 << objbits_cte));
 }
 
@@ -948,12 +949,12 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
         .frame,
         .end_point_ump,
         => {
-            common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
+            lib.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
         },
         .l1cnode,
         .l2cnode,
         => {
-            common.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
+            lib.zero(virtual_address.access([*]u8)[0 .. object_size * count]);
         },
         .vnode_arm_l1,
         .vnode_arm_l2,
@@ -979,7 +980,7 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
             @panic("todo vnode");
         },
         .dispatcher => {
-            common.zero(virtual_address.access([*]u8)[0 .. Size.dispatcher * count]);
+            lib.zero(virtual_address.access([*]u8)[0 .. Size.dispatcher * count]);
         },
         .kernel_control_block => {
             @panic("kernel_control_block");
@@ -999,7 +1000,9 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
     }
 
     const ctes = cte_ptr[0..count];
-    common.zero_slice(CTE, ctes);
+    for (ctes) |*cte| {
+        cte.* = lib.zeroes(CTE);
+    }
 
     switch (capability_type) {
         .l1cnode => {

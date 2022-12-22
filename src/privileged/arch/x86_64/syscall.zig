@@ -1,6 +1,6 @@
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.Syscall_x86_64);
+const lib = @import("lib");
+const assert = lib.assert;
+const log = lib.log.scoped(.Syscall_x86_64);
 
 const privileged = @import("privileged");
 const x86_64 = privileged.arch.x86_64;

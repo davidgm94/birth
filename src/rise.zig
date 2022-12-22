@@ -1,6 +1,6 @@
-const common = @import("common");
-const CustomAllocator = common.CustomAllocator;
-const valid_page_sizes = common.arch.x86_64.valid_page_sizes;
+const lib = @import("lib");
+const CustomAllocator = lib.CustomAllocator;
+const valid_page_sizes = lib.arch.x86_64.valid_page_sizes;
 
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
@@ -15,12 +15,12 @@ pub var bootstrap_address_space = PhysicalAddressSpace{};
 pub fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
     _ = allocator;
     // TODO: proper error
-    if (!common.is_aligned(alignment, valid_page_sizes[0])) {
+    if (!lib.isAligned(alignment, valid_page_sizes[0])) {
         return CustomAllocator.Error.OutOfMemory;
     }
 
     const result = bootstrap_address_space.allocate(size, valid_page_sizes[0]) catch return CustomAllocator.Error.OutOfMemory;
-    if (!common.is_aligned(alignment, valid_page_sizes[0])) {
+    if (!lib.isAligned(alignment, valid_page_sizes[0])) {
         return CustomAllocator.Error.OutOfMemory;
     }
 
@@ -52,5 +52,5 @@ pub var physical_allocator = CustomAllocator{
 };
 
 comptime {
-    if (common.os != .freestanding) @compileError("Kernel file included non-kernel project");
+    if (lib.os != .freestanding) @compileError("Kernel file included non-kernel project");
 }

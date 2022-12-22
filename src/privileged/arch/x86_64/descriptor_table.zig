@@ -1,5 +1,5 @@
-const common = @import("common");
-const assert = common.assert;
+const lib = @import("lib");
+const assert = lib.assert;
 
 pub const Register = extern struct {
     limit: u16,

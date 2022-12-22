@@ -1,6 +1,6 @@
-const common = @import("common");
-const assert = common.assert;
-const log = common.log.scoped(.MappingDatabase);
+const lib = @import("lib");
+const assert = lib.assert;
+const log = lib.log.scoped(.MappingDatabase);
 const privileged = @import("privileged");
 const Capabilities = privileged.Capabilities;
 const CoreId = privileged.CoreId;
@@ -114,7 +114,7 @@ fn skew(maybe_node: ?*CTE) ?*CTE {
             if (node.mdb_node.level == left.mdb_node.level) {
                 node.mdb_node.left = left.mdb_node.right;
                 left.mdb_node.right = node;
-                if (@ptrToInt(node) < common.config.kernel_higher_half_address) {
+                if (@ptrToInt(node) < lib.config.kernel_higher_half_address) {
                     @panic("wtf 1");
                 }
                 update_end(node);

@@ -1,9 +1,9 @@
 comptime {
-    if (common.os != .freestanding) @compileError("This file is not meant to be imported in build.zig");
+    if (lib.os != .freestanding) @compileError("This file is not meant to be imported in build.zig");
 }
 
-const common = @import("common");
-const ExecutionMode = common.Syscall.ExecutionMode;
+const lib = @import("lib");
+const ExecutionMode = lib.Syscall.ExecutionMode;
 
 pub const Syscall = @import("user/syscall.zig");
 
@@ -69,25 +69,25 @@ const Lock = struct {
     }
 };
 
-var writer: common.Writer(void, Writer.Error, Writer.write) = undefined;
+var writer: lib.Writer(void, Writer.Error, Writer.write) = undefined;
 
 // TODO: handle locks in userspace
 // TODO: handle errors
-pub fn zig_log(comptime level: common.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub fn zig_log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     var buffer: [0x2000]u8 = undefined;
     Writer.lock.acquire();
     defer Writer.lock.release();
-    const resulting_slice = common.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
+    const resulting_slice = lib.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
     writer.writeAll(resulting_slice) catch unreachable;
 }
 
 // TODO: improve user panic implementation
-pub fn zig_panic(message: []const u8, _: ?*common.StackTrace, _: ?usize) noreturn {
+pub fn zig_panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     panic("{s}", .{message});
 }
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    common.log.scoped(.PANIC).err(format, arguments);
+    lib.log.scoped(.PANIC).err(format, arguments);
     while (true) {}
 }
 

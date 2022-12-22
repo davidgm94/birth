@@ -1,6 +1,6 @@
 const GPT = @This();
 
-const common = @import("../../common.zig");
+const common = @import("../../lib.zig");
 const assert = common.assert;
 const kb = common.kb;
 const mb = common.mb;

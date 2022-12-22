@@ -1,8 +1,8 @@
 pub const Driver = @This();
 
-const common = @import("../common.zig");
-const assert = common.assert;
-const log = common.log.scoped(.Graphics);
+const lib = @import("../lib.zig");
+const assert = lib.assert;
+const log = lib.log.scoped(.Graphics);
 
 pub const Rectangle = @import("graphics/rectangle.zig");
 pub const Rect = Rectangle.Rectangle;
@@ -43,7 +43,8 @@ pub const Framebuffer = struct {
     pub fn get_pointer(framebuffer: Framebuffer) [*]u32 {
         return @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes));
     }
-    pub fn resize(framebuffer: *Framebuffer, allocator: common.CustomAllocator, width: u32, height: u32) bool {
+
+    pub fn resize(framebuffer: *Framebuffer, allocator: lib.CustomAllocator, width: u32, height: u32) bool {
         // TODO: copy old bytes
         // TODO: free old bytes
         if (width == 0 or height == 0) return false;

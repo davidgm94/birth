@@ -1,14 +1,14 @@
 const FAT32 = @This();
 
-const common = @import("../../common.zig");
-const assert = common.assert;
-const Disk = common.Disk;
-const GPT = common.PartitionTable.GPT;
-const MBR = common.PartitionTable.MBR;
-const kb = common.kb;
-const mb = common.mb;
-const gb = common.gb;
-const log = common.log.scoped(.FAT32);
+const lib = @import("../../lib.zig");
+const assert = lib.assert;
+const Disk = lib.Disk;
+const GPT = lib.PartitionTable.GPT;
+const MBR = lib.PartitionTable.MBR;
+const kb = lib.kb;
+const mb = lib.mb;
+const gb = lib.gb;
+const log = lib.log.scoped(.FAT32);
 
 pub const count = 2;
 pub const volumes_lba = GPT.reserved_partition_size / GPT.max_block_size / 2;
@@ -37,28 +37,28 @@ pub const FSInfo = extern struct {
         return result;
     }
 
-    pub fn format(fsinfo: *const FSInfo, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try common.internal_format(writer, "FSInfo:\n", .{});
-        try common.internal_format(writer, "\tLead signature: 0x{x}\n", .{fsinfo.lead_signature});
-        try common.internal_format(writer, "\tOther signature: 0x{x}\n", .{fsinfo.signature});
-        try common.internal_format(writer, "\tFree cluster count: {}\n", .{fsinfo.free_cluster_count});
-        try common.internal_format(writer, "\tLast allocated cluster: {}\n", .{fsinfo.last_allocated_cluster});
-        try common.internal_format(writer, "\tTrail signature: 0x{x}\n", .{fsinfo.trail_signature});
+    pub fn format(fsinfo: *const FSInfo, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.internal_format(writer, "FSInfo:\n", .{});
+        try lib.internal_format(writer, "\tLead signature: 0x{x}\n", .{fsinfo.lead_signature});
+        try lib.internal_format(writer, "\tOther signature: 0x{x}\n", .{fsinfo.signature});
+        try lib.internal_format(writer, "\tFree cluster count: {}\n", .{fsinfo.free_cluster_count});
+        try lib.internal_format(writer, "\tLast allocated cluster: {}\n", .{fsinfo.last_allocated_cluster});
+        try lib.internal_format(writer, "\tTrail signature: 0x{x}\n", .{fsinfo.trail_signature});
     }
 };
 
 pub fn is_filesystem(file: []const u8) bool {
     const magic = "FAT32   ";
-    return common.std.mem.eql(u8, file[0x52..], magic);
+    return lib.std.mem.eql(u8, file[0x52..], magic);
 }
 
 pub fn is_boot_record(file: []const u8) bool {
     const magic = [_]u8{ 0x55, 0xAA };
     const magic_alternative = [_]u8{ 'M', 'S', 'W', 'I', 'N', '4', '.', '1' };
-    if (!common.std.mem.eql(u8, file[0x1fe..], magic)) return false;
-    if (!common.std.mem.eql(u8, file[0x3fe..], magic)) return false;
-    if (!common.std.mem.eql(u8, file[0x5fe..], magic)) return false;
-    if (!common.std.mem.eql(u8, file[0x03..], magic_alternative)) return false;
+    if (!lib.std.mem.eql(u8, file[0x1fe..], magic)) return false;
+    if (!lib.std.mem.eql(u8, file[0x3fe..], magic)) return false;
+    if (!lib.std.mem.eql(u8, file[0x5fe..], magic)) return false;
+    if (!lib.std.mem.eql(u8, file[0x03..], magic_alternative)) return false;
     return true;
 }
 
@@ -123,19 +123,19 @@ pub const DirectoryEntry = extern struct {
         current: *DirectoryEntry,
     };
 
-    pub fn format(entry: *const DirectoryEntry, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try common.internal_format(writer, "Directory entry:\n", .{});
-        try common.internal_format(writer, "\tName: {s}\n", .{entry.name});
-        try common.internal_format(writer, "\tAttributes: {}\n", .{entry.attributes});
-        try common.internal_format(writer, "\tCreation time tenth: {}\n", .{entry.creation_time_tenth});
-        try common.internal_format(writer, "\tCreation time: {}\n", .{entry.creation_time});
-        try common.internal_format(writer, "\tCreation date: {}\n", .{entry.creation_date});
-        try common.internal_format(writer, "\tLast access date: {}\n", .{entry.last_access_date});
-        try common.internal_format(writer, "\tLast write time: {}\n", .{entry.last_write_time});
-        try common.internal_format(writer, "\tLast write date: {}\n", .{entry.last_write_date});
+    pub fn format(entry: *const DirectoryEntry, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.internal_format(writer, "Directory entry:\n", .{});
+        try lib.internal_format(writer, "\tName: {s}\n", .{entry.name});
+        try lib.internal_format(writer, "\tAttributes: {}\n", .{entry.attributes});
+        try lib.internal_format(writer, "\tCreation time tenth: {}\n", .{entry.creation_time_tenth});
+        try lib.internal_format(writer, "\tCreation time: {}\n", .{entry.creation_time});
+        try lib.internal_format(writer, "\tCreation date: {}\n", .{entry.creation_date});
+        try lib.internal_format(writer, "\tLast access date: {}\n", .{entry.last_access_date});
+        try lib.internal_format(writer, "\tLast write time: {}\n", .{entry.last_write_time});
+        try lib.internal_format(writer, "\tLast write date: {}\n", .{entry.last_write_date});
         const first_cluster = @as(u32, entry.first_cluster_high) << 16 | entry.first_cluster_low;
-        try common.internal_format(writer, "\tFirst cluster: 0x{x}\n", .{first_cluster});
-        try common.internal_format(writer, "\tFile size: 0x{x}\n", .{entry.file_size});
+        try lib.internal_format(writer, "\tFirst cluster: 0x{x}\n", .{first_cluster});
+        try lib.internal_format(writer, "\tFile size: 0x{x}\n", .{entry.file_size});
     }
 
     pub fn small_filename_only(entry: DirectoryEntry) bool {
@@ -329,7 +329,7 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
     const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba);
 
     const sectors_per_track = 32;
-    const total_sector_count_32 = @intCast(u32, common.align_backward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
+    const total_sector_count_32 = @intCast(u32, lib.align_backward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
     const fat_count = FAT32.count;
 
     var cluster_size: u8 = 1;
@@ -340,9 +340,9 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
 
     while (true) {
         assert(cluster_size > 0);
-        fat_data_sector_count = total_sector_count_32 - common.align_forward(u32, FAT32.default_reserved_sector_count, cluster_size);
+        fat_data_sector_count = total_sector_count_32 - lib.align_forward(u32, FAT32.default_reserved_sector_count, cluster_size);
         cluster_count_32 = (fat_data_sector_count * disk.sector_size + fat_count * 8) / (cluster_size * disk.sector_size + fat_count * 4);
-        fat_length_32 = common.align_forward(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
+        fat_length_32 = lib.align_forward(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
         cluster_count_32 = (fat_data_sector_count - fat_count * fat_length_32) / cluster_size;
         const max_cluster_size_32 = @min(fat_length_32 * disk.sector_size / 4, max_cluster_32);
         if (cluster_count_32 > max_cluster_size_32) {
@@ -365,7 +365,7 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
     _ = root_directory_entries;
 
     log.debug("Cluster size: {}. FAT data sector count: {}. FAT sector count: {}", .{ cluster_size, fat_data_sector_count, fat_length_32 });
-    const reserved_sector_count = common.align_forward(u16, FAT32.default_reserved_sector_count, cluster_size);
+    const reserved_sector_count = lib.align_forward(u16, FAT32.default_reserved_sector_count, cluster_size);
 
     fat_partition_mbr.* = MBR.Partition{
         .bpb = .{
@@ -403,7 +403,7 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
             0xe, 0x1f, 0xbe, 0x77, 0x7c, 0xac, 0x22, 0xc0, 0x74, 0xb, 0x56, 0xb4, 0xe, 0xbb, 0x7, 0x0, 0xcd, 0x10, 0x5e, 0xeb, 0xf0, 0x32, 0xe4, 0xcd, 0x16, 0xcd, 0x19, 0xeb, 0xfe, 0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x64, 0x69, 0x73, 0x6b, 0x2e, 0x20, 0x20, 0x50, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x20, 0x69, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x66, 0x6c, 0x6f, 0x70, 0x70, 0x79, 0x20, 0x61, 0x6e, 0x64, 0xd, 0xa, 0x70, 0x72, 0x65, 0x73, 0x73, 0x20, 0x61, 0x6e, 0x79, 0x20, 0x6b, 0x65, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x74, 0x72, 0x79, 0x20, 0x61, 0x67, 0x61, 0x69, 0x6e, 0x20, 0x2e, 0x2e, 0x2e, 0x20, 0xd, 0xa,
         } ++ [1]u8{0} ** 227,
         // This should be zero
-        .partitions = common.zeroes([4]MBR.LegacyPartition),
+        .partitions = lib.zeroes([4]MBR.LegacyPartition),
     };
 
     try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
@@ -557,7 +557,7 @@ pub const Cache = extern struct {
 
         const root_cluster_sector = data_lba;
         var upper_cluster = root_cluster;
-        var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+        var dir_tokenizer = lib.std.mem.tokenize(u8, absolute_path, "/");
 
         var directories: u64 = 0;
         while (dir_tokenizer.next()) |entry_name| {
@@ -573,7 +573,7 @@ pub const Cache = extern struct {
             const entry = FAT32.DirectoryEntry{
                 .name = blk: {
                     var name: [11]u8 = [1]u8{' '} ** 11;
-                    common.copy(u8, &name, entry_name);
+                    lib.copy(u8, &name, entry_name);
                     break :blk name;
                 },
                 .attributes = .{
@@ -656,7 +656,7 @@ pub const Cache = extern struct {
 
         const root_cluster_sector = data_lba;
         var upper_cluster = root_cluster;
-        var dir_tokenizer = common.std.mem.tokenize(u8, absolute_path, "/");
+        var dir_tokenizer = lib.std.mem.tokenize(u8, absolute_path, "/");
         var directories: usize = 0;
 
         entry_loop: while (dir_tokenizer.next()) |entry_name| : (directories += 1) {
@@ -768,7 +768,7 @@ pub const Cache = extern struct {
                             assert(entry_index < directory_entries_in_cluster.len);
                             const normal_entry = &directory_entries_in_cluster[entry_index];
                             log.debug("Normal entry: {s}. Name: {s}", .{ &normal_entry.name, &normalized_name });
-                            if (common.string_eq(&normal_entry.name, &normalized_name)) {
+                            if (lib.string_eq(&normal_entry.name, &normalized_name)) {
                                 if (is_last) {
                                     return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index), .directory_entry = normal_entry };
                                 } else {
@@ -781,7 +781,7 @@ pub const Cache = extern struct {
                         }
                         unreachable;
                     } else {
-                        if (common.string_eq(&directory_entry.name, &normalized_name)) {
+                        if (lib.string_eq(&directory_entry.name, &normalized_name)) {
                             log.debug("Equal!", .{});
                             if (is_last) {
                                 log.debug("Found!", .{});
@@ -804,8 +804,8 @@ pub const Cache = extern struct {
     }
 
     pub fn allocate_file_content(cache: Cache, file_content: []const u8) !void {
-        const sector_count = common.align_forward(file_content.len, cache.disk.sector_size);
-        const cluster_count = common.align_forward(sector_count, cache.cluster_to_sectors(1));
+        const sector_count = lib.align_forward(file_content.len, cache.disk.sector_size);
+        const cluster_count = lib.align_forward(sector_count, cache.cluster_to_sectors(1));
         const first_cluster = cache.allocate_clusters(cluster_count);
         log.debug("First cluster: {}", .{first_cluster});
         unreachable;
@@ -832,9 +832,9 @@ pub inline fn pack_string(name: []const u8, comptime options: PackStringOptions)
     var result = [1]u8{options.fill_with} ** options.len;
     if (name.len > 0) {
         if (options.upper) {
-            _ = common.std.ascii.upperString(&result, name);
+            _ = lib.std.ascii.upperString(&result, name);
         } else {
-            common.copy(u8, &result, name);
+            lib.copy(u8, &result, name);
         }
     }
 
@@ -863,3 +863,10 @@ fn EntryResult(comptime EntryType: type) type {
         directory_entry: *EntryType,
     };
 }
+
+const Barebones = extern struct {
+    gpt_partition_cache: GPT.Partition.Cache,
+    fat_partition: FAT32.Cache,
+};
+
+test "Basic FAT32 image" {}

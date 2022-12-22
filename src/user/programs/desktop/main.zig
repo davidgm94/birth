@@ -1,10 +1,10 @@
-const common = @import("common");
-const assert = common.assert;
-const field_size = common.field_size;
-pub const logger = common.log.scoped(.main);
+const lib = @import("lib");
+const assert = lib.assert;
+const field_size = lib.fieldSize;
+pub const logger = lib.log.scoped(.main);
 
 const Desktop = @import("desktop.zig");
-const Message = common.Message;
+const Message = lib.Message;
 
 const user = @import("user");
 pub const panic = user.zig_panic;
