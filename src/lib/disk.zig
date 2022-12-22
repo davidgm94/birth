@@ -14,15 +14,14 @@ pub const Disk = extern struct {
     type: Type,
     disk_size: u64,
     partition_sizes: [GPT.default_max_partition_count]u64 = [1]u64{0} ** GPT.default_max_partition_count,
-    sector_size: u16 = 0x200,
-    partition_count: u8 = 0,
+    sector_size: u16,
     callbacks: Callbacks,
 
-    pub const ReadFn = fn (disk: *Disk.Descriptor, sector_count: u64, sector_offset: u64) ReadError![]u8;
+    pub const ReadFn = fn (disk: *Disk, sector_count: u64, sector_offset: u64) ReadError![]u8;
     pub const ReadError = error{
         read_error,
     };
-    pub const WriteFn = fn (disk: *Disk.Descriptor, bytes: []const u8, offset: u64, commit_memory_to_disk: bool) WriteError!void;
+    pub const WriteFn = fn (disk: *Disk, bytes: []const u8, offset: u64, commit_memory_to_disk: bool) WriteError!void;
     pub const WriteError = error{
         write_error,
     };
@@ -32,18 +31,18 @@ pub const Disk = extern struct {
         write: *const WriteFn,
     };
 
-    pub inline fn read_typed_sectors(disk: *Disk.Descriptor, comptime T: type, sector_offset: u64) !*T {
+    pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64) !*T {
         const bytes = try disk.callbacks.read(disk, @divExact(@sizeOf(T), disk.sector_size), sector_offset);
         // Don't need to write back since it's a memory disk
         const result = @ptrCast(*T, @alignCast(@alignOf(T), bytes.ptr));
         return result;
     }
 
-    pub inline fn write_typed_sectors(disk: *Disk.Descriptor, comptime T: type, content: *T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+    pub inline fn write_typed_sectors(disk: *Disk, comptime T: type, content: *T, sector_offset: u64, commit_memory_to_disk: bool) !void {
         try disk.callbacks.write(disk, asBytes(content), sector_offset, commit_memory_to_disk);
     }
 
-    pub inline fn read_slice(disk: *Disk.Descriptor, comptime T: type, len: usize, sector_offset: u64) ![]T {
+    pub inline fn read_slice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64) ![]T {
         const element_count_per_sector = @divExact(disk.sector_size, @sizeOf(T));
         const sector_count = @divExact(len, element_count_per_sector);
         const bytes = try disk.callbacks.read(disk, sector_count, sector_offset);
@@ -51,11 +50,11 @@ pub const Disk = extern struct {
         return result;
     }
 
-    pub inline fn write_slice(disk: *Disk.Descriptor, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+    pub inline fn write_slice(disk: *Disk, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
         try disk.callbacks.write(disk, sliceAsBytes(slice), sector_offset, commit_memory_to_disk);
     }
 
-    pub fn verify(disk: *Disk.Descriptor) !void {
+    pub fn verify(disk: *Disk) !void {
         const mbr = try disk.read_typed_sectors(MBR.Struct, 0);
         try mbr.verify(disk);
         unreachable;
@@ -103,11 +102,49 @@ pub const Disk = extern struct {
             size: usize,
         };
 
-        inline fn get_buffer(disk_image: *Disk.Image) []u8 {
-            return disk_image.buffer_ptr[0..disk_image.descriptor.disk_size];
+        pub fn from_zero(byte_count: usize, sector_size: u16) !Disk.Image {
+            assert(byte_count % sector_size == 0);
+            const disk_bytes = try lib.allocate_zero_memory(byte_count);
+            var disk_image = Disk.Image{
+                .disk = .{
+                    .type = .memory,
+                    .callbacks = .{
+                        .read = read,
+                        .write = write,
+                    },
+                    .disk_size = disk_bytes.len,
+                    .sector_size = sector_size,
+                },
+                .buffer_ptr = disk_bytes.ptr,
+            };
+
+            return disk_image;
         }
 
-        fn get_file(file_path: []const u8) !File {
+        pub fn from_file(file_path: []const u8, sector_size: u16, allocator: lib.Allocator) !Disk.Image {
+            const disk_memory = try cwd().readFileAlloc(allocator, file_path, lib.maxInt(usize));
+
+            var disk_image = Disk.Image{
+                .disk = .{
+                    .type = .memory,
+                    .callbacks = .{
+                        .read = read,
+                        .write = write,
+                    },
+                    .disk_size = disk_memory.len,
+                    .sector_size = sector_size,
+                },
+                .buffer_ptr = disk_memory.ptr,
+            };
+
+            return disk_image;
+        }
+
+        pub inline fn get_buffer(disk_image: *Disk.Image) []u8 {
+            return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
+        }
+
+        pub fn get_file(file_path: []const u8) !File {
             const handle = try cwd().openFile(file_path, .{});
             return File{
                 .handle = handle,
@@ -115,32 +152,32 @@ pub const Disk = extern struct {
             };
         }
 
-        fn read(disk: *Disk, sector_count: u64, sector_offset: u64) Disk.ReadError![]u8 {
-            const disk_image = @fieldParentPtr(Disk.Image, "descriptor", disk);
-            assert(disk_image.descriptor.disk_size > 0);
+        pub fn read(disk: *Disk, sector_count: u64, sector_offset: u64) Disk.ReadError![]u8 {
+            const disk_image = @fieldParentPtr(Disk.Image, "disk", disk);
+            assert(disk_image.disk.disk_size > 0);
             assert(sector_count > 0);
-            //assert(disk.descriptor.disk_size == disk.buffer.items.len);
-            const byte_count = sector_count * disk_image.descriptor.sector_size;
-            const byte_offset = sector_offset * disk_image.descriptor.sector_size;
-            if (byte_offset + byte_count > disk.descriptor.disk_size) {
-                log.debug("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.descriptor.disk_size });
+            //assert(disk.disk.disk_size == disk.buffer.items.len);
+            const byte_count = sector_count * disk_image.disk.sector_size;
+            const byte_offset = sector_offset * disk_image.disk.sector_size;
+            if (byte_offset + byte_count > disk.disk_size) {
+                log.debug("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.disk_size });
                 return Disk.ReadError.read_error;
             }
-            const result = disk.get_buffer()[byte_offset .. byte_offset + byte_count];
+            const result = disk_image.get_buffer()[byte_offset .. byte_offset + byte_count];
             return result;
         }
 
-        fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
+        pub fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
             const need_write = !(disk.type == .memory and !commit_memory_to_disk);
             if (need_write) {
                 log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
-                const disk_image = @fieldParentPtr(Disk.Image, "descriptor", disk);
+                const disk_image = @fieldParentPtr(Disk.Image, "disk", disk);
                 assert(disk_image.disk.disk_size > 0);
-                //assert(disk.descriptor.partition_count == 1);
+                //assert(disk.disk.partition_count == 1);
                 assert(bytes.len > 0);
-                //assert(disk.descriptor.disk_size == disk.buffer.items.len);
-                const byte_offset = sector_offset * disk_image.descriptor.sector_size;
-                if (byte_offset + bytes.len > disk_image.descriptor.disk_size) return Disk.WriteError.write_error;
+                //assert(disk.disk.disk_size == disk.buffer.items.len);
+                const byte_offset = sector_offset * disk_image.disk.sector_size;
+                if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.write_error;
                 lib.copy(u8, disk_image.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
             }
         }
@@ -152,7 +189,7 @@ pub const Disk = extern struct {
         //const disk_sector_count = @divExact(disk_bytes.len, 0x200);
         //common.log.debug("Disk size: 0x{x}", .{disk_sector_count});
         //var disk = DiskImage{
-        //.descriptor = .{
+        //.disk = .{
         //.type = .memory,
         //.callbacks = .{
         //.read = read,
@@ -163,26 +200,13 @@ pub const Disk = extern struct {
         //.buffer_ptr = disk_bytes.ptr,
         //};
 
-        //const barebones_disk_memory = try cwd().readFileAlloc(kernel.builder.allocator, "barebones.hdd", common.max_int(usize));
-        //var barebones_disk_image = DiskImage{
-        //.descriptor = .{
-        //.type = .memory,
-        //.callbacks = .{
-        //.read = read,
-        //.write = write,
-        //},
-        //.disk_size = barebones_disk_memory.len,
-        //},
-        //.buffer_ptr = barebones_disk_memory.ptr,
-        //};
-
         //switch (kernel.options.arch) {
         //.x86_64 => {
         //const x86_64 = kernel.options.arch.x86_64;
         //switch (x86_64.boot_protocol) {
         //.bios => {
         //const barebones = blk: {
-        //const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.descriptor, 0);
+        //const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.disk, 0);
         //const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
         //break :blk Barebones{
         //.gpt_partition_cache = gpt_partition_cache,
@@ -190,7 +214,7 @@ pub const Disk = extern struct {
         //};
         //};
 
-        //const gpt_cache = try GPT.create(&disk.descriptor, barebones.gpt_partition_cache.gpt.header);
+        //const gpt_cache = try GPT.create(&disk.disk, barebones.gpt_partition_cache.gpt.header);
         //// TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
         //const gpt_partition_cache = try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
         //const fat_cache = try gpt_partition_cache.format(.fat32);
@@ -202,17 +226,17 @@ pub const Disk = extern struct {
 
         //try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
         //unreachable;
-        ////try common.Disk.Descriptor.image(&disk.descriptor, &.{common.Disk.Descriptor.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
+        ////try common.Disk.image(&disk.disk, &.{common.Disk.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
         ////.read = read,
         ////.write = write,
         ////});
 
-        ////try disk.descriptor.verify();
+        ////try disk.disk.verify();
         ////try cwd().writeFile("zig-cache/disk_image.bin", disk.get_buffer());
 
         ////const fat32_partition = try kernel.builder.allocator.create(common.Filesystem.FAT32.Partition);
 
-        ////fat32_partition.* = try disk.descriptor.get_partition(0);
+        ////fat32_partition.* = try disk.disk.get_partition(0);
 
         ////const r = try fat32_partition.create_file("loader.elf");
         ////_ = r;

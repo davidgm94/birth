@@ -52,7 +52,11 @@ pub const Allocator = std.mem.Allocator;
 pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;
 pub const AllocatorResizeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, new_size: usize, len_align: u29, return_address: usize) ?usize;
 pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_align: u29, return_address: usize) void;
+pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const FixedBufferAllocator = std.heap.FixedBufferAllocator;
+pub const GPA = std.heap.GeneralPurposeAllocator;
+pub const testing_allocator = std.testing.allocator;
+pub const page_allocator = std.heap.page_allocator;
 
 // DATA STRUCTURES
 pub const ArrayList = std.ArrayListUnmanaged;
@@ -124,6 +128,7 @@ pub fn zeroes(comptime T: type) T {
 // TEST
 pub const expect = std.testing.expect;
 pub const expectEqual = std.testing.expectEqual;
+pub const expectEqualSlices = std.testing.expectEqualSlices;
 
 // FILESYSTEM
 pub const cwd = std.fs.cwd;
@@ -141,6 +146,9 @@ pub const tb = gb * 1024;
 
 // POSIX
 pub const posix = std.os;
+
+// RANDOM
+pub const random = std.rand;
 
 pub fn enumCount(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;

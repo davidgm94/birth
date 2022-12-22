@@ -1,17 +1,17 @@
 const GPT = @This();
 
-const common = @import("../../lib.zig");
-const assert = common.assert;
-const kb = common.kb;
-const mb = common.mb;
-const gb = common.gb;
-const CRC32 = common.CRC32;
-const Disk = common.Disk;
-const Filesystem = common.Filesystem;
+const lib = @import("../../lib.zig");
+const assert = lib.assert;
+const kb = lib.kb;
+const mb = lib.mb;
+const gb = lib.gb;
+const CRC32 = lib.CRC32;
+const Disk = lib.Disk;
+const Filesystem = lib.Filesystem;
 const FAT32 = Filesystem.FAT32;
-const log = common.log.scoped(.GPT);
-const MBR = common.PartitionTable.MBR;
-const GUID = common.std.os.uefi.Guid;
+const log = lib.log.scoped(.GPT);
+const MBR = lib.PartitionTable.MBR;
+const GUID = lib.uefi.Guid;
 
 pub const default_max_partition_count = 128;
 pub const min_block_size = 0x200;
@@ -36,38 +36,38 @@ pub const Header = extern struct {
 
     pub fn update_crc32(header: *Header) void {
         header.header_crc32 = 0;
-        header.header_crc32 = CRC32.compute(common.as_bytes(header)[0..header.header_size]);
+        header.header_crc32 = CRC32.compute(lib.asBytes(header)[0..header.header_size]);
     }
 
-    pub fn get_partition_count_in_sector(header: *const Header, disk: *const Disk.Descriptor) u32 {
+    pub fn get_partition_count_in_sector(header: *const Header, disk: *const Disk) u32 {
         return @divExact(disk.sector_size, header.partition_entry_size);
     }
 
-    pub fn format(header: *const Header, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try common.internal_format(writer, "GPT header:\n", .{});
-        try common.internal_format(writer, "\tSignature: {s}\n", .{header.signature});
-        try common.internal_format(writer, "\tRevision: {any}\n", .{header.revision});
-        try common.internal_format(writer, "\tHeader size: {}\n", .{header.header_size});
-        try common.internal_format(writer, "\tHeader CRC32: 0x{x}\n", .{header.header_crc32});
-        try common.internal_format(writer, "\tHeader LBA: 0x{x}\n", .{header.header_lba});
-        try common.internal_format(writer, "\tAlternate header LBA: 0x{x}\n", .{header.backup_lba});
-        try common.internal_format(writer, "\tFirst usable LBA: 0x{x}\n", .{header.first_usable_lba});
-        try common.internal_format(writer, "\tLast usable LBA: 0x{x}\n", .{header.last_usable_lba});
-        try common.internal_format(writer, "\tDisk GUID: {}\n", .{header.disk_guid});
-        try common.internal_format(writer, "\tPartition array LBA: 0x{x}\n", .{header.partition_array_lba});
-        try common.internal_format(writer, "\tPartition entry count: {}\n", .{header.partition_entry_count});
-        try common.internal_format(writer, "\tPartition entry size: {}\n", .{header.partition_entry_size});
-        try common.internal_format(writer, "\tPartition array CRC32: 0x{x}\n", .{header.partition_array_crc32});
+    pub fn format(header: *const Header, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.internal_format(writer, "GPT header:\n", .{});
+        try lib.internal_format(writer, "\tSignature: {s}\n", .{header.signature});
+        try lib.internal_format(writer, "\tRevision: {any}\n", .{header.revision});
+        try lib.internal_format(writer, "\tHeader size: {}\n", .{header.header_size});
+        try lib.internal_format(writer, "\tHeader CRC32: 0x{x}\n", .{header.header_crc32});
+        try lib.internal_format(writer, "\tHeader LBA: 0x{x}\n", .{header.header_lba});
+        try lib.internal_format(writer, "\tAlternate header LBA: 0x{x}\n", .{header.backup_lba});
+        try lib.internal_format(writer, "\tFirst usable LBA: 0x{x}\n", .{header.first_usable_lba});
+        try lib.internal_format(writer, "\tLast usable LBA: 0x{x}\n", .{header.last_usable_lba});
+        try lib.internal_format(writer, "\tDisk GUID: {}\n", .{header.disk_guid});
+        try lib.internal_format(writer, "\tPartition array LBA: 0x{x}\n", .{header.partition_array_lba});
+        try lib.internal_format(writer, "\tPartition entry count: {}\n", .{header.partition_entry_count});
+        try lib.internal_format(writer, "\tPartition entry size: {}\n", .{header.partition_entry_size});
+        try lib.internal_format(writer, "\tPartition array CRC32: 0x{x}\n", .{header.partition_array_crc32});
     }
 
     pub fn compare(header: *const Header, other: *align(1) const Header) void {
         log.debug("{}", .{header});
         log.debug("{}", .{other});
 
-        if (!common.equal(u8, &header.signature, &other.signature)) {
+        if (!lib.equal(u8, &header.signature, &other.signature)) {
             log.debug("Signature mismatch: {s}, {s}", .{ header.signature, other.signature });
         }
-        if (!common.equal(u8, &header.revision, &other.revision)) {
+        if (!lib.equal(u8, &header.revision, &other.revision)) {
             log.debug("Revision mismatch: {any}, {any}", .{ header.revision, other.revision });
         }
         if (header.header_size != other.header_size) {
@@ -109,7 +109,7 @@ pub const Header = extern struct {
         mbr: *MBR.Partition,
         header: *GPT.Header,
         partition_entries: [*]GPT.Partition,
-        disk: *Disk.Descriptor,
+        disk: *Disk,
 
         pub fn get_free_partition_slot(cache: Cache) !*GPT.Partition {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
@@ -134,7 +134,7 @@ pub const Header = extern struct {
         pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition) !void {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = cache.partition_entries[0..cache.header.partition_entry_count];
-            const partition_entry_bytes = common.std.mem.sliceAsBytes(partition_entries);
+            const partition_entry_bytes = lib.std.mem.sliceAsBytes(partition_entries);
             partition.* = new_value;
             cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
             cache.header.update_crc32();
@@ -154,7 +154,7 @@ pub const Header = extern struct {
             try cache.disk.write_typed_sectors(GPT.Header, backup_gpt_header, backup_gpt_header.header_lba, false);
         }
 
-        pub fn add_partition(cache: Cache, comptime filesystem: common.Filesystem.Type, partition_name: []const u16, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition) !GPT.Partition.Cache {
+        pub fn add_partition(cache: Cache, comptime filesystem: lib.Filesystem.Type, partition_name: []const u16, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition) !GPT.Partition.Cache {
             // TODO: check if we are not overwriting a partition
             // TODO: check filesystem specific stuff
             const new_partition_entry = try cache.get_free_partition_slot();
@@ -169,7 +169,7 @@ pub const Header = extern struct {
                 .attributes = .{},
                 .partition_name = blk: {
                     var name = [1]u16{0} ** 36;
-                    common.copy(u16, &name, partition_name);
+                    lib.copy(u16, &name, partition_name);
                     break :blk name;
                 },
             });
@@ -180,11 +180,11 @@ pub const Header = extern struct {
             };
         }
 
-        pub fn load(disk: *Disk.Descriptor) !GPT.Header.Cache {
+        pub fn load(disk: *Disk) !GPT.Header.Cache {
             //mbr: *MBR.Partition,
             //header: *GPT.Header,
             //partition_entries: [*]GPT.Partition,
-            //disk: *Disk.Descriptor,
+            //disk: *Disk,
             const mbr_lba = MBR.default_lba;
             const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba);
             const primary_gpt_header_lba = mbr_lba + 1;
@@ -205,16 +205,16 @@ pub const Header = extern struct {
         assert(@sizeOf(Header) == 0x200);
     }
 
-    pub fn get(disk: *Disk.Descriptor) !*GPT.Header {
+    pub fn get(disk: *Disk) !*GPT.Header {
         return try disk.read_typed_sectors(GPT.Header, 1);
     }
 
-    pub fn get_backup(gpt_header: *GPT.Header, disk: *Disk.Descriptor) !*GPT.Header {
+    pub fn get_backup(gpt_header: *GPT.Header, disk: *Disk) !*GPT.Header {
         return try disk.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
     }
 };
 
-var prng = common.std.rand.DefaultPrng.init(0);
+var prng = lib.random.DefaultPrng.init(0);
 pub fn get_random_guid() GUID {
     const random_array = blk: {
         var arr: [16]u8 = undefined;
@@ -252,7 +252,7 @@ pub const Partition = extern struct {
         gpt: GPT.Header.Cache,
         partition: *GPT.Partition,
 
-        pub fn from_partition_index(disk: *Disk.Descriptor, partition_index: usize) !GPT.Partition.Cache {
+        pub fn from_partition_index(disk: *Disk, partition_index: usize) !GPT.Partition.Cache {
             const gpt_cache = try GPT.Header.Cache.load(disk);
             if (partition_index < gpt_cache.header.partition_entry_count) {
                 return .{
@@ -302,18 +302,18 @@ pub const Partition = extern struct {
         }
     }
 
-    pub fn format(partition: *const Partition, comptime _: []const u8, _: common.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try common.internal_format(writer, "GPT partition:\n", .{});
-        try common.internal_format(writer, "\tPartition type GUID: {}\n", .{partition.partition_type_guid});
-        try common.internal_format(writer, "\tUnique partition GUID: {}\n", .{partition.unique_partition_guid});
-        try common.internal_format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
-        try common.internal_format(writer, "\tLast LBA: 0x{x}\n", .{partition.last_lba});
-        try common.internal_format(writer, "\tAttributes: {}\n", .{partition.attributes});
-        try common.internal_format(writer, "\tPartition name: {}\n", .{common.std.unicode.fmtUtf16le(&partition.partition_name)});
+    pub fn format(partition: *const Partition, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.internal_format(writer, "GPT partition:\n", .{});
+        try lib.internal_format(writer, "\tPartition type GUID: {}\n", .{partition.partition_type_guid});
+        try lib.internal_format(writer, "\tUnique partition GUID: {}\n", .{partition.unique_partition_guid});
+        try lib.internal_format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
+        try lib.internal_format(writer, "\tLast LBA: 0x{x}\n", .{partition.last_lba});
+        try lib.internal_format(writer, "\tAttributes: {}\n", .{partition.attributes});
+        try lib.internal_format(writer, "\tPartition name: {}\n", .{lib.std.unicode.fmtUtf16le(&partition.partition_name)});
     }
 };
 
-pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
+pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
     // 1. Create MBR fake partition
     const mbr_lba = MBR.default_lba;
     const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba);
@@ -351,7 +351,7 @@ pub fn create(disk: *Disk.Descriptor, copy_gpt_header: ?*const Header) !GPT.Head
         .disk_guid = if (copy_gpt_header) |gpth| gpth.disk_guid else get_random_guid(),
         .partition_array_lba = partition_array_lba_start,
         .partition_entry_count = partition_count,
-        .partition_array_crc32 = CRC32.compute(common.std.mem.sliceAsBytes(partition_entries)),
+        .partition_array_crc32 = CRC32.compute(lib.sliceAsBytes(partition_entries)),
     };
 
     gpt_header.update_crc32();
@@ -411,6 +411,133 @@ const FilesystemCacheTypes = blk: {
 
 test "gpt size" {
     comptime {
-        assert(@sizeOf(Header) == 0x5c);
+        assert(@sizeOf(Header) == 0x200);
     }
 }
+
+pub fn generate_test_gpt_image(image_path: []const u8, byte_count: usize, allocator: lib.Allocator) !void {
+    const megabytes = @divExact(byte_count, mb);
+
+    var dd = lib.ChildProcess.init(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{image_path}) }, lib.testing_allocator);
+    _ = try dd.spawnAndWait();
+
+    var parted_gpt = lib.ChildProcess.init(&.{ "parted", "-s", image_path, "mklabel", "gpt" }, allocator);
+    _ = try parted_gpt.spawnAndWait();
+}
+
+test "Create partition table" {
+    const original_image_path = "barebones.hdd";
+    const byte_count = 64 * mb;
+    const sector_size = 0x200;
+
+    // Using an arena allocator because it doesn't care about memory leaks
+    var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
+    defer arena_allocator.deinit();
+
+    var allocator = arena_allocator.allocator();
+
+    try generate_test_gpt_image(original_image_path, byte_count, allocator);
+
+    var original_disk_image = try Disk.Image.from_file(original_image_path, sector_size, allocator);
+    try lib.cwd().deleteFile(original_image_path);
+
+    const original_disk = &original_disk_image.disk;
+    const original_gpt_cache = try GPT.Header.Cache.load(original_disk);
+
+    var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
+    const disk = &disk_image.disk;
+    const gpt_cache = try GPT.create(disk, original_gpt_cache.header);
+    _ = gpt_cache;
+
+    try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_disk_image.get_buffer());
+}
+
+//fn make(step: *lib.build.Step) !void {
+
+//switch (kernel.options.arch) {
+//.x86_64 => {
+//const x86_64 = kernel.options.arch.x86_64;
+//switch (x86_64.boot_protocol) {
+//.bios => {
+//const barebones = blk: {
+//const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.descriptor, 0);
+//const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
+//break :blk Barebones{
+//.gpt_partition_cache = gpt_partition_cache,
+//.fat_partition = fat_partition,
+//};
+//};
+
+//// TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
+//const gpt_partition_cache = try gpt_cache.add_partition(.fat32, lib.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
+//const fat_cache = try gpt_partition_cache.format(.fat32);
+//try fat_cache.mkdir("/EFI/BOOT");
+//const foo_entry = try barebones.fat_partition.get_directory_entry("/foo", .fail, null);
+//try fat_cache.add_file("/foo", "a\n", foo_entry.directory_entry);
+
+//lib.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
+
+//try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
+//unreachable;
+////try lib.Disk.image(&disk.descriptor, &.{lib.Disk.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
+////.read = read,
+////.write = write,
+////});
+
+////try disk.descriptor.verify();
+////try cwd().writeFile("zig-cache/disk_image.bin", disk.get_buffer());
+
+////const fat32_partition = try kernel.builder.allocator.create(lib.Filesystem.FAT32.Partition);
+
+////fat32_partition.* = try disk.descriptor.get_partition(0);
+
+////const r = try fat32_partition.create_file("loader.elf");
+////_ = r;
+////
+
+////const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
+////assert(mbr_file.len == 0x200);
+////disk.buffer.appendSliceAssumeCapacity(mbr_file);
+////const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
+////const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
+////disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
+////mbr.dap = .{
+////.sector_count = @intCast(u16, lib.align_forward(loader_file.len, 0x200) >> 9),
+////.pointer = 0x7e00,
+////.lba = disk.buffer.items.len >> 9,
+////};
+//////std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
+//////if (true) unreachable;
+//////const a = @ptrToInt(&mbr.dap.pointer);
+//////const b = @ptrToInt(mbr);
+//////std.debug.print("A: 0x{x}\n", .{a - b});
+//////if (true) unreachable;
+////disk.buffer.appendSliceAssumeCapacity(loader_file);
+//////assert(loader_file.len < 0x200);
+////disk.buffer.appendNTimesAssumeCapacity(0, lib.align_forward(loader_file.len, 0x200) - loader_file.len);
+//},
+//.uefi => unreachable,
+//}
+//},
+//else => unreachable,
+//}
+
+////assert(resource_files.len > 0);
+
+////for (resource_files) |filename| {
+////const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
+////try filesystem.write_file(kernel.allocator, filename, file_content);
+////}
+
+////assert(kernel.userspace_programs.len > 0);
+
+////for (kernel.userspace_programs) |program| {
+////const filename = program.out_filename;
+////const file_path = program.output_path_source.getPath();
+////const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, max_file_length);
+////try filesystem.write_file(get_allocator(), filename, file_content);
+////}
+
+//// TODO: use filesystem
+//try cwd().writeFile(kernel.builder.fmt("{s}disk.bin", .{cache_dir}), disk.buffer.items);
+//}
