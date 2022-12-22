@@ -47,6 +47,9 @@ pub const clamp = std.math.clamp;
 pub const isPowerOfTwo = std.math.isPowerOfTwo;
 pub const mul = std.math.mul;
 
+// UNICODE
+pub const unicode = std.unicode;
+
 // MEMORY ALLOCATION
 pub const Allocator = std.mem.Allocator;
 pub const AllocatorAllocFunction = fn (context: *anyopaque, len: usize, ptr_align: u29, len_align: u29, return_address: usize) Allocator.Error![]u8;

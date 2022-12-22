@@ -869,4 +869,55 @@ const Barebones = extern struct {
     fat_partition: FAT32.Cache,
 };
 
-test "Basic FAT32 image" {}
+test "Basic FAT32 image" {
+    switch (lib.os) {
+        .linux => {
+            const original_image_path = "barebones.hdd";
+            const byte_count = 64 * mb;
+            const sector_size = 0x200;
+
+            // Using an arena allocator because it doesn't care about memory leaks
+            var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
+            defer arena_allocator.deinit();
+
+            var allocator = arena_allocator.allocator();
+
+            var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
+            defer lib.cwd().deleteFile(original_image_path) catch unreachable;
+
+            const megabytes = @divExact(byte_count, mb);
+
+            var original_gpt_disk_image = blk: {
+                var dd = lib.ChildProcess.init(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
+                _ = try dd.spawnAndWait();
+
+                var parted_gpt = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
+                _ = try parted_gpt.spawnAndWait();
+
+                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
+            };
+
+            const original_gpt_cache = try GPT.Header.Cache.load(&original_gpt_disk_image.disk);
+            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.header);
+            try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_gpt_disk_image.get_buffer());
+
+            const partition_start_lba = 0x800;
+            const partition_name = "ESP";
+            const partition_filesystem = lib.Filesystem.Type.fat32;
+            original_gpt_disk_image = blk: {
+                var parted_mkpart = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
+                _ = try parted_mkpart.spawnAndWait();
+                var parted_esp = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
+                _ = try parted_esp.spawnAndWait();
+                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
+            };
+            const original_gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&original_gpt_disk_image.disk, 0);
+
+            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_partition_cache.partition);
+            _ = gpt_partition_cache;
+
+            try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_gpt_disk_image.get_buffer());
+        },
+        else => {},
+    }
+}

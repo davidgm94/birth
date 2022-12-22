@@ -134,7 +134,7 @@ pub const Header = extern struct {
         pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition) !void {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = cache.partition_entries[0..cache.header.partition_entry_count];
-            const partition_entry_bytes = lib.std.mem.sliceAsBytes(partition_entries);
+            const partition_entry_bytes = lib.sliceAsBytes(partition_entries);
             partition.* = new_value;
             cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
             cache.header.update_crc32();
@@ -412,45 +412,6 @@ const FilesystemCacheTypes = blk: {
 test "gpt size" {
     comptime {
         assert(@sizeOf(Header) == 0x200);
-    }
-}
-
-pub fn generate_test_gpt_image(image_path: []const u8, byte_count: usize, allocator: lib.Allocator) !void {
-    const megabytes = @divExact(byte_count, mb);
-
-    var dd = lib.ChildProcess.init(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{image_path}) }, lib.testing_allocator);
-    _ = try dd.spawnAndWait();
-
-    var parted_gpt = lib.ChildProcess.init(&.{ "parted", "-s", image_path, "mklabel", "gpt" }, allocator);
-    _ = try parted_gpt.spawnAndWait();
-}
-
-test "Create partition table" {
-    if (lib.os == .linux) {
-        const original_image_path = "barebones.hdd";
-        const byte_count = 64 * mb;
-        const sector_size = 0x200;
-
-        // Using an arena allocator because it doesn't care about memory leaks
-        var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
-        defer arena_allocator.deinit();
-
-        var allocator = arena_allocator.allocator();
-
-        try generate_test_gpt_image(original_image_path, byte_count, allocator);
-
-        var original_disk_image = try Disk.Image.from_file(original_image_path, sector_size, allocator);
-        try lib.cwd().deleteFile(original_image_path);
-
-        const original_disk = &original_disk_image.disk;
-        const original_gpt_cache = try GPT.Header.Cache.load(original_disk);
-
-        var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
-        const disk = &disk_image.disk;
-        const gpt_cache = try GPT.create(disk, original_gpt_cache.header);
-        _ = gpt_cache;
-
-        try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_disk_image.get_buffer());
     }
 }
 
