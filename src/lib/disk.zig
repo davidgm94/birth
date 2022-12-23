@@ -182,38 +182,6 @@ pub const Disk = extern struct {
             }
         }
 
-        //fn make(step: *lib.build.Step) !void {
-        //const kernel = @fieldParentPtr(Kernel, "disk_step", step);
-
-        //const disk_bytes = try common.allocate_zero_memory(64 * 1024 * 1024);
-        //const disk_sector_count = @divExact(disk_bytes.len, 0x200);
-        //common.log.debug("Disk size: 0x{x}", .{disk_sector_count});
-        //var disk = DiskImage{
-        //.disk = .{
-        //.type = .memory,
-        //.callbacks = .{
-        //.read = read,
-        //.write = write,
-        //},
-        //.disk_size = disk_bytes.len,
-        //},
-        //.buffer_ptr = disk_bytes.ptr,
-        //};
-
-        //switch (kernel.options.arch) {
-        //.x86_64 => {
-        //const x86_64 = kernel.options.arch.x86_64;
-        //switch (x86_64.boot_protocol) {
-        //.bios => {
-        //const barebones = blk: {
-        //const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.disk, 0);
-        //const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
-        //break :blk Barebones{
-        //.gpt_partition_cache = gpt_partition_cache,
-        //.fat_partition = fat_partition,
-        //};
-        //};
-
         //const gpt_cache = try GPT.create(&disk.disk, barebones.gpt_partition_cache.gpt.header);
         //// TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
         //const gpt_partition_cache = try gpt_cache.add_partition(.fat32, common.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);

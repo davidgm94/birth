@@ -31,8 +31,11 @@ pub const assert = std.debug.assert;
 
 pub const uefi = std.os.uefi;
 
+// ASCII
+pub const upperString = std.ascii.upperString;
+
 // META PROGRAMMING
-pub const refAllDecls = std.testing.refAllDecls;
+pub const refAllDecls = testing.refAllDecls;
 pub const Type = std.builtin.Type;
 pub const fields = std.meta.fields;
 pub const enumValues = std.enums.values;
@@ -58,7 +61,6 @@ pub const AllocatorFreeFunction = fn (context: *anyopaque, old_mem: []u8, old_al
 pub const ArenaAllocator = std.heap.ArenaAllocator;
 pub const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 pub const GPA = std.heap.GeneralPurposeAllocator;
-pub const testing_allocator = std.testing.allocator;
 pub const page_allocator = std.heap.page_allocator;
 
 // DATA STRUCTURES
@@ -116,6 +118,7 @@ pub const alignBackward = std.mem.alignBackward;
 pub const alignBackwardGeneric = std.mem.alignBackwardGeneric;
 pub const isAligned = std.mem.isAligned;
 pub const reverse = std.mem.reverse;
+pub const tokenize = std.mem.tokenize;
 
 pub fn zero(slice: []u8) void {
     @memset(slice.ptr, 0, slice.len);
@@ -128,13 +131,11 @@ pub fn zeroes(comptime T: type) T {
     return result;
 }
 
-// TEST
-pub const expect = std.testing.expect;
-pub const expectEqual = std.testing.expectEqual;
-pub const expectEqualSlices = std.testing.expectEqualSlices;
+pub const testing = std.testing;
 
 // FILESYSTEM
 pub const cwd = std.fs.cwd;
+pub const sync = std.os.sync;
 
 pub const ChildProcess = std.ChildProcess;
 
