@@ -153,6 +153,9 @@ pub const posix = std.os;
 // RANDOM
 pub const random = std.rand;
 
+// TIME
+pub const Instant = std.time.Instant;
+
 pub fn enumCount(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
 }
@@ -356,6 +359,11 @@ pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
         },
         .freestanding => @compileError("Not implemented yet"),
     }
+}
+
+pub fn spawnProcess(arguments: []const []const u8, allocator: Allocator) !void {
+    var process = ChildProcess.init(arguments, allocator);
+    _ = try process.spawnAndWait();
 }
 
 test {

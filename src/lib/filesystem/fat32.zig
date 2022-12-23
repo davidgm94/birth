@@ -38,12 +38,12 @@ pub const FSInfo = extern struct {
     }
 
     pub fn format(fsinfo: *const FSInfo, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try lib.internal_format(writer, "FSInfo:\n", .{});
-        try lib.internal_format(writer, "\tLead signature: 0x{x}\n", .{fsinfo.lead_signature});
-        try lib.internal_format(writer, "\tOther signature: 0x{x}\n", .{fsinfo.signature});
-        try lib.internal_format(writer, "\tFree cluster count: {}\n", .{fsinfo.free_cluster_count});
-        try lib.internal_format(writer, "\tLast allocated cluster: {}\n", .{fsinfo.last_allocated_cluster});
-        try lib.internal_format(writer, "\tTrail signature: 0x{x}\n", .{fsinfo.trail_signature});
+        try lib.format(writer, "FSInfo:\n", .{});
+        try lib.format(writer, "\tLead signature: 0x{x}\n", .{fsinfo.lead_signature});
+        try lib.format(writer, "\tOther signature: 0x{x}\n", .{fsinfo.signature});
+        try lib.format(writer, "\tFree cluster count: {}\n", .{fsinfo.free_cluster_count});
+        try lib.format(writer, "\tLast allocated cluster: {}\n", .{fsinfo.last_allocated_cluster});
+        try lib.format(writer, "\tTrail signature: 0x{x}\n", .{fsinfo.trail_signature});
     }
 };
 
@@ -324,12 +324,12 @@ fn cdiv(a: u32, b: u32) u32 {
 const min_cluster_32 = 65525;
 const max_cluster_32 = 268435446;
 
-pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cache {
+pub fn format(disk: *Disk, partition_range: Disk.PartitionRange) !Cache {
     const fat_partition_mbr_lba = partition_range.first_lba;
     const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba);
 
     const sectors_per_track = 32;
-    const total_sector_count_32 = @intCast(u32, lib.align_backward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
+    const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
     const fat_count = FAT32.count;
 
     var cluster_size: u8 = 1;
@@ -340,9 +340,9 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
 
     while (true) {
         assert(cluster_size > 0);
-        fat_data_sector_count = total_sector_count_32 - lib.align_forward(u32, FAT32.default_reserved_sector_count, cluster_size);
+        fat_data_sector_count = total_sector_count_32 - lib.alignForwardGeneric(u32, FAT32.default_reserved_sector_count, cluster_size);
         cluster_count_32 = (fat_data_sector_count * disk.sector_size + fat_count * 8) / (cluster_size * disk.sector_size + fat_count * 4);
-        fat_length_32 = lib.align_forward(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
+        fat_length_32 = lib.alignForwardGeneric(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
         cluster_count_32 = (fat_data_sector_count - fat_count * fat_length_32) / cluster_size;
         const max_cluster_size_32 = @min(fat_length_32 * disk.sector_size / 4, max_cluster_32);
         if (cluster_count_32 > max_cluster_size_32) {
@@ -365,7 +365,7 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
     _ = root_directory_entries;
 
     log.debug("Cluster size: {}. FAT data sector count: {}. FAT sector count: {}", .{ cluster_size, fat_data_sector_count, fat_length_32 });
-    const reserved_sector_count = lib.align_forward(u16, FAT32.default_reserved_sector_count, cluster_size);
+    const reserved_sector_count = lib.alignForwardGeneric(u16, FAT32.default_reserved_sector_count, cluster_size);
 
     fat_partition_mbr.* = MBR.Partition{
         .bpb = .{
@@ -441,7 +441,7 @@ pub fn format(disk: *Disk.Descriptor, partition_range: Disk.PartitionRange) !Cac
     };
 }
 
-fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize) !void {
+fn write_fat_entry_slow(disk: *Disk, fat_partition_mbr: *MBR.Partition, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize) !void {
     const fat_entries_lba = partition_lba_start + fat_partition_mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
     const fat_entry_count = fat_partition_mbr.bpb.dos3_31.dos2_0.fat_count;
     const fat_entry_sector_count = fat_partition_mbr.bpb.fat_sector_count_32;
@@ -456,7 +456,7 @@ fn write_fat_entry_slow(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partitio
     }
 }
 
-fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition, fs_info: *FAT32.FSInfo, partition_lba_start: u64) !u32 {
+fn allocate_fat_entry(disk: *Disk, fat_partition_mbr: *MBR.Partition, fs_info: *FAT32.FSInfo, partition_lba_start: u64) !u32 {
     const cluster = fs_info.allocate_clusters(1);
     try write_fat_entry_slow(disk, fat_partition_mbr, partition_lba_start, FAT32.Entry.allocated_and_eof, cluster);
     return cluster;
@@ -465,7 +465,7 @@ fn allocate_fat_entry(disk: *Disk.Descriptor, fat_partition_mbr: *MBR.Partition,
 const dot_entry_name: [11]u8 = ".".* ++ ([1]u8{' '} ** 10);
 const dot_dot_entry_name: [11]u8 = "..".* ++ ([1]u8{' '} ** 9);
 
-fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: anytype, insert: struct { cluster: u32, root_cluster: u32, cluster_sector_count: u16, root_cluster_sector: u64 }) !EntryResult(@TypeOf(desired_entry)) {
+fn insert_directory_entry_slow(disk: *Disk, desired_entry: anytype, insert: struct { cluster: u32, root_cluster: u32, cluster_sector_count: u16, root_cluster_sector: u64 }) !EntryResult(@TypeOf(desired_entry)) {
     const EntryType = @TypeOf(desired_entry);
     comptime assert(EntryType == DirectoryEntry or EntryType == LongNameEntry);
     comptime assert(@sizeOf(EntryType) == 32);
@@ -492,7 +492,7 @@ fn insert_directory_entry_slow(disk: *Disk.Descriptor, desired_entry: anytype, i
 const limine_date = FAT32.Date.new(9, 12, 2022);
 const limine_time = FAT32.Time.new(28, 20, 18);
 
-pub fn add_file(disk: *Disk.Descriptor, partition_index: usize, file_absolute_path: []const u8, file_content: []const u8, write_options: Disk.Descriptor.WriteOptions) !void {
+pub fn add_file(disk: *Disk, partition_index: usize, file_absolute_path: []const u8, file_content: []const u8, write_options: Disk.WriteOptions) !void {
     _ = disk;
     _ = partition_index;
     _ = file_absolute_path;
@@ -519,7 +519,7 @@ fn compare_fat_entries(my_fat_entries: []const FAT32.Entry, barebones_fat_entrie
 }
 
 pub const Cache = extern struct {
-    disk: *Disk.Descriptor,
+    disk: *Disk,
     partition_range: Disk.PartitionRange,
     mbr: *MBR.Partition,
     fs_info: *FSInfo,
@@ -804,8 +804,8 @@ pub const Cache = extern struct {
     }
 
     pub fn allocate_file_content(cache: Cache, file_content: []const u8) !void {
-        const sector_count = lib.align_forward(file_content.len, cache.disk.sector_size);
-        const cluster_count = lib.align_forward(sector_count, cache.cluster_to_sectors(1));
+        const sector_count = lib.alignForward(file_content.len, cache.disk.sector_size);
+        const cluster_count = lib.alignForward(sector_count, cache.cluster_to_sectors(1));
         const first_cluster = cache.allocate_clusters(cluster_count);
         log.debug("First cluster: {}", .{first_cluster});
         unreachable;
@@ -869,6 +869,14 @@ const Barebones = extern struct {
     fat_partition: FAT32.Cache,
 };
 
+fn losetup_start(allocator: lib.Allocator, image_path: []const u8, loopback_device: []const u8) !void {
+    try lib.spawnProcess(&.{ "./tools/losetup_start.sh", image_path, loopback_device }, allocator);
+}
+
+fn losetup_end(allocator: lib.Allocator, comptime loopback_device: []const u8) !void {
+    try lib.spawnProcess(&.{ "./tools/losetup_end.sh", loopback_device }, allocator);
+}
+
 test "Basic FAT32 image" {
     switch (lib.os) {
         .linux => {
@@ -888,11 +896,8 @@ test "Basic FAT32 image" {
             const megabytes = @divExact(byte_count, mb);
 
             var original_gpt_disk_image = blk: {
-                var dd = lib.ChildProcess.init(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
-                _ = try dd.spawnAndWait();
-
-                var parted_gpt = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
-                _ = try parted_gpt.spawnAndWait();
+                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
 
                 break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
             };
@@ -905,18 +910,21 @@ test "Basic FAT32 image" {
             const partition_name = "ESP";
             const partition_filesystem = lib.Filesystem.Type.fat32;
             original_gpt_disk_image = blk: {
-                var parted_mkpart = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
-                _ = try parted_mkpart.spawnAndWait();
-                var parted_esp = lib.ChildProcess.init(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
-                _ = try parted_esp.spawnAndWait();
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
                 break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
             };
             const original_gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&original_gpt_disk_image.disk, 0);
 
             const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_partition_cache.partition);
-            _ = gpt_partition_cache;
-
             try lib.expectEqualSlices(u8, disk_image.get_buffer(), original_gpt_disk_image.get_buffer());
+
+            const loopback_device = "loopback_dev";
+            try losetup_start(allocator, original_image_path, loopback_device);
+            try losetup_end(allocator, loopback_device);
+
+            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem);
+            _ = fat_partition_cache;
         },
         else => {},
     }

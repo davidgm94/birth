@@ -8,4 +8,7 @@
 # Text files to always have LF (unix) line endings on checkout.
 *.zig text eol=lf
 
-tools/* binary
+tools/OVMF_CODE-pure-efi.fd binary
+tools/xorriso-windows/cygwin1.dll binary
+tools/xorriso-windows/cygiconv-2.dll binary
+tools/xorriso-windows/xorriso.exe binary

@@ -6,7 +6,7 @@ pub const Type = enum(u32) {
     ext2 = 1,
     fat32 = 2,
 
-    pub const count = common.enum_count(@This());
+    pub const count = common.enumCount(@This());
 };
 
 pub const ReadError = error{
