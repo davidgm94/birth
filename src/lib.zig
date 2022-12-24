@@ -330,7 +330,11 @@ pub const CustomAllocator = extern struct {
     pub const Error = error{OutOfMemory};
 };
 
-pub fn diff(file1: []const u8, file2: []const u8) void {
+const DiffError = error{
+    diff,
+};
+
+pub fn diff(file1: []const u8, file2: []const u8) !void {
     assert(file1.len == file2.len);
     var different_bytes: u64 = 0;
     for (file1) |byte1, index| {
@@ -342,7 +346,10 @@ pub fn diff(file1: []const u8, file2: []const u8) void {
         }
     }
 
-    log.debug("Total different bytes: 0x{x}", .{different_bytes});
+    if (different_bytes != 0) {
+        log.debug("Total different bytes: 0x{x}", .{different_bytes});
+        return DiffError.diff;
+    }
 }
 
 pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
