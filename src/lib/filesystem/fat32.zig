@@ -964,6 +964,26 @@ const MountedPartition = struct {
     }
 };
 
+fn test_copy_file(config: struct { loopback_device: LoopbackDevice, allocator: lib.Allocator, original_image_path: []const u8, mount_dir: []const u8, file_path: []const u8, file_content: []const u8, sector_size: u16, fat_partition_cache: FAT32.Cache, disk_image: Disk.Image }) !void {
+    var original_disk_image = blk: {
+        const root_character = '/';
+        assert(config.file_path[0] == root_character);
+        var partition = try MountedPartition.from_loopback(config.loopback_device, config.allocator, config.original_image_path, config.mount_dir);
+        try partition.copy_files(config.allocator, config.file_path[0..1], &.{config.file_path[1..]});
+        try partition.end(config.allocator);
+        break :blk try Disk.Image.from_file(config.original_image_path, config.sector_size, config.allocator);
+    };
+
+    try config.fat_partition_cache.add_file(config.file_path, config.file_content, blk: {
+        const fat_cache = try FAT32.Cache.from_gpt_partition_cache(try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0));
+        const entry_result = try fat_cache.get_directory_entry(config.file_path, .fail, null);
+        break :blk entry_result.directory_entry;
+    });
+
+    try lib.diff(original_disk_image.get_buffer(), config.disk_image.get_buffer());
+    try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), config.disk_image.get_buffer());
+}
+
 test "Basic FAT32 image" {
     lib.testing.log_level = .debug;
 
@@ -1045,28 +1065,18 @@ test "Basic FAT32 image" {
             });
             try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
 
-            const file_path = "/foo";
-            const file_content = "a\n";
             log.info("[TEST #5] Copying a file", .{});
-            original_disk_image = blk: {
-                var partition = try MountedPartition.from_loopback(loopback_device, allocator, original_image_path, mount_dir);
-                try partition.copy_files(allocator, "/", &.{file_path[1..]});
-                try partition.end(allocator);
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
-            };
-            try fat_partition_cache.add_file(file_path, file_content, blk: {
-                const fat_cache = try FAT32.Cache.from_gpt_partition_cache(try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0));
-                const entry_result = try fat_cache.get_directory_entry(file_path, .fail, null);
-                break :blk entry_result.directory_entry;
+            try test_copy_file(.{
+                .file_path = "/foo",
+                .file_content = "a\n",
+                .loopback_device = loopback_device,
+                .allocator = allocator,
+                .original_image_path = original_image_path,
+                .mount_dir = mount_dir,
+                .sector_size = sector_size,
+                .fat_partition_cache = fat_partition_cache,
+                .disk_image = disk_image,
             });
-
-            const original_long_name_entry = @ptrCast(*LongNameEntry, original_disk_image.get_buffer()[0x1fc020 .. 0x1fc020 + 0x20]);
-            const long_name_entry = @ptrCast(*LongNameEntry, disk_image.get_buffer()[0x1fc020 .. 0x1fc020 + 0x20]);
-            log.debug("Original: {}\nMine: {}\n", .{ original_long_name_entry, long_name_entry });
-
-            try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
-
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
         },
         else => log.debug("Skipping for missing `parted` dependency...", .{}),
     }

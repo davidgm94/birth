@@ -140,7 +140,7 @@ pub const Disk = extern struct {
             return disk_image;
         }
 
-        pub inline fn get_buffer(disk_image: *Disk.Image) []u8 {
+        pub inline fn get_buffer(disk_image: Disk.Image) []u8 {
             return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
         }
 
