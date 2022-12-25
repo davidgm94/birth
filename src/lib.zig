@@ -369,9 +369,24 @@ pub fn allocate_zero_memory(bytes: u64) ![]align(0x1000) u8 {
     }
 }
 
+pub const ExecutionError = error{failed};
 pub fn spawnProcess(arguments: []const []const u8, allocator: Allocator) !void {
     var process = ChildProcess.init(arguments, allocator);
-    _ = try process.spawnAndWait();
+    const execution_result = try process.spawnAndWait();
+
+    switch (execution_result) {
+        .Exited => |exit_code| {
+            switch (exit_code) {
+                0 => {},
+                else => return ExecutionError.failed,
+            }
+        },
+        .Signal => |signal_code| {
+            _ = signal_code;
+            unreachable;
+        },
+        .Stopped, .Unknown => unreachable,
+    }
 }
 
 test {

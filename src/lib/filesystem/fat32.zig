@@ -537,8 +537,6 @@ pub const Cache = extern struct {
         const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
         log.debug("Data LBA: 0x{x}", .{data_lba});
 
-        assert(absolute_path[0] == '/');
-
         const root_cluster_sector = data_lba;
         var upper_cluster = root_cluster;
         var dir_tokenizer = lib.tokenize(u8, absolute_path, "/");
@@ -633,6 +631,7 @@ pub const Cache = extern struct {
 
     pub const GetError = error{
         not_found,
+        entry_already_exist,
     };
 
     pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, not_found_policy: GetNotFoundPolicy, entry_copy: ?*FAT32.DirectoryEntry) !EntryResult(DirectoryEntry) {
@@ -640,14 +639,13 @@ pub const Cache = extern struct {
         const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
         const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
 
-        assert(absolute_path[0] == '/');
-
         const root_cluster_sector = data_lba;
         var upper_cluster = root_cluster;
         var dir_tokenizer = lib.tokenize(u8, absolute_path, "/");
         var directories: usize = 0;
 
         entry_loop: while (dir_tokenizer.next()) |entry_name| : (directories += 1) {
+            log.debug("Searching for entry #{}: {s}", .{ directories, entry_name });
             const is_last = dir_tokenizer.peek() == null;
 
             const normalized_name = pack_string(entry_name, .{
@@ -677,19 +675,6 @@ pub const Cache = extern struct {
                                     const chop_index = entry_name.len / chop_element_count;
                                     const chop_count = chop_index + 1;
                                     const chop_slice = entry_name[chop_element_count * chop_index ..];
-                                    //sequence_number: packed struct(u8) {
-                                    //number: u5,
-                                    //first_physical_entry: u1 = 0,
-                                    //last_logical: bool,
-                                    //reserved: u1 = 0,
-                                    //},
-                                    //chars_0_4: [5]u16 align(1),
-                                    //attributes: u8,
-                                    //type: u8,
-                                    //checksum: u8,
-                                    //chars_5_10: [6]u16 align(1),
-                                    //reserved: [2]u8 = .{ 0, 0 },
-                                    //chars_11_12: [2]u16 align(1),
 
                                     _ = try insert_directory_entry_slow(cache.disk, LongNameEntry{
                                         .sequence_number = .{
@@ -762,47 +747,51 @@ pub const Cache = extern struct {
                             },
                             .fail => return GetError.not_found,
                         }
-                    }
+                    } else {
+                        if (is_unused) {
+                            unreachable;
+                        } else if (is_long_name) {
+                            const long_name_entry = @ptrCast(*FAT32.LongNameEntry, directory_entry);
+                            const original_starting_index = entry_index;
+                            if (long_name_entry.is_last()) {
+                                entry_index += 1;
+                                assert(entry_index < directory_entries_in_cluster.len);
+                                const normal_entry = &directory_entries_in_cluster[entry_index];
 
-                    if (is_unused) unreachable;
+                                if (lib.equal(u8, &normal_entry.name, &normalized_name)) {
+                                    log.debug("Entry: {s}", .{normal_entry.name});
+                                    if (not_found_policy == .allocate) return GetError.entry_already_exist;
 
-                    if (is_long_name) {
-                        const long_name_entry = @ptrCast(*FAT32.LongNameEntry, directory_entry);
-                        const original_starting_index = entry_index;
-                        if (long_name_entry.is_last()) {
-                            entry_index += 1;
-                            assert(entry_index < directory_entries_in_cluster.len);
-                            const normal_entry = &directory_entries_in_cluster[entry_index];
-                            if (lib.equal(u8, &normal_entry.name, &normalized_name)) {
-                                if (is_last) {
-                                    return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index), .directory_entry = normal_entry };
-                                } else {
-                                    unreachable;
+                                    if (is_last) {
+                                        return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index), .directory_entry = normal_entry };
+                                    } else {
+                                        unreachable; //normal_entry.get_first_cluster();
+                                    }
                                 }
+                                unreachable;
+                            } else {
+                                unreachable;
                             }
                             unreachable;
                         } else {
-                            unreachable;
-                        }
-                        unreachable;
-                    } else {
-                        if (lib.equal(u8, &directory_entry.name, &normalized_name)) {
-                            if (is_last) {
-                                return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, entry_index), .directory_entry = directory_entry };
-                            } else {
-                                upper_cluster = directory_entry.get_first_cluster();
-                                continue :entry_loop;
+                            if (lib.equal(u8, &directory_entry.name, &normalized_name)) {
+                                if (is_last) {
+                                    return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, entry_index), .directory_entry = directory_entry };
+                                } else {
+                                    upper_cluster = directory_entry.get_first_cluster();
+                                    continue :entry_loop;
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            switch (not_found_policy) {
-                .allocate => {
-                    unreachable;
-                },
-                .fail => return GetError.not_found,
+                switch (not_found_policy) {
+                    .allocate => {
+                        unreachable;
+                    },
+                    .fail => return GetError.not_found,
+                }
             }
         }
 
@@ -933,56 +922,62 @@ const LoopbackDevice = struct {
 const MountedPartition = struct {
     loopback_device: LoopbackDevice,
 
-    fn from_loopback(ld: LoopbackDevice, allocator: lib.Allocator, image_path: []const u8, mount_dir: []const u8) !MountedPartition {
-        var loopback_device = ld;
-        try loopback_device.start(allocator, image_path);
-        return try loopback_device.mount(allocator, mount_dir);
-    }
-
     fn mkdir(partition: MountedPartition, allocator: lib.Allocator, dir: []const u8) !void {
         try lib.spawnProcess(&.{ "sudo", "mkdir", "-p", try partition.join_with_root(allocator, dir) }, allocator);
     }
 
     fn join_with_root(partition: MountedPartition, allocator: lib.Allocator, path: []const u8) ![]const u8 {
-        const mount_dir = partition.loopback_device.mount_dir orelse unreachable;
-        const join_slice: []const []const u8 = if (path[0] != '/') &.{ mount_dir, "/", path } else &.{ mount_dir, path };
+        const mount_dir = partition.get_mount_dir();
+        assert(path[0] != '/');
+        const join_slice: []const []const u8 = &.{ mount_dir, "/", path };
         const joint_path = try lib.concat(allocator, u8, join_slice);
         return joint_path;
     }
 
-    fn copy_files(partition: MountedPartition, allocator: lib.Allocator, dst: []const u8, files: []const []const u8) !void {
-        const process_args = try lib.concat(allocator, []const u8, &.{ &.{ "sudo", "cp", "-v" }, files, &.{try partition.join_with_root(allocator, dst)} });
-        try lib.spawnProcess(process_args, allocator);
+    pub fn get_mount_dir(partition: MountedPartition) []const u8 {
+        const mount_dir = partition.loopback_device.mount_dir orelse unreachable;
+        return mount_dir;
+    }
+
+    fn copy_file(partition: MountedPartition, allocator: lib.Allocator, file_path: []const u8, file_content: []const u8) !void {
+        log.debug("Making sure path is created...", .{});
+        const maybe_last_slash = lib.lastIndexOf(u8, file_path, "/");
+
+        if (maybe_last_slash) |last_slash_index| {
+            const file_name = file_path[last_slash_index + 1 ..];
+            try lib.cwd().writeFile(file_name, file_content);
+            const dir = file_path[0..last_slash_index];
+            log.debug("Creating path to {s}", .{dir});
+            const destination_dir = try partition.join_with_root(allocator, dir);
+            const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
+            try lib.spawnProcess(mkdir_process_args, allocator);
+            log.debug("Copying file...", .{});
+            const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
+            try lib.spawnProcess(copy_process_args, allocator);
+            try lib.cwd().deleteFile(file_name);
+        } else {
+            try lib.cwd().writeFile(file_path, file_content);
+            const copy_process_args = &.{ "sudo", "cp", "-v", file_path, try partition.join_with_root(allocator, file_path) };
+            try lib.spawnProcess(copy_process_args, allocator);
+            try lib.cwd().deleteFile(file_path);
+        }
     }
 
     fn end(partition: *MountedPartition, allocator: lib.Allocator) !void {
         const mount_dir = partition.loopback_device.mount_dir orelse unreachable;
+        lib.sync();
         try lib.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
         partition.loopback_device.mount_dir = null;
         try partition.loopback_device.end(allocator);
-        try lib.cwd().deleteTree(mount_dir);
+        //try lib.cwd().deleteTree(mount_dir);
+        lib.spawnProcess(&.{ "sudo", "rm", "-rf", mount_dir }, allocator) catch |err| {
+            switch (err) {
+                lib.ExecutionError.failed => {},
+                else => return err,
+            }
+        };
     }
 };
-
-fn test_copy_file(config: struct { loopback_device: LoopbackDevice, allocator: lib.Allocator, original_image_path: []const u8, mount_dir: []const u8, file_path: []const u8, file_content: []const u8, sector_size: u16, fat_partition_cache: FAT32.Cache, disk_image: Disk.Image }) !void {
-    var original_disk_image = blk: {
-        const root_character = '/';
-        assert(config.file_path[0] == root_character);
-        var partition = try MountedPartition.from_loopback(config.loopback_device, config.allocator, config.original_image_path, config.mount_dir);
-        try partition.copy_files(config.allocator, config.file_path[0..1], &.{config.file_path[1..]});
-        try partition.end(config.allocator);
-        break :blk try Disk.Image.from_file(config.original_image_path, config.sector_size, config.allocator);
-    };
-
-    try config.fat_partition_cache.add_file(config.file_path, config.file_content, blk: {
-        const fat_cache = try FAT32.Cache.from_gpt_partition_cache(try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0));
-        const entry_result = try fat_cache.get_directory_entry(config.file_path, .fail, null);
-        break :blk entry_result.directory_entry;
-    });
-
-    try lib.diff(original_disk_image.get_buffer(), config.disk_image.get_buffer());
-    try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), config.disk_image.get_buffer());
-}
 
 test "Basic FAT32 image" {
     lib.testing.log_level = .debug;
@@ -1002,81 +997,65 @@ test "Basic FAT32 image" {
             var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
             defer lib.cwd().deleteFile(original_image_path) catch unreachable;
 
-            const megabytes = @divExact(byte_count, mb);
-
-            // 1. Test GPT creation
-            log.info("[TEST #1] Creating GPT", .{});
-            var original_disk_image = blk: {
-                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
-
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
-            };
-
-            const gpt_cache = try GPT.create(&disk_image.disk, blk: {
-                const original_gpt_cache = try GPT.Header.Cache.load(&original_disk_image.disk);
-                break :blk original_gpt_cache.header;
-            });
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
-
-            // 2. Test GPT partition creation
-            log.info("[TEST #2] Creating a GPT partition", .{});
             const partition_start_lba = 0x800;
             const partition_name = "ESP";
             const partition_filesystem = lib.Filesystem.Type.fat32;
-            original_disk_image = blk: {
+
+            const directories = [_][]const u8{"EFI/BOOT"};
+            const files = [_]struct { path: []const u8, content: []const u8 }{
+                .{ .path = "foo", .content = "this is the foo file content" },
+            };
+
+            // 1. Test GPT creation
+            var original_disk_image = blk: {
+                const megabytes = @divExact(byte_count, mb);
+                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
+
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
                 try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
                 try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
-            };
 
-            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, blk: {
-                const original_gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0);
-                break :blk original_gpt_partition_cache.partition;
-            });
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
-
-            log.info("[TEST #3] Formatting a partition with FAT32", .{});
-            var loopback_device = LoopbackDevice{ .name = "loopback_device" };
-
-            original_disk_image = blk: {
+                var loopback_device = LoopbackDevice{ .name = "loopback_device" };
                 try loopback_device.start(allocator, original_image_path);
+
                 try lib.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, allocator);
-                loopback_device.end(allocator) catch unreachable;
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
-            };
 
-            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, blk: {
-                break :blk try FAT32.Cache.from_gpt_partition_cache(try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0));
-            });
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
+                const mount_dir = "image_mount";
 
-            log.info("[TEST #4] Making a directory", .{});
-            const mount_dir = "image_mount";
-            const efi_boot_dir = "/EFI/BOOT";
-            original_disk_image = blk: {
-                var partition = try MountedPartition.from_loopback(loopback_device, allocator, original_image_path, mount_dir);
-                try partition.mkdir(allocator, efi_boot_dir);
+                var partition = try loopback_device.mount(allocator, mount_dir);
+
+                for (directories) |directory| {
+                    try partition.mkdir(allocator, directory);
+                }
+
+                for (files) |file| {
+                    try partition.copy_file(allocator, file.path, file.content);
+                }
+
                 try partition.end(allocator);
+
                 break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
             };
-            try fat_partition_cache.mkdir(efi_boot_dir, blk: {
-                break :blk try FAT32.Cache.from_gpt_partition_cache(try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0));
-            });
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
 
-            log.info("[TEST #5] Copying a file", .{});
-            try test_copy_file(.{
-                .file_path = "/foo",
-                .file_content = "a\n",
-                .loopback_device = loopback_device,
-                .allocator = allocator,
-                .original_image_path = original_image_path,
-                .mount_dir = mount_dir,
-                .sector_size = sector_size,
-                .fat_partition_cache = fat_partition_cache,
-                .disk_image = disk_image,
-            });
+            const original_gpt_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0);
+            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(original_gpt_cache);
+
+            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
+            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
+            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, original_fat_cache);
+
+            for (directories) |directory| {
+                try fat_partition_cache.mkdir(directory, original_fat_cache);
+            }
+
+            for (files) |file| {
+                try fat_partition_cache.add_file(file.path, file.content, blk: {
+                    const entry_result = try original_fat_cache.get_directory_entry(file.path, .fail, null);
+                    break :blk entry_result.directory_entry;
+                });
+            }
+
+            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
         },
         else => log.debug("Skipping for missing `parted` dependency...", .{}),
     }
