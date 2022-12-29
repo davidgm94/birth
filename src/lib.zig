@@ -13,6 +13,7 @@ pub const Filesystem = @import("lib/filesystem.zig");
 pub const List = @import("lib/list.zig");
 pub const Message = @import("lib/message.zig");
 pub const Module = @import("lib/module.zig");
+pub const NLS = @import("lib/nls.zig");
 pub const PartitionTable = @import("lib/partition_table.zig");
 pub const QEMU = @import("lib/qemu.zig");
 pub const Syscall = @import("lib/syscall.zig");
@@ -33,6 +34,8 @@ pub const uefi = std.os.uefi;
 
 // ASCII
 pub const upperString = std.ascii.upperString;
+pub const isUpper = std.ascii.isUpper;
+pub const isAlphabetic = std.ascii.isAlphabetic;
 
 // META PROGRAMMING
 pub const refAllDecls = testing.refAllDecls;
@@ -118,7 +121,6 @@ pub const alignBackward = std.mem.alignBackward;
 pub const alignBackwardGeneric = std.mem.alignBackwardGeneric;
 pub const isAligned = std.mem.isAligned;
 pub const reverse = std.mem.reverse;
-pub const tokenize = std.mem.tokenize;
 
 pub fn zero(slice: []u8) void {
     @memset(slice.ptr, 0, slice.len);
@@ -389,7 +391,108 @@ pub fn spawnProcess(arguments: []const []const u8, allocator: Allocator) !void {
     }
 }
 
+pub const DirectoryTokenizer = struct {
+    string: []const u8,
+    index: usize = 0,
+    given_count: usize = 0,
+    total_count: usize,
+
+    pub fn init(string: []const u8) DirectoryTokenizer {
+        assert(string.len > 0);
+        var count: usize = 0;
+
+        if (string[0] == '/') {
+            for (string) |ch| {
+                count += @boolToInt(ch == '/');
+            }
+        } else unreachable;
+
+        return .{ .string = string, .total_count = count + 1 };
+    }
+
+    pub fn next(tokenizer: *DirectoryTokenizer) ?[]const u8 {
+        if (tokenizer.index == 0) {
+            const is_root_dir = tokenizer.string[0] == '/';
+            if (is_root_dir) {
+                tokenizer.index += 1;
+                tokenizer.given_count += 1;
+                return "/";
+            } else unreachable;
+        } else {
+            const original_index = tokenizer.index;
+            if (original_index < tokenizer.string.len) {
+                for (tokenizer.string[original_index..]) |char| {
+                    if (char == '/') {
+                        const result = tokenizer.string[original_index..tokenizer.index];
+                        tokenizer.given_count += 1;
+                        tokenizer.index += 1;
+                        return result;
+                    }
+
+                    tokenizer.index += 1;
+                }
+
+                tokenizer.given_count += 1;
+
+                return tokenizer.string[original_index..];
+            } else {
+                assert(original_index == tokenizer.string.len);
+                assert(tokenizer.given_count == tokenizer.total_count);
+                return null;
+            }
+        }
+    }
+
+    pub fn is_last(tokenizer: DirectoryTokenizer) bool {
+        return tokenizer.given_count == tokenizer.total_count;
+    }
+
+    test {
+        const TestCase = struct {
+            path: []const u8,
+            expected_result: []const []const u8,
+        };
+
+        const test_cases = [_]TestCase{
+            .{ .path = "/EFI", .expected_result = &.{ "/", "EFI" } },
+            .{ .path = "/abc/def/a", .expected_result = &.{ "/", "abc", "def", "a" } },
+        };
+
+        inline for (test_cases) |case| {
+            var dir_tokenizer = DirectoryTokenizer.init(case.path);
+            var results: [case.expected_result.len][]const u8 = undefined;
+            var result_count: usize = 0;
+
+            while (dir_tokenizer.next()) |dir| {
+                try testing.expect(result_count < results.len);
+                try testing.expectEqualStrings(case.expected_result[result_count], dir);
+                results[result_count] = dir;
+                result_count += 1;
+            }
+
+            try testing.expectEqual(case.expected_result.len, result_count);
+        }
+    }
+};
+
+pub inline fn ptrAdd(comptime T: type, ptr: *T, element_offset: usize) *T {
+    return @intToPtr(*T, @ptrToInt(ptr) + @sizeOf(T) * element_offset);
+}
+
+pub inline fn maybePtrAdd(comptime T: type, ptr: ?*T, element_offset: usize) ?*T {
+    return @intToPtr(*T, @ptrToInt(ptr) + @sizeOf(T) * element_offset);
+}
+
+pub inline fn ptrSub(comptime T: type, ptr: *T, element_offset: usize) *T {
+    return @intToPtr(*T, @ptrToInt(ptr) - @sizeOf(T) * element_offset);
+}
+
+pub inline fn maybePtrSub(comptime T: type, ptr: ?*T, element_offset: usize) ?*T {
+    return @intToPtr(*T, @ptrToInt(ptr) - @sizeOf(T) * element_offset);
+}
+
 test {
+    _ = DirectoryTokenizer;
     _ = Filesystem;
     _ = PartitionTable;
 }

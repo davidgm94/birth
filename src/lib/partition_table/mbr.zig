@@ -150,10 +150,6 @@ pub const Partition = extern struct {
         assert(@sizeOf(@This()) == 0x200);
     }
 
-    pub fn get_fs_info(mbr: *const MBR.Partition, disk: *Disk, gpt_partition: *const GPT.Partition) !*FAT32.FSInfo {
-        return try disk.read_typed_sectors(FAT32.FSInfo, gpt_partition.first_lba + mbr.bpb.fs_info_sector);
-    }
-
     pub fn compare(mbr: *Partition, other: *MBR.Partition) void {
         log.debug("Comparing MBRs...", .{});
         mbr.bpb.compare(&other.bpb);

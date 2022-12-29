@@ -169,6 +169,7 @@ pub const Disk = extern struct {
 
         pub fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
             const need_write = !(disk.type == .memory and !commit_memory_to_disk);
+            log.debug("Trying to write {} bytes to sector offset 0x{x}. Actually write: {}", .{ bytes.len, sector_offset, commit_memory_to_disk });
             if (need_write) {
                 log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
                 const disk_image = @fieldParentPtr(Disk.Image, "disk", disk);

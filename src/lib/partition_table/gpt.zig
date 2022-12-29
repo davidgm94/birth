@@ -327,7 +327,6 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
         .first_lba = first_lba,
         .size_in_lba = @intCast(u32, @divExact(disk.disk_size, disk.sector_size) - 1),
     };
-    log.debug("Size in LBA: 0x{x}", .{mbr.partitions[0].size_in_lba});
     mbr.signature = .{ 0x55, 0xaa };
     try disk.write_typed_sectors(MBR.Partition, mbr, mbr_lba, false);
 

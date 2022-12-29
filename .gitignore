@@ -5,3 +5,4 @@ debug_disk
 .gdb_history
 bochsout.txt
 *.hdd
+loopback_device
