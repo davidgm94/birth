@@ -577,7 +577,7 @@ pub const Cache = extern struct {
         const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse unreachable;
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
-        const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_entry);
+        const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_cache);
         const last_element = absolute_path[last_slash_index + 1 ..];
         try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, copy_entry);
     }
@@ -993,13 +993,19 @@ pub const Cache = extern struct {
         return result;
     }
 
-    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, copy_entry: ?*FAT32.DirectoryEntry) !u32 {
+    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, copy_cache: ?FAT32.Cache) !u32 {
         var clusters = [1]u32{0};
         try cache.allocate_clusters(&clusters);
         const cluster = clusters[0];
         const lba = cache.cluster_to_sector(cluster);
         log.debug("Directory cluster LBA: 0x{x}", .{lba});
         const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba);
+
+        var copy_entry: ?*FAT32.DirectoryEntry = null;
+        if (copy_cache) |cp_cache| {
+            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.cluster_to_sector(cluster));
+            copy_entry = &entries[0];
+        }
         const attributes = Attributes{
             .read_only = false,
             .hidden = false,
