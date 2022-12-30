@@ -170,22 +170,22 @@ pub const DirectoryEntry = extern struct {
         return @as(u32, entry.first_cluster_high) << 16 | entry.first_cluster_low;
     }
 
-    pub const Attributes = packed struct(u8) {
-        read_only: bool = false,
-        hidden: bool = false,
-        system: bool = false,
-        volume_id: bool = false,
-        directory: bool = false,
-        archive: bool = false,
-        reserved: u2 = 0,
-
-        pub fn has_long_name(attributes: Attributes) bool {
-            return attributes.read_only and attributes.hidden and attributes.system and attributes.volume_id;
-        }
-    };
-
     comptime {
         assert(@sizeOf(@This()) == 32);
+    }
+};
+
+pub const Attributes = packed struct(u8) {
+    read_only: bool = false,
+    hidden: bool = false,
+    system: bool = false,
+    volume_id: bool = false,
+    directory: bool = false,
+    archive: bool = false,
+    reserved: u2 = 0,
+
+    pub fn has_long_name(attributes: Attributes) bool {
+        return attributes.read_only and attributes.hidden and attributes.system and attributes.volume_id;
     }
 };
 
@@ -197,11 +197,11 @@ pub const LongNameEntry = extern struct {
         reserved: u1 = 0,
     },
     chars_0_4: [5]u16 align(1),
-    attributes: u8,
-    type: u8,
+    attributes: Attributes,
+    reserved: u8 = 0,
     checksum: u8,
     chars_5_10: [6]u16 align(1),
-    reserved: [2]u8 = .{ 0, 0 },
+    first_cluster: u16 align(1),
     chars_11_12: [2]u16 align(1),
 
     pub const Sector = [per_sector]@This();
@@ -298,7 +298,7 @@ fn cdiv(a: u32, b: u32) u32 {
 const min_cluster_32 = 65525;
 const max_cluster_32 = 268435446;
 
-pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
+pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
     const fat_partition_mbr_lba = partition_range.first_lba;
     const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba);
 
@@ -413,6 +413,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
         .partition_range = partition_range,
         .mbr = fat_partition_mbr,
         .fs_info = fs_info,
+        .allocator = allocator,
     };
 }
 
@@ -460,13 +461,14 @@ pub const Cache = extern struct {
     partition_range: Disk.PartitionRange,
     mbr: *MBR.Partition,
     fs_info: *FSInfo,
+    allocator: *lib.Allocator,
     name_configuration: NameConfiguration = mixed,
 
     fn get_backup_boot_record_sector(cache: Cache) u64 {
         return cache.partition_range.first_lba + cache.mbr.bpb.backup_boot_record_sector;
     }
 
-    pub fn from_gpt_partition_cache(gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
+    pub fn from_gpt_partition_cache(allocator: *lib.Allocator, gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
         const partition_range = Disk.PartitionRange{
             .first_lba = gpt_partition_cache.partition.first_lba,
             .last_lba = gpt_partition_cache.partition.last_lba,
@@ -487,6 +489,7 @@ pub const Cache = extern struct {
             .partition_range = partition_range,
             .mbr = partition_mbr,
             .fs_info = fs_info,
+            .allocator = allocator,
         };
     }
 
@@ -574,48 +577,40 @@ pub const Cache = extern struct {
         const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse unreachable;
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
-        const cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_entry);
+        const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_entry);
         const last_element = absolute_path[last_slash_index + 1 ..];
-        const entry = try cache.add_entry(last_element, true, cluster, copy_entry);
-        const total_slots = entry.get_slots();
-        var free_slots: usize = 0;
-        log.debug("Cluster in which the directories entries will fit: {}", .{containing_dir_cluster});
-        var entry_iterator = DirectoryEntryIterator(DirectoryEntry).init(containing_dir_cluster);
-        var current_cluster: u32 = 0;
+        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, copy_entry);
+    }
 
-        while (try entry_iterator.next(cache)) |cluster_entry| {
-            if (cluster_entry.is_free()) {
-                if (free_slots == 0) current_cluster = @intCast(u32, entry_iterator.cluster);
-                free_slots += 1;
+    pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, copy_cache: ?FAT32.Cache) !void {
+        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(file_path, null)).directory_entry else null;
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse unreachable;
+        const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
+        const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
+        const content_cluster = try cache.allocate_new_file(file_content);
+        const last_element = file_path[last_slash_index + 1 ..];
+        try cache.add_entry(.{ .name = last_element, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, copy_entry);
+    }
 
-                if (free_slots == total_slots) {
-                    const last_current_cluster = @intCast(u32, entry_iterator.cluster);
-                    assert(last_current_cluster == current_cluster);
-                    const element_offset = @divExact(@ptrToInt(cluster_entry) - @ptrToInt(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
-                    log.debug("Element offset: {}. Free slots: {}", .{ element_offset, free_slots });
-                    const entry_start_index = element_offset - (free_slots - 1);
-                    log.debug("Entry start index: {}", .{entry_start_index});
+    fn allocate_new_file(cache: Cache, file_content: []const u8) !u32 {
+        assert(file_content.len > 0);
+        const cluster_byte_count = cache.get_cluster_sector_count() * cache.disk.sector_size;
+        const aligned_file_size = lib.alignForward(file_content.len, cluster_byte_count);
+        const cluster_count = @divExact(aligned_file_size, cluster_byte_count);
+        const clusters = try cache.allocator.alloc(u32, cluster_count);
+        try cache.allocate_clusters(clusters);
 
-                    var entry_index = entry_start_index;
-                    for (entry.long_name_entries) |*long_name_entry| {
-                        entry_iterator.cluster_entries[entry_index] = @bitCast(DirectoryEntry, long_name_entry.*);
-                        entry_index += 1;
-                    }
-
-                    entry_iterator.cluster_entries[entry_index] = entry.normal_entry;
-
-                    try cache.disk.write_slice(DirectoryEntry, entry_iterator.cluster_entries, entry_iterator.get_current_lba(cache), false);
-
-                    return;
-                }
-
-                unreachable;
-            } else {
-                free_slots = 0;
-            }
+        for (clusters) |cluster, cluster_index| {
+            const cluster_byte_offset = cluster_byte_count * cluster_index;
+            const slice_start = cluster_byte_offset;
+            const slice_end = cluster_byte_offset + cluster_byte_count;
+            const slice = file_content[slice_start..if (slice_end > file_content.len) file_content.len else slice_end];
+            const lba = cache.cluster_to_sector(cluster);
+            log.debug("[#{}] Cluster: {}. Cluster byte offset: {}. Slice len: {}. LBA: 0x{x}", .{ cluster_index, cluster, cluster_byte_offset, slice.len, lba });
+            try cache.disk.write_slice(u8, slice, lba, true);
         }
 
-        unreachable;
+        return clusters[0];
     }
 
     const Size = struct {
@@ -715,7 +710,7 @@ pub const Cache = extern struct {
         case: NameCase,
     };
 
-    fn create_shortname(cache: Cache, nls: *const NLS.Table, long_name: []u16, cluster: u32) !?ShortNameResult {
+    fn create_shortname(cache: Cache, nls: *const NLS.Table, long_name: []u16, cluster: u32, short_name_result: *ShortNameResult) !bool {
         var is_short_name = true;
         const end = lib.ptrAdd(u16, &long_name[0], long_name.len);
         var extension_start: ?*u16 = end;
@@ -823,7 +818,7 @@ pub const Cache = extern struct {
 
         if (base[0] == 0xe5) base[0] = 0x05;
 
-        var result = ShortNameResult{
+        short_name_result.* = ShortNameResult{
             .name = blk: {
                 var name = [1]u8{' '} ** short_name_len;
                 lib.copy(u8, name[0..base_len], base[0..base_len]);
@@ -833,13 +828,14 @@ pub const Cache = extern struct {
             .case = .{ .base = .upper, .extension = .upper },
         };
 
-        if (is_short_name) {
-            if (try cache.exists(&result.name, cluster)) unreachable;
-
-            return switch (cache.name_configuration.create) {
-                .windows_95 => if (base_info.upper and extension_info.upper) result else null,
+        if (is_short_name and base_info.valid and extension_info.valid) {
+            if (try cache.exists(&short_name_result.name, cluster)) unreachable;
+            const result = switch (cache.name_configuration.create) {
+                .windows_95 => base_info.upper and extension_info.upper,
                 .windows_nt => unreachable,
             };
+            log.debug("Base info: {}. Extension info: {}. Create name policy: {}. Result: {}", .{ base_info, extension_info, cache.name_configuration.create, result });
+            return result;
         }
 
         unreachable;
@@ -875,41 +871,126 @@ pub const Cache = extern struct {
         }
     };
 
-    pub fn add_entry(cache: Cache, name: []const u8, is_dir: bool, cluster: u32, copy_entry: ?*DirectoryEntry) !GenericEntry {
-        log.debug("Adding entry for {s}. Dir: {}. Cluster: {}", .{ name, is_dir, cluster });
+    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, copy_entry: ?*DirectoryEntry) !void {
+        log.debug("Adding entry for {s}. Dir: {}. Content cluster: {}. Containing cluster: {}", .{ entry_setup.name, entry_setup.is_dir, entry_setup.content_cluster, entry_setup.containing_cluster });
         // TODO:
-        for (name) |ch| {
+        for (entry_setup.name) |ch| {
             if (ch == '.') unreachable;
         }
 
-        var array: [long_name_max_characters + 2]u16 = undefined;
-        const size = try translate_to_unicode(name, &array);
-        const long_name = array[0..size.len];
+        var long_name_array = [1]u16{0} ** (long_name_max_characters + 2);
+        const size = try translate_to_unicode(entry_setup.name, &long_name_array);
+        const long_name = long_name_array[0..size.len];
         try check_bad_chars(long_name);
 
-        if (try cache.create_shortname(&NLS.ascii.table, long_name, cluster)) |shortname| {
-            const entry = DirectoryEntry{
-                .name = shortname.name,
+        var short_name_result: ShortNameResult = undefined;
+        const can_get_away_with_short_name = try cache.create_shortname(&NLS.ascii.table, long_name, entry_setup.content_cluster, &short_name_result);
+        var entry = GenericEntry{
+            .normal_entry = DirectoryEntry{
+                .name = short_name_result.name,
                 .attributes = .{
-                    .directory = is_dir,
-                    .archive = !is_dir,
+                    .directory = entry_setup.is_dir,
+                    .archive = !entry_setup.is_dir,
                 },
-                .case = shortname.case,
+                .case = short_name_result.case,
                 .creation_time_tenth = if (copy_entry) |e| e.creation_time_tenth else unreachable,
                 .creation_time = if (copy_entry) |e| e.creation_time else unreachable,
                 .creation_date = if (copy_entry) |e| e.creation_date else unreachable,
                 .last_access_date = if (copy_entry) |e| e.last_access_date else unreachable,
-                .first_cluster_high = @truncate(u16, cluster >> 16),
+                .first_cluster_high = @truncate(u16, entry_setup.content_cluster >> 16),
                 .last_write_time = if (copy_entry) |e| e.last_write_time else unreachable,
                 .last_write_date = if (copy_entry) |e| e.last_write_date else unreachable,
-                .first_cluster_low = @truncate(u16, cluster),
-                .file_size = 0,
-            };
+                .first_cluster_low = @truncate(u16, entry_setup.content_cluster),
+                .file_size = entry_setup.size,
+            },
+        };
 
-            return .{ .normal_entry = entry };
-        } else {
-            unreachable;
+        if (!can_get_away_with_short_name) {
+            log.debug("cannot create shortname", .{});
+            log.debug("Short name result: {}", .{short_name_result});
+            const checksum = shortname_checksum(&short_name_result.name);
+            log.debug("checksum: 0x{x}", .{checksum});
+
+            const long_slot_count = @intCast(u5, size.size / character_count_per_long_entry);
+            entry.long_name_entries = try cache.allocator.alloc(LongNameEntry, long_slot_count);
+            var reverse_index = long_slot_count;
+
+            for (entry.long_name_entries) |*long_name_entry| {
+                const offset = (reverse_index - 1) * character_count_per_long_entry;
+                long_name_entry.* = .{
+                    .sequence_number = .{
+                        .number = reverse_index,
+                        .last_logical = reverse_index == long_slot_count,
+                    },
+                    .chars_0_4 = long_name_array[offset .. offset + 6][0..5].*,
+                    .attributes = .{
+                        .read_only = true,
+                        .hidden = true,
+                        .system = true,
+                        .volume_id = true,
+                    },
+                    .checksum = checksum,
+                    .chars_5_10 = long_name_array[offset + 5 .. offset + 11][0..6].*,
+                    .first_cluster = 0,
+                    .chars_11_12 = long_name_array[offset + 11 .. offset + 13][0..2].*,
+                };
+            }
         }
+
+        const total_slots = entry.get_slots();
+        var free_slots: usize = 0;
+        log.debug("Cluster in which the directories entries will fit: {}", .{entry_setup.containing_cluster});
+        var entry_iterator = DirectoryEntryIterator(DirectoryEntry).init(entry_setup.containing_cluster);
+        var current_cluster: u32 = 0;
+
+        while (try entry_iterator.next(cache)) |cluster_entry| {
+            if (cluster_entry.is_free()) {
+                if (free_slots == 0) current_cluster = @intCast(u32, entry_iterator.cluster);
+                free_slots += 1;
+
+                if (free_slots == total_slots) {
+                    const last_current_cluster = @intCast(u32, entry_iterator.cluster);
+                    assert(last_current_cluster == current_cluster);
+                    const element_offset = @divExact(@ptrToInt(cluster_entry) - @ptrToInt(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
+                    log.debug("Element offset: {}. Free slots: {}", .{ element_offset, free_slots });
+                    const entry_start_index = element_offset - (free_slots - 1);
+                    log.debug("Entry start index: {}", .{entry_start_index});
+
+                    var entry_index = entry_start_index;
+                    for (entry.long_name_entries) |*long_name_entry| {
+                        entry_iterator.cluster_entries[entry_index] = @bitCast(DirectoryEntry, long_name_entry.*);
+                        entry_index += 1;
+                    }
+
+                    entry_iterator.cluster_entries[entry_index] = entry.normal_entry;
+
+                    try cache.disk.write_slice(DirectoryEntry, entry_iterator.cluster_entries, entry_iterator.get_current_lba(cache), false);
+
+                    return;
+                }
+            } else {
+                free_slots = 0;
+            }
+        }
+
+        unreachable;
+    }
+
+    pub fn shortname_checksum(name: []const u8) u8 {
+        var result = name[0];
+
+        result = (result << 7) + (result >> 1) +% name[1];
+        result = (result << 7) + (result >> 1) +% name[2];
+        result = (result << 7) + (result >> 1) +% name[3];
+        result = (result << 7) + (result >> 1) +% name[4];
+        result = (result << 7) + (result >> 1) +% name[5];
+        result = (result << 7) + (result >> 1) +% name[6];
+        result = (result << 7) + (result >> 1) +% name[7];
+        result = (result << 7) + (result >> 1) +% name[8];
+        result = (result << 7) + (result >> 1) +% name[9];
+        result = (result << 7) + (result >> 1) +% name[10];
+
+        return result;
     }
 
     pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, copy_entry: ?*FAT32.DirectoryEntry) !u32 {
@@ -919,7 +1000,7 @@ pub const Cache = extern struct {
         const lba = cache.cluster_to_sector(cluster);
         log.debug("Directory cluster LBA: 0x{x}", .{lba});
         const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba);
-        const attributes = FAT32.DirectoryEntry.Attributes{
+        const attributes = Attributes{
             .read_only = false,
             .hidden = false,
             .system = false,
@@ -1286,27 +1367,19 @@ const MountedPartition = struct {
 
     fn copy_file(partition: MountedPartition, allocator: lib.Allocator, file_path: []const u8, file_content: []const u8) !void {
         log.debug("Making sure path is created...", .{});
-        const maybe_last_slash = lib.lastIndexOf(u8, file_path, "/");
-        if (true) unreachable;
-
-        if (maybe_last_slash) |last_slash_index| {
-            const file_name = file_path[last_slash_index + 1 ..];
-            try lib.cwd().writeFile(file_name, file_content);
-            const dir = file_path[0..last_slash_index];
-            log.debug("Creating path to {s}", .{dir});
-            const destination_dir = try partition.join_with_root(allocator, dir);
-            const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
-            try lib.spawnProcess(mkdir_process_args, allocator);
-            log.debug("Copying file...", .{});
-            const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
-            try lib.spawnProcess(copy_process_args, allocator);
-            try lib.cwd().deleteFile(file_name);
-        } else {
-            try lib.cwd().writeFile(file_path, file_content);
-            const copy_process_args = &.{ "sudo", "cp", "-v", file_path, try partition.join_with_root(allocator, file_path) };
-            try lib.spawnProcess(copy_process_args, allocator);
-            try lib.cwd().deleteFile(file_path);
-        }
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse unreachable;
+        const file_name = file_path[last_slash_index + 1 ..];
+        assert(file_name.len > 0);
+        try lib.cwd().writeFile(file_name, file_content);
+        const dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
+        log.debug("Creating path to {s}", .{dir});
+        const destination_dir = try partition.join_with_root(allocator, dir);
+        const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
+        try lib.spawnProcess(mkdir_process_args, allocator);
+        log.debug("Copying file...", .{});
+        const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
+        try lib.spawnProcess(copy_process_args, allocator);
+        try lib.cwd().deleteFile(file_name);
     }
 
     fn end(partition: *MountedPartition, allocator: lib.Allocator) !void {
@@ -1323,91 +1396,6 @@ const MountedPartition = struct {
         };
     }
 };
-
-test "Basic FAT32 image" {
-    lib.testing.log_level = .debug;
-
-    switch (lib.os) {
-        .linux => {
-            const original_image_path = "barebones.hdd";
-            const byte_count = 64 * mb;
-            const sector_size = 0x200;
-
-            // Using an arena allocator because it doesn't care about memory leaks
-            var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
-            defer arena_allocator.deinit();
-
-            var allocator = arena_allocator.allocator();
-
-            var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
-            defer lib.cwd().deleteFile(original_image_path) catch unreachable;
-
-            const partition_start_lba = 0x800;
-            const partition_name = "ESP";
-            const partition_filesystem = lib.Filesystem.Type.fat32;
-
-            const directories = [_][]const u8{ "/EFI", "/EFI/BOOT" };
-            const files = [_]struct { path: []const u8, content: []const u8 }{
-                .{ .path = "/FOO", .content = "this is the foo file content" },
-                .{ .path = "/EFI/def", .content = "this is the def file content" },
-                .{ .path = "/EFI/BOOT/xyz", .content = "this is the xyz file content" },
-                .{ .path = "/EFI/opq", .content = "this is the opq file content" },
-            };
-            _ = files;
-
-            // 1. Test GPT creation
-            var original_disk_image = blk: {
-                const megabytes = @divExact(byte_count, mb);
-                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
-
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
-
-                var loopback_device = LoopbackDevice{ .name = "loopback_device" };
-                try loopback_device.start(allocator, original_image_path);
-
-                try lib.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, allocator);
-
-                const mount_dir = "image_mount";
-
-                var partition = try loopback_device.mount(allocator, mount_dir);
-
-                for (directories) |directory| {
-                    try partition.mkdir(allocator, directory);
-                }
-
-                //for (files) |file| {
-                //try partition.copy_file(allocator, file.path, file.content);
-                //}
-
-                try partition.end(allocator);
-
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
-            };
-
-            const original_gpt_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0);
-            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(original_gpt_cache);
-
-            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
-            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
-            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, original_fat_cache);
-
-            for (directories) |directory| {
-                try fat_partition_cache.make_new_directory(directory, original_fat_cache);
-            }
-
-            //for (files) |file| {
-            //log.debug("Commanding to add file {s}", .{file.path});
-            //try fat_partition_cache.add_file(file.path, file.content, original_fat_cache);
-            //}
-
-            try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
-            //try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
-        },
-        else => log.debug("Skipping for missing `parted` dependency...", .{}),
-    }
-}
 
 const FATEntryIterator = struct {
     entries: []FAT32.Entry = &.{},
@@ -1438,31 +1426,11 @@ const FATEntryIterator = struct {
                 unreachable;
             }
 
+            if (iterator.cluster == iterator.entries.len) unreachable;
+
             const result = iterator.cluster;
             iterator.cluster += 1;
             return result;
-
-            // TODO: @Bug Make this work with real disks (non-memory disks)
-            //while (lba_offset < lba_top) : (lba_offset += 1) {
-            //const fat_entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset);
-
-            //for (fat_entries) |*entry| {
-            //if (entry.is_free()) {
-            //log.debug("[ALLOCATING CLUSTER] #{}", .{cluster});
-            //clusters[cluster_index] = cluster;
-            //cluster_index += 1;
-            //entry.* = FAT32.Entry.allocated_and_eof;
-            //cache.fs_info.last_allocated_cluster = cluster;
-            //cache.fs_info.free_cluster_count -= 1;
-
-            //if (cluster_index == clusters.len) break :cluster_find_loop;
-            //}
-
-            //cluster += 1;
-            //cluster_count += 1;
-            //if (cluster_count == max_clusters) unreachable;
-            //}
-            //}
         }
 
         unreachable;
@@ -1511,4 +1479,88 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
             return &iterator.cluster_entries[iterator.cluster_it];
         }
     };
+}
+
+test "Basic FAT32 image" {
+    lib.testing.log_level = .debug;
+
+    switch (lib.os) {
+        .linux => {
+            const original_image_path = "barebones.hdd";
+            const byte_count = 64 * mb;
+            const sector_size = 0x200;
+
+            // Using an arena allocator because it doesn't care about memory leaks
+            var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
+            defer arena_allocator.deinit();
+
+            var allocator = arena_allocator.allocator();
+
+            var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
+            defer lib.cwd().deleteFile(original_image_path) catch unreachable;
+
+            const partition_start_lba = 0x800;
+            const partition_name = "ESP";
+            const partition_filesystem = lib.Filesystem.Type.fat32;
+
+            const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
+            const files = [_]struct { path: []const u8, content: []const u8 }{
+                .{ .path = "/foo", .content = "this is the foo file content" },
+                .{ .path = "/EFI/def", .content = "this is the def file content" },
+                .{ .path = "/EFI/BOOT/xyz", .content = "this is the xyz file content" },
+                .{ .path = "/EFI/opq", .content = "this is the opq file content" },
+            };
+
+            // 1. Test GPT creation
+            var original_disk_image = blk: {
+                const megabytes = @divExact(byte_count, mb);
+                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
+
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
+                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
+
+                var loopback_device = LoopbackDevice{ .name = "loopback_device" };
+                try loopback_device.start(allocator, original_image_path);
+
+                try lib.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, allocator);
+
+                const mount_dir = "image_mount";
+
+                var partition = try loopback_device.mount(allocator, mount_dir);
+
+                for (directories) |directory| {
+                    try partition.mkdir(allocator, directory);
+                }
+
+                for (files) |file| {
+                    try partition.copy_file(allocator, file.path, file.content);
+                }
+
+                try partition.end(allocator);
+
+                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
+            };
+
+            const original_gpt_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0);
+            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(&allocator, original_gpt_cache);
+
+            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
+            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
+            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, &allocator, original_fat_cache);
+
+            for (directories) |directory| {
+                try fat_partition_cache.make_new_directory(directory, original_fat_cache);
+            }
+
+            for (files) |file| {
+                log.debug("Commanding to add file {s}", .{file.path});
+                try fat_partition_cache.create_file(file.path, file.content, original_fat_cache);
+            }
+
+            try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
+            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
+        },
+        else => log.debug("Skipping for missing `parted` dependency...", .{}),
+    }
 }
