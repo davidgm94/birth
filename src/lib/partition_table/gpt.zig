@@ -264,14 +264,14 @@ pub const Partition = extern struct {
             unreachable;
         }
 
-        pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, allocator: *lib.Allocator, copy_cache: FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
+        pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, allocator: *lib.Allocator, copy_cache: ?FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
             return try switch (filesystem) {
                 .fat32 => fat32: {
                     const partition_range = Disk.PartitionRange{
                         .first_lba = gpt_partition_cache.partition.first_lba,
                         .last_lba = gpt_partition_cache.partition.last_lba,
                     };
-                    break :fat32 FAT32.format(gpt_partition_cache.gpt.disk, allocator, partition_range, copy_cache.mbr);
+                    break :fat32 FAT32.format(gpt_partition_cache.gpt.disk, allocator, partition_range, if (copy_cache) |cp_cache| cp_cache.mbr else null);
                 },
                 else => unreachable,
             };

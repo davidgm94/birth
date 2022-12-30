@@ -243,6 +243,10 @@ pub const Entry = packed struct(u32) {
         };
     }
 
+    pub fn is_allocated_and_eof(entry: Entry) bool {
+        return entry.value == value_allocated_and_eof;
+    }
+
     pub fn get_type(entry: Entry, max_valid_cluster_number: u32) Type {
         return switch (entry.value) {
             value_free => .free,
@@ -335,6 +339,8 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
         unreachable;
     }
 
+    log.debug("Cluster count: {}. Total sector count: {}", .{ cluster_count_32, total_sector_count_32 });
+
     var root_directory_entries: u64 = 0;
     _ = root_directory_entries;
 
@@ -369,7 +375,7 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
             .backup_boot_record_sector = FAT32.default_backup_boot_record_sector,
             .drive_number = 0x80,
             .extended_boot_signature = 0x29,
-            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else unreachable,
+            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(u32, @intCast(u64, lib.time.microTimestamp())),
             .volume_label = "NO NAME    ".*,
             .filesystem_type = "FAT32   ".*,
         },
@@ -392,11 +398,28 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
     fs_info.* = .{
         .lead_signature = 0x41615252,
         .signature = 0x61417272,
-        .free_cluster_count = fat_partition_mbr.bpb.dos3_31.total_sector_count_32 - 2017, // TODO: compute,
-        .last_allocated_cluster = fat_partition_mbr.bpb.root_directory_cluster_offset,
+        .free_cluster_count = cluster_count_32,
+        .last_allocated_cluster = 0,
         .trail_signature = 0xaa550000,
     };
     try disk.write_typed_sectors(FAT32.FSInfo, fs_info, fs_info_lba, false);
+
+    const cache = Cache{
+        .disk = disk,
+        .partition_range = partition_range,
+        .mbr = fat_partition_mbr,
+        .fs_info = fs_info,
+        .allocator = allocator,
+    };
+
+    // TODO: write this properly
+
+    try cache.register_cluster(0, FAT32.Entry.reserved_and_should_not_be_used_eof);
+    try cache.register_cluster(1, FAT32.Entry.allocated_and_eof);
+    try cache.register_cluster(2, FAT32.Entry.reserved_and_should_not_be_used_eof);
+
+    cache.fs_info.last_allocated_cluster = 2;
+    cache.fs_info.free_cluster_count = cluster_count_32 - 1;
 
     const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
     log.debug("backup_fs_info_lba: 0x{x}. Index: 0x{x}", .{ backup_fs_info_lba, backup_fs_info_lba * disk.sector_size });
@@ -404,17 +427,7 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
     backup_fs_info.* = fs_info.*;
     try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
 
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_range.first_lba, FAT32.Entry.reserved_and_should_not_be_used_eof, 0);
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_range.first_lba, FAT32.Entry.allocated_and_eof, 1);
-    try write_fat_entry_slow(disk, fat_partition_mbr, partition_range.first_lba, FAT32.Entry.reserved_and_should_not_be_used_eof, 2);
-
-    return .{
-        .disk = disk,
-        .partition_range = partition_range,
-        .mbr = fat_partition_mbr,
-        .fs_info = fs_info,
-        .allocator = allocator,
-    };
+    return cache;
 }
 
 fn write_fat_entry_slow(disk: *Disk, fat_partition_mbr: *MBR.Partition, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize) !void {
@@ -1052,83 +1065,46 @@ pub const Cache = extern struct {
         return (@as(u64, cluster) - cache.get_root_cluster()) * cache.get_cluster_sector_count() + cache.get_data_lba();
     }
 
-    pub fn allocate_clusters(cache: Cache, clusters: []u32) !void {
-        var fat_entry_iterator = try FATEntryIterator.init(cache);
-        var cluster_index: usize = 0;
+    fn register_cluster(cache: Cache, cluster: u32, entry: Entry) !void {
         const fat_lba = cache.get_fat_lba();
         const fat_entry_count = cache.mbr.bpb.dos3_31.dos2_0.fat_count;
         const fat_entry_sector_count = cache.mbr.bpb.fat_sector_count_32;
 
+        if (entry.is_allocated_and_eof()) {
+            cache.fs_info.last_allocated_cluster = cluster;
+            cache.fs_info.free_cluster_count -= 1;
+        }
+
+        // Actually allocate FAT entry
+
+        var fat_index: u8 = 0;
+
+        const fat_entry_sector_index = cluster % cache.disk.sector_size;
+
+        while (fat_index < fat_entry_count) : (fat_index += 1) {
+            const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + (cluster * @sizeOf(u32) / cache.disk.sector_size);
+            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba);
+            fat_entry_sector[fat_entry_sector_index] = entry;
+            try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
+        }
+    }
+
+    pub fn allocate_clusters(cache: Cache, clusters: []u32) !void {
+        var fat_entry_iterator = try FATEntryIterator.init(cache);
+        var cluster_index: usize = 0;
+
         while (try fat_entry_iterator.next(cache)) |cluster| {
             const entry = &fat_entry_iterator.entries[cluster];
             if (entry.is_free()) {
+                try cache.register_cluster(cluster, FAT32.Entry.allocated_and_eof);
                 clusters[cluster_index] = cluster;
                 cluster_index += 1;
-
-                cache.fs_info.last_allocated_cluster = cluster;
-                cache.fs_info.free_cluster_count -= 1;
-
-                //cache.backup_fs_info.last_allocated_cluster = cluster;
-                //cache.backup_fs_info.free_cluster_count -= 1;
-
-                // Actually allocate FAT entry
-
-                var fat_index: u8 = 0;
-
-                const fat_entry_sector_index = cluster % cache.disk.sector_size;
-
-                while (fat_index < fat_entry_count) : (fat_index += 1) {
-                    const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + (cluster * @sizeOf(u32) / cache.disk.sector_size);
-                    const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba);
-                    fat_entry_sector[fat_entry_sector_index] = FAT32.Entry.allocated_and_eof;
-                    try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
-                }
 
                 if (cluster_index == clusters.len) return;
             }
         }
 
         unreachable;
-        //var cluster_count: usize = starting_cluster;
-        //// TODO: replace with proper variable
-        //const max_clusters = 100000;
-        //var cluster_index: usize = 0;
-        //var cluster = cache.fs_info.last_allocated_cluster + 1;
-        //log.debug("Starting cluster: {}", .{cluster});
-        //const cluster_sector_count = cache.get_cluster_sector_count();
-        //cluster_find_loop: {
-        //while (cluster_count < max_clusters) {
-        //if (cluster_count >= max_clusters) cluster_count = starting_cluster;
-
-        //var lba_offset = cache.cluster_to_sector(cluster);
-        //log.debug("Cluster starting LBA: 0x{x}. Index: 0x{x}", .{ lba_offset, lba_offset * cache.disk.sector_size });
-        //const lba_top = lba_offset + cluster_sector_count;
-
-        //// TODO: @Bug Make this work with real disks (non-memory disks)
-        //while (lba_offset < lba_top) : (lba_offset += 1) {
-        //const fat_entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset);
-
-        //for (fat_entries) |*entry| {
-        //if (entry.is_free()) {
-        //log.debug("[ALLOCATING CLUSTER] #{}", .{cluster});
-        //clusters[cluster_index] = cluster;
-        //cluster_index += 1;
-        //entry.* = FAT32.Entry.allocated_and_eof;
-        //cache.fs_info.last_allocated_cluster = cluster;
-        //cache.fs_info.free_cluster_count -= 1;
-
-        //if (cluster_index == clusters.len) break :cluster_find_loop;
-        //}
-
-        //cluster += 1;
-        //cluster_count += 1;
-        //if (cluster_count == max_clusters) unreachable;
-        //}
-        //}
-        //}
-
-        //unreachable;
-        //}
     }
 
     pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
@@ -1495,6 +1471,9 @@ test "Basic FAT32 image" {
             const original_image_path = "barebones.hdd";
             const byte_count = 64 * mb;
             const sector_size = 0x200;
+            const partition_start_lba = 0x800;
+            const partition_name = "ESP";
+            const partition_filesystem = lib.Filesystem.Type.fat32;
 
             // Using an arena allocator because it doesn't care about memory leaks
             var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
@@ -1504,10 +1483,6 @@ test "Basic FAT32 image" {
 
             var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
             defer lib.cwd().deleteFile(original_image_path) catch unreachable;
-
-            const partition_start_lba = 0x800;
-            const partition_name = "ESP";
-            const partition_filesystem = lib.Filesystem.Type.fat32;
 
             const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
             const files = [_]struct { path: []const u8, content: []const u8 }{

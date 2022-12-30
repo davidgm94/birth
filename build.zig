@@ -450,7 +450,19 @@ const Kernel = struct {
     }
 
     fn disk_image_make(step: *Step) !void {
-        _ = step;
+        const kernel = @fieldParentPtr(Kernel, "disk_step", step);
+        //const original_image_path = "rise.hdd";
+        const byte_count = 64 * lib.mb;
+        const sector_size = 0x200;
+        const partition_start_lba = 0x800;
+        const partition_name = "ESP";
+        const partition_filesystem = lib.Filesystem.Type.fat32;
+        var disk_image = try lib.Disk.Image.from_zero(byte_count, sector_size);
+        const disk = &disk_image.disk;
+        const gpt_cache = try GPT.create(disk, null);
+        const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, null);
+        const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, &kernel.builder.allocator, null);
+        _ = fat_partition_cache;
         @panic("Disk image step to be implemented");
     }
 

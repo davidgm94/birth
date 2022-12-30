@@ -157,7 +157,7 @@ pub const posix = std.os;
 pub const random = std.rand;
 
 // TIME
-pub const Instant = std.time.Instant;
+pub const time = std.time;
 
 pub fn enumCount(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
