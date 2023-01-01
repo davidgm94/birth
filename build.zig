@@ -69,7 +69,7 @@ pub fn build(b: *Builder) void {
                                         .assembly = true,
                                         .interrupts = true,
                                     },
-                                    .virtualize = true,
+                                    .virtualize = false,
                                     .print_command = true,
                                 },
                             };
@@ -462,8 +462,25 @@ const Kernel = struct {
         const gpt_cache = try GPT.create(disk, null);
         const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, null);
         const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, &kernel.builder.allocator, null);
-        _ = fat_partition_cache;
-        @panic("Disk image step to be implemented");
+
+        const max_file_length = lib.maxInt(usize);
+        const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
+        const first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
+        assert((fat_partition_cache.partition_range.first_lba - first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
+        try disk.write_slice(u8, loader_file, first_usable_lba, true);
+        lib.log.debug("First usable LBA: 0x{x}", .{first_usable_lba});
+
+        // Build our own assembler
+        const boot_disk_mbr_lba = 0;
+        const boot_disk_mbr = try disk.read_typed_sectors(MBR.BootDisk, boot_disk_mbr_lba);
+        try boot_disk_mbr.fill(kernel.builder.allocator, MBR.DAP{
+            .sector_count = @intCast(u16, lib.alignForward(loader_file.len, 0x200) >> 9),
+            .pointer = 0x7e00,
+            .lba = first_usable_lba,
+        });
+        try disk.write_typed_sectors(MBR.BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
+
+        try cwd().writeFile("zig-cache/disk.bin", disk_image.get_buffer());
     }
 
     const Error = error{
