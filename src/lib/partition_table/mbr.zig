@@ -116,7 +116,7 @@ pub const LegacyPartition = packed struct(u128) {
     size_in_lba: u32,
 
     comptime {
-        assert(@sizeOf(@This()) == 16);
+        assert(@sizeOf(@This()) == 0x10);
     }
 };
 
@@ -350,6 +350,10 @@ pub const DAP = extern struct {
     sector_count: u16,
     pointer: u32,
     lba: u64,
+
+    comptime {
+        assert(@sizeOf(DAP) == 0x10);
+    }
 };
 
 pub const BootDisk = extern struct {
@@ -431,9 +435,10 @@ pub const BootDisk = extern struct {
     };
     const xor_eax_eax = [_]u8{ xor, 0xc8 };
     const xor_ebx_ebx = [_]u8{ xor, 0xdb };
+    const nop = [_]u8{0x90};
 
-    fn or_eax(imm8: u8) [3]u8 {
-        return .{ 0x83, 0xc8, imm8 };
+    fn or_ax(imm8: u8) [4]u8 {
+        return .{ 0x66, 0x83, 0xc8, imm8 };
     }
 
     fn int(interrupt_number: u8) [2]u8 {
@@ -451,14 +456,16 @@ pub const BootDisk = extern struct {
 
     pub fn fill(mbr: *BootDisk, allocator: lib.Allocator, dap: DAP) !void {
         // Hardcoded jmp to end of FAT32 BPB
-        mbr.bpb.dos3_31.dos2_0.jmp_code = .{ 0xeb, 0x58, 0x90 };
+        const jmp_to_end_of_bpb = .{ 0xeb, @sizeOf(BIOSParameterBlock.DOS7_1_79) - 2 };
+        mbr.bpb.dos3_31.dos2_0.jmp_code = jmp_to_end_of_bpb ++ nop;
         mbr.dap = dap;
         mbr.gdt_32 = GDT32{
             .register = .{
-                .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register),
-                .pointer = offset + @offsetOf(BootDisk, "gdt_32") + @offsetOf(GDT32, "code_32"),
+                .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) + 8 - 1,
+                .pointer = offset + @offsetOf(BootDisk, "gdt_32") + @offsetOf(GDT32, "code_32") - 8,
             },
         };
+        log.debug("GDT: {}", .{mbr.gdt_32});
         var assembler = Assembler{
             .boot_disk = mbr,
             .patches = lib.ArrayListManaged(Patch).init(allocator),
@@ -490,7 +497,7 @@ pub const BootDisk = extern struct {
         try assembler.lgdt_16(.gdt);
         assembler.add_instruction(&cli);
         assembler.add_instruction(&mov_eax_cr0);
-        assembler.add_instruction(&or_eax(1));
+        assembler.add_instruction(&or_ax(1));
         assembler.add_instruction(&mov_cr0_eax);
         try assembler.far_jmp_16(0x8, .protected_mode);
 
@@ -580,8 +587,12 @@ pub const BootDisk = extern struct {
         labels: lib.ArrayListManaged(Label.Offset),
 
         pub inline fn add_instruction(assembler: *Assembler, instruction_bytes: []const u8) void {
-            log.debug("adding instruction: {any}", .{instruction_bytes});
             assert(assembler.code_index + instruction_bytes.len <= assembler.boot_disk.code.len);
+            lib.print("[0x{x:0>4}] ", .{offset + @offsetOf(BootDisk, "code") + assembler.code_index});
+            for (instruction_bytes) |byte| {
+                lib.print("{x:0>2} ", .{byte});
+            }
+            lib.print("\n", .{});
             lib.copy(u8, assembler.boot_disk.code[assembler.code_index .. assembler.code_index + instruction_bytes.len], instruction_bytes);
             assembler.code_index += @intCast(u8, instruction_bytes.len);
         }
@@ -636,7 +647,7 @@ pub const BootDisk = extern struct {
         }
 
         pub fn lgdt_16(assembler: *Assembler, label: Label) !void {
-            const instruction_bytes = [_]u8{ 0xf1, 0x01, 0x16, 0x00, 0x00 };
+            const instruction_bytes = [_]u8{ 0x0f, 0x01, 0x16, 0x00, 0x00 };
             try assembler.patches.append(.{
                 .label = label,
                 .label_size = @sizeOf(u16),
@@ -653,9 +664,9 @@ pub const BootDisk = extern struct {
             const instruction_bytes = [_]u8{ 0x8b, 0x2d, 0x00, 0x00, 0x00, 0x00 };
             try assembler.patches.append(.{
                 .label = label,
-                .label_size = @sizeOf(u32),
+                .label_size = @sizeOf(u16),
                 .label_offset = 2,
-                .label_type = .relative,
+                .label_type = .absolute,
                 .label_section = .data,
                 .instruction_starting_offset = assembler.code_index,
                 .instruction_len = instruction_bytes.len,
@@ -668,13 +679,14 @@ pub const BootDisk = extern struct {
 
             next_patch: for (assembler.patches.items) |patch_descriptor| {
                 const index = patch_descriptor.instruction_starting_offset + patch_descriptor.label_offset;
+                log.debug("Trying to patch instruction. Section: {s}. Label: {s}. Label size: {}. Label type: {s}", .{ @tagName(patch_descriptor.label_section), @tagName(patch_descriptor.label), patch_descriptor.label_size, @tagName(patch_descriptor.label_type) });
                 switch (patch_descriptor.label_section) {
                     .code => for (assembler.labels.items) |label_descriptor| {
                         if (patch_descriptor.label == label_descriptor.label) {
                             switch (patch_descriptor.label_type) {
                                 .absolute => {
                                     assert(patch_descriptor.label_size == @sizeOf(u16));
-                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + label_descriptor.offset;
+                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
                                 },
                                 .relative => {
                                     assert(patch_descriptor.label_size == @sizeOf(u8));
@@ -683,10 +695,18 @@ pub const BootDisk = extern struct {
                                     const operand_a = @intCast(isize, label_descriptor.offset);
                                     const operand_b = @intCast(isize, computed_after_instruction_offset);
                                     const diff = @bitCast(u8, @intCast(i8, operand_a - operand_b));
+                                    log.debug("Operand A: 0x{x}. Operand B: 0x{x}. Result: 0x{x}", .{ operand_a, operand_b, diff });
                                     @ptrCast(*align(1) u8, &assembler.boot_disk.code[index]).* = diff;
                                 },
                             }
 
+                            const instruction_start = offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                            lib.print("[0x{x:0>4}] ", .{instruction_start});
+                            const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
+                            for (instruction_bytes) |byte| {
+                                lib.print("{x:0>2} ", .{byte});
+                            }
+                            lib.print("\n", .{});
                             patched += 1;
                             continue :next_patch;
                         }
@@ -694,30 +714,42 @@ pub const BootDisk = extern struct {
                     .data => {
                         log.debug("Data: {s}", .{@tagName(patch_descriptor.label)});
                         const dap_offset = @offsetOf(BootDisk, "dap");
+                        log.debug("DAP offset: 0x{x}", .{dap_offset});
                         switch (patch_descriptor.label_type) {
                             .absolute => {
                                 assert(patch_descriptor.label_size == @sizeOf(u16));
                                 @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + @as(u16, switch (patch_descriptor.label) {
                                     .dap => dap_offset,
                                     .gdt => @offsetOf(BootDisk, "gdt_32"),
+                                    .dap_pointer => dap_offset + @offsetOf(DAP, "pointer"),
                                     else => unreachable,
                                 });
                             },
-                            .relative => {
-                                assert(patch_descriptor.label_size == @sizeOf(u32));
-                                const relative_offset: u32 = switch (patch_descriptor.label) {
-                                    .dap_pointer => dap_offset + @offsetOf(DAP, "pointer"),
-                                    else => unreachable,
-                                };
-                                const computed_after_instruction_offset = patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len;
-                                assert(relative_offset >= computed_after_instruction_offset);
-                                const diff = relative_offset - computed_after_instruction_offset;
-                                const offset_to_write = offset + diff;
-                                log.debug("offset to write: 0x{x}", .{offset_to_write});
-                                log.debug("label size: {}", .{patch_descriptor.label_size});
-                                @ptrCast(*align(1) u32, &assembler.boot_disk.code[index]).* = offset_to_write;
-                            },
+                            .relative => unreachable,
+                            //assert(patch_descriptor.label_size == @sizeOf(u32));
+                            //const relative_offset: u32 = switch (patch_descriptor.label) {
+                            //else => unreachable,
+                            //};
+                            //log.debug("DAP pointer offset: 0x{x}", .{relative_offset});
+                            //log.debug("Total offset: 0x{x}", .{relative_offset + offset});
+                            //const computed_after_instruction_offset = @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len;
+                            //assert(relative_offset >= computed_after_instruction_offset);
+                            //const diff = relative_offset - computed_after_instruction_offset;
+                            //const offset_to_write = offset + diff;
+                            //log.debug("offset to write: 0x{x}", .{offset_to_write});
+                            //log.debug("label size: {}", .{patch_descriptor.label_size});
+                            //@ptrCast(*align(1) u32, &assembler.boot_disk.code[index]).* = offset_to_write;
+                            //},
                         }
+
+                        log.debug("Patched instruction:", .{});
+                        const instruction_start = offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                        lib.print("[0x{x:0>4}] ", .{instruction_start});
+                        const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
+                        for (instruction_bytes) |byte| {
+                            lib.print("{x:0>2} ", .{byte});
+                        }
+                        lib.print("\n", .{});
 
                         patched += 1;
                         continue :next_patch;

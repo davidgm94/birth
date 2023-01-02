@@ -473,14 +473,29 @@ const Kernel = struct {
         // Build our own assembler
         const boot_disk_mbr_lba = 0;
         const boot_disk_mbr = try disk.read_typed_sectors(MBR.BootDisk, boot_disk_mbr_lba);
-        try boot_disk_mbr.fill(kernel.builder.allocator, MBR.DAP{
+        const dap_offset = @offsetOf(MBR.BootDisk, "dap");
+        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
+        assert(dap_offset == 0x1ae);
+        const dap = MBR.DAP{
             .sector_count = @intCast(u16, lib.alignForward(loader_file.len, 0x200) >> 9),
             .pointer = 0x7e00,
             .lba = first_usable_lba,
-        });
+        };
+
+        const custom = true;
+
+        if (custom) {
+            try boot_disk_mbr.fill(kernel.builder.allocator, dap);
+        } else {
+            const nasm_mbr = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
+            boot_disk_mbr.* = @ptrCast(*align(1) MBR.BootDisk, nasm_mbr).*;
+            boot_disk_mbr.dap = dap;
+        }
+
         try disk.write_typed_sectors(MBR.BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
 
         try cwd().writeFile("zig-cache/disk.bin", disk_image.get_buffer());
+        try cwd().writeFile("zig-cache/mymbr.bin", disk_image.get_buffer()[0..0x200]);
     }
 
     const Error = error{

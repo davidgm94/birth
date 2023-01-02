@@ -89,6 +89,7 @@ pub const AtomicOrder = std.builtin.AtomicOrder;
 
 // LOG
 pub const log = std.log;
+pub const print = std.debug.print;
 
 // FORMAT
 pub const format = std.fmt.format;
