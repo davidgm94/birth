@@ -304,9 +304,6 @@ const Kernel = struct {
                                 kernel.bootloader = bootloader_exe;
                             },
                             .bios => {
-                                const mbr = kernel.builder.addSystemCommand(&.{ "nasm", "-fbin", "src/bootloader/rise/mbr.S", "-o", "zig-cache/mbr.bin" });
-                                kernel.builder.default_step.dependOn(&mbr.step);
-
                                 const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios.zig");
                                 bootloader_exe.setTarget(get_target(.x86, false));
                                 bootloader_exe.setOutputDir(cache_dir);
@@ -482,20 +479,12 @@ const Kernel = struct {
             .lba = first_usable_lba,
         };
 
-        const custom = true;
-
-        if (custom) {
-            try boot_disk_mbr.fill(kernel.builder.allocator, dap);
-        } else {
-            const nasm_mbr = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
-            boot_disk_mbr.* = @ptrCast(*align(1) MBR.BootDisk, nasm_mbr).*;
-            boot_disk_mbr.dap = dap;
-        }
+        try boot_disk_mbr.fill(kernel.builder.allocator, dap);
 
         try disk.write_typed_sectors(MBR.BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
 
         try cwd().writeFile("zig-cache/disk.bin", disk_image.get_buffer());
-        try cwd().writeFile("zig-cache/mymbr.bin", disk_image.get_buffer()[0..0x200]);
+        try cwd().writeFile("zig-cache/mbr.bin", disk_image.get_buffer()[0..0x200]);
     }
 
     const Error = error{
