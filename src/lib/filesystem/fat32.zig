@@ -253,7 +253,7 @@ pub const Entry = packed struct(u32) {
             value_bad_cluster => .bad_cluster,
             value_reserved_and_should_not_be_used_eof_start...value_reserved_and_should_not_be_used_eof_end => .reserved_and_should_not_be_used_eof,
             value_allocated_and_eof => .allocated_and_eof,
-            else => if (entry.value >= value_allocated_start and entry.value <= @intCast(u28, max_valid_cluster_number)) .allocated else if (entry.value >= @intCast(u28, max_valid_cluster_number) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else unreachable,
+            else => if (entry.value >= value_allocated_start and entry.value <= @intCast(u28, max_valid_cluster_number)) .allocated else if (entry.value >= @intCast(u28, max_valid_cluster_number) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else @panic("wtF"),
         };
     }
 
@@ -336,7 +336,7 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
 
         const keep_going = cluster_size != 0 and cluster_size <= max_cluster_size;
         if (!keep_going) break;
-        unreachable;
+        @panic("wtf");
     }
 
     log.debug("Cluster count: {}. Total sector count: {}", .{ cluster_count_32, total_sector_count_32 });
@@ -587,7 +587,7 @@ pub const Cache = extern struct {
 
     pub fn make_new_directory(cache: Cache, absolute_path: []const u8, copy_cache: ?FAT32.Cache) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(absolute_path, null)).directory_entry else null;
-        const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse unreachable;
+        const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("wtf");
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
         const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_cache);
@@ -597,7 +597,7 @@ pub const Cache = extern struct {
 
     pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, copy_cache: ?FAT32.Cache) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(file_path, null)).directory_entry else null;
-        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse unreachable;
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
         const content_cluster = try cache.allocate_new_file(file_content);
@@ -686,19 +686,19 @@ pub const Cache = extern struct {
         var is_upper = true;
         var is_valid = true;
 
-        if (is_skip_char(wchar)) unreachable;
-        if (is_replace_char(wchar)) unreachable;
+        if (is_skip_char(wchar)) @panic("wtf");
+        if (is_replace_char(wchar)) @panic("wtf");
 
         try nls.unicode_to_character(wchar, char_buffer);
 
         // TODO:
         const len = 1;
         if (len == 0) {
-            unreachable;
+            @panic("wtf");
         } else if (len == 1) {
             const previous = char_buffer[0];
 
-            if (previous >= 0x7f) unreachable;
+            if (previous >= 0x7f) @panic("wtf");
 
             char_buffer[0] = nls.to_upper(previous);
             if (lib.isAlphabetic(char_buffer[0])) {
@@ -708,7 +708,7 @@ pub const Cache = extern struct {
                     is_upper = false;
                 }
             }
-        } else unreachable;
+        } else @panic("wtf");
 
         return ShortNameInfo{
             .len = @intCast(u5, len),
@@ -817,13 +817,13 @@ pub const Cache = extern struct {
             }
         }
 
-        if (base_len == 0) unreachable;
+        if (base_len == 0) @panic("wtf");
 
         var extension_len: usize = 0;
         var extension: [4]u8 = undefined;
         if (extension_start) |ext_start| {
             _ = ext_start;
-            unreachable;
+            @panic("wtf");
         }
 
         extension[extension_len] = 0;
@@ -842,16 +842,16 @@ pub const Cache = extern struct {
         };
 
         if (is_short_name and base_info.valid and extension_info.valid) {
-            if (try cache.exists(&short_name_result.name, cluster)) unreachable;
+            if (try cache.exists(&short_name_result.name, cluster)) @panic("wtf");
             const result = switch (cache.name_configuration.create) {
                 .windows_95 => base_info.upper and extension_info.upper,
-                .windows_nt => unreachable,
+                .windows_nt => @panic("wtf"),
             };
             log.debug("Base info: {}. Extension info: {}. Create name policy: {}. Result: {}", .{ base_info, extension_info, cache.name_configuration.create, result });
             return result;
         }
 
-        unreachable;
+        @panic("wtf");
     }
 
     pub fn scan(cache: Cache, name: []const u8, cluster: u32) !?*DirectoryEntry {
@@ -888,7 +888,7 @@ pub const Cache = extern struct {
         log.debug("Adding entry for {s}. Dir: {}. Content cluster: {}. Containing cluster: {}", .{ entry_setup.name, entry_setup.is_dir, entry_setup.content_cluster, entry_setup.containing_cluster });
         // TODO:
         for (entry_setup.name) |ch| {
-            if (ch == '.') unreachable;
+            if (ch == '.') @panic("wtf");
         }
 
         var long_name_array = [1]u16{0} ** (long_name_max_characters + 2);
@@ -906,13 +906,13 @@ pub const Cache = extern struct {
                     .archive = !entry_setup.is_dir,
                 },
                 .case = short_name_result.case,
-                .creation_time_tenth = if (copy_entry) |e| e.creation_time_tenth else unreachable,
-                .creation_time = if (copy_entry) |e| e.creation_time else unreachable,
-                .creation_date = if (copy_entry) |e| e.creation_date else unreachable,
-                .last_access_date = if (copy_entry) |e| e.last_access_date else unreachable,
+                .creation_time_tenth = if (copy_entry) |e| e.creation_time_tenth else @panic("wtf"),
+                .creation_time = if (copy_entry) |e| e.creation_time else @panic("wtf"),
+                .creation_date = if (copy_entry) |e| e.creation_date else @panic("wtf"),
+                .last_access_date = if (copy_entry) |e| e.last_access_date else @panic("wtf"),
                 .first_cluster_high = @truncate(u16, entry_setup.content_cluster >> 16),
-                .last_write_time = if (copy_entry) |e| e.last_write_time else unreachable,
-                .last_write_date = if (copy_entry) |e| e.last_write_date else unreachable,
+                .last_write_time = if (copy_entry) |e| e.last_write_time else @panic("wtf"),
+                .last_write_date = if (copy_entry) |e| e.last_write_date else @panic("wtf"),
                 .first_cluster_low = @truncate(u16, entry_setup.content_cluster),
                 .file_size = entry_setup.size,
             },
@@ -986,7 +986,7 @@ pub const Cache = extern struct {
             }
         }
 
-        unreachable;
+        @panic("wtf");
     }
 
     pub fn shortname_checksum(name: []const u8) u8 {
@@ -1031,14 +1031,14 @@ pub const Cache = extern struct {
             .name = dot_entry_name,
             .attributes = attributes,
             .case = .{},
-            .creation_time_tenth = if (copy_entry) |ce| ce.creation_time_tenth else unreachable,
-            .creation_time = if (copy_entry) |ce| ce.creation_time else unreachable,
-            .creation_date = if (copy_entry) |ce| ce.creation_date else unreachable,
+            .creation_time_tenth = if (copy_entry) |ce| ce.creation_time_tenth else @panic("wtf"),
+            .creation_time = if (copy_entry) |ce| ce.creation_time else @panic("wtf"),
+            .creation_date = if (copy_entry) |ce| ce.creation_date else @panic("wtf"),
             .first_cluster_high = @truncate(u16, cluster >> 16),
             .first_cluster_low = @truncate(u16, cluster),
-            .last_access_date = if (copy_entry) |ce| ce.last_access_date else unreachable,
-            .last_write_time = if (copy_entry) |ce| ce.last_write_time else unreachable,
-            .last_write_date = if (copy_entry) |ce| ce.last_write_date else unreachable,
+            .last_access_date = if (copy_entry) |ce| ce.last_access_date else @panic("wtf"),
+            .last_write_time = if (copy_entry) |ce| ce.last_write_time else @panic("wtf"),
+            .last_write_date = if (copy_entry) |ce| ce.last_write_date else @panic("wtf"),
             .file_size = 0,
         };
         // Copy the values and only modify the necessary ones
@@ -1104,7 +1104,7 @@ pub const Cache = extern struct {
             }
         }
 
-        unreachable;
+        @panic("wtf");
     }
 
     pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
@@ -1117,7 +1117,7 @@ pub const Cache = extern struct {
         var dir_tokenizer = lib.DirectoryTokenizer.init(absolute_path);
         var directories: usize = 0;
 
-        const first_dir = dir_tokenizer.next() orelse unreachable;
+        const first_dir = dir_tokenizer.next() orelse @panic("wtf");
         assert(lib.equal(u8, first_dir, "/"));
 
         entry_loop: while (dir_tokenizer.next()) |entry_name| : (directories += 1) {
@@ -1159,7 +1159,7 @@ pub const Cache = extern struct {
                         return GetError.not_found;
                     } else {
                         if (is_unused) {
-                            unreachable;
+                            @panic("wtf");
                         } else if (is_long_name) {
                             const long_name_entry = @ptrCast(*FAT32.LongNameEntry, directory_entry);
                             const original_starting_index = entry_index;
@@ -1177,11 +1177,11 @@ pub const Cache = extern struct {
                                         } else if (u16_ch <= lib.maxInt(u8)) {
                                             arr[index] = @intCast(u8, u16_ch);
                                         } else {
-                                            unreachable;
+                                            @panic("wtf");
                                         }
                                     }
 
-                                    unreachable;
+                                    @panic("wtf");
                                 };
 
                                 log.debug("Long name \"{s}\" ({}). Entry name \"{s}\"({})", .{ long_name_u8, long_name_u8.len, entry_name, entry_name.len });
@@ -1196,7 +1196,7 @@ pub const Cache = extern struct {
                                     }
                                 }
                             } else {
-                                unreachable;
+                                @panic("wtf");
                             }
                         } else {
                             if (lib.equal(u8, &directory_entry.name, &normalized_name)) {
@@ -1215,7 +1215,7 @@ pub const Cache = extern struct {
             }
         }
 
-        unreachable;
+        @panic("wtf");
     }
 
     pub fn get_fat_lba(cache: Cache) u64 {
@@ -1237,7 +1237,7 @@ pub const Cache = extern struct {
         const sector_count = @intCast(u32, @divExact(lib.alignForward(file_content.len, cache.disk.sector_size), cache.disk.sector_size));
         const cluster_count = lib.alignForwardGeneric(u32, sector_count, cache.get_cluster_sector_count());
         assert(cluster_count == 1);
-        unreachable;
+        @panic("wtf");
         //const first_cluster = try cache.
         //try cache.write_string_to_cluster_offset(file_content, first_cluster);
         //return first_cluster;
@@ -1343,13 +1343,13 @@ const MountedPartition = struct {
     }
 
     pub fn get_mount_dir(partition: MountedPartition) []const u8 {
-        const mount_dir = partition.loopback_device.mount_dir orelse unreachable;
+        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
         return mount_dir;
     }
 
     fn copy_file(partition: MountedPartition, allocator: lib.Allocator, file_path: []const u8, file_content: []const u8) !void {
         log.debug("Making sure path is created...", .{});
-        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse unreachable;
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const file_name = file_path[last_slash_index + 1 ..];
         assert(file_name.len > 0);
         try lib.cwd().writeFile(file_name, file_content);
@@ -1365,7 +1365,7 @@ const MountedPartition = struct {
     }
 
     fn end(partition: *MountedPartition, allocator: lib.Allocator) !void {
-        const mount_dir = partition.loopback_device.mount_dir orelse unreachable;
+        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
         lib.sync();
         try lib.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
         partition.loopback_device.mount_dir = null;
@@ -1405,17 +1405,17 @@ const FATEntryIterator = struct {
                 assert(cache.disk.sector_size == @sizeOf(FAT32.Entry.Sector));
                 const lba_offset = cache.get_fat_lba() + (iterator.cluster / FAT32.Entry.per_sector);
                 iterator.entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset);
-                unreachable;
+                @panic("wtf");
             }
 
-            if (iterator.cluster == iterator.entries.len) unreachable;
+            if (iterator.cluster == iterator.entries.len) @panic("wtf");
 
             const result = iterator.cluster;
             iterator.cluster += 1;
             return result;
         }
 
-        unreachable;
+        @panic("wtf");
     }
 };
 
@@ -1482,7 +1482,7 @@ test "Basic FAT32 image" {
             var allocator = arena_allocator.allocator();
 
             var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
-            defer lib.cwd().deleteFile(original_image_path) catch unreachable;
+            defer lib.cwd().deleteFile(original_image_path) catch @panic("wtf");
 
             const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
             const files = [_]struct { path: []const u8, content: []const u8 }{

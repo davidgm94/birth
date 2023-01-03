@@ -155,7 +155,7 @@ pub const Partition = extern struct {
         mbr.bpb.compare(&other.bpb);
 
         if (!lib.equal(u8, &mbr.code, &other.code)) {
-            unreachable;
+            @panic("wtF");
         }
 
         for (mbr.partitions) |this_partition, partition_i| {
@@ -287,7 +287,7 @@ pub const Partition = extern struct {
             return VerificationError.filesystem_type;
         }
 
-        unreachable;
+        @panic("wtF");
     }
 
     pub fn format(mbr: *const MBR.Partition, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -345,10 +345,10 @@ pub const Partition = extern struct {
 };
 
 pub const DAP = extern struct {
-    size: u8 = 0x10,
-    unused: u8 = 0,
+    size: u16 = 0x10,
     sector_count: u16,
-    pointer: u32,
+    offset: u16,
+    segment: u16,
     lba: u64,
 
     comptime {
@@ -366,30 +366,113 @@ pub const BootDisk = extern struct {
 
     const GDT32 = extern struct {
         register: Register,
+        null: Descriptor = .{
+            .limit = 0,
+            .access = lib.zeroes(Descriptor.AccessByte),
+            .limit_and_flags = lib.zeroes(Descriptor.LimitAndFlags),
+        },
         code_32: Descriptor = .{
-            .access = 0b10011010,
-            .granularity = 0b11001111,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_and_flags = .{
+                .limit = 0xf,
+                .long_mode = false,
+                .protected_mode = true,
+                .granularity = true,
+            },
         },
         data_32: Descriptor = .{
-            .access = 0b10010010,
-            .granularity = 0b11001111,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_and_flags = .{
+                .limit = 0xf,
+                .long_mode = false,
+                .protected_mode = true,
+                .granularity = true,
+            },
+        },
+        code_16: Descriptor = .{
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_and_flags = .{
+                .limit = 0x0,
+                .long_mode = false,
+                .protected_mode = false,
+                .granularity = false,
+            },
+        },
+        data_16: Descriptor = .{
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_and_flags = .{
+                .limit = 0x0,
+                .long_mode = false,
+                .protected_mode = false,
+                .granularity = false,
+            },
         },
 
         comptime {
-            assert(@sizeOf(GDT32) == @sizeOf(Register) + 2 * @sizeOf(Descriptor));
+            assert(@sizeOf(GDT32) == @sizeOf(Register) + 5 * @sizeOf(Descriptor));
         }
 
         const Descriptor = extern struct {
             limit: u16 = 0xffff,
             base_low: u16 = 0,
             base_mid: u8 = 0,
-            access: u8,
-            granularity: u8,
+            access: AccessByte,
+            limit_and_flags: LimitAndFlags,
             base_high: u8 = 0,
 
             comptime {
                 assert(@sizeOf(Descriptor) == @sizeOf(u64));
             }
+
+            const AccessByte = packed struct(u8) {
+                accessed: bool = true,
+                read_write: bool = false,
+                direction_conforming: bool = false,
+                executable: bool = false,
+                code_data_segment: bool = true,
+                dpl: u2 = 0,
+                present: bool = true,
+            };
+
+            const LimitAndFlags = packed struct(u8) {
+                limit: u4,
+                reserved: bool = false,
+                long_mode: bool,
+                protected_mode: bool,
+                granularity: bool,
+            };
         };
 
         const Register = extern struct {
@@ -402,7 +485,7 @@ pub const BootDisk = extern struct {
         };
     };
 
-    const code_byte_count = 0x13e;
+    const code_byte_count = 0x126;
     const offset: u16 = 0x7c00;
 
     const hlt = [_]u8{0xf4};
@@ -413,6 +496,7 @@ pub const BootDisk = extern struct {
 
     const xor = 0x31;
     const xor_si_si_16 = [_]u8{ xor, 0xf6 };
+    const push_ds = [_]u8{0x1e};
     const mov_ds_si = [_]u8{ 0x8e, 0xde };
     const mov_es_si = [_]u8{ 0x8e, 0xc6 };
     const mov_ss_si = [_]u8{ 0x8e, 0xd6 };
@@ -461,8 +545,8 @@ pub const BootDisk = extern struct {
         mbr.dap = dap;
         mbr.gdt_32 = GDT32{
             .register = .{
-                .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) + 8 - 1,
-                .pointer = offset + @offsetOf(BootDisk, "gdt_32") + @offsetOf(GDT32, "code_32") - 8,
+                .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) - 1,
+                .pointer = offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
             },
         };
         log.debug("GDT: {}", .{mbr.gdt_32});
@@ -494,6 +578,7 @@ pub const BootDisk = extern struct {
         assembler.add_instruction(&clc);
         assembler.add_instruction(&int(0x13));
         try assembler.jcc(jc, .error16);
+        // Save real mode
         try assembler.lgdt_16(.gdt);
         assembler.add_instruction(&cli);
         assembler.add_instruction(&mov_eax_cr0);
@@ -721,25 +806,11 @@ pub const BootDisk = extern struct {
                                 @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + @as(u16, switch (patch_descriptor.label) {
                                     .dap => dap_offset,
                                     .gdt => @offsetOf(BootDisk, "gdt_32"),
-                                    .dap_pointer => dap_offset + @offsetOf(DAP, "pointer"),
-                                    else => unreachable,
+                                    .dap_pointer => dap_offset + @offsetOf(DAP, "offset"),
+                                    else => @panic("wtF"),
                                 });
                             },
-                            .relative => unreachable,
-                            //assert(patch_descriptor.label_size == @sizeOf(u32));
-                            //const relative_offset: u32 = switch (patch_descriptor.label) {
-                            //else => unreachable,
-                            //};
-                            //log.debug("DAP pointer offset: 0x{x}", .{relative_offset});
-                            //log.debug("Total offset: 0x{x}", .{relative_offset + offset});
-                            //const computed_after_instruction_offset = @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len;
-                            //assert(relative_offset >= computed_after_instruction_offset);
-                            //const diff = relative_offset - computed_after_instruction_offset;
-                            //const offset_to_write = offset + diff;
-                            //log.debug("offset to write: 0x{x}", .{offset_to_write});
-                            //log.debug("label size: {}", .{patch_descriptor.label_size});
-                            //@ptrCast(*align(1) u32, &assembler.boot_disk.code[index]).* = offset_to_write;
-                            //},
+                            .relative => @panic("wtF"),
                         }
 
                         log.debug("Patched instruction:", .{});

@@ -21,7 +21,7 @@ pub const Disk = extern struct {
     pub const ReadError = error{
         read_error,
     };
-    pub const WriteFn = fn (disk: *Disk, bytes: []const u8, offset: u64, commit_memory_to_disk: bool) WriteError!void;
+    pub const WriteFn = fn (disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) WriteError!void;
     pub const WriteError = error{
         write_error,
     };
@@ -66,6 +66,7 @@ pub const Disk = extern struct {
         ahci = 2,
         ide = 3,
         memory = 4,
+        bios = 5,
     };
 
     pub const Work = struct {

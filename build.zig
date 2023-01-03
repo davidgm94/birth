@@ -63,7 +63,7 @@ pub fn build(b: *Builder) void {
                                     .vga = .std,
                                     .smp = null,
                                     .log = .{
-                                        .file = null,
+                                        .file = "logfile",
                                         .guest_errors = true,
                                         .cpu = false,
                                         .assembly = true,
@@ -304,7 +304,8 @@ const Kernel = struct {
                                 kernel.bootloader = bootloader_exe;
                             },
                             .bios => {
-                                const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios.zig");
+                                const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios/main.zig");
+                                bootloader_exe.addAssemblyFile("src/bootloader/rise/bios/bios.S");
                                 bootloader_exe.setTarget(get_target(.x86, false));
                                 bootloader_exe.setOutputDir(cache_dir);
                                 bootloader_exe.addPackage(lib_package);
@@ -440,6 +441,7 @@ const Kernel = struct {
 
         const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
         named_step.dependOn(&kernel.disk_step);
+        kernel.disk_step.dependOn(&kernel.bootloader.?.step);
 
         for (kernel.userspace_programs) |program| {
             kernel.disk_step.dependOn(&program.step);
@@ -475,7 +477,8 @@ const Kernel = struct {
         assert(dap_offset == 0x1ae);
         const dap = MBR.DAP{
             .sector_count = @intCast(u16, lib.alignForward(loader_file.len, 0x200) >> 9),
-            .pointer = 0x7e00,
+            .offset = 0x7e00,
+            .segment = 0x0,
             .lba = first_usable_lba,
         };
 

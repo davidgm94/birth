@@ -124,7 +124,9 @@ pub const isAligned = std.mem.isAligned;
 pub const reverse = std.mem.reverse;
 
 pub fn zero(slice: []u8) void {
-    @memset(slice.ptr, 0, slice.len);
+    for (slice) |*byte| {
+        byte.* = 0;
+    }
 }
 
 pub fn zeroes(comptime T: type) T {

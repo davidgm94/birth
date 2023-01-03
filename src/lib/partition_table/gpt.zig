@@ -119,7 +119,7 @@ pub const Header = extern struct {
                 }
             }
 
-            unreachable;
+            @panic("WTF");
         }
 
         pub fn get_partition_index(cache: Cache, partition: *GPT.Partition) u32 {
@@ -161,7 +161,7 @@ pub const Header = extern struct {
             try update_partition_entry(cache, new_partition_entry, GPT.Partition{
                 .partition_type_guid = switch (filesystem) {
                     .fat32 => efi_guid,
-                    else => unreachable,
+                    else => @panic("WTF"),
                 },
                 .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
                 .first_lba = lba_start,
@@ -261,7 +261,7 @@ pub const Partition = extern struct {
                 };
             }
 
-            unreachable;
+            @panic("WTF");
         }
 
         pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, allocator: *lib.Allocator, copy_cache: ?FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
@@ -273,7 +273,7 @@ pub const Partition = extern struct {
                     };
                     break :fat32 FAT32.format(gpt_partition_cache.gpt.disk, allocator, partition_range, if (copy_cache) |cp_cache| cp_cache.mbr else null);
                 },
-                else => unreachable,
+                else => @panic("WTF"),
             };
         }
     };
@@ -440,7 +440,7 @@ test "gpt size" {
 //lib.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
 
 //try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
-//unreachable;
+//@panic("WTF");
 ////try lib.Disk.image(&disk.descriptor, &.{lib.Disk.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
 ////.read = read,
 ////.write = write,
@@ -469,19 +469,19 @@ test "gpt size" {
 ////.lba = disk.buffer.items.len >> 9,
 ////};
 //////std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
-//////if (true) unreachable;
+//////if (true) @panic("WTF");
 //////const a = @ptrToInt(&mbr.dap.pointer);
 //////const b = @ptrToInt(mbr);
 //////std.debug.print("A: 0x{x}\n", .{a - b});
-//////if (true) unreachable;
+//////if (true) @panic("WTF");
 ////disk.buffer.appendSliceAssumeCapacity(loader_file);
 //////assert(loader_file.len < 0x200);
 ////disk.buffer.appendNTimesAssumeCapacity(0, lib.align_forward(loader_file.len, 0x200) - loader_file.len);
 //},
-//.uefi => unreachable,
+//.uefi => @panic("WTF"),
 //}
 //},
-//else => unreachable,
+//else => @panic("WTF"),
 //}
 
 ////assert(resource_files.len > 0);
