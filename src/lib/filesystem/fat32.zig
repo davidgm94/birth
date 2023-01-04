@@ -1,5 +1,7 @@
 const FAT32 = @This();
 
+const host = @import("../../host.zig");
+
 const lib = @import("../../lib.zig");
 const kb = lib.kb;
 const mb = lib.mb;
@@ -302,9 +304,10 @@ fn cdiv(a: u32, b: u32) u32 {
 const min_cluster_32 = 65525;
 const max_cluster_32 = 268435446;
 
-pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
+pub fn format(disk: *Disk, allocator: *const lib.Allocator, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
+    if (disk.type != .memory) @panic("disk is not memory");
     const fat_partition_mbr_lba = partition_range.first_lba;
-    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba);
+    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null);
 
     const sectors_per_track = 32;
     const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
@@ -375,7 +378,7 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
             .backup_boot_record_sector = FAT32.default_backup_boot_record_sector,
             .drive_number = 0x80,
             .extended_boot_signature = 0x29,
-            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(u32, @intCast(u64, lib.time.microTimestamp())),
+            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(u32, @intCast(u64, host.time.microTimestamp())),
             .volume_label = "NO NAME    ".*,
             .filesystem_type = "FAT32   ".*,
         },
@@ -389,12 +392,12 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
     try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
 
     const backup_boot_record_sector = partition_range.first_lba + fat_partition_mbr.bpb.backup_boot_record_sector;
-    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector);
+    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector, null);
     backup_boot_record.* = fat_partition_mbr.*;
     try disk.write_typed_sectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, false);
 
     const fs_info_lba = partition_range.first_lba + fat_partition_mbr.bpb.fs_info_sector;
-    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba);
+    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba, null);
     fs_info.* = .{
         .lead_signature = 0x41615252,
         .signature = 0x61417272,
@@ -423,7 +426,7 @@ pub fn format(disk: *Disk, allocator: *lib.Allocator, partition_range: Disk.Part
 
     const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
     log.debug("backup_fs_info_lba: 0x{x}. Index: 0x{x}", .{ backup_fs_info_lba, backup_fs_info_lba * disk.sector_size });
-    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba);
+    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba, null);
     backup_fs_info.* = fs_info.*;
     try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
 
@@ -474,24 +477,25 @@ pub const Cache = extern struct {
     partition_range: Disk.PartitionRange,
     mbr: *MBR.Partition,
     fs_info: *FSInfo,
-    allocator: *lib.Allocator,
+    allocator: *const lib.Allocator,
     name_configuration: NameConfiguration = mixed,
 
     fn get_backup_boot_record_sector(cache: Cache) u64 {
         return cache.partition_range.first_lba + cache.mbr.bpb.backup_boot_record_sector;
     }
 
-    pub fn from_gpt_partition_cache(allocator: *lib.Allocator, gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
+    pub fn from_gpt_partition_cache(allocator: *const lib.Allocator, gpt_partition_cache: GPT.Partition.Cache, provided_buffer: ?[]const u8) !FAT32.Cache {
+        if (gpt_partition_cache.gpt.disk.type != .memory) @panic("from_gpt_partition_cache fix");
         const partition_range = Disk.PartitionRange{
             .first_lba = gpt_partition_cache.partition.first_lba,
             .last_lba = gpt_partition_cache.partition.last_lba,
         };
         const disk = gpt_partition_cache.gpt.disk;
 
-        const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba);
+        const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, provided_buffer);
         assert(partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count == 1);
         const fs_info_sector = partition_range.first_lba + partition_mbr.bpb.fs_info_sector;
-        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector);
+        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, provided_buffer);
 
         const backup_fs_info_sector = partition_range.first_lba + partition_mbr.bpb.backup_boot_record_sector + partition_mbr.bpb.fs_info_sector;
         log.debug("FSInfo: LBA: 0x{x}. Index: 0x{x}", .{ fs_info_sector, fs_info_sector * disk.sector_size });
@@ -575,43 +579,43 @@ pub const Cache = extern struct {
         return entry;
     }
 
-    fn get_directory_entry_cluster(cache: Cache, dir: []const u8) !u32 {
+    fn get_directory_entry_cluster(cache: Cache, dir: []const u8, provided_buffer: ?[]const u8) !u32 {
         log.debug("Dir: {s} ({})", .{ dir, dir.len });
         if (lib.equal(u8, dir, "/")) {
             return cache.get_root_cluster();
         } else {
-            const containing_dir_entry = try cache.get_directory_entry(dir, null);
+            const containing_dir_entry = try cache.get_directory_entry(dir, provided_buffer, null);
             return containing_dir_entry.directory_entry.get_first_cluster();
         }
     }
 
-    pub fn make_new_directory(cache: Cache, absolute_path: []const u8, copy_cache: ?FAT32.Cache) !void {
-        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(absolute_path, null)).directory_entry else null;
+    pub fn make_new_directory(cache: Cache, absolute_path: []const u8, provided_buffer: ?[]const u8, copy_cache: ?FAT32.Cache) !void {
+        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(absolute_path, provided_buffer, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("wtf");
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
-        const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, copy_cache);
+        const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, provided_buffer);
+        const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, provided_buffer, copy_cache);
         const last_element = absolute_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, copy_entry);
+        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, provided_buffer, copy_entry);
     }
 
-    pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, copy_cache: ?FAT32.Cache) !void {
-        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(file_path, null)).directory_entry else null;
+    pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, provided_buffer: ?[]const u8, copy_cache: ?FAT32.Cache) !void {
+        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(file_path, null, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir);
-        const content_cluster = try cache.allocate_new_file(file_content);
+        const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, provided_buffer);
+        const content_cluster = try cache.allocate_new_file(file_content, provided_buffer);
         const last_element = file_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = last_element, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, copy_entry);
+        try cache.add_entry(.{ .name = last_element, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, provided_buffer, copy_entry);
     }
 
-    fn allocate_new_file(cache: Cache, file_content: []const u8) !u32 {
+    fn allocate_new_file(cache: Cache, file_content: []const u8, provided_buffer: ?[]const u8) !u32 {
         assert(file_content.len > 0);
         const cluster_byte_count = cache.get_cluster_sector_count() * cache.disk.sector_size;
         const aligned_file_size = lib.alignForward(file_content.len, cluster_byte_count);
         const cluster_count = @divExact(aligned_file_size, cluster_byte_count);
         const clusters = try cache.allocator.alloc(u32, cluster_count);
-        try cache.allocate_clusters(clusters);
+        try cache.allocate_clusters(clusters, provided_buffer);
 
         for (clusters) |cluster, cluster_index| {
             const cluster_byte_offset = cluster_byte_count * cluster_index;
@@ -723,7 +727,7 @@ pub const Cache = extern struct {
         case: NameCase,
     };
 
-    fn create_shortname(cache: Cache, nls: *const NLS.Table, long_name: []u16, cluster: u32, short_name_result: *ShortNameResult) !bool {
+    fn create_shortname(cache: Cache, nls: *const NLS.Table, long_name: []u16, cluster: u32, short_name_result: *ShortNameResult, provided_buffer: ?[]const u8) !bool {
         var is_short_name = true;
         const end = lib.ptrAdd(u16, &long_name[0], long_name.len);
         var extension_start: ?*u16 = end;
@@ -842,7 +846,7 @@ pub const Cache = extern struct {
         };
 
         if (is_short_name and base_info.valid and extension_info.valid) {
-            if (try cache.exists(&short_name_result.name, cluster)) @panic("wtf");
+            if (try cache.exists(&short_name_result.name, cluster, provided_buffer)) @panic("wtf");
             const result = switch (cache.name_configuration.create) {
                 .windows_95 => base_info.upper and extension_info.upper,
                 .windows_nt => @panic("wtf"),
@@ -854,10 +858,10 @@ pub const Cache = extern struct {
         @panic("wtf");
     }
 
-    pub fn scan(cache: Cache, name: []const u8, cluster: u32) !?*DirectoryEntry {
+    pub fn scan(cache: Cache, name: []const u8, cluster: u32, provided_buffer: ?[]const u8) !?*DirectoryEntry {
         var iterator = DirectoryEntryIterator(DirectoryEntry).init(cluster);
 
-        while (try iterator.next(cache)) |entry| {
+        while (try iterator.next(cache, provided_buffer)) |entry| {
             assert(!entry.attributes.has_long_name());
             if (lib.equal(u8, &entry.name, name)) {
                 return entry;
@@ -867,8 +871,8 @@ pub const Cache = extern struct {
         return null;
     }
 
-    pub fn exists(cache: Cache, name: []const u8, cluster: u32) !bool {
-        return (try cache.scan(name, cluster)) != null;
+    pub fn exists(cache: Cache, name: []const u8, cluster: u32, provided_buffer: ?[]const u8) !bool {
+        return (try cache.scan(name, cluster, provided_buffer)) != null;
     }
 
     const GenericEntry = struct {
@@ -884,7 +888,7 @@ pub const Cache = extern struct {
         }
     };
 
-    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, copy_entry: ?*DirectoryEntry) !void {
+    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, provided_buffer: ?[]const u8, copy_entry: ?*DirectoryEntry) !void {
         log.debug("Adding entry for {s}. Dir: {}. Content cluster: {}. Containing cluster: {}", .{ entry_setup.name, entry_setup.is_dir, entry_setup.content_cluster, entry_setup.containing_cluster });
         // TODO:
         for (entry_setup.name) |ch| {
@@ -897,7 +901,7 @@ pub const Cache = extern struct {
         try check_bad_chars(long_name);
 
         var short_name_result: ShortNameResult = undefined;
-        const can_get_away_with_short_name = try cache.create_shortname(&NLS.ascii.table, long_name, entry_setup.content_cluster, &short_name_result);
+        const can_get_away_with_short_name = try cache.create_shortname(&NLS.ascii.table, long_name, entry_setup.content_cluster, &short_name_result, provided_buffer);
         var entry = GenericEntry{
             .normal_entry = DirectoryEntry{
                 .name = short_name_result.name,
@@ -956,7 +960,7 @@ pub const Cache = extern struct {
         var entry_iterator = DirectoryEntryIterator(DirectoryEntry).init(entry_setup.containing_cluster);
         var current_cluster: u32 = 0;
 
-        while (try entry_iterator.next(cache)) |cluster_entry| {
+        while (try entry_iterator.next(cache, provided_buffer)) |cluster_entry| {
             if (cluster_entry.is_free()) {
                 if (free_slots == 0) current_cluster = @intCast(u32, entry_iterator.cluster);
                 free_slots += 1;
@@ -1006,17 +1010,17 @@ pub const Cache = extern struct {
         return result;
     }
 
-    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, copy_cache: ?FAT32.Cache) !u32 {
+    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, provided_buffer: ?[]const u8, copy_cache: ?FAT32.Cache) !u32 {
         var clusters = [1]u32{0};
-        try cache.allocate_clusters(&clusters);
+        try cache.allocate_clusters(&clusters, provided_buffer);
         const cluster = clusters[0];
         const lba = cache.cluster_to_sector(cluster);
         log.debug("Directory cluster LBA: 0x{x}", .{lba});
-        const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba);
+        const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba, provided_buffer);
 
         var copy_entry: ?*FAT32.DirectoryEntry = null;
         if (copy_cache) |cp_cache| {
-            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.cluster_to_sector(cluster));
+            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.cluster_to_sector(cluster), null);
             copy_entry = &entries[0];
         }
         const attributes = Attributes{
@@ -1083,17 +1087,17 @@ pub const Cache = extern struct {
 
         while (fat_index < fat_entry_count) : (fat_index += 1) {
             const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + (cluster * @sizeOf(u32) / cache.disk.sector_size);
-            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba);
+            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, null);
             fat_entry_sector[fat_entry_sector_index] = entry;
             try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
         }
     }
 
-    pub fn allocate_clusters(cache: Cache, clusters: []u32) !void {
-        var fat_entry_iterator = try FATEntryIterator.init(cache);
+    pub fn allocate_clusters(cache: Cache, clusters: []u32, provided_buffer: ?[]const u8) !void {
+        var fat_entry_iterator = try FATEntryIterator.init(cache, provided_buffer);
         var cluster_index: usize = 0;
 
-        while (try fat_entry_iterator.next(cache)) |cluster| {
+        while (try fat_entry_iterator.next(cache, provided_buffer)) |cluster| {
             const entry = &fat_entry_iterator.entries[cluster];
             if (entry.is_free()) {
                 try cache.register_cluster(cluster, FAT32.Entry.allocated_and_eof);
@@ -1107,7 +1111,7 @@ pub const Cache = extern struct {
         @panic("wtf");
     }
 
-    pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
+    pub fn get_directory_entry(cache: Cache, absolute_path: []const u8, provided_buffer: ?[]const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
         const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
         const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
         const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
@@ -1128,7 +1132,7 @@ pub const Cache = extern struct {
                 if (copy_cache) |cc| {
                     const name = absolute_path[0..dir_tokenizer.index];
                     log.debug("Entry name: {s}", .{name});
-                    const entry_result = try cc.get_directory_entry(name, null);
+                    const entry_result = try cc.get_directory_entry(name, provided_buffer, null);
                     break :blk entry_result.directory_entry;
                 } else break :blk null;
             };
@@ -1142,7 +1146,7 @@ pub const Cache = extern struct {
 
             while (true) : (upper_cluster += 1) {
                 const cluster_sector_offset = root_cluster_sector + cache.get_cluster_sector_count() * (upper_cluster - root_cluster);
-                const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector_offset);
+                const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector_offset, provided_buffer);
 
                 var entry_index: usize = 0;
                 while (entry_index < directory_entries_in_cluster.len) : ({
@@ -1308,18 +1312,18 @@ const LoopbackDevice = struct {
     mount_dir: ?[]const u8 = null,
 
     fn start(loopback_device: LoopbackDevice, allocator: lib.Allocator, image_path: []const u8) !void {
-        try lib.spawnProcess(&.{ "./tools/loopback_start.sh", image_path, loopback_device.name }, allocator);
+        try host.spawnProcess(&.{ "./tools/loopback_start.sh", image_path, loopback_device.name }, allocator);
     }
 
     fn end(loopback_device: LoopbackDevice, allocator: lib.Allocator) !void {
         assert(loopback_device.mount_dir == null);
-        try lib.spawnProcess(&.{ "./tools/loopback_end.sh", loopback_device.name }, allocator);
-        try lib.cwd().deleteFile(loopback_device.name);
+        try host.spawnProcess(&.{ "./tools/loopback_end.sh", loopback_device.name }, allocator);
+        try host.cwd().deleteFile(loopback_device.name);
     }
 
     fn mount(loopback_device: *LoopbackDevice, allocator: lib.Allocator, mount_dir: []const u8) !MountedPartition {
-        try lib.cwd().makePath(mount_dir);
-        try lib.spawnProcess(&.{ "./tools/loopback_mount.sh", loopback_device.name, mount_dir }, allocator);
+        try host.cwd().makePath(mount_dir);
+        try host.spawnProcess(&.{ "./tools/loopback_mount.sh", loopback_device.name, mount_dir }, allocator);
         loopback_device.mount_dir = mount_dir;
 
         return MountedPartition{
@@ -1332,7 +1336,7 @@ const MountedPartition = struct {
     loopback_device: LoopbackDevice,
 
     fn mkdir(partition: MountedPartition, allocator: lib.Allocator, dir: []const u8) !void {
-        try lib.spawnProcess(&.{ "sudo", "mkdir", "-p", try partition.join_with_root(allocator, dir) }, allocator);
+        try host.spawnProcess(&.{ "sudo", "mkdir", "-p", try partition.join_with_root(allocator, dir) }, allocator);
     }
 
     fn join_with_root(partition: MountedPartition, allocator: lib.Allocator, path: []const u8) ![]const u8 {
@@ -1352,27 +1356,27 @@ const MountedPartition = struct {
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const file_name = file_path[last_slash_index + 1 ..];
         assert(file_name.len > 0);
-        try lib.cwd().writeFile(file_name, file_content);
+        try host.cwd().writeFile(file_name, file_content);
         const dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         log.debug("Creating path to {s}", .{dir});
         const destination_dir = try partition.join_with_root(allocator, dir);
         const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
-        try lib.spawnProcess(mkdir_process_args, allocator);
+        try host.spawnProcess(mkdir_process_args, allocator);
         log.debug("Copying file...", .{});
         const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
-        try lib.spawnProcess(copy_process_args, allocator);
-        try lib.cwd().deleteFile(file_name);
+        try host.spawnProcess(copy_process_args, allocator);
+        try host.cwd().deleteFile(file_name);
     }
 
     fn end(partition: *MountedPartition, allocator: lib.Allocator) !void {
         const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
-        lib.sync();
-        try lib.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
+        host.sync();
+        try host.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
         partition.loopback_device.mount_dir = null;
         try partition.loopback_device.end(allocator);
-        lib.spawnProcess(&.{ "sudo", "rm", "-rf", mount_dir }, allocator) catch |err| {
+        host.spawnProcess(&.{ "sudo", "rm", "-rf", mount_dir }, allocator) catch |err| {
             switch (err) {
-                lib.ExecutionError.failed => {},
+                host.ExecutionError.failed => {},
                 else => return err,
             }
         };
@@ -1383,18 +1387,18 @@ const FATEntryIterator = struct {
     entries: []FAT32.Entry = &.{},
     cluster: u32,
 
-    fn init(cache: Cache) !FATEntryIterator {
+    fn init(cache: Cache, provided_buffer: ?[]const u8) !FATEntryIterator {
         const cluster = cache.fs_info.last_allocated_cluster + 1;
         assert(cache.disk.sector_size == @sizeOf(FAT32.Entry.Sector));
         const lba_offset = cache.get_fat_lba() + (cluster / FAT32.Entry.per_sector);
 
         return .{
-            .entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset),
+            .entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset, provided_buffer),
             .cluster = cluster,
         };
     }
 
-    fn next(iterator: *FATEntryIterator, cache: Cache) !?u32 {
+    fn next(iterator: *FATEntryIterator, cache: Cache, provided_buffer: ?[]const u8) !?u32 {
         var cluster_count: usize = starting_cluster;
         // TODO: replace with proper variable
         const max_clusters = 100000;
@@ -1404,7 +1408,7 @@ const FATEntryIterator = struct {
             if (iterator.entries.len == 0) {
                 assert(cache.disk.sector_size == @sizeOf(FAT32.Entry.Sector));
                 const lba_offset = cache.get_fat_lba() + (iterator.cluster / FAT32.Entry.per_sector);
-                iterator.entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset);
+                iterator.entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset, provided_buffer);
                 @panic("wtf");
             }
 
@@ -1441,7 +1445,7 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
             return cluster_lba;
         }
 
-        pub fn next(iterator: *Iterator, cache: Cache) !?*EntryType {
+        pub fn next(iterator: *Iterator, cache: Cache, provided_buffer: ?[]const u8) !?*EntryType {
             if (iterator.cluster_fetched) iterator.cluster_it += 1;
 
             const cluster_sector_count = cache.get_cluster_sector_count();
@@ -1453,7 +1457,7 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
                 if (iterator.cluster_it == cluster_entry_count) iterator.cluster += 1;
 
                 const cluster_lba = cache.cluster_to_sector(iterator.cluster);
-                iterator.cluster_entries = try cache.disk.read_slice(EntryType, cluster_entry_count, cluster_lba);
+                iterator.cluster_entries = try cache.disk.read_slice(EntryType, cluster_entry_count, cluster_lba, provided_buffer);
                 iterator.cluster_it = 0;
                 iterator.cluster_fetched = true;
             }
@@ -1469,20 +1473,20 @@ test "Basic FAT32 image" {
     switch (lib.os) {
         .linux => {
             const original_image_path = "barebones.hdd";
-            const byte_count = 64 * mb;
+            const sector_count = 131072;
             const sector_size = 0x200;
             const partition_start_lba = 0x800;
             const partition_name = "ESP";
             const partition_filesystem = lib.Filesystem.Type.fat32;
 
             // Using an arena allocator because it doesn't care about memory leaks
-            var arena_allocator = lib.ArenaAllocator.init(lib.page_allocator);
+            var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
             defer arena_allocator.deinit();
 
             var allocator = arena_allocator.allocator();
 
-            var disk_image = try Disk.Image.from_zero(byte_count, sector_size);
-            defer lib.cwd().deleteFile(original_image_path) catch @panic("wtf");
+            var disk_image = try Disk.Image.fromZero(sector_count, sector_size);
+            defer host.cwd().deleteFile(original_image_path) catch @panic("wtf");
 
             const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
             const files = [_]struct { path: []const u8, content: []const u8 }{
@@ -1494,17 +1498,17 @@ test "Basic FAT32 image" {
 
             // 1. Test GPT creation
             var original_disk_image = blk: {
-                const megabytes = @divExact(byte_count, mb);
-                try lib.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
+                const megabytes = @divExact(sector_count * sector_size, mb);
+                try host.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(allocator, "seek={d}", .{megabytes}), try lib.allocPrint(allocator, "of={s}", .{original_image_path}) }, allocator);
 
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
-                try lib.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
+                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, allocator);
+                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(allocator, "{d}s", .{partition_start_lba}), "100%" }, allocator);
+                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, allocator);
 
                 var loopback_device = LoopbackDevice{ .name = "loopback_device" };
                 try loopback_device.start(allocator, original_image_path);
 
-                try lib.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, allocator);
+                try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, allocator);
 
                 const mount_dir = "image_mount";
 
@@ -1520,23 +1524,23 @@ test "Basic FAT32 image" {
 
                 try partition.end(allocator);
 
-                break :blk try Disk.Image.from_file(original_image_path, sector_size, allocator);
+                break :blk try Disk.Image.fromFile(original_image_path, sector_size, allocator);
             };
 
-            const original_gpt_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0);
-            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(&allocator, original_gpt_cache);
+            const original_gpt_cache = try GPT.Partition.Cache.from_partition_index(&original_disk_image.disk, 0, null);
+            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(&allocator, original_gpt_cache, null);
 
             const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
-            const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
+            const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
             const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, &allocator, original_fat_cache);
 
             for (directories) |directory| {
-                try fat_partition_cache.make_new_directory(directory, original_fat_cache);
+                try fat_partition_cache.make_new_directory(directory, null, original_fat_cache);
             }
 
             for (files) |file| {
                 log.debug("Commanding to add file {s}", .{file.path});
-                try fat_partition_cache.create_file(file.path, file.content, original_fat_cache);
+                try fat_partition_cache.create_file(file.path, file.content, null, original_fat_cache);
             }
 
             try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());

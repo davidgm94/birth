@@ -12,6 +12,7 @@ var real_mode_ds: u16 = 0;
 
 export fn _start() noreturn {
     BIOS.a20_enable() catch @panic("can't enable a20");
+    BIOS.e820_init() catch @panic("can't init e820");
     logger.debug("Hello loader!", .{});
 
     var bios_disk = BIOS.Disk{
@@ -28,8 +29,9 @@ export fn _start() noreturn {
     };
 
     const disk = &bios_disk.disk;
-    const result = disk.callbacks.read(disk, 0x20, 0x800) catch @panic("Wtf");
-    logger.debug("result[0] = 0x{x}", .{result[0]});
+
+    _ = disk;
+    logger.debug("End of bootloader", .{});
     loop();
 }
 

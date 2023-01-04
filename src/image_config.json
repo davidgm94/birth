@@ -1,0 +1,11 @@
+{
+    "sector_count": 131072,
+    "sector_size": 512,
+    "image_name": "rise.hdd",
+    "partition_table": "gpt",
+    "partition": {
+        "name": "ESP",
+        "filesystem": "fat32",
+        "first_lba": 2048
+    }
+}

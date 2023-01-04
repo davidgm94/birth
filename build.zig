@@ -1,44 +1,17 @@
-const lib = @import("src/lib.zig");
-const assert = lib.assert;
+const host = @import("src/host.zig");
 
-// Build imports
-const Builder = lib.build.Builder;
-const FileSource = lib.build.FileSource;
-const LibExeObjStep = lib.build.LibExeObjStep;
-const OptionsStep = lib.build.OptionsStep;
-const Package = lib.build.Pkg;
-const RunStep = lib.build.RunStep;
-const Step = lib.build.Step;
-const WriteFileStep = lib.build.WriteFileStep;
-
-const Target = lib.Target;
-const Arch = Target.Cpu.Arch;
-const CrossTarget = lib.CrossTarget;
-
-const ChildProcess = lib.ChildProcess;
-
-const fork = lib.posix.fork;
-const waitpid = lib.posix.waitpid;
-
-const cwd = lib.cwd;
-const Dir = lib.Dir;
-const basename = lib.path.basename;
-const dirname = lib.path.dirname;
-
-const PartitionTable = lib.PartitionTable;
-const GPT = PartitionTable.GPT;
-const MBR = PartitionTable.MBR;
-
-const Filesystem = lib.Filesystem;
-const FAT32 = Filesystem.FAT32;
+const assert = host.assert;
+const Cpu = host.Cpu;
+const CrossTarget = host.CrossTarget;
+const DiskType = host.DiskType;
+const FilesystemType = host.FilesystemType;
+const Target = host.Target;
 
 const cache_dir = "zig-cache/";
 const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ kernel_name;
 
-const resource_files = [_][]const u8{ "zap-light16.psf", "FiraSans-Regular.otf" };
-
-pub fn build(b: *Builder) void {
+pub fn build(b: *host.build.Builder) void {
     const kernel = b.allocator.create(Kernel) catch unreachable;
     const emulator = Kernel.Options.RunOptions.Emulator.qemu;
     kernel.* = Kernel{
@@ -82,10 +55,10 @@ pub fn build(b: *Builder) void {
     };
 
     kernel.create() catch |err| {
-        lib.getStdOut().writeAll("error: ") catch unreachable;
-        lib.getStdOut().writeAll(@errorName(err)) catch unreachable;
-        lib.getStdOut().writer().writeByte('\n') catch unreachable;
-        unreachable;
+        host.getStdOut().writeAll("error: ") catch unreachable;
+        host.getStdOut().writeAll(@errorName(err)) catch unreachable;
+        host.getStdOut().writer().writeByte('\n') catch unreachable;
+        @panic("building the kernel failed");
     };
 
     const test_step = b.step("test", "Run unit tests");
@@ -104,38 +77,33 @@ pub fn build(b: *Builder) void {
     }
 }
 
-var lib_package = Package{
+var lib_package = host.build.Pkg{
     .name = "lib",
-    .source = FileSource.relative("src/lib.zig"),
+    .source = host.build.FileSource.relative("src/lib.zig"),
 };
 
-var bootloader_package = Package{
+var bootloader_package = host.build.Pkg{
     .name = "bootloader",
-    .source = FileSource.relative("src/bootloader.zig"),
+    .source = host.build.FileSource.relative("src/bootloader.zig"),
 };
 
-var rise_package = Package{
+var rise_package = host.build.Pkg{
     .name = "rise",
-    .source = FileSource.relative("src/rise.zig"),
+    .source = host.build.FileSource.relative("src/rise.zig"),
 };
 
-var privileged_package = Package{
+var privileged_package = host.build.Pkg{
     .name = "privileged",
-    .source = FileSource.relative("src/privileged.zig"),
+    .source = host.build.FileSource.relative("src/privileged.zig"),
 };
 
-var user_package = Package{
+var user_package = host.build.Pkg{
     .name = "user",
-    .source = FileSource.relative("src/user.zig"),
+    .source = host.build.FileSource.relative("src/user.zig"),
 };
-
-fn add_qemu_debug_isa_exit(builder: *Builder, list: *lib.ArrayListManaged([]const u8), qemu_debug_isa_exit: lib.QEMU.ISADebugExit) !void {
-    try list.append("-device");
-    try list.append(builder.fmt("isa-debug-exit,iobase=0x{x},iosize=0x{x}", .{ qemu_debug_isa_exit.port, qemu_debug_isa_exit.size }));
-}
 
 //const BootImage = struct {
-//fn build(step: *Step) !void {
+//fn build(step: *host.build.Step) !void {
 //const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
 
 //switch (kernel.options.arch) {
@@ -199,72 +167,20 @@ fn add_qemu_debug_isa_exit(builder: *Builder, list: *lib.ArrayListManaged([]cons
 //}
 //};
 
-const Module = struct {
-    type: Type,
-    dependencies: []const []const u8,
-
-    fn parse(allocator: lib.Allocator, file: []const u8) !Module {
-        var token_stream = lib.json.TokenStream.init(file);
-        const module = try lib.json.parse(Module, &token_stream, .{ .allocator = allocator });
-        return module;
-    }
-
-    fn from_source_file(source_file: anytype) *const Module {
-        return &source_file.module.module;
-    }
-
-    fn get_path_to_file(module: Module, allocator: lib.Allocator, file: []const u8) []const u8 {
-        const directory_length = lib.last_index_of(u8, module.path, "module.zig") orelse unreachable;
-        const directory_path = module.path[0..directory_length];
-        const path_to_file = try lib.concatenate(allocator, u8, &.{ directory_path, file });
-        return path_to_file;
-    }
-
-    fn get_program_name(module: Module) []const u8 {
-        const directory_length = lib.last_index_of(u8, module.path, "module.zig") orelse unreachable;
-        const directory_path = module.path[0..directory_length];
-        const directory_name = basename(directory_path);
-        return directory_name;
-    }
-
-    const Type = enum(u32) {
-        zig_exe = 0,
-        zig_static_lib = 1,
-        zig_dynamic_lib = 2,
-        c_objects = 3,
-    };
-};
-
-const UserProgram = struct {
-    module: Module,
-    path: []const u8,
-    name: []const u8,
-
-    fn make(allocator: lib.Allocator, module: Module, program_name: []const u8, source_path: []const u8) UserProgram {
-        assert(module.type == .zig_exe);
-        _ = allocator;
-        //_ = module.get_path_to_file(allocator, "main.zig");
-        return UserProgram{
-            .module = module,
-            .path = source_path,
-            .name = program_name,
-        };
-    }
-};
-
 const Kernel = struct {
-    builder: *Builder,
-    bootloader: ?*LibExeObjStep = null,
-    executable: *LibExeObjStep = undefined,
-    userspace_programs: []*LibExeObjStep = &.{},
+    builder: *host.build.Builder,
+    bootloader: ?*host.build.LibExeObjStep = null,
+    executable: *host.build.LibExeObjStep = undefined,
+    //userspace_programs: []*host.build.LibExeObjStep = &.{},
     options: Options,
-    boot_image_step: Step = undefined,
+    boot_image_step: host.build.Step = undefined,
     disk_count: u64 = 0,
-    disk_step: Step = undefined,
-    debug_step: Step = undefined,
-    run_argument_list: lib.ArrayListManaged([]const u8) = undefined,
-    debug_argument_list: lib.ArrayListManaged([]const u8) = undefined,
-    gdb_script: *WriteFileStep = undefined,
+    disk_step: host.build.Step = undefined,
+    debug_step: host.build.Step = undefined,
+    disk_image_builder_run_step: *host.build.RunStep = undefined,
+    run_argument_list: host.ArrayList([]const u8) = undefined,
+    debug_argument_list: host.ArrayList([]const u8) = undefined,
+    gdb_script: *host.build.WriteFileStep = undefined,
 
     fn create(kernel: *Kernel) !void {
         // Initialize package dependencies here
@@ -276,7 +192,6 @@ const Kernel = struct {
         kernel.create_bootloader();
         kernel.create_executable();
         try kernel.create_disassembly_step();
-        try kernel.create_userspace_programs();
         kernel.create_disk();
         try kernel.create_run_and_debug_steps();
     }
@@ -314,7 +229,7 @@ const Kernel = struct {
                                 bootloader_exe.link_gc_sections = true;
                                 bootloader_exe.want_lto = true;
                                 bootloader_exe.force_pic = true;
-                                bootloader_exe.setLinkerScriptPath(FileSource.relative("src/bootloader/rise/bios.ld"));
+                                bootloader_exe.setLinkerScriptPath(host.build.FileSource.relative("src/bootloader/rise/bios.ld"));
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
                                 kernel.builder.default_step.dependOn(&bootloader_exe.step);
@@ -347,9 +262,8 @@ const Kernel = struct {
         switch (kernel.options.arch) {
             .x86_64 => {
                 kernel.executable = kernel.builder.addExecutable(kernel_name, "src/rise/arch/x86_64/entry_point.zig");
-                //kernel.executable.pie = true;
                 kernel.executable.code_model = .kernel;
-                kernel.executable.setLinkerScriptPath(FileSource.relative(kernel_source_path ++ "arch/x86_64/linker.ld"));
+                kernel.executable.setLinkerScriptPath(host.build.FileSource.relative(kernel_source_path ++ "arch/x86_64/linker.ld"));
             },
             else => unreachable,
         }
@@ -376,7 +290,7 @@ const Kernel = struct {
     }
 
     fn create_disassembly_step(kernel: *Kernel) !void {
-        var arg_list = lib.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        var arg_list = host.ArrayList([]const u8).init(kernel.builder.allocator);
         const main_args = &.{ "llvm-objdump", kernel_path };
         const common_flags = &.{ "-d", "-S" };
         try arg_list.appendSlice(main_args);
@@ -391,103 +305,15 @@ const Kernel = struct {
         disassembly_kernel_step.dependOn(&disassembly_kernel.step);
     }
 
-    fn create_userspace_programs(kernel: *Kernel) !void {
-        const linker_script_path = kernel.builder.fmt("src/user/arch/{s}/linker.ld", .{@tagName(kernel.options.arch)});
-        const user_programs_path = "src/user/programs";
-        const user_programs_dir = try cwd().openIterableDir(user_programs_path, .{});
-        var it = user_programs_dir.iterate();
-
-        var unique_programs = lib.ArrayListManaged(UserProgram).init(kernel.builder.allocator);
-        while (try it.next()) |module_entry| {
-            if (module_entry.kind == .Directory) {
-                const module_dir = try user_programs_dir.dir.openDir(module_entry.name, .{});
-                const module_configuration_file = module_dir.readFileAlloc(kernel.builder.allocator, "module.json", 0x1000 * 16) catch return Error.module_file_not_found;
-                const module = try Module.parse(kernel.builder.allocator, module_configuration_file);
-                // TODO: change path
-                const source_file_path = try lib.concat(kernel.builder.allocator, u8, &.{ user_programs_path, "/", module_entry.name, "/main.zig" });
-                const unique_program = UserProgram.make(kernel.builder.allocator, module, module_entry.name, source_file_path);
-                try unique_programs.append(unique_program);
-            }
-        }
-
-        var libexeobj_steps = try lib.ArrayListManaged(*LibExeObjStep).initCapacity(kernel.builder.allocator, unique_programs.items.len);
-
-        for (unique_programs.items) |unique_program| {
-            const filename = unique_program.name;
-            const source_path = unique_program.path;
-            const program = kernel.builder.addExecutable(filename, source_path);
-
-            program.setMainPkgPath("src");
-            program.setTarget(get_target(kernel.options.arch, true));
-            program.setOutputDir(cache_dir);
-            program.setBuildMode(kernel.builder.standardReleaseOptions());
-            //program.setBuildMode(.ReleaseSafe);
-            program.setLinkerScriptPath(FileSource.relative(linker_script_path));
-            program.entry_symbol_name = "user_entry_point";
-
-            program.addPackage(lib_package);
-            program.addPackage(user_package);
-
-            kernel.builder.default_step.dependOn(&program.step);
-
-            libexeobj_steps.appendAssumeCapacity(program);
-        }
-
-        kernel.userspace_programs = libexeobj_steps.items;
-    }
-
     fn create_disk(kernel: *Kernel) void {
-        kernel.disk_step = Step.init(.custom, "disk_create", kernel.builder.allocator, disk_image_make);
+        const disk_image_builder = kernel.builder.addExecutable("disk_image_builder", "src/disk_image_builder.zig");
+        disk_image_builder.setOutputDir(cache_dir);
+        disk_image_builder.setBuildMode(kernel.builder.standardReleaseOptions());
+        disk_image_builder.step.dependOn(&(kernel.bootloader orelse unreachable).step);
+        disk_image_builder.step.dependOn(&kernel.executable.step);
 
-        const named_step = kernel.builder.step("disk", "Create a disk blob to use with QEMU");
-        named_step.dependOn(&kernel.disk_step);
-        kernel.disk_step.dependOn(&kernel.bootloader.?.step);
-
-        for (kernel.userspace_programs) |program| {
-            kernel.disk_step.dependOn(&program.step);
-        }
-    }
-
-    fn disk_image_make(step: *Step) !void {
-        const kernel = @fieldParentPtr(Kernel, "disk_step", step);
-        //const original_image_path = "rise.hdd";
-        const byte_count = 64 * lib.mb;
-        const sector_size = 0x200;
-        const partition_start_lba = 0x800;
-        const partition_name = "ESP";
-        const partition_filesystem = lib.Filesystem.Type.fat32;
-        var disk_image = try lib.Disk.Image.from_zero(byte_count, sector_size);
-        const disk = &disk_image.disk;
-        const gpt_cache = try GPT.create(disk, null);
-        const gpt_partition_cache = try gpt_cache.add_partition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, null);
-        const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, &kernel.builder.allocator, null);
-
-        const max_file_length = lib.maxInt(usize);
-        const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
-        const first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
-        assert((fat_partition_cache.partition_range.first_lba - first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
-        try disk.write_slice(u8, loader_file, first_usable_lba, true);
-        lib.log.debug("First usable LBA: 0x{x}", .{first_usable_lba});
-
-        // Build our own assembler
-        const boot_disk_mbr_lba = 0;
-        const boot_disk_mbr = try disk.read_typed_sectors(MBR.BootDisk, boot_disk_mbr_lba);
-        const dap_offset = @offsetOf(MBR.BootDisk, "dap");
-        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-        assert(dap_offset == 0x1ae);
-        const dap = MBR.DAP{
-            .sector_count = @intCast(u16, lib.alignForward(loader_file.len, 0x200) >> 9),
-            .offset = 0x7e00,
-            .segment = 0x0,
-            .lba = first_usable_lba,
-        };
-
-        try boot_disk_mbr.fill(kernel.builder.allocator, dap);
-
-        try disk.write_typed_sectors(MBR.BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
-
-        try cwd().writeFile("zig-cache/disk.bin", disk_image.get_buffer());
-        try cwd().writeFile("zig-cache/mbr.bin", disk_image.get_buffer()[0..0x200]);
+        kernel.disk_image_builder_run_step = disk_image_builder.run();
+        kernel.disk_image_builder_run_step.step.dependOn(kernel.builder.default_step);
     }
 
     const Error = error{
@@ -496,19 +322,10 @@ const Kernel = struct {
     };
 
     fn create_run_and_debug_steps(kernel: *Kernel) !void {
-        kernel.run_argument_list = lib.ArrayListManaged([]const u8).init(kernel.builder.allocator);
+        kernel.run_argument_list = host.ArrayList([]const u8).init(kernel.builder.allocator);
         switch (kernel.options.run.emulator) {
             .qemu => {
-                //defer {
-                //if (kernel.options.run.emulator.qemu.print_command) {
-                //for (kernel.run_argument_list.items) |arg| {
-                //print("{s} ", .{arg});
-                //}
-                //print("\n\n", .{});
-                //}
-                //}
-
-                const qemu_name = try lib.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
+                const qemu_name = try host.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
                 try kernel.run_argument_list.append(qemu_name);
 
                 if (!kernel.options.is_virtualizing()) {
@@ -571,7 +388,8 @@ const Kernel = struct {
                 try kernel.run_argument_list.append("-global");
                 try kernel.run_argument_list.append("virtio-mmio.force-legacy=false");
 
-                const disk_path = kernel.builder.fmt("{s}disk.bin", .{cache_dir});
+                const image_config = try host.ImageConfig.get(kernel.builder.allocator, host.ImageConfig.default_path);
+                const disk_path = try host.concat(kernel.builder.allocator, u8, &.{ cache_dir, image_config.image_name });
                 // TODO: don't ignore system interface
                 try kernel.run_argument_list.appendSlice(
                 //&.{ "-hda", disk_path });
@@ -581,7 +399,7 @@ const Kernel = struct {
                 if (kernel.options.is_virtualizing()) {
                     const args = &.{
                         "-accel",
-                        switch (lib.os) {
+                        switch (host.os) {
                             .windows => "whpx",
                             .linux => "kvm",
                             .macos => "hvf",
@@ -594,7 +412,7 @@ const Kernel = struct {
                     try kernel.debug_argument_list.appendSlice(args);
                 } else {
                     if (kernel.options.run.emulator.qemu.log) |log_options| {
-                        var log_what = lib.ArrayListManaged(u8).init(kernel.builder.allocator);
+                        var log_what = host.ArrayList(u8).init(kernel.builder.allocator);
                         if (log_options.guest_errors) try log_what.appendSlice("guest_errors,");
                         if (log_options.cpu) try log_what.appendSlice("cpu,");
                         if (log_options.interrupts) try log_what.appendSlice("int,");
@@ -621,11 +439,6 @@ const Kernel = struct {
                     }
                 }
 
-                try add_qemu_debug_isa_exit(kernel.builder, &kernel.run_argument_list, switch (kernel.options.arch) {
-                    .x86_64 => lib.QEMU.x86_64_debug_exit,
-                    else => return Error.not_implemented,
-                });
-
                 if (!kernel.options.is_virtualizing()) {
                     try kernel.debug_argument_list.append("-S");
                 }
@@ -639,16 +452,18 @@ const Kernel = struct {
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
         run_command.step.dependOn(kernel.builder.default_step);
-        run_command.step.dependOn(&kernel.disk_step);
+        //run_command.step.dependOn(&kernel.disk_step);
+        run_command.step.dependOn(&kernel.disk_image_builder_run_step.step);
+
         const run_step = kernel.builder.step("run", "run step");
         run_step.dependOn(&run_command.step);
 
-        switch (kernel.options.arch) {
-            .x86_64 => run_command.step.dependOn(&kernel.disk_step),
-            else => return Error.not_implemented,
-        }
+        //switch (kernel.options.arch) {
+        //.x86_64 => run_command.step.dependOn(&kernel.disk_step),
+        //else => return Error.not_implemented,
+        //}
 
-        var gdb_script_buffer = lib.ArrayListManaged(u8).init(kernel.builder.allocator);
+        var gdb_script_buffer = host.ArrayList(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
             .x86, .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
             else => return Error.not_implemented,
@@ -671,10 +486,11 @@ const Kernel = struct {
         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);
 
         // We need a member variable because we need consistent memory around it to do @fieldParentPtr
-        kernel.debug_step = Step.init(.custom, "_debug_", kernel.builder.allocator, do_debug_step);
-        kernel.debug_step.dependOn(&kernel.boot_image_step);
+        kernel.debug_step = host.build.Step.init(.custom, "_debug_", kernel.builder.allocator, do_debug_step);
+        //kernel.debug_step.dependOn(&kernel.boot_image_step);
         kernel.debug_step.dependOn(&kernel.gdb_script.step);
-        kernel.debug_step.dependOn(&kernel.disk_step);
+        //kernel.debug_step.dependOn(&kernel.disk_step);
+        kernel.debug_step.dependOn(&kernel.disk_image_builder_run_step.step);
 
         const debug_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
         debug_step.dependOn(&kernel.debug_step);
@@ -699,7 +515,7 @@ const Kernel = struct {
             };
         };
 
-        const ArchSpecific = union(Arch) {
+        const ArchSpecific = union(Cpu.Arch) {
             arm,
             armeb,
             aarch64,
@@ -804,8 +620,8 @@ const Kernel = struct {
             const Bochs = struct {};
 
             const DiskOptions = struct {
-                interface: lib.Disk.Type,
-                filesystem: lib.Filesystem.Type,
+                interface: host.DiskType,
+                filesystem: host.FilesystemType,
             };
 
             const LogOptions = struct {
@@ -819,15 +635,15 @@ const Kernel = struct {
 
         fn is_virtualizing(options: Options) bool {
             return switch (options.run.emulator) {
-                .qemu => options.run.emulator.qemu.virtualize and lib.cpu.arch == options.arch,
+                .qemu => options.run.emulator.qemu.virtualize and host.cpu.arch == options.arch,
                 .bochs => false,
             };
         }
     };
 
-    fn get_target(asked_arch: Arch, user: bool) CrossTarget {
-        var enabled_features = Target.Cpu.Feature.Set.empty;
-        var disabled_features = Target.Cpu.Feature.Set.empty;
+    fn get_target(asked_arch: Cpu.Arch, user: bool) CrossTarget {
+        var enabled_features = Cpu.Feature.Set.empty;
+        var disabled_features = Cpu.Feature.Set.empty;
 
         if (!user) {
             assert(asked_arch == .x86_64 or asked_arch == .x86);
@@ -855,35 +671,33 @@ const Kernel = struct {
     }
 };
 
-fn do_debug_step(step: *Step) !void {
+fn do_debug_step(step: *host.build.Step) !void {
     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
     const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
-    switch (lib.os) {
+    switch (host.os) {
         .linux, .macos => {
-            const first_pid = try fork();
+            const first_pid = try host.posix.fork();
             if (first_pid == 0) {
-                switch (lib.os) {
+                switch (host.os) {
                     .linux => {
-                        var debugger_process = ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
+                        var debugger_process = host.ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
                         _ = try debugger_process.spawnAndWait();
                     },
                     .macos => {
-                        var debugger_process = ChildProcess.init(&[_][]const u8{ "wezterm", "start", "--cwd", kernel.builder.build_root, "--", "x86_64-elf-gdb", "-x", gdb_script_path }, kernel.builder.allocator);
+                        var debugger_process = host.ChildProcess.init(&[_][]const u8{ "wezterm", "start", "--cwd", kernel.builder.build_root, "--", "x86_64-elf-gdb", "-x", gdb_script_path }, kernel.builder.allocator);
                         _ = try debugger_process.spawnAndWait();
                     },
                     else => @compileError("OS not supported"),
                 }
             } else {
-                var qemu_process = ChildProcess.init(kernel.debug_argument_list.items, kernel.builder.allocator);
+                var qemu_process = host.ChildProcess.init(kernel.debug_argument_list.items, kernel.builder.allocator);
                 try qemu_process.spawn();
 
-                _ = waitpid(first_pid, 0);
+                _ = host.posix.waitpid(first_pid, 0);
                 _ = try qemu_process.kill();
             }
         },
-        else => {
-            @panic("todo implement");
-        },
+        else => @panic("todo implement"),
     }
 }
 

@@ -1,6 +1,7 @@
 const lib = @import("lib");
 const privileged = @import("privileged");
-const log = lib.log.scoped(.Disk);
+const assert = lib.assert;
+const log = lib.log.scoped(.BIOS);
 
 var buffer = [1]u8{0} ** (0x200 * 0x20);
 
@@ -15,7 +16,8 @@ inline fn offset(value: u32) u16 {
 pub const Disk = extern struct {
     disk: lib.Disk,
 
-    pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64) lib.Disk.ReadError![]u8 {
+    pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, provided_buffer: ?[]const u8) lib.Disk.ReadError!lib.Disk.ReadResult {
+        assert(provided_buffer != null);
         _ = disk;
         if (sector_count > lib.maxInt(u16)) @panic("too many sectors");
 
@@ -100,3 +102,5 @@ pub fn a20_enable() A20Error!void {
         return A20Error.a20_not_enabled;
     }
 }
+
+pub fn e820_init() !void {}
