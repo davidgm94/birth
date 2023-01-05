@@ -383,21 +383,6 @@ fn flush_new_line() !void {
     }
 }
 
-const Writer = common.Writer(void, UEFI.Error, e9_write);
-const debug_writer = Writer{ .context = {} };
-
-fn e9_write(_: void, bytes: []const u8) UEFI.Error!usize {
-    const bytes_left = asm volatile (
-        \\cld
-        \\rep outsb
-        : [ret] "={rcx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
-          [src] "{rsi}" (bytes.ptr),
-          [len] "{rcx}" (bytes.len),
-    );
-    return bytes.len - bytes_left;
-}
-
 const MemoryManager = struct {
     map: MemoryMap,
     size_counters: MemoryMap.SizeCounters = .{},

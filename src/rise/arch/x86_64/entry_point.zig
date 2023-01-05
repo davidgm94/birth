@@ -476,6 +476,7 @@ fn enable_fpu() void {
 }
 
 pub const log_level = lib.log.Level.debug;
+pub const writer = privileged.E9Writer{ .context = {} };
 
 pub fn log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
@@ -492,20 +493,6 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     );
     lib.log.scoped(.PANIC).err("{s}", .{message});
     privileged.arch.CPU_stop();
-}
-
-const Writer = lib.Writer(void, error{}, e9_write);
-const writer = Writer{ .context = {} };
-fn e9_write(_: void, bytes: []const u8) error{}!usize {
-    const bytes_left = asm volatile (
-        \\cld
-        \\rep outsb
-        : [ret] "={rcx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
-          [src] "{rsi}" (bytes.ptr),
-          [len] "{rcx}" (bytes.len),
-    );
-    return bytes.len - bytes_left;
 }
 
 // TODO: implement syscall

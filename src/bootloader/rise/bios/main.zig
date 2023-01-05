@@ -1,5 +1,8 @@
 const lib = @import("lib");
-const BIOS = @import("bios.zig");
+const privileged = @import("privileged");
+
+const BIOS = privileged.BIOS;
+
 export fn loop() noreturn {
     asm volatile (
         \\cli
@@ -11,9 +14,12 @@ export fn loop() noreturn {
 var real_mode_ds: u16 = 0;
 
 export fn _start() noreturn {
-    BIOS.a20_enable() catch @panic("can't enable a20");
-    BIOS.e820_init() catch @panic("can't init e820");
     logger.debug("Hello loader!", .{});
+    BIOS.a20_enable() catch @panic("can't enable a20");
+    const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
+    for (memory_map_entries) |memory_map_entry| {
+        logger.debug("Entry {s}. Address: 0x{x}. Size: 0x{x}", .{ @tagName(memory_map_entry.type), memory_map_entry.base, memory_map_entry.len });
+    }
 
     var bios_disk = BIOS.Disk{
         .disk = .{
@@ -35,34 +41,20 @@ export fn _start() noreturn {
     loop();
 }
 
-const Writer = lib.Writer(void, error{}, e9_write);
-const debug_writer = Writer{ .context = {} };
-
-fn e9_write(_: void, bytes: []const u8) error{}!usize {
-    const bytes_left = asm volatile (
-        \\cld
-        \\rep outsb
-        : [ret] "={ecx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
-          [src] "{esi}" (bytes.ptr),
-          [len] "{ecx}" (bytes.len),
-    );
-
-    return bytes.len - bytes_left;
-}
-
 pub const logger = lib.log.scoped(.Loader);
 pub const log_level = lib.log.Level.debug;
+pub const writer = privileged.E9Writer{ .context = {} };
 
 pub fn log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    debug_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+    writer.print(prefix ++ format ++ "\n", args) catch unreachable;
 }
 
 pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
     _ = stack_trace;
     _ = ret_addr;
+
     lib.log.scoped(.PANIC).err("{s}", .{message});
     asm volatile (
         \\cli

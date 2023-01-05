@@ -10,6 +10,73 @@ const MBR = lib.PartitionTable.MBR;
 
 const max_file_length = lib.maxInt(usize);
 
+// TODO: introduce Limine in this executable
+
+//const BootImage = struct {
+//fn build(step: *host.build.Step) !void {
+//const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
+
+//switch (kernel.options.arch) {
+//.x86_64 => {
+//switch (kernel.options.arch.x86_64.bootloader) {
+//.rise_uefi => {
+//var cache_dir_handle = try std.fs.cwd().openDir(kernel.builder.cache_root, .{});
+//defer cache_dir_handle.close();
+//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+//const current_directory = cwd();
+//current_directory.deleteFile(Limine.image_path) catch {};
+//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+//try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
+//try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
+//// TODO: copy all userspace programs
+//try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
+//},
+//.rise_bios => {},
+//.limine => {
+//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+//const current_directory = cwd();
+//current_directory.deleteFile(Limine.image_path) catch {};
+//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+
+//const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
+
+//const limine_efi_bin_file = "limine-cd-efi.bin";
+//const files_to_copy_from_limine_dir = [_][]const u8{
+//"limine.cfg",
+//"limine.sys",
+//"limine-cd.bin",
+//limine_efi_bin_file,
+//};
+
+//for (files_to_copy_from_limine_dir) |filename| {
+//try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+//}
+//try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+//try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
+
+//const xorriso_executable = switch (common.os) {
+//.windows => "tools/xorriso-windows/xorriso.exe",
+//else => "xorriso",
+//};
+//var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
+//// Ignore stderr and stdout
+//xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
+//xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
+//xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
+//_ = try xorriso_process.spawnAndWait();
+
+//try Limine.installer.install(Limine.image_path, false, null);
+//},
+//}
+//},
+//else => unreachable,
+//}
+//}
+//};
+
 pub const BootDisk = extern struct {
     bpb: MBR.BIOSParameterBlock.DOS7_1_79,
     code: [code_byte_count]u8,

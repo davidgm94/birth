@@ -6,10 +6,12 @@ comptime {
     }
 }
 const arch = switch (@import("builtin").cpu.arch) {
+    .x86 => x86,
     .x86_64 => x86_64,
     else => @compileError("Architecture not supported"),
 };
 
+pub const x86 = @import("arch/x86.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
 
 pub const page_size = arch.page_size;

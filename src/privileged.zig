@@ -1,3 +1,5 @@
+// This package provides of privileged data structures and routines to both kernel and bootloaders, for now
+
 const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.Privileged);
@@ -6,13 +8,8 @@ const alignForward = lib.alignForward;
 const alignBackward = lib.alignBackward;
 const maxInt = lib.maxInt;
 
-// This package provides of privileged data structures and routines to both kernel and bootloaders, for now
-// TODO: implement properly
-//const crash = @import("privileged/crash.zig");
-//pub const panic = crash.panic;
-//pub const panic_extended = crash.panic_extended;
-
 pub const arch = @import("privileged/arch.zig");
+pub const BIOS = @import("privileged/bios.zig");
 pub const Capabilities = @import("privileged/capabilities.zig");
 pub const ELF = @import("privileged/elf.zig");
 pub const Executable = @import("privileged/executable.zig");
@@ -25,6 +22,25 @@ pub const Scheduler = switch (scheduler_type) {
     .round_robin => @import("privileged/round_robin.zig"),
     else => @compileError("other scheduler is not supported right now"),
 };
+
+const E9WriterError = error{};
+pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
+
+fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
+    return arch.io.write_bytes(bytes);
+}
+fn e9_write(_: void, bytes: []const u8) error{}!usize {
+    const bytes_left = asm volatile (
+        \\cld
+        \\rep outsb
+        : [ret] "={ecx}" (-> usize),
+        : [dest] "{dx}" (0xe9),
+          [src] "{esi}" (bytes.ptr),
+          [len] "{ecx}" (bytes.len),
+    );
+
+    return bytes.len - bytes_left;
+}
 
 pub const ResourceOwner = enum(u2) {
     bootloader = 0,

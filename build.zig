@@ -12,7 +12,7 @@ const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ kernel_name;
 
 pub fn build(b: *host.build.Builder) void {
-    const kernel = b.allocator.create(Kernel) catch unreachable;
+    const kernel = b.allocator.create(Kernel) catch @panic("unable to allocate memory for kernel builder");
     const emulator = Kernel.Options.RunOptions.Emulator.qemu;
     kernel.* = Kernel{
         .builder = b,
@@ -101,71 +101,6 @@ var user_package = host.build.Pkg{
     .name = "user",
     .source = host.build.FileSource.relative("src/user.zig"),
 };
-
-//const BootImage = struct {
-//fn build(step: *host.build.Step) !void {
-//const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-
-//switch (kernel.options.arch) {
-//.x86_64 => {
-//switch (kernel.options.arch.x86_64.bootloader) {
-//.rise_uefi => {
-//var cache_dir_handle = try std.fs.cwd().openDir(kernel.builder.cache_root, .{});
-//defer cache_dir_handle.close();
-//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-//const current_directory = cwd();
-//current_directory.deleteFile(Limine.image_path) catch {};
-//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-//try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
-//try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
-//// TODO: copy all userspace programs
-//try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
-//},
-//.rise_bios => {},
-//.limine => {
-//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-//const current_directory = cwd();
-//current_directory.deleteFile(Limine.image_path) catch {};
-//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-//const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
-
-//const limine_efi_bin_file = "limine-cd-efi.bin";
-//const files_to_copy_from_limine_dir = [_][]const u8{
-//"limine.cfg",
-//"limine.sys",
-//"limine-cd.bin",
-//limine_efi_bin_file,
-//};
-
-//for (files_to_copy_from_limine_dir) |filename| {
-//try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
-//}
-//try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
-//try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
-
-//const xorriso_executable = switch (common.os) {
-//.windows => "tools/xorriso-windows/xorriso.exe",
-//else => "xorriso",
-//};
-//var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
-//// Ignore stderr and stdout
-//xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
-//xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
-//xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
-//_ = try xorriso_process.spawnAndWait();
-
-//try Limine.installer.install(Limine.image_path, false, null);
-//},
-//}
-//},
-//else => unreachable,
-//}
-//}
-//};
 
 const Kernel = struct {
     builder: *host.build.Builder,
@@ -452,16 +387,10 @@ const Kernel = struct {
 
         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
         run_command.step.dependOn(kernel.builder.default_step);
-        //run_command.step.dependOn(&kernel.disk_step);
         run_command.step.dependOn(&kernel.disk_image_builder_run_step.step);
 
         const run_step = kernel.builder.step("run", "run step");
         run_step.dependOn(&run_command.step);
-
-        //switch (kernel.options.arch) {
-        //.x86_64 => run_command.step.dependOn(&kernel.disk_step),
-        //else => return Error.not_implemented,
-        //}
 
         var gdb_script_buffer = host.ArrayList(u8).init(kernel.builder.allocator);
         switch (kernel.options.arch) {
@@ -570,8 +499,6 @@ const Kernel = struct {
             renderscript32,
             renderscript64,
             ve,
-            // Stage1 currently assumes that architectures above this comment
-            // map one-to-one with the ZigLLVM_ArchType enum.
             spu_2,
             spirv32,
             spirv64,
@@ -581,7 +508,6 @@ const Kernel = struct {
         };
 
         const RunOptions = struct {
-            //disk: DiskOptions,
             memory: Memory,
             emulator: union(Emulator) {
                 qemu: QEMU,
