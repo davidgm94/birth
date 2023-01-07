@@ -103,7 +103,7 @@ pub fn a20_enable() A20Error!void {
     }
 }
 
-const MemoryMapEntry = extern struct {
+pub const MemoryMapEntry = extern struct {
     base: u64,
     len: u64,
     type: Type,

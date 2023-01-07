@@ -8,17 +8,28 @@ export fn loop() noreturn {
         \\cli
         \\hlt
     );
+
     while (true) {}
 }
 
 var real_mode_ds: u16 = 0;
 
+const MemoryManager = struct {
+    entries: []const BIOS.MemoryMapEntry,
+};
+
 export fn _start() noreturn {
     logger.debug("Hello loader!", .{});
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
+
     for (memory_map_entries) |memory_map_entry| {
         logger.debug("Entry {s}. Address: 0x{x}. Size: 0x{x}", .{ @tagName(memory_map_entry.type), memory_map_entry.base, memory_map_entry.len });
+    }
+
+    for (memory_map_entries) |entry| {
+        if (entry.base < 1 * lib.mb) continue;
+        @panic("TODO: do something with memory map entries");
     }
 
     var bios_disk = BIOS.Disk{
