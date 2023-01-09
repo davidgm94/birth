@@ -475,10 +475,11 @@ fn enable_fpu() void {
     // should we ldmxcsr ?
 }
 
-pub const log_level = lib.log.Level.debug;
 pub const writer = privileged.E9Writer{ .context = {} };
 
-pub fn log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+pub const std_options = struct {
+pub const log_level = lib.log.Level.debug;
+pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
     writer.writeAll(prefix) catch unreachable;
@@ -486,6 +487,8 @@ pub fn log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral),
     writer.print(format, args) catch unreachable;
     writer.writeByte('\n') catch unreachable;
 }
+};
+
 
 pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     asm volatile (
