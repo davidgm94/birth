@@ -50,7 +50,7 @@ pub fn allocateZeroMemory(bytes: u64) ![]align(0x1000) u8 {
 }
 
 pub const ExecutionError = error{failed};
-pub fn spawnProcess(arguments: []const []const u8, allocator: common.Allocator) !void {
+pub fn spawnProcess(arguments: []const []const u8, allocator: common.ZigAllocator) !void {
     var process = ChildProcess.init(arguments, allocator);
     const execution_result = try process.spawnAndWait();
 
@@ -78,7 +78,7 @@ pub const ImageConfig = struct {
 
     pub const default_path = "src/image_config.json";
 
-    pub fn get(allocator: common.Allocator, path: []const u8) !ImageConfig {
+    pub fn get(allocator: common.ZigAllocator, path: []const u8) !ImageConfig {
         const image_config_file = cwd().readFileAlloc(allocator, path, common.maxInt(usize)) catch unreachable;
         var json_stream = common.json.TokenStream.init(image_config_file);
         return try common.json.parse(ImageConfig, &json_stream, .{ .allocator = allocator });

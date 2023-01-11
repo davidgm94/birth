@@ -124,3 +124,22 @@ test {
     _ = Filesystem;
     _ = PartitionTable;
 }
+
+pub const Allocator = extern struct {
+    callback_allocate: *const Allocate.Fn,
+
+    pub const Allocate = struct {
+        pub const Result = struct {
+            address: u64,
+            size: u64,
+        };
+        pub const Fn = fn (allocator: *Allocator, size: u64, alignment: u64) Error!Result;
+        pub const Error = error{
+            OutOfMemory,
+        };
+    };
+
+    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
+        return try allocator.callback_allocate(allocator, size, alignment);
+    }
+};

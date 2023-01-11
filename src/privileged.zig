@@ -7,13 +7,13 @@ const isAligned = lib.isAligned;
 const alignForward = lib.alignForward;
 const alignBackward = lib.alignBackward;
 const maxInt = lib.maxInt;
+const Allocator = lib.Allocator;
 
 pub const arch = @import("privileged/arch.zig");
 pub const BIOS = @import("privileged/bios.zig");
 pub const Capabilities = @import("privileged/capabilities.zig");
 pub const ELF = @import("privileged/elf.zig");
 pub const Executable = @import("privileged/executable.zig");
-pub const Heap = @import("privileged/heap.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const UEFI = @import("privileged/uefi.zig");
 pub const VirtualAddressSpace = @import("privileged/virtual_address_space.zig");
@@ -131,13 +131,13 @@ pub const CoreLocality = enum {
 };
 
 pub fn PhysicalAddress(comptime locality: CoreLocality) type {
-    return enum(usize) {
+    return enum(u64) {
         null = 0,
         _,
 
         const PA = @This();
 
-        pub fn new(new_value: usize) PA {
+        pub fn new(new_value: u64) PA {
             const physical_address = @intToEnum(PA, new_value);
 
             if (!physical_address.is_valid()) {
@@ -151,7 +151,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             return maybe_invalid(0);
         }
 
-        pub fn maybe_invalid(new_value: usize) PA {
+        pub fn maybe_invalid(new_value: u64) PA {
             return @intToEnum(PA, new_value);
         }
 
@@ -159,13 +159,13 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             if (physical_address == PA.null) return false;
 
             assert(arch.max_physical_address_bit != 0);
-            const max = @as(usize, 1) << arch.max_physical_address_bit;
+            const max = @as(u64, 1) << arch.max_physical_address_bit;
             assert(max > maxInt(u32));
 
             return physical_address.value() <= max;
         }
 
-        pub fn value(physical_address: PA) usize {
+        pub fn value(physical_address: PA) u64 {
             return @enumToInt(physical_address);
         }
 
@@ -173,7 +173,7 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             return physical_address.value == other.value;
         }
 
-        pub fn is_aligned(physical_address: PA, alignment: usize) bool {
+        pub fn is_aligned(physical_address: PA, alignment: u64) bool {
             return lib.is_aligned(physical_address.value(), alignment);
         }
 
@@ -181,27 +181,27 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
         }
 
-        pub fn offset(physical_address: PA, asked_offset: usize) PA {
+        pub fn offset(physical_address: PA, asked_offset: u64) PA {
             return @intToEnum(PA, @enumToInt(physical_address) + asked_offset);
         }
 
-        pub fn add_offset(physical_address: *PA, asked_offset: usize) void {
+        pub fn add_offset(physical_address: *PA, asked_offset: u64) void {
             physical_address.* = physical_address.offset(asked_offset);
         }
 
-        pub fn aligned_forward(physical_address: PA, alignment: usize) PA {
+        pub fn aligned_forward(physical_address: PA, alignment: u64) PA {
             return @intToEnum(PA, alignForward(physical_address.value(), alignment));
         }
 
-        pub fn aligned_backward(physical_address: PA, alignment: usize) PA {
+        pub fn aligned_backward(physical_address: PA, alignment: u64) PA {
             return @intToEnum(PA, alignBackward(physical_address.value(), alignment));
         }
 
-        pub fn align_forward(physical_address: *PA, alignment: usize) void {
+        pub fn align_forward(physical_address: *PA, alignment: u64) void {
             physical_address.* = physical_address.aligned_forward(alignment);
         }
 
-        pub fn align_backward(physical_address: *PA, alignment: usize) void {
+        pub fn align_backward(physical_address: *PA, alignment: u64) void {
             physical_address.* = physical_address.aligned_backward(alignment);
         }
 
@@ -235,13 +235,13 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
 }
 
 pub fn VirtualAddress(comptime locality: CoreLocality) type {
-    return enum(usize) {
+    return enum(u64) {
         null = 0,
         _,
 
         const VA = @This();
 
-        pub fn new(new_value: usize) VA {
+        pub fn new(new_value: u64) VA {
             const virtual_address = @intToEnum(VA, new_value);
             assert(virtual_address.is_valid());
             return virtual_address;
@@ -251,7 +251,7 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
             return VA.null;
         }
 
-        pub fn value(virtual_address: VA) usize {
+        pub fn value(virtual_address: VA) u64 {
             return @enumToInt(virtual_address);
         }
 
@@ -260,34 +260,34 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
         }
 
         pub fn access(virtual_address: VA, comptime Ptr: type) Ptr {
-            return @intToPtr(Ptr, virtual_address.value());
+            return @intToPtr(Ptr, @intCast(usize, virtual_address.value()));
         }
 
-        pub fn offset(virtual_address: VA, asked_offset: usize) VA {
+        pub fn offset(virtual_address: VA, asked_offset: u64) VA {
             return @intToEnum(VA, virtual_address.value() + asked_offset);
         }
 
-        pub fn add_offset(virtual_address: *VA, asked_offset: usize) void {
+        pub fn add_offset(virtual_address: *VA, asked_offset: u64) void {
             virtual_address.* = virtual_address.offset(asked_offset);
         }
 
-        pub fn aligned_forward(virtual_address: VA, alignment: usize) VA {
+        pub fn aligned_forward(virtual_address: VA, alignment: u64) VA {
             return @intToEnum(VA, lib.align_forward(virtual_address.value(), alignment));
         }
 
-        pub fn aligned_backward(virtual_address: VA, alignment: usize) VA {
+        pub fn aligned_backward(virtual_address: VA, alignment: u64) VA {
             return @intToEnum(VA, lib.align_backward(virtual_address.value(), alignment));
         }
 
-        pub fn align_forward(virtual_address: *VA, alignment: usize) void {
+        pub fn align_forward(virtual_address: *VA, alignment: u64) void {
             virtual_address.* = virtual_address.aligned_forward(alignment);
         }
 
-        pub fn align_backward(virtual_address: *VA, alignment: usize) void {
+        pub fn align_backward(virtual_address: *VA, alignment: u64) void {
             virtual_address.* = virtual_address.aligned_backward(alignment);
         }
 
-        pub fn is_aligned(virtual_address: VA, alignment: usize) bool {
+        pub fn is_aligned(virtual_address: VA, alignment: u64) bool {
             return lib.is_aligned(virtual_address.value(), alignment);
         }
 
@@ -338,7 +338,7 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
             };
         }
 
-        pub fn offset(physical_memory_region: PMR, asked_offset: usize) PMR {
+        pub fn offset(physical_memory_region: PMR, asked_offset: u64) PMR {
             assert(asked_offset < physical_memory_region.size);
 
             var result = physical_memory_region;
@@ -347,12 +347,12 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
             return result;
         }
 
-        pub fn add_offset(physical_memory_region: *PMR, asked_offset: usize) void {
+        pub fn add_offset(physical_memory_region: *PMR, asked_offset: u64) void {
             physical_memory_region.* = physical_memory_region.offset(asked_offset);
         }
 
         /// Result: chop, the rest is modified through the pointer
-        pub fn chop(physical_memory_region: *PMR, asked_offset: usize) PMR {
+        pub fn chop(physical_memory_region: *PMR, asked_offset: u64) PMR {
             const ptr_result = physical_memory_region.offset(asked_offset);
             const result = PMR{
                 .address = physical_memory_region.address,
@@ -375,12 +375,13 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
 
 pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
     return struct {
-        address: VirtualAddress(locality),
+        address: VA,
         size: u64,
 
+        const VA = VirtualAddress(locality);
         const VMR = @This();
 
-        pub fn new(address: VirtualAddress, size: u64) VMR {
+        pub fn new(address: VA, size: u64) VMR {
             return VMR{
                 .address = address,
                 .size = size,
@@ -392,10 +393,10 @@ pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
         }
 
         pub fn access(virtual_memory_region: VMR, comptime T: type) []T {
-            return virtual_memory_region.address.access([*]T)[0..@divExact(virtual_memory_region.size, @sizeOf(T))];
+            return virtual_memory_region.address.access([*]T)[0..@intCast(usize, @divExact(virtual_memory_region.size, @sizeOf(T)))];
         }
 
-        pub fn offset(virtual_memory_region: VMR, asked_offset: usize) VMR {
+        pub fn offset(virtual_memory_region: VMR, asked_offset: u64) VMR {
             assert(asked_offset < virtual_memory_region.size);
 
             var result = virtual_memory_region;
@@ -576,4 +577,193 @@ pub const PhysicalAddressSpace = extern struct {
         previous: ?*Region = null,
         next: ?*Region = null,
     };
+};
+
+const LoaderProtocol = enum {
+    bios,
+    uefi,
+};
+
+pub const MemoryMap = struct {
+    type: LoaderProtocol,
+    region: VirtualMemoryRegion(.global),
+    descriptor_size: u32,
+    descriptor_version: u32 = 1,
+    loader: LoaderProtocol,
+
+    pub fn fromBIOS(entries: []const BIOS.MemoryMapEntry) struct { entry_index: usize, memory_map: MemoryMap } {
+        const entry_total_size = entries.len * @sizeOf(BIOS.MemoryMapEntry);
+        const bootstrap_index = blk: {
+            for (entries) |entry, entry_index| {
+                if (entry.is_low_memory()) continue;
+                if (entry.base < lib.maxInt(usize) and entry.len >= entry_total_size) {
+                    break :blk entry_index;
+                }
+            }
+
+            @panic("todo");
+        };
+
+        const bootstrap_entry = entries[bootstrap_index];
+        const dst = @intToPtr([*]BIOS.MemoryMapEntry, @intCast(usize, bootstrap_entry.base))[0..entries.len];
+        lib.copy(BIOS.MemoryMapEntry, dst, entries);
+
+        return .{ .entry_index = bootstrap_index, .memory_map = MemoryMap{
+            .type = .bios,
+            .region = .{
+                .address = VirtualAddress(.global).new(bootstrap_entry.base),
+                .size = entry_total_size,
+            },
+            .descriptor_size = @sizeOf(BIOS.MemoryMapEntry),
+            .loader = .bios,
+        } };
+    }
+};
+
+pub const MemoryManager = struct {
+    memory_map: MemoryMap,
+    size_counters: []u64,
+    allocator: Allocator,
+
+    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        const memory_manager = @fieldParentPtr(MemoryManager, "allocator", allocator);
+        return switch (memory_manager.memory_map.loader) {
+            inline else => |loader_protocol| blk: {
+                const allocation_result = try Interface(loader_protocol).allocate(memory_manager.*, size, alignment);
+                break :blk .{
+                    .address = allocation_result.address.value(),
+                    .size = allocation_result.size,
+                };
+            },
+        };
+    }
+
+    pub fn Interface(comptime loader_protocol: LoaderProtocol) type {
+        return struct {
+            const EntryType = switch (loader_protocol) {
+                .bios => BIOS.MemoryMapEntry,
+                .uefi => UEFI.MemoryDescriptor,
+            };
+
+            fn entry_size(entry: anytype) u64 {
+                return switch (@TypeOf(entry)) {
+                    BIOS.MemoryMapEntry => entry.len,
+                    UEFI.MemoryDescriptor => entry.number_of_pages * lib.arch.valid_page_sizes[0],
+                    else => @compileError("Type not admitted"),
+                };
+            }
+
+            fn entry_address(entry: anytype) u64 {
+                return switch (@TypeOf(entry)) {
+                    BIOS.MemoryMapEntry => entry.base,
+                    UEFI.MemoryDescriptor => entry.physical_start,
+                    else => @compileError("Type not admitted"),
+                };
+            }
+
+            pub fn get_entries(memory_manager: MemoryManager) []EntryType {
+                const entries = memory_manager.memory_map.region.access(EntryType);
+                return entries;
+            }
+
+            pub fn from_memory_map(memory_map: MemoryMap, bootstrap_index: usize) MemoryManager {
+                comptime {
+                    assert(lib.arch.valid_page_sizes[0] == 0x1000);
+                }
+                const aligned_memory_map_size = lib.alignForward(@intCast(usize, memory_map.region.size), lib.arch.valid_page_sizes[0]);
+                const entry_count = @divExact(memory_map.region.size, memory_map.descriptor_size);
+                const size_counters_size = entry_count * @sizeOf(u64);
+
+                const entries = memory_map.region.access(EntryType);
+
+                for (entries) |entry, entry_index| {
+                    const memory_map_entry_size = entry_size(entry);
+                    const memory_map_entry_address = entry_address(entry);
+
+                    if (memory_map_entry_address > lib.maxInt(usize)) @panic("Address higher");
+                    if (memory_map_entry_address >= 1 * lib.mb and memory_map_entry_size > size_counters_size) {
+                        const offset = if (bootstrap_index == entry_index) aligned_memory_map_size else 0;
+                        const size_counters = @intToPtr([*]u64, @intCast(usize, memory_map_entry_address + offset))[0..@intCast(usize, entry_count)];
+                        size_counters[bootstrap_index] += @divExact(aligned_memory_map_size, lib.arch.valid_page_sizes[0]);
+                        size_counters[entry_index] += @divExact(lib.alignForward(@intCast(usize, size_counters_size), lib.arch.valid_page_sizes[0]), lib.arch.valid_page_sizes[0]);
+
+                        return MemoryManager{
+                            .memory_map = memory_map,
+                            .size_counters = size_counters,
+                            .allocator = .{
+                                .callback_allocate = MemoryManager.allocate,
+                            },
+                        };
+                    }
+                }
+
+                @panic("cannot create from_memory_map");
+            }
+
+            pub fn allocate(memory_manager: MemoryManager, asked_size: u64, asked_alignment: u64) !PhysicalMemoryRegion(.global) {
+                // TODO: satisfy alignment
+                _ = asked_alignment;
+                if (asked_size % lib.arch.valid_page_sizes[0] != 0) @panic("not page-aligned allocate");
+                const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
+
+                const entries = Interface(loader_protocol).get_entries(memory_manager);
+                for (entries) |entry, entry_index| {
+                    const address = entry_address(entry);
+                    const size = entry_size(entry);
+                    if (address > 1 * lib.mb and size > asked_size) {
+                        memory_manager.size_counters[entry_index] += four_kb_pages;
+
+                        return .{
+                            .address = PhysicalAddress(.global).new(address),
+                            .size = size,
+                        };
+                    }
+                }
+
+                return Allocator.Allocate.Error.OutOfMemory;
+            }
+        };
+    }
+};
+
+pub const PhysicalHeap = extern struct {
+    allocator: Allocator = .{
+        .callback_allocate = callback_allocate,
+    },
+    regions: [6]PhysicalMemoryRegion(.global) = lib.zeroes([6]PhysicalMemoryRegion(.global)),
+    page_allocator: *Allocator,
+
+    const Region = extern struct {
+        descriptor: PhysicalMemoryRegion,
+    };
+
+    pub fn callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        _ = alignment;
+        const physical_heap = @fieldParentPtr(PhysicalHeap, "allocator", allocator);
+        for (physical_heap.regions) |*region| {
+            if (region.size > size) {
+                @panic("todo found");
+            }
+        }
+
+        const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
+        for (physical_heap.regions) |*region| {
+            if (region.size == 0) {
+                const allocated_region = try physical_heap.page_allocator.allocate(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                region.* = .{
+                    .address = PhysicalAddress(.global).new(allocated_region.address),
+                    .size = allocated_region.size,
+                };
+                const result = .{
+                    .address = region.address.value(),
+                    .size = region.size,
+                };
+                region.address.add_offset(size);
+                region.size -= size;
+                return result;
+            }
+        }
+
+        @panic("WTF");
+    }
 };

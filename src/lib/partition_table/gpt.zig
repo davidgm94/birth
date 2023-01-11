@@ -12,6 +12,7 @@ const FAT32 = Filesystem.FAT32;
 const log = lib.log.scoped(.GPT);
 const MBR = lib.PartitionTable.MBR;
 const GUID = lib.uefi.Guid;
+const Allocator = lib.Allocator;
 
 pub const default_max_partition_count = 128;
 pub const min_block_size = 0x200;
@@ -181,18 +182,13 @@ pub const Header = extern struct {
             };
         }
 
-        pub fn load(disk: *Disk, provided_buffer: ?[]const u8) !GPT.Header.Cache {
-            //mbr: *MBR.Partition,
-            //header: *GPT.Header,
-            //partition_entries: [*]GPT.Partition,
-            //disk: *Disk,
-            if (disk.type != .memory) @panic("Todo: disk not memory loading gpt cache");
+        pub fn load(disk: *Disk, allocator: ?*Allocator) !GPT.Header.Cache {
             const mbr_lba = MBR.default_lba;
-            const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, provided_buffer);
+            const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, allocator);
             const primary_gpt_header_lba = mbr_lba + 1;
-            const gpt_header = try disk.read_typed_sectors(GPT.Header, primary_gpt_header_lba, provided_buffer);
+            const gpt_header = try disk.read_typed_sectors(GPT.Header, primary_gpt_header_lba, allocator);
             assert(gpt_header.partition_entry_size == @sizeOf(GPT.Partition));
-            const partition_entries = try disk.read_slice(GPT.Partition, gpt_header.partition_entry_count, gpt_header.partition_array_lba, provided_buffer);
+            const partition_entries = try disk.read_slice(GPT.Partition, gpt_header.partition_entry_count, gpt_header.partition_array_lba, allocator);
 
             return .{
                 .mbr = mbr,
@@ -254,8 +250,8 @@ pub const Partition = extern struct {
         gpt: GPT.Header.Cache,
         partition: *GPT.Partition,
 
-        pub fn from_partition_index(disk: *Disk, partition_index: usize, provided_buffer: ?[]const u8) !GPT.Partition.Cache {
-            const gpt_cache = try GPT.Header.Cache.load(disk, provided_buffer);
+        pub fn fromPartitionIndex(disk: *Disk, partition_index: usize, allocator: *Allocator) !GPT.Partition.Cache {
+            const gpt_cache = try GPT.Header.Cache.load(disk, allocator);
             if (partition_index < gpt_cache.header.partition_entry_count) {
                 return .{
                     .gpt = gpt_cache,
@@ -266,14 +262,14 @@ pub const Partition = extern struct {
             @panic("WTF");
         }
 
-        pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, allocator: *const lib.Allocator, copy_cache: ?FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
+        pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, copy_cache: ?FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
             return try switch (filesystem) {
                 .fat32 => fat32: {
                     const partition_range = Disk.PartitionRange{
                         .first_lba = gpt_partition_cache.partition.first_lba,
                         .last_lba = gpt_partition_cache.partition.last_lba,
                     };
-                    break :fat32 FAT32.format(gpt_partition_cache.gpt.disk, allocator, partition_range, if (copy_cache) |cp_cache| cp_cache.mbr else null);
+                    break :fat32 FAT32.format(gpt_partition_cache.gpt.disk, partition_range, if (copy_cache) |cp_cache| cp_cache.mbr else null);
                 },
                 else => @panic("WTF"),
             };

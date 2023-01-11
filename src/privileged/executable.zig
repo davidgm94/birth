@@ -1,5 +1,5 @@
 const lib = @import("lib");
-const CustomAllocator = lib.CustomAllocator;
+const Allocator = lib.Allocator;
 const log = lib.log.scoped(.Executable);
 const privileged = @import("privileged");
 const ELF = privileged.ELF;
@@ -44,7 +44,7 @@ pub const InKernelMemory = struct {
     sections: [32]Section = undefined,
     section_count: u64 = 0,
 
-    pub fn load_into_user_memory(executable: InKernelMemory, physical_allocator: *CustomAllocator) !u64 {
+    pub fn load_into_user_memory(executable: InKernelMemory, physical_allocator: *Allocator) !u64 {
         log.debug("Assuming user memory right now...", .{});
         for (executable.sections[0..executable.section_count]) |section| {
             const physical_address = section.kernel_address.to_physical_address();

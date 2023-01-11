@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const assert = lib.assert;
 const log = lib.log.scoped(.APIC);
 const cpuid = lib.arch.x86_64.cpuid;
 const maxInt = lib.maxInt;
@@ -106,7 +107,10 @@ pub fn init() VirtualAddress(.global) {
     var ia32_apic_base = IA32_APIC_BASE.read();
     is_bsp = ia32_apic_base.bsp;
     const apic_base_physical_address = ia32_apic_base.get_address();
-    const apic_base = arch.paging.map_device(apic_base_physical_address, lib.arch.page_size) catch @panic("mapping apic failed");
+    comptime {
+        assert(lib.arch.valid_page_sizes[0] == 0x1000);
+    }
+    const apic_base = arch.paging.map_device(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
     log.debug("APIC base: {}", .{apic_base});
     const id_register = ID.read(apic_base);
     const id = id_register.apic_id;

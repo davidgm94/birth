@@ -4,10 +4,10 @@ const alignBackward = lib.alignBackward;
 const isAligned = lib.isAligned;
 const assert = lib.assert;
 const copy = lib.copy;
-const CustomAllocator = lib.CustomAllocator;
 const enumCount = lib.enumCount;
 const log = lib.log.scoped(.VAS);
 const zeroes = lib.zeroes;
+const Allocator = lib.Allocator;
 
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
@@ -36,9 +36,9 @@ pub const Specific = struct {
 
 const Indices = [enumCount(PageIndex)]u16;
 
-const limine_physical_allocator = CustomAllocator{};
+//const limine_physical_allocator = CustomAllocator{};
 
-fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     if (size == valid_page_sizes[0]) {
         try map_4k_page(vas_cr3, asked_physical_address, asked_virtual_address, flags, physical_allocator);
     } else {
@@ -99,7 +99,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
     }
 }
 
-pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *CustomAllocator) !void {
+pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     // TODO: use flags
     const flags = general_flags.to_arch_specific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
@@ -116,7 +116,7 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
     try map_function(vas_cr3, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
 }
 
-pub fn map_current(asked_physical_address: usize, asked_virtual_address: usize, size: usize, general_flags: VirtualAddressSpace.Flags, physical_allocator: *CustomAllocator) !void {
+pub fn map_current(asked_physical_address: usize, asked_virtual_address: usize, size: usize, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     const flags = general_flags.to_arch_specific(.global);
     const vas_cr3 = cr3.read();
 
@@ -128,7 +128,7 @@ pub fn context_switch(vas_cr3_int: usize) void {
     const vas_cr3 = @bitCast(cr3, vas_cr3_int);
     vas_cr3.write();
 }
-fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     log.debug("Map generic page size: 0x{x}. From 0x{x} to 0x{x}", .{ asked_page_size, asked_physical_address, asked_virtual_address });
     const reverse_index = switch (asked_page_size) {
         reverse_valid_page_sizes[0] => 0,
@@ -193,7 +193,7 @@ fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
     }
 }
 
-fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     const indices = compute_indices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
@@ -202,7 +202,7 @@ fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags
     try page_tables_map_1_gb_page(pdp_table, indices, physical_address, flags);
 }
 
-fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) !void {
+fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     const indices = compute_indices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
@@ -212,7 +212,7 @@ fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags
     try page_tables_map_2_mb_page(pd_table, indices, physical_address, flags);
 }
 
-fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *CustomAllocator) MapError!void {
+fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) MapError!void {
     const indices = compute_indices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
@@ -238,7 +238,7 @@ fn get_pml4_table(cr3_register: cr3) *volatile PML4Table {
     return pml4_virtual_address.access(*volatile PML4Table);
 }
 
-fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_allocator: *CustomAllocator) *volatile PDPTable {
+fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_allocator: *Allocator) *volatile PDPTable {
     const entry_pointer = &pml4_table[indices[@enumToInt(PageIndex.PML4)]];
 
     const table_physical_address_value = physical_address_blk: {
@@ -247,7 +247,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
             break :physical_address_blk unpack_address(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocate_bytes(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocate(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PML4TE{
                 .present = true,
@@ -324,7 +324,7 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
     entry_pointer.* = @bitCast(PTE, get_page_entry(PTE, physical_address, flags));
 }
 
-fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_allocator: *CustomAllocator) *volatile PDTable {
+fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_allocator: *Allocator) *volatile PDTable {
     const entry_pointer = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
 
     const table_physical_address_value = physical_address_blk: {
@@ -337,7 +337,7 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
             break :physical_address_blk unpack_address(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocate_bytes(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocate(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PDPTE{
                 .present = true,
@@ -359,7 +359,7 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
     return table_virtual_address.access(*volatile PDTable);
 }
 
-fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator: *CustomAllocator) *volatile PTable {
+fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator: *Allocator) *volatile PTable {
     const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
 
     const table_physical_address_value = physical_address_blk: {
@@ -371,7 +371,7 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
             }
             break :physical_address_blk unpack_address(entry_value);
         } else {
-            const entry_allocation = physical_allocator.allocate_bytes(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocate(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PDTE{
                 .present = true,
@@ -513,9 +513,9 @@ fn compute_indices(virtual_address: u64) Indices {
     return indices;
 }
 
-var paging_physical_allocator: ?*CustomAllocator = null;
+var paging_physical_allocator: ?*Allocator = null;
 
-pub fn register_physical_allocator(allocator: *CustomAllocator) void {
+pub fn register_physical_allocator(allocator: *Allocator) void {
     paging_physical_allocator = allocator;
 }
 

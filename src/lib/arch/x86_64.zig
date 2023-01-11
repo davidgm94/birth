@@ -6,7 +6,7 @@ pub const reverse_valid_page_sizes = blk: {
     lib.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
     break :blk reverse;
 };
-pub const page_size = valid_page_sizes[0];
+pub const default_page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
 
 pub const registers = @import("x86_64/registers.zig");

@@ -38,9 +38,19 @@ pub const Disk = extern struct {
         write: *const WriteFn,
     };
 
-    pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, provided_buffer: ?[]const u8) !*T {
+    pub inline fn get_provided_buffer(comptime T: type, count: usize, allocator: ?*lib.Allocator) !?[]const u8 {
+        if (allocator) |alloc| {
+            const result = try alloc.allocate(@sizeOf(T) * count, @alignOf(T));
+            const slice = @intToPtr([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
+            return slice;
+        } else {
+            return null;
+        }
+    }
+
+    pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator) !*T {
         const sector_count = @divExact(@sizeOf(T), disk.sector_size);
-        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
+        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, try get_provided_buffer(T, 1, allocator));
         if (read_result.sector_count != sector_count) @panic("WTF");
         // Don't need to write back since it's a memory disk
         const result = @ptrCast(*T, @alignCast(@alignOf(T), read_result.buffer));
@@ -51,10 +61,10 @@ pub const Disk = extern struct {
         try disk.callbacks.write(disk, asBytes(content), sector_offset, commit_memory_to_disk);
     }
 
-    pub inline fn read_slice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64, provided_buffer: ?[]const u8) ![]T {
+    pub inline fn read_slice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64, allocator: ?*lib.Allocator) ![]T {
         const element_count_per_sector = @divExact(disk.sector_size, @sizeOf(T));
         const sector_count = @divExact(len, element_count_per_sector);
-        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
+        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, try get_provided_buffer(T, len, allocator));
         if (read_result.sector_count != sector_count) @panic("wtf");
         const result = @ptrCast([*]T, @alignCast(@alignOf(T), read_result.buffer))[0..len];
         return result;

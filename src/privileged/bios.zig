@@ -109,6 +109,10 @@ pub const MemoryMapEntry = extern struct {
     type: Type,
     unused: u32 = 0,
 
+    pub fn is_low_memory(entry: MemoryMapEntry) bool {
+        return entry.base < lib.mb;
+    }
+
     const Type = enum(u32) {
         usable = 1,
         reserved = 2,

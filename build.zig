@@ -36,11 +36,11 @@ pub fn build(b: *host.build.Builder) void {
                                     .vga = .std,
                                     .smp = null,
                                     .log = .{
-                                        .file = "logfile",
+                                        .file = null,
                                         .guest_errors = true,
                                         .cpu = false,
-                                        .assembly = true,
-                                        .interrupts = true,
+                                        .assembly = false,
+                                        .interrupts = false,
                                     },
                                     .virtualize = false,
                                     .print_command = true,
@@ -160,11 +160,9 @@ const Kernel = struct {
                                 bootloader_exe.setOutputDir(cache_dir);
                                 bootloader_exe.addPackage(lib_package);
                                 bootloader_exe.addPackage(privileged_package);
-                                bootloader_exe.strip = true;
-                                bootloader_exe.link_gc_sections = true;
-                                bootloader_exe.want_lto = true;
-                                bootloader_exe.force_pic = true;
                                 bootloader_exe.setLinkerScriptPath(host.build.FileSource.relative("src/bootloader/rise/bios.ld"));
+                                bootloader_exe.strip = true;
+
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
                                 kernel.builder.default_step.dependOn(&bootloader_exe.step);

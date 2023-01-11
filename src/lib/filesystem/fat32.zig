@@ -304,7 +304,7 @@ fn cdiv(a: u32, b: u32) u32 {
 const min_cluster_32 = 65525;
 const max_cluster_32 = 268435446;
 
-pub fn format(disk: *Disk, allocator: *const lib.Allocator, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
+pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
     if (disk.type != .memory) @panic("disk is not memory");
     const fat_partition_mbr_lba = partition_range.first_lba;
     const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null);
@@ -412,7 +412,6 @@ pub fn format(disk: *Disk, allocator: *const lib.Allocator, partition_range: Dis
         .partition_range = partition_range,
         .mbr = fat_partition_mbr,
         .fs_info = fs_info,
-        .allocator = allocator,
     };
 
     // TODO: write this properly
@@ -477,7 +476,6 @@ pub const Cache = extern struct {
     partition_range: Disk.PartitionRange,
     mbr: *MBR.Partition,
     fs_info: *FSInfo,
-    allocator: *const lib.Allocator,
     name_configuration: NameConfiguration = mixed,
 
     fn get_backup_boot_record_sector(cache: Cache) u64 {

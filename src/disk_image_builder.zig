@@ -259,7 +259,7 @@ pub const BootDisk = extern struct {
         return .{ 0xb4, imm8 };
     }
 
-    pub fn fill(mbr: *BootDisk, allocator: lib.Allocator, dap: MBR.DAP) !void {
+    pub fn fill(mbr: *BootDisk, allocator: lib.ZigAllocator, dap: MBR.DAP) !void {
         // Hardcoded jmp to end of FAT32 BPB
         const jmp_to_end_of_bpb = .{ 0xeb, @sizeOf(MBR.BIOSParameterBlock.DOS7_1_79) - 2 };
         mbr.bpb.dos3_31.dos2_0.jmp_code = jmp_to_end_of_bpb ++ nop;
@@ -574,11 +574,12 @@ pub fn main() anyerror!void {
         const partition_index = try lib.unicode.utf8ToUtf16Le(&partition_name_buffer, image_config.partition.name);
         break :blk partition_name_buffer[0..partition_index];
     };
+
     switch (image_config.partition.filesystem) {
         .fat32 => {
             const filesystem = .fat32;
             const gpt_partition_cache = try gpt_cache.addPartition(filesystem, partition_name, image_config.partition.first_lba, gpt_cache.header.last_usable_lba, null);
-            const fat_partition_cache = try gpt_partition_cache.format(filesystem, &allocator, null);
+            const fat_partition_cache = try gpt_partition_cache.format(filesystem, null);
 
             const loader_file = try host.cwd().readFileAlloc(allocator, "zig-cache/rise.elf", max_file_length);
             const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
