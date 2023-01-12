@@ -142,4 +142,39 @@ pub const Allocator = extern struct {
     pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
         return try allocator.callback_allocate(allocator, size, alignment);
     }
+
+    pub fn wrap(zig_allocator: common.ZigAllocator) Wrapped {
+        return .{
+            .allocator = .{
+                .callback_allocate = Wrapped.wrapped_callback_allocate,
+            },
+            .zig = .{
+                .ptr = zig_allocator.ptr,
+                .vtable = zig_allocator.vtable,
+            },
+        };
+    }
+
+    pub const Wrapped = extern struct {
+        allocator: Allocator,
+        zig: extern struct {
+            ptr: *anyopaque,
+            vtable: *const common.ZigAllocator.VTable,
+        },
+
+        pub fn unwrap(wrapped_allocator: *Wrapped) *Allocator {
+            return &wrapped_allocator.allocator;
+        }
+
+        pub fn unwrap_zig(wrapped_allocator: *Wrapped) common.ZigAllocator {
+            return .{
+                .ptr = wrapped_allocator.zig.ptr,
+                .vtable = wrapped_allocator.zig.vtable,
+            };
+        }
+
+        pub fn wrapped_callback_allocate() !void {
+            @panic("todo wrapped allocate");
+        }
+    };
 };
