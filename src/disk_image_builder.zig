@@ -588,7 +588,7 @@ pub fn main() anyerror!void {
 
             // Build our own assembler
             const boot_disk_mbr_lba = 0;
-            const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null);
+            const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
             const dap_offset = @offsetOf(BootDisk, "dap");
             lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
             assert(dap_offset == 0x1ae);

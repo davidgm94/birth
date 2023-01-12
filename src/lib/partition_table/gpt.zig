@@ -141,7 +141,7 @@ pub const Header = extern struct {
             cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
             cache.header.update_crc32();
 
-            const backup_gpt_header = try cache.disk.read_typed_sectors(GPT.Header, cache.header.backup_lba, null);
+            const backup_gpt_header = try cache.disk.read_typed_sectors(GPT.Header, cache.header.backup_lba, null, .{});
             backup_gpt_header.partition_array_crc32 = cache.header.partition_array_crc32;
             backup_gpt_header.update_crc32();
 
@@ -315,7 +315,7 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
     if (disk.type != .memory) @panic("wtF");
     // 1. Create MBR fake partition
     const mbr_lba = MBR.default_lba;
-    const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, null);
+    const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, null, .{});
     const first_lba = mbr_lba + 1;
     const primary_header_lba = first_lba;
     mbr.partitions[0] = MBR.LegacyPartition{
@@ -333,10 +333,10 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
     const partition_count = default_max_partition_count;
     const partition_array_sector_count = @divExact(@sizeOf(Partition) * partition_count, disk.sector_size);
     // TODO: properly compute header LBA
-    const gpt_header = try disk.read_typed_sectors(GPT.Header, first_lba, null);
+    const gpt_header = try disk.read_typed_sectors(GPT.Header, first_lba, null, .{});
     const secondary_header_lba = mbr.partitions[0].size_in_lba;
     const partition_array_lba_start = first_lba + 1;
-    const partition_entries = try disk.read_slice(GPT.Partition, partition_count, partition_array_lba_start, null);
+    const partition_entries = try disk.read_slice(GPT.Partition, partition_count, partition_array_lba_start, null, .{});
     gpt_header.* = GPT.Header{
         .signature = "EFI PART".*,
         .revision = .{ 0, 0, 1, 0 },

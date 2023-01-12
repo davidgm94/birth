@@ -307,7 +307,7 @@ const max_cluster_32 = 268435446;
 pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
     if (disk.type != .memory) @panic("disk is not memory");
     const fat_partition_mbr_lba = partition_range.first_lba;
-    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null);
+    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
 
     const sectors_per_track = 32;
     const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
@@ -392,12 +392,12 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
 
     const backup_boot_record_sector = partition_range.first_lba + fat_partition_mbr.bpb.backup_boot_record_sector;
-    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector, null);
+    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector, null, .{});
     backup_boot_record.* = fat_partition_mbr.*;
     try disk.write_typed_sectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, false);
 
     const fs_info_lba = partition_range.first_lba + fat_partition_mbr.bpb.fs_info_sector;
-    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba, null);
+    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba, null, .{});
     fs_info.* = .{
         .lead_signature = 0x41615252,
         .signature = 0x61417272,
@@ -425,7 +425,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
 
     const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
     log.debug("backup_fs_info_lba: 0x{x}. Index: 0x{x}", .{ backup_fs_info_lba, backup_fs_info_lba * disk.sector_size });
-    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba, null);
+    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba, null, .{});
     backup_fs_info.* = fs_info.*;
     try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
 
@@ -1085,7 +1085,7 @@ pub const Cache = extern struct {
 
         while (fat_index < fat_entry_count) : (fat_index += 1) {
             const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + (cluster * @sizeOf(u32) / cache.disk.sector_size);
-            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, null);
+            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, null, .{});
             fat_entry_sector[fat_entry_sector_index] = entry;
             try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
         }
