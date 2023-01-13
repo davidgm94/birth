@@ -482,18 +482,17 @@ pub const Cache = extern struct {
         return cache.partition_range.first_lba + cache.mbr.bpb.backup_boot_record_sector;
     }
 
-    pub fn from_gpt_partition_cache(allocator: *const lib.Allocator, gpt_partition_cache: GPT.Partition.Cache, provided_buffer: ?[]const u8) !FAT32.Cache {
-        if (gpt_partition_cache.gpt.disk.type != .memory) @panic("from_gpt_partition_cache fix");
+    pub fn fromGPTPartitionCache(allocator: *lib.Allocator, gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
         const partition_range = Disk.PartitionRange{
             .first_lba = gpt_partition_cache.partition.first_lba,
             .last_lba = gpt_partition_cache.partition.last_lba,
         };
         const disk = gpt_partition_cache.gpt.disk;
 
-        const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, provided_buffer, .{});
+        const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, allocator, .{});
         assert(partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count == 1);
         const fs_info_sector = partition_range.first_lba + partition_mbr.bpb.fs_info_sector;
-        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, provided_buffer, .{});
+        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, allocator, .{});
 
         const backup_fs_info_sector = partition_range.first_lba + partition_mbr.bpb.backup_boot_record_sector + partition_mbr.bpb.fs_info_sector;
         log.debug("FSInfo: LBA: 0x{x}. Index: 0x{x}", .{ fs_info_sector, fs_info_sector * disk.sector_size });
@@ -504,7 +503,6 @@ pub const Cache = extern struct {
             .partition_range = partition_range,
             .mbr = partition_mbr,
             .fs_info = fs_info,
-            .allocator = allocator,
         };
     }
 

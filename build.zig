@@ -40,7 +40,8 @@ pub fn build(b: *host.build.Builder) void {
                                         .guest_errors = true,
                                         .cpu = false,
                                         .assembly = false,
-                                        .interrupts = false,
+                                        .interrupts = true,
+                                        .pmode_exceptions = true,
                                     },
                                     .virtualize = false,
                                     .print_command = true,
@@ -161,8 +162,9 @@ const Kernel = struct {
                                 bootloader_exe.addPackage(lib_package);
                                 bootloader_exe.addPackage(privileged_package);
                                 bootloader_exe.setLinkerScriptPath(host.build.FileSource.relative("src/bootloader/rise/bios.ld"));
+                                bootloader_exe.link_gc_sections = true;
+                                bootloader_exe.want_lto = true;
                                 bootloader_exe.strip = true;
-
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
                                 kernel.builder.default_step.dependOn(&bootloader_exe.step);
@@ -350,6 +352,7 @@ const Kernel = struct {
                         if (log_options.cpu) try log_what.appendSlice("cpu,");
                         if (log_options.interrupts) try log_what.appendSlice("int,");
                         if (log_options.assembly) try log_what.appendSlice("in_asm,");
+                        if (log_options.pmode_exceptions) try log_what.appendSlice("pcall,");
 
                         if (log_what.items.len > 0) {
                             // Delete the last comma
@@ -403,7 +406,7 @@ const Kernel = struct {
         else
             \\symbol-file zig-cache/kernel.elf
             \\target remote localhost:1234
-            \\b kernel_entry_point
+            \\b *0xa3b9
             \\c
             ;
 
@@ -554,6 +557,7 @@ const Kernel = struct {
                 cpu: bool,
                 interrupts: bool,
                 assembly: bool,
+                pmode_exceptions: bool,
             };
         };
 

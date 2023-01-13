@@ -6,17 +6,16 @@ PHDRS {
 }
 
 SECTIONS {
-    . = 0xa000;
+    . = 0xc000;
     loader_start = .;
-    . = ALIGN(0x200);
     .text . : {
         *(.text*)
   }:text
-    . = ALIGN(0x200);
+  . = ALIGN(0x200);
   .rodata . : {
       *(.rodata*)
   }:rodata
-    . = ALIGN(0x200);
+  . = ALIGN(0x200);
   .data . : {
       *(.data*)
           *(.bss*)

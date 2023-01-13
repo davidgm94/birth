@@ -20,7 +20,7 @@ pub const Disk = extern struct {
 
     pub const Type = lib.DiskType;
 
-    pub const ReadFn = fn (disk: *Disk, sector_count: u64, sector_offset: u64, provided_buffer: ?[]const u8) ReadError!ReadResult;
+    pub const ReadFn = fn (disk: *Disk, sector_count: u64, sector_offset: u64, provided_buffer: ?[]u8) ReadError!ReadResult;
     pub const ReadError = error{
         read_error,
     };
@@ -38,7 +38,7 @@ pub const Disk = extern struct {
         write: *const WriteFn,
     };
 
-    pub inline fn get_provided_buffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]const u8 {
+    pub inline fn get_provided_buffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]u8 {
         if ((disk.type == .memory and force) or (disk.type != .memory)) {
             if (allocator) |alloc| {
                 const result = try alloc.allocate(@sizeOf(T) * count, @alignOf(T));

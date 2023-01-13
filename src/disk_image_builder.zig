@@ -259,7 +259,7 @@ pub const BootDisk = extern struct {
         return .{ 0xb4, imm8 };
     }
 
-    pub fn fill(mbr: *BootDisk, allocator: lib.ZigAllocator, dap: MBR.DAP) !void {
+    pub fn fill(mbr: *BootDisk, allocator: lib.ZigAllocator, dap: MBR.DAP, bootloader_entry: u16) !void {
         // Hardcoded jmp to end of FAT32 BPB
         const jmp_to_end_of_bpb = .{ 0xeb, @sizeOf(MBR.BIOSParameterBlock.DOS7_1_79) - 2 };
         mbr.bpb.dos3_31.dos2_0.jmp_code = jmp_to_end_of_bpb ++ nop;
@@ -347,6 +347,8 @@ pub const BootDisk = extern struct {
         try assembler.jcc(jnz, .elf_loader_loop);
         //d5:	8b 5d 18             	mov    ebx,DWORD PTR [rbp+0x18]
         assembler.add_instruction(&.{ 0x8b, 0x5d, 0x18 });
+        const bootloader_entry_bytes = lib.asBytes(&bootloader_entry);
+        assembler.add_instruction(&.{ 0xbc, bootloader_entry_bytes[1], bootloader_entry_bytes[0], 0x00, 0x00 });
         //d8:	ff e3                	jmp    rbx
         assembler.add_instruction(&.{ 0xff, 0xe3 });
     }
@@ -592,14 +594,21 @@ pub fn main() anyerror!void {
             const dap_offset = @offsetOf(BootDisk, "dap");
             lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
             assert(dap_offset == 0x1ae);
+            const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
+            const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
+            if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
             const dap = MBR.DAP{
-                .sector_count = @intCast(u16, lib.alignForward(loader_file.len, 0x200) >> 9),
+                .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
                 .offset = 0x7e00,
                 .segment = 0x0,
                 .lba = partition_first_usable_lba,
             };
+            if (text_section_guess - dap.offset < aligned_file_size) {
+                log.debug("Text section guess: 0x{x}. File size aligned: 0x{x}", .{text_section_guess, aligned_file_size});
+                @panic("Unable to fit bootloader in such space");
+            }
 
-            try boot_disk_mbr.fill(allocator, dap);
+            try boot_disk_mbr.fill(allocator, dap, @intCast(u16, text_section_guess));
             try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
         },
         else => @panic("Filesystem not supported"),

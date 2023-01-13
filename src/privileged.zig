@@ -742,7 +742,13 @@ pub const PhysicalHeap = extern struct {
         const physical_heap = @fieldParentPtr(PhysicalHeap, "allocator", allocator);
         for (physical_heap.regions) |*region| {
             if (region.size > size) {
-                @panic("todo found");
+                const result = .{
+                    .address = region.address.value(),
+                    .size = region.size,
+                };
+                region.size -= size;
+                region.address.add_offset(size);
+                return result;
             }
         }
 
