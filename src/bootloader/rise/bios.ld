@@ -6,7 +6,7 @@ PHDRS {
 }
 
 SECTIONS {
-    . = 0xc000;
+    . = 0x600;
     loader_start = .;
     .text . : {
         *(.text*)

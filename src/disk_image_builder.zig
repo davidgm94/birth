@@ -10,6 +10,10 @@ const MBR = lib.PartitionTable.MBR;
 
 const max_file_length = lib.maxInt(usize);
 
+const mbr_offset: u16 = 0xfe00;
+const stack_top: u16 = mbr_offset;
+const stack_size = 0x1000;
+
 // TODO: introduce Limine in this executable
 
 //const BootImage = struct {
@@ -207,7 +211,6 @@ pub const BootDisk = extern struct {
     };
 
     const code_byte_count = 0x126;
-    const offset: u16 = 0x7c00;
 
     const hlt = [_]u8{0xf4};
     const clc = [_]u8{0xf8};
@@ -221,7 +224,7 @@ pub const BootDisk = extern struct {
     const mov_ds_si = [_]u8{ 0x8e, 0xde };
     const mov_es_si = [_]u8{ 0x8e, 0xc6 };
     const mov_ss_si = [_]u8{ 0x8e, 0xd6 };
-    const mov_sp_0x7c00 = [_]u8{ 0xbc, 0x00, 0x7c };
+    const mov_sp_stack_top = [_]u8{0xbc} ++ lib.asBytes(&stack_top).*;
     const mov_bx_0xaa55 = [_]u8{ 0xbb, 0xaa, 0x55 };
     const cmp_bx_0xaa55 = [_]u8{ 0x81, 0xfb, 0x55, 0xaa };
 
@@ -241,6 +244,7 @@ pub const BootDisk = extern struct {
     const xor_eax_eax = [_]u8{ xor, 0xc8 };
     const xor_ebx_ebx = [_]u8{ xor, 0xdb };
     const nop = [_]u8{0x90};
+    const rep_movsb = [_]u8{ 0xf3, 0xa4 };
 
     fn or_ax(imm8: u8) [4]u8 {
         return .{ 0x66, 0x83, 0xc8, imm8 };
@@ -248,6 +252,16 @@ pub const BootDisk = extern struct {
 
     fn int(interrupt_number: u8) [2]u8 {
         return .{ 0xcd, interrupt_number };
+    }
+
+    fn mov_cx(imm16: u16) [3]u8 {
+        const imm_bytes = lib.asBytes(&imm16);
+        return .{ 0xb9, imm_bytes[0], imm_bytes[1] };
+    }
+
+    fn mov_di(imm16: u16) [3]u8 {
+        const imm_bytes = lib.asBytes(&imm16);
+        return .{ 0xbf, imm_bytes[0], imm_bytes[1] };
     }
 
     fn mov_si(imm16: u16) [3]u8 {
@@ -259,7 +273,7 @@ pub const BootDisk = extern struct {
         return .{ 0xb4, imm8 };
     }
 
-    pub fn fill(mbr: *BootDisk, allocator: lib.ZigAllocator, dap: MBR.DAP, bootloader_entry: u16) !void {
+    pub fn fill(mbr: *BootDisk, allocator: lib.ZigAllocator, dap: MBR.DAP) !void {
         // Hardcoded jmp to end of FAT32 BPB
         const jmp_to_end_of_bpb = .{ 0xeb, @sizeOf(MBR.BIOSParameterBlock.DOS7_1_79) - 2 };
         mbr.bpb.dos3_31.dos2_0.jmp_code = jmp_to_end_of_bpb ++ nop;
@@ -267,7 +281,7 @@ pub const BootDisk = extern struct {
         mbr.gdt_32 = GDT32{
             .register = .{
                 .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) - 1,
-                .pointer = offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
+                .pointer = mbr_offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
             },
         };
         log.debug("GDT: {}", .{mbr.gdt_32});
@@ -279,15 +293,19 @@ pub const BootDisk = extern struct {
         defer assembler.patch();
 
         assembler.add_instruction(&cli);
-        assembler.add_instruction(&cld);
-        try assembler.far_jmp_16(0x0, .reload_cs_16);
-
-        try assembler.add_instruction_with_label(&xor_si_si_16, .reload_cs_16);
+        assembler.add_instruction(&xor_si_si_16);
         assembler.add_instruction(&mov_ds_si);
         assembler.add_instruction(&mov_es_si);
         assembler.add_instruction(&mov_ss_si);
-        assembler.add_instruction(&mov_sp_0x7c00);
-        assembler.add_instruction(&sti);
+        assembler.add_instruction(&mov_sp_stack_top);
+        assembler.add_instruction(&cld);
+        assembler.add_instruction(&mov_si(0x7c00));
+        assembler.add_instruction(&mov_di(mbr_offset));
+        assembler.add_instruction(&mov_cx(0x200));
+        assembler.add_instruction(&rep_movsb);
+        try assembler.far_jmp_16(0x0, .reload_cs_16);
+
+        try assembler.add_instruction_with_label(&sti, .reload_cs_16);
         assembler.add_instruction(&mov_ah(0x41));
         assembler.add_instruction(&mov_bx_0xaa55);
         assembler.add_instruction(&int(0x13));
@@ -298,6 +316,7 @@ pub const BootDisk = extern struct {
         try assembler.mov_si(.dap);
         assembler.add_instruction(&clc);
         assembler.add_instruction(&int(0x13));
+
         try assembler.jcc(jc, .error16);
         // Save real mode
         try assembler.lgdt_16(.gdt);
@@ -347,10 +366,9 @@ pub const BootDisk = extern struct {
         try assembler.jcc(jnz, .elf_loader_loop);
         //d5:	8b 5d 18             	mov    ebx,DWORD PTR [rbp+0x18]
         assembler.add_instruction(&.{ 0x8b, 0x5d, 0x18 });
-        const bootloader_entry_bytes = lib.asBytes(&bootloader_entry);
-        assembler.add_instruction(&.{ 0xbc, bootloader_entry_bytes[1], bootloader_entry_bytes[0], 0x00, 0x00 });
         //d8:	ff e3                	jmp    rbx
         assembler.add_instruction(&.{ 0xff, 0xe3 });
+        log.debug("MBR code length: 0x{x}/0x{x}", .{ assembler.code_index, assembler.boot_disk.code.len });
     }
 
     const Label = enum {
@@ -396,7 +414,7 @@ pub const BootDisk = extern struct {
 
         pub inline fn add_instruction(assembler: *Assembler, instruction_bytes: []const u8) void {
             assert(assembler.code_index + instruction_bytes.len <= assembler.boot_disk.code.len);
-            lib.print("[0x{x:0>4}] ", .{offset + @offsetOf(BootDisk, "code") + assembler.code_index});
+            lib.print("[0x{x:0>4}] ", .{mbr_offset + @offsetOf(BootDisk, "code") + assembler.code_index});
             for (instruction_bytes) |byte| {
                 lib.print("{x:0>2} ", .{byte});
             }
@@ -412,7 +430,7 @@ pub const BootDisk = extern struct {
 
         pub fn far_jmp_16(assembler: *Assembler, segment: u16, label: Label) !void {
             const segment_bytes = lib.asBytes(&segment);
-            const offset_bytes = lib.asBytes(&offset);
+            const offset_bytes = lib.asBytes(&mbr_offset);
             const instruction_bytes = [_]u8{ 0xea, offset_bytes[0], offset_bytes[1], segment_bytes[0], segment_bytes[1] };
             try assembler.patches.append(.{
                 .label = label,
@@ -494,7 +512,7 @@ pub const BootDisk = extern struct {
                             switch (patch_descriptor.label_type) {
                                 .absolute => {
                                     assert(patch_descriptor.label_size == @sizeOf(u16));
-                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
+                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = mbr_offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
                                 },
                                 .relative => {
                                     assert(patch_descriptor.label_size == @sizeOf(u8));
@@ -508,7 +526,7 @@ pub const BootDisk = extern struct {
                                 },
                             }
 
-                            const instruction_start = offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                            const instruction_start = mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
                             lib.print("[0x{x:0>4}] ", .{instruction_start});
                             const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
                             for (instruction_bytes) |byte| {
@@ -526,18 +544,20 @@ pub const BootDisk = extern struct {
                         switch (patch_descriptor.label_type) {
                             .absolute => {
                                 assert(patch_descriptor.label_size == @sizeOf(u16));
-                                @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = offset + @as(u16, switch (patch_descriptor.label) {
+                                const ptr = mbr_offset + @as(u16, switch (patch_descriptor.label) {
                                     .dap => dap_offset,
                                     .gdt => @offsetOf(BootDisk, "gdt_32"),
                                     .dap_pointer => dap_offset + @offsetOf(MBR.DAP, "offset"),
                                     else => @panic("wtF"),
                                 });
+                                log.debug("Ptr patched: 0x{x}", .{ptr});
+                                @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = ptr;
                             },
                             .relative => @panic("wtF"),
                         }
 
                         log.debug("Patched instruction:", .{});
-                        const instruction_start = offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                        const instruction_start = mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
                         lib.print("[0x{x:0>4}] ", .{instruction_start});
                         const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
                         for (instruction_bytes) |byte| {
@@ -599,16 +619,12 @@ pub fn main() anyerror!void {
             if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
             const dap = MBR.DAP{
                 .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
-                .offset = 0x7e00,
+                .offset = @intCast(u16, @intCast(usize, stack_top) - @intCast(usize, stack_size) - aligned_file_size),
                 .segment = 0x0,
                 .lba = partition_first_usable_lba,
             };
-            if (text_section_guess - dap.offset < aligned_file_size) {
-                log.debug("Text section guess: 0x{x}. File size aligned: 0x{x}", .{text_section_guess, aligned_file_size});
-                @panic("Unable to fit bootloader in such space");
-            }
 
-            try boot_disk_mbr.fill(allocator, dap, @intCast(u16, text_section_guess));
+            try boot_disk_mbr.fill(allocator, dap);
             try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
         },
         else => @panic("Filesystem not supported"),

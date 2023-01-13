@@ -39,7 +39,7 @@ pub fn build(b: *host.build.Builder) void {
                                         .file = null,
                                         .guest_errors = true,
                                         .cpu = false,
-                                        .assembly = false,
+                                        .assembly = true,
                                         .interrupts = true,
                                         .pmode_exceptions = true,
                                     },

@@ -3,7 +3,7 @@ const privileged = @import("privileged");
 const assert = lib.assert;
 const log = lib.log.scoped(.BIOS);
 
-var buffer = [1]u8{0} ** (0x200 );
+var buffer = [1]u8{0} ** (0x200);
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -12,7 +12,6 @@ inline fn segment(value: u32) u16 {
 inline fn offset(value: u32) u16 {
     return @truncate(u16, value & 0xf >> 0);
 }
-
 
 pub const Disk = extern struct {
     disk: lib.Disk,
@@ -36,18 +35,18 @@ pub const Disk = extern struct {
 
             const dap = DAP{
                 .sector_count = sectors_to_read,
-                    .offset = @intCast(u16, disk_buffer_address),
-                    .segment = 0,
-                    .lba = lba,
+                .offset = @intCast(u16, disk_buffer_address),
+                .segment = 0,
+                .lba = lba,
             };
             const dap_address = @ptrToInt(&dap);
             const dap_offset = offset(dap_address);
             const dap_segment = segment(dap_address);
             var registers = Registers{
                 .eax = 0x4200,
-                    .edx = 0x80,
-                    .esi = dap_offset,
-                    .ds = dap_segment,
+                .edx = 0x80,
+                .esi = dap_offset,
+                .ds = dap_segment,
             };
 
             int(0x13, &registers, &registers);
