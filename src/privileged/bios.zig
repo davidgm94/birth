@@ -1,9 +1,8 @@
 const lib = @import("lib");
 const privileged = @import("privileged");
 const assert = lib.assert;
-const log = lib.log.scoped(.BIOS);
 
-var buffer = [1]u8{0} ** (0x200);
+var buffer = [1]u8{0} ** (0x200 * 0x10);
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -17,7 +16,6 @@ pub const Disk = extern struct {
     disk: lib.Disk,
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
-        _ = disk;
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
         if (sector_count > lib.maxInt(u16)) @panic("too many sectors");
 
@@ -26,7 +24,7 @@ pub const Disk = extern struct {
 
         var sectors_left = sector_count;
         while (sectors_left > 0) {
-            const buffer_sectors = @divExact(buffer.len, 0x200);
+            const buffer_sectors = @divExact(buffer.len, disk.sector_size);
             const sectors_to_read = @intCast(u16, @min(sectors_left, buffer_sectors));
             defer sectors_left -= sectors_to_read;
 
@@ -51,8 +49,8 @@ pub const Disk = extern struct {
 
             int(0x13, &registers, &registers);
             if (registers.eflags & 1 != 0) @panic("disk read failed");
-            const provided_buffer_offset = lba_offset * 0x200;
-            const bytes_to_copy = sectors_to_read * 0x200;
+            const provided_buffer_offset = lba_offset * disk.sector_size;
+            const bytes_to_copy = sectors_to_read * disk.sector_size;
             const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..];
             lib.copy(u8, dst_slice, buffer[0..bytes_to_copy]);
         }
@@ -112,7 +110,6 @@ fn is_a20_enabled() bool {
 const A20Error = error{a20_not_enabled};
 
 pub fn a20_enable() A20Error!void {
-    log.debug("Trying to enable A20", .{});
     if (!is_a20_enabled()) {
         return A20Error.a20_not_enabled;
     }

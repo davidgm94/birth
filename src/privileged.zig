@@ -522,16 +522,6 @@ pub const PhysicalAddressSpace = extern struct {
         @panic("todo free pages");
     }
 
-    pub fn log_free_memory(physical_address_space: *PhysicalAddressSpace) void {
-        var node_ptr = physical_address_space.free_list.first;
-        var size: u64 = 0;
-        while (node_ptr) |node| : (node_ptr = node.next) {
-            size += node.descriptor.size;
-        }
-
-        log.debug("Free memory: {} bytes", .{size});
-    }
-
     const List = extern struct {
         first: ?*Region = null,
         last: ?*Region = null,
@@ -755,7 +745,7 @@ pub const PhysicalHeap = extern struct {
         const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
         for (physical_heap.regions) |*region| {
             if (region.size == 0) {
-                const allocated_region = try physical_heap.page_allocator.allocate(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                const allocated_region = try physical_heap.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
                 region.* = .{
                     .address = PhysicalAddress(.global).new(allocated_region.address),
                     .size = allocated_region.size,

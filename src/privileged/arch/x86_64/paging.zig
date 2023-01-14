@@ -247,7 +247,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
             break :physical_address_blk unpack_address(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocate(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PML4TE{
                 .present = true,
@@ -337,7 +337,7 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
             break :physical_address_blk unpack_address(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocate(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PDPTE{
                 .present = true,
@@ -371,7 +371,7 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
             }
             break :physical_address_blk unpack_address(entry_value);
         } else {
-            const entry_allocation = physical_allocator.allocate(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
 
             entry_pointer.* = PDTE{
                 .present = true,

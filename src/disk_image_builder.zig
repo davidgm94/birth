@@ -584,10 +584,10 @@ pub const BootDisk = extern struct {
 pub fn main() anyerror!void {
     var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
     defer arena_allocator.deinit();
-    const allocator = arena_allocator.allocator();
+    var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
     // TODO: use a format with hex support
-    const image_config = try host.ImageConfig.get(allocator, host.ImageConfig.default_path);
+    const image_config = try host.ImageConfig.get(wrapped_allocator.unwrap_zig(), host.ImageConfig.default_path);
     var disk_image = try Disk.Image.fromZero(image_config.sector_count, image_config.sector_size);
     const disk = &disk_image.disk;
     const gpt_cache = try GPT.create(disk, null);
@@ -597,13 +597,28 @@ pub fn main() anyerror!void {
         break :blk partition_name_buffer[0..partition_index];
     };
 
+    const config_file_name = "files";
+    const configuration_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "src/" ++ config_file_name, max_file_length);
+
     switch (image_config.partition.filesystem) {
         .fat32 => {
             const filesystem = .fat32;
             const gpt_partition_cache = try gpt_cache.addPartition(filesystem, partition_name, image_config.partition.first_lba, gpt_cache.header.last_usable_lba, null);
             const fat_partition_cache = try gpt_partition_cache.format(filesystem, null);
 
-            const loader_file = try host.cwd().readFileAlloc(allocator, "zig-cache/rise.elf", max_file_length);
+            var files_parser = lib.FileParser.init(configuration_file);
+            while (try files_parser.next()) |file_descriptor| {
+                const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), file_descriptor.host, max_file_length);
+                try fat_partition_cache.create_file(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null);
+            }
+            blk: {
+                const file_content = configuration_file;
+                const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name});
+                try fat_partition_cache.create_file(guest_file_path, file_content, wrapped_allocator.unwrap(), null);
+                break :blk;
+            }
+
+            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/rise.elf", max_file_length);
             const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
             assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
             try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
@@ -617,19 +632,28 @@ pub fn main() anyerror!void {
             const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
             const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
             if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
+            const dap_top = stack_top - stack_size;
             const dap = MBR.DAP{
                 .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
-                .offset = @intCast(u16, @intCast(usize, stack_top) - @intCast(usize, stack_size) - aligned_file_size),
+                .offset = @intCast(u16, dap_top - aligned_file_size),
                 .segment = 0x0,
                 .lba = partition_first_usable_lba,
             };
+            
+            if (dap_top - dap.offset < aligned_file_size) {
+                @panic("unable to fit file read from disk");
+            }
 
-            try boot_disk_mbr.fill(allocator, dap);
+            if (dap.offset - 0x600 < aligned_file_size) {
+                @panic("unable to fit loaded executable in memory");
+            }
+
+            try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
             try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
         },
         else => @panic("Filesystem not supported"),
     }
 
-    const disk_image_path = try host.concat(allocator, u8, &.{ "zig-cache/", image_config.image_name });
+    const disk_image_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", image_config.image_name });
     try host.cwd().writeFile(disk_image_path, disk_image.get_buffer());
 }

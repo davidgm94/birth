@@ -139,9 +139,18 @@ pub const Allocator = extern struct {
         };
     };
 
-    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
+    pub fn allocateBytes(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
         return try allocator.callback_allocate(allocator, size, alignment);
     }
+
+    // pub fn allocate(allocator: *Allocator, comptime T: type, len: usize) Allocate.Error![]T {
+    //     _ = allocator;
+    //     _ = len;
+    //     @panic("WTF");
+    //     // const size = @sizeOf(asdsd) * len;
+    //     // const alignment = @alignOf(asdsd);
+    //     // return try allocator.callback_allocate(allocator, size, alignment);
+    // }
 
     pub fn wrap(zig_allocator: common.ZigAllocator) Wrapped {
         return .{
@@ -153,6 +162,46 @@ pub const Allocator = extern struct {
                 .vtable = zig_allocator.vtable,
             },
         };
+    }
+
+    pub fn unwrap_zig(allocator: *Allocator) common.ZigAllocator {
+        return .{
+            .ptr = allocator,
+            .vtable = &zig_vtable,
+        };
+    }
+
+    pub const zig_vtable = .{
+        .alloc = zig_allocate,
+        .resize = zig_resize,
+        .free = zig_free,
+    };
+
+    pub fn zig_allocate(context: *anyopaque, size: usize, ptr_align: u8, return_address: usize) ?[*]u8 {
+        _ = context;
+        _ = size;
+        _ = ptr_align;
+        _ = return_address;
+        @panic("todo: zig_allocate");
+    }
+    //resize: *const fn (ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool,
+    //free: *const fn (ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void,
+
+    pub fn zig_resize(context: *anyopaque, buffer: []u8, buffer_alignment: u8, new_length: usize, return_address: usize) bool {
+        _ = context;
+        _ = buffer;
+        _ = buffer_alignment;
+        _ = new_length;
+        _ = return_address;
+        @panic("todo: zig_resize");
+    }
+
+    pub fn zig_free(context: *anyopaque, buffer: []u8, buffer_alignment: u8, return_address: usize) void {
+        _ = context;
+        _ = buffer;
+        _ = buffer_alignment;
+        _ = return_address;
+        @panic("todo: zig_free");
     }
 
     pub const Wrapped = extern struct {
@@ -173,8 +222,113 @@ pub const Allocator = extern struct {
             };
         }
 
-        pub fn wrapped_callback_allocate() !void {
-            @panic("todo wrapped allocate");
+        pub fn wrapped_callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+            const wrapped_allocator = @fieldParentPtr(Wrapped, "allocator", allocator);
+            const zig_allocator = wrapped_allocator.unwrap_zig();
+            if (alignment > common.maxInt(u8)) {
+                @panic("wtf alignment big");
+            }
+            const zig_result = zig_allocator.vtable.alloc(zig_allocator.ptr, size, @intCast(u8, alignment), @returnAddress());
+            return .{
+                .address = @ptrToInt(zig_result),
+                .size = size,
+            };
         }
     };
+};
+
+pub const FileParser = struct {
+    text: []const u8,
+    index: usize = 0,
+
+    pub fn init(text: []const u8) FileParser {
+        return .{
+            .text = text,
+        };
+    }
+
+    const Error = error{
+        err,
+    };
+
+    pub const File = struct {
+        host: []const u8,
+        guest: []const u8,
+    };
+
+    pub fn next(parser: *FileParser) !?File {
+        while (parser.index < parser.text.len) {
+            try parser.expect_char('.');
+            try parser.expect_char('{');
+
+            while (parser.index < parser.text.len and parser.text[parser.index] != '}') {
+                const host_field = try parser.parse_field("host");
+                const guest_field = try parser.parse_field("guest");
+                return .{
+                    .host = host_field,
+                    .guest = guest_field,
+                };
+            }
+
+            try parser.expect_char('}');
+        }
+
+        return null;
+    }
+
+    fn parse_field(parser: *FileParser, field: []const u8) ![]const u8 {
+        try parser.expect_char('.');
+        try parser.expect_string(field);
+        try parser.expect_char('=');
+        const field_value = try parser.expect_quoted_string();
+        parser.maybe_expect_char(',');
+
+        return field_value;
+    }
+
+    pub fn skip_space(parser: *FileParser) void {
+        while (parser.index < parser.text.len) {
+            const char = parser.text[parser.index];
+            const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
+            if (!is_space) break;
+            parser.index += 1;
+        }
+    }
+
+    pub fn maybe_expect_char(parser: *FileParser, char: u8) void {
+        parser.skip_space();
+        if (parser.text[parser.index] == char) parser.index += 1;
+    }
+
+    pub fn expect_char(parser: *FileParser, expected_char: u8) !void {
+        parser.skip_space();
+        const char = parser.text[parser.index];
+        if (char != expected_char) {
+            common.log.debug("Expected {c}, got: {c}", .{expected_char, char});
+            return Error.err;
+        }
+        parser.index += 1;
+    }
+
+    pub fn expect_string(parser: *FileParser, string: []const u8) !void {
+        parser.skip_space();
+        if (!common.equal(u8, parser.text[parser.index..][0..string.len], string)) {
+            return Error.err;
+        }
+        parser.index += string.len;
+    }
+
+    pub fn expect_quoted_string(parser: *FileParser) ![]const u8 {
+        parser.skip_space();
+        try parser.expect_char('"');
+        const start_index = parser.index;
+        while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
+            parser.index += 1;
+        }
+        const end_index = parser.index;
+        try parser.expect_char('"');
+
+        const string = parser.text[start_index..end_index];
+        return string;
+    }
 };

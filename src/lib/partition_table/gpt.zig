@@ -185,10 +185,8 @@ pub const Header = extern struct {
         pub fn load(disk: *Disk, allocator: ?*Allocator) !GPT.Header.Cache {
             const mbr_lba = MBR.default_lba;
             const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, allocator, .{});
-            @import("root").write_message("mbr done\n");
             const primary_gpt_header_lba = mbr_lba + 1;
             const gpt_header = try disk.read_typed_sectors(GPT.Header, primary_gpt_header_lba, allocator, .{});
-            @import("root").write_message("gpt header done\n");
             assert(gpt_header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = try disk.read_slice(GPT.Partition, gpt_header.partition_entry_count, gpt_header.partition_array_lba, allocator, .{});
 

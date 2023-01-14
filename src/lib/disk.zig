@@ -41,7 +41,7 @@ pub const Disk = extern struct {
     pub inline fn get_provided_buffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]u8 {
         if ((disk.type == .memory and force) or (disk.type != .memory)) {
             if (allocator) |alloc| {
-                const result = try alloc.allocate(@sizeOf(T) * count, @alignOf(T));
+                const result = try alloc.allocateBytes(@sizeOf(T) * count, @alignOf(T));
                 const slice = @intToPtr([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
                 return slice;
             }
@@ -78,7 +78,8 @@ pub const Disk = extern struct {
     }
 
     pub inline fn write_slice(disk: *Disk, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
-        try disk.callbacks.write(disk, sliceAsBytes(slice), sector_offset, commit_memory_to_disk);
+        const byte_slice = sliceAsBytes(slice);
+        try disk.callbacks.write(disk, byte_slice, sector_offset, commit_memory_to_disk);
     }
 
     pub fn verify(disk: *Disk) !void {
@@ -188,9 +189,7 @@ pub const Disk = extern struct {
 
         pub fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
             const need_write = !(disk.type == .memory and !commit_memory_to_disk);
-            log.debug("Trying to write {} bytes to sector offset 0x{x}. Actually write: {}", .{ bytes.len, sector_offset, commit_memory_to_disk });
             if (need_write) {
-                log.debug("Actually writing {} bytes to sector offset 0x{x}", .{ bytes.len, sector_offset });
                 const disk_image = @fieldParentPtr(Image, "disk", disk);
                 assert(disk_image.disk.disk_size > 0);
                 //assert(disk.disk.partition_count == 1);
