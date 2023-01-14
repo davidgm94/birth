@@ -41,8 +41,11 @@ pub const Disk = extern struct {
     pub inline fn get_provided_buffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]u8 {
         if ((disk.type == .memory and force) or (disk.type != .memory)) {
             if (allocator) |alloc| {
-                const result = try alloc.allocateBytes(@sizeOf(T) * count, @alignOf(T));
+                const size = @sizeOf(T) * count;
+                const alignment = @alignOf(T);
+                const result = try alloc.allocateBytes(size, alignment);
                 const slice = @intToPtr([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
+                if (slice.len != size) @panic("WTQSAD/jasD");
                 return slice;
             }
         }
@@ -58,7 +61,7 @@ pub const Disk = extern struct {
     pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
         const sector_count = @divExact(@sizeOf(T), disk.sector_size);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, try disk.get_provided_buffer(T, 1, allocator, options.force));
-        if (read_result.sector_count != sector_count) @panic("WTF");
+        if (read_result.sector_count != sector_count) @panic("Sector count mismatch");
         // Don't need to write back since it's a memory disk
         const result = @ptrCast(*T, @alignCast(@alignOf(T), read_result.buffer));
         return result;
@@ -71,7 +74,8 @@ pub const Disk = extern struct {
     pub inline fn read_slice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) ![]T {
         const element_count_per_sector = @divExact(disk.sector_size, @sizeOf(T));
         const sector_count = @divExact(len, element_count_per_sector);
-        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, try disk.get_provided_buffer(T, len, allocator, options.force));
+        const provided_buffer = try disk.get_provided_buffer(T, len, allocator, options.force);
+        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("wtf");
         const result = @ptrCast([*]T, @alignCast(@alignOf(T), read_result.buffer))[0..len];
         return result;
@@ -178,7 +182,6 @@ pub const Disk = extern struct {
             const byte_count = sector_count * disk_image.disk.sector_size;
             const byte_offset = sector_offset * disk_image.disk.sector_size;
             if (byte_offset + byte_count > disk.disk_size) {
-                log.debug("Trying to read {} bytes with {} offset: {}. Disk size: {}\n", .{ byte_count, byte_offset, byte_offset + byte_count, disk.disk_size });
                 return Disk.ReadError.read_error;
             }
             return .{

@@ -413,9 +413,9 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
 
     // TODO: write this properly
 
-    try cache.register_cluster(0, FAT32.Entry.reserved_and_should_not_be_used_eof);
-    try cache.register_cluster(1, FAT32.Entry.allocated_and_eof);
-    try cache.register_cluster(2, FAT32.Entry.reserved_and_should_not_be_used_eof);
+    try cache.register_cluster(0, FAT32.Entry.reserved_and_should_not_be_used_eof, null);
+    try cache.register_cluster(1, FAT32.Entry.allocated_and_eof, null);
+    try cache.register_cluster(2, FAT32.Entry.reserved_and_should_not_be_used_eof, null);
 
     cache.fs_info.last_allocated_cluster = 2;
     cache.fs_info.free_cluster_count = cluster_count_32 - 1;
@@ -485,7 +485,8 @@ pub const Cache = extern struct {
         const file_size = directory_entry.file_size;
         const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
         const lba = cache.cluster_to_sector(first_cluster);
-        return try cache.disk.read_slice(u8, aligned_file_size, lba, allocator, .{});
+        const result = try cache.disk.read_slice(u8, aligned_file_size, lba, allocator, .{});
+        return result[0..file_size];
     }
 
     pub fn fromGPTPartitionCache(allocator: *lib.Allocator, gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
@@ -624,7 +625,6 @@ pub const Cache = extern struct {
             const slice_end = cluster_byte_offset + cluster_byte_count;
             const slice = file_content[slice_start..if (slice_end > file_content.len) file_content.len else slice_end];
             const lba = cache.cluster_to_sector(cluster);
-            log.debug("slice start: 0x{x}. slice end: 0x{x}. cluster: 0x{x}. lba: 0x{x}. slice len: {}. disk size: 0x{x}", .{slice_start, slice_end, cluster, lba, slice.len, cache.disk.disk_size});
             try cache.disk.write_slice(u8, slice, lba, true);
         }
 
@@ -1090,7 +1090,7 @@ pub const Cache = extern struct {
         return (@as(u64, cluster) - cache.get_root_cluster()) * cache.get_cluster_sector_count() + cache.get_data_lba();
     }
 
-    fn register_cluster(cache: Cache, cluster: u32, entry: Entry) !void {
+    fn register_cluster(cache: Cache, cluster: u32, entry: Entry, allocator: ?*lib.Allocator) !void {
         const fat_lba = cache.get_fat_lba();
         const fat_entry_count = cache.mbr.bpb.dos3_31.dos2_0.fat_count;
         const fat_entry_sector_count = cache.mbr.bpb.fat_sector_count_32;
@@ -1109,9 +1109,8 @@ pub const Cache = extern struct {
         const cluster_offset = cluster * @sizeOf(u32) / cache.disk.sector_size;
         while (fat_index < fat_entry_count) : (fat_index += 1) {
             const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + cluster_offset;
-            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, null, .{});
+            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, allocator, .{});
             fat_entry_sector[fat_entry_sector_index] = entry;
-            log.debug("Registering cluster 0x{x} with FAT entry LBA 0x{x} and fat entry sector index 0x{x}", .{cluster, fat_entry_lba, fat_entry_sector_index});
             try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
         }
     }
@@ -1123,7 +1122,7 @@ pub const Cache = extern struct {
         while (try fat_entry_iterator.next(cache, maybe_allocator)) |cluster| {
             const entry = &fat_entry_iterator.entries[cluster % Entry.per_sector];
             if (entry.is_free()) {
-                try cache.register_cluster(cluster, FAT32.Entry.allocated_and_eof);
+                try cache.register_cluster(cluster, FAT32.Entry.allocated_and_eof, maybe_allocator);
                 clusters[cluster_index] = cluster;
                 cluster_index += 1;
 
@@ -1424,7 +1423,7 @@ const FATEntryIterator = struct {
         var cluster_count: usize = starting_cluster;
         // TODO: replace with proper variable
         const max_clusters = 100000;
-        if (cache.disk.sector_size != @sizeOf(FAT32.Entry.Sector)) @panic("WTF");
+        if (cache.disk.sector_size != @sizeOf(FAT32.Entry.Sector)) @panic("Unexpected disk sector size");
 
         while (cluster_count < max_clusters) {
             if (cluster_count >= max_clusters) cluster_count = starting_cluster;

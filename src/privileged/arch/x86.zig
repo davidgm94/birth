@@ -9,3 +9,5 @@ pub fn CPU_stop() noreturn {
             ::: "memory");
     }
 }
+
+pub const paging = struct {};

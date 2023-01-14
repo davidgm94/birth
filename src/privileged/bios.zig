@@ -37,6 +37,7 @@ pub const Disk = extern struct {
                 .segment = 0,
                 .lba = lba,
             };
+
             const dap_address = @ptrToInt(&dap);
             const dap_offset = offset(dap_address);
             const dap_segment = segment(dap_address);
@@ -52,13 +53,16 @@ pub const Disk = extern struct {
             const provided_buffer_offset = lba_offset * disk.sector_size;
             const bytes_to_copy = sectors_to_read * disk.sector_size;
             const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..];
-            lib.copy(u8, dst_slice, buffer[0..bytes_to_copy]);
+            const src_slice = buffer[0..bytes_to_copy];
+            lib.copy(u8, dst_slice, src_slice);
         }
 
-        return lib.Disk.ReadResult{
+        const result = lib.Disk.ReadResult{
             .sector_count = sector_count,
             .buffer = provided_buffer.ptr,
         };
+
+        return result;
     }
 
     pub fn write(disk: *lib.Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) lib.Disk.WriteError!void {
@@ -143,7 +147,7 @@ pub fn e820_init() ![]MemoryMapEntry {
 
     for (memory_map_entries) |*entry, entry_index| {
         var memory_entry: MemoryMapEntry = undefined;
-        if (registers.es != 0) @panic("WTF");
+        if (registers.es != 0) @panic("Register ES not zero");
         registers.eax = 0xe820;
         registers.ecx = 24;
         registers.edx = 0x534d4150;

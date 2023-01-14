@@ -105,7 +105,7 @@ var user_package = host.build.Pkg{
 
 const Kernel = struct {
     builder: *host.build.Builder,
-    bootloader: ?*host.build.LibExeObjStep = null,
+    bootloader_executables: host.ArrayList(*host.build.LibExeObjStep) = undefined,
     executable: *host.build.LibExeObjStep = undefined,
     //userspace_programs: []*host.build.LibExeObjStep = &.{},
     options: Options,
@@ -125,14 +125,16 @@ const Kernel = struct {
         user_package.dependencies = &.{lib_package};
         privileged_package.dependencies = &.{ lib_package, privileged_package };
 
-        kernel.create_bootloader();
+        try kernel.create_bootloader();
         kernel.create_executable();
         try kernel.create_disassembly_step();
         kernel.create_disk();
         try kernel.create_run_and_debug_steps();
     }
 
-    fn create_bootloader(kernel: *Kernel) void {
+    fn create_bootloader(kernel: *Kernel) !void {
+        kernel.bootloader_executables = host.ArrayList(*host.build.LibExeObjStep).init(kernel.builder.allocator);
+
         switch (kernel.options.arch) {
             .x86_64 => {
                 switch (kernel.options.arch.x86_64.bootloader) {
@@ -151,8 +153,7 @@ const Kernel = struct {
                                 bootloader_exe.strip = true;
                                 bootloader_exe.setBuildMode(.ReleaseSafe);
 
-                                kernel.builder.default_step.dependOn(&bootloader_exe.step);
-                                kernel.bootloader = bootloader_exe;
+                                try kernel.bootloader_executables.append(bootloader_exe);
                             },
                             .bios => {
                                 const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios/main.zig");
@@ -167,8 +168,19 @@ const Kernel = struct {
                                 bootloader_exe.strip = true;
                                 bootloader_exe.setBuildMode(.ReleaseSmall);
 
-                                kernel.builder.default_step.dependOn(&bootloader_exe.step);
-                                kernel.bootloader = bootloader_exe;
+                                try kernel.bootloader_executables.append(bootloader_exe);
+
+                                const loader_64 = kernel.builder.addExecutable("loader64", "src/bootloader/rise/bios/loader64.zig");
+                                loader_64.setTarget(get_target(.x86_64, false));
+                                loader_64.setOutputDir(cache_dir);
+                                loader_64.addPackage(lib_package);
+                                loader_64.addPackage(privileged_package);
+                                loader_64.link_gc_sections = true;
+                                loader_64.want_lto = true;
+                                loader_64.strip = true;
+                                loader_64.setBuildMode(.ReleaseSmall);
+
+                                try kernel.bootloader_executables.append(loader_64);
                             },
                         }
                     },
@@ -181,12 +193,15 @@ const Kernel = struct {
                         bootloader_exe.strip = true;
                         bootloader_exe.setBuildMode(.ReleaseSafe);
 
-                        kernel.builder.default_step.dependOn(&bootloader_exe.step);
-                        kernel.bootloader = bootloader_exe;
+                        try kernel.bootloader_executables.append(bootloader_exe);
                     },
                 }
             },
-            else => unreachable,
+            else => @panic("Architecture not supported"),
+        }
+
+        for (kernel.bootloader_executables.items) |bootloader_executable| {
+            kernel.builder.default_step.dependOn(&bootloader_executable.step);
         }
     }
 
@@ -244,10 +259,15 @@ const Kernel = struct {
         const disk_image_builder = kernel.builder.addExecutable("disk_image_builder", "src/disk_image_builder.zig");
         disk_image_builder.setOutputDir(cache_dir);
         disk_image_builder.setBuildMode(kernel.builder.standardReleaseOptions());
-        disk_image_builder.step.dependOn(&(kernel.bootloader orelse unreachable).step);
-        disk_image_builder.step.dependOn(&kernel.executable.step);
+        kernel.builder.default_step.dependOn(&disk_image_builder.step);
 
         kernel.disk_image_builder_run_step = disk_image_builder.run();
+
+        for (kernel.bootloader_executables.items) |bootloader_executable| {
+            kernel.disk_image_builder_run_step.step.dependOn(&bootloader_executable.step);
+        }
+
+        kernel.disk_image_builder_run_step.step.dependOn(&kernel.executable.step);
         kernel.disk_image_builder_run_step.step.dependOn(kernel.builder.default_step);
     }
 

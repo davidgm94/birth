@@ -39,18 +39,6 @@ pub fn initialize_kernel_address_space_bsp(physical_memory_region: PhysicalMemor
     return paging.init_kernel_bsp(physical_memory_region);
 }
 
-pub fn user(physical_address_space: *PhysicalAddressSpace) VirtualAddressSpace {
-    // TODO: defer memory free when this produces an error
-    // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
-    var virtual_address_space = VirtualAddressSpace{
-        .arch = undefined,
-        .privileged = false,
-    };
-
-    paging.init_user(&virtual_address_space, physical_address_space);
-
-    return virtual_address_space;
-}
 
 pub fn allocate(virtual_address_space: *VirtualAddressSpace, byte_count: u64, maybe_specific_address: ?VirtualAddress, flags: Flags) !VirtualAddress {
     //if (kernel.config.safe_slow) {
@@ -208,29 +196,11 @@ pub fn translate_address_extended(virtual_address_space: *VirtualAddressSpace, v
     return result;
 }
 
-pub inline fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
-    paging.make_current(virtual_address_space);
-}
 
 pub inline fn is_current(virtual_address_space: *VirtualAddressSpace) bool {
     return paging.is_current(virtual_address_space);
 }
 
-pub const Flags = packed struct {
-    write: bool = false,
-    cache_disable: bool = false,
-    global: bool = false,
-    execute: bool = false,
-    user: bool = false,
-
-    pub inline fn empty() Flags {
-        return common.zeroes(Flags);
-    }
-
-    pub inline fn to_arch_specific(flags: Flags, comptime locality: privileged.CoreLocality) paging.MemoryFlags {
-        return paging.new_flags(flags, locality);
-    }
-};
 
 pub fn add_used_region(virtual_address_space: *VirtualAddressSpace, region: Region) !void {
     if (region.is_valid_new_region_at_bootstrapping(virtual_address_space)) {

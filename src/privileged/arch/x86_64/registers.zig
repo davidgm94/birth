@@ -6,7 +6,7 @@ const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
 
-pub const cr3 = packed struct(usize) {
+pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,
     /// Page-level Write-Through (bit 3 of CR3) — Controls the memory type used to access the first paging
     /// structure of the current paging-structure hierarchy. See Section 4.9, “Paging and Memory Typing”. This bit
@@ -21,8 +21,8 @@ pub const cr3 = packed struct(usize) {
     address: u52 = 0, // get this to be 32-bit compatible
 
     comptime {
-        assert(@sizeOf(cr3) == @sizeOf(usize));
-        assert(@bitSizeOf(cr3) == @bitSizeOf(usize));
+        assert(@sizeOf(cr3) == @sizeOf(u64));
+        assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
     }
 
     pub fn from_address(physical_address: PhysicalAddress(.local)) cr3 {
@@ -61,7 +61,7 @@ pub const cr3 = packed struct(usize) {
 };
 
 /// Contains system control flags that control operating mode and states of the processor.
-pub const cr0 = packed struct(usize) {
+pub const cr0 = packed struct(u64) {
     protected_mode_enable: bool = true,
     monitor_coprocessor: bool = false,
     emulation: bool = false,
@@ -101,7 +101,7 @@ pub const cr2 = SimpleR64(.cr2);
 /// executive support for specific processor capabilities. Bits CR4[63:32] can only be used for IA-32e mode only
 /// features that are enabled after entering 64-bit mode. Bits CR4[63:32] do not have any effect outside of IA-32e
 /// mode.
-pub const cr4 = packed struct(usize) {
+pub const cr4 = packed struct(u64) {
     vme: bool = false,
     pvi: bool = false,
     timestamp_disable: bool = false,

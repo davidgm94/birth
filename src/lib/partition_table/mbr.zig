@@ -290,55 +290,55 @@ pub const Partition = extern struct {
         @panic("wtF");
     }
 
-    pub fn format(mbr: *const MBR.Partition, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try lib.internal_format(writer, "MBR:\n", .{});
+    pub fn format(mbr: *const MBR.Partition, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.format(writer, "MBR:\n", .{});
         const bpb_2_0 = mbr.bpb.dos3_31.dos2_0;
-        try lib.internal_format(writer, "\tJump code: [0x{x}, 0x{x}, 0x{x}]\n", .{ bpb_2_0.jmp_code[0], bpb_2_0.jmp_code[1], bpb_2_0.jmp_code[2] });
-        try lib.internal_format(writer, "\tOEM identifier: {s}\n", .{bpb_2_0.oem_identifier});
-        try lib.internal_format(writer, "\tSector size: {}\n", .{bpb_2_0.sector_size});
-        try lib.internal_format(writer, "\tCluster sector count: {}\n", .{bpb_2_0.cluster_sector_count});
-        try lib.internal_format(writer, "\tReserved sector count: {}\n", .{bpb_2_0.reserved_sector_count});
-        try lib.internal_format(writer, "\tFAT count: {}\n", .{bpb_2_0.fat_count});
-        try lib.internal_format(writer, "\tRoot entry count: {}\n", .{bpb_2_0.root_entry_count});
-        try lib.internal_format(writer, "\tTotal sector count(16): {}\n", .{bpb_2_0.total_sector_count_16});
-        try lib.internal_format(writer, "\tMedia descriptor: {}\n", .{bpb_2_0.media_descriptor});
-        try lib.internal_format(writer, "\tFAT sector count (16): {}\n", .{bpb_2_0.fat_sector_count_16});
+        try lib.format(writer, "\tJump code: [0x{x}, 0x{x}, 0x{x}]\n", .{ bpb_2_0.jmp_code[0], bpb_2_0.jmp_code[1], bpb_2_0.jmp_code[2] });
+        try lib.format(writer, "\tOEM identifier: {s}\n", .{bpb_2_0.oem_identifier});
+        try lib.format(writer, "\tSector size: {}\n", .{bpb_2_0.sector_size});
+        try lib.format(writer, "\tCluster sector count: {}\n", .{bpb_2_0.cluster_sector_count});
+        try lib.format(writer, "\tReserved sector count: {}\n", .{bpb_2_0.reserved_sector_count});
+        try lib.format(writer, "\tFAT count: {}\n", .{bpb_2_0.fat_count});
+        try lib.format(writer, "\tRoot entry count: {}\n", .{bpb_2_0.root_entry_count});
+        try lib.format(writer, "\tTotal sector count(16): {}\n", .{bpb_2_0.total_sector_count_16});
+        try lib.format(writer, "\tMedia descriptor: {}\n", .{bpb_2_0.media_descriptor});
+        try lib.format(writer, "\tFAT sector count (16): {}\n", .{bpb_2_0.fat_sector_count_16});
 
         const bpb_3_31 = mbr.bpb.dos3_31;
-        try lib.internal_format(writer, "\tPhysical sectors per track: {}\n", .{bpb_3_31.physical_sectors_per_track});
-        try lib.internal_format(writer, "\tDisk head count: {}\n", .{bpb_3_31.disk_head_count});
-        try lib.internal_format(writer, "\tHidden sector count: {}\n", .{bpb_3_31.hidden_sector_count});
-        try lib.internal_format(writer, "\tTotal sector count: {}\n", .{bpb_3_31.total_sector_count_32});
+        try lib.format(writer, "\tPhysical sectors per track: {}\n", .{bpb_3_31.physical_sectors_per_track});
+        try lib.format(writer, "\tDisk head count: {}\n", .{bpb_3_31.disk_head_count});
+        try lib.format(writer, "\tHidden sector count: {}\n", .{bpb_3_31.hidden_sector_count});
+        try lib.format(writer, "\tTotal sector count: {}\n", .{bpb_3_31.total_sector_count_32});
 
         const bpb_7_1_79 = mbr.bpb;
 
-        try lib.internal_format(writer, "\tFAT sector count (32): {}\n", .{bpb_7_1_79.fat_sector_count_32});
-        try lib.internal_format(writer, "\tDrive description: {}\n", .{bpb_7_1_79.drive_description});
-        try lib.internal_format(writer, "\tVersion: {}.{}\n", .{ bpb_7_1_79.version[0], bpb_7_1_79.version[1] });
-        try lib.internal_format(writer, "\tRoot directory cluster offset: {}\n", .{bpb_7_1_79.root_directory_cluster_offset});
-        try lib.internal_format(writer, "\tFS info sector: {}\n", .{bpb_7_1_79.fs_info_sector});
-        try lib.internal_format(writer, "\tBackup boot record sector: {}\n", .{bpb_7_1_79.backup_boot_record_sector});
-        try lib.internal_format(writer, "\tDrive number: {}\n", .{bpb_7_1_79.drive_number});
-        try lib.internal_format(writer, "\tExtended boot signature: {}\n", .{bpb_7_1_79.extended_boot_signature});
-        try lib.internal_format(writer, "\tSerial number: {}\n", .{bpb_7_1_79.serial_number});
-        try lib.internal_format(writer, "\tVolume label: {s}\n", .{bpb_7_1_79.volume_label});
-        try lib.internal_format(writer, "\tFilesystem type: {s}\n", .{bpb_7_1_79.filesystem_type});
+        try lib.format(writer, "\tFAT sector count (32): {}\n", .{bpb_7_1_79.fat_sector_count_32});
+        try lib.format(writer, "\tDrive description: {}\n", .{bpb_7_1_79.drive_description});
+        try lib.format(writer, "\tVersion: {}.{}\n", .{ bpb_7_1_79.version[0], bpb_7_1_79.version[1] });
+        try lib.format(writer, "\tRoot directory cluster offset: {}\n", .{bpb_7_1_79.root_directory_cluster_offset});
+        try lib.format(writer, "\tFS info sector: {}\n", .{bpb_7_1_79.fs_info_sector});
+        try lib.format(writer, "\tBackup boot record sector: {}\n", .{bpb_7_1_79.backup_boot_record_sector});
+        try lib.format(writer, "\tDrive number: {}\n", .{bpb_7_1_79.drive_number});
+        try lib.format(writer, "\tExtended boot signature: {}\n", .{bpb_7_1_79.extended_boot_signature});
+        try lib.format(writer, "\tSerial number: {}\n", .{bpb_7_1_79.serial_number});
+        try lib.format(writer, "\tVolume label: {s}\n", .{bpb_7_1_79.volume_label});
+        try lib.format(writer, "\tFilesystem type: {s}\n", .{bpb_7_1_79.filesystem_type});
 
-        try lib.internal_format(writer, "\nCode:\n", .{});
+        try lib.format(writer, "\nCode:\n", .{});
         for (mbr.code) |code_byte| {
-            try lib.internal_format(writer, "0x{x}, ", .{code_byte});
+            try lib.format(writer, "0x{x}, ", .{code_byte});
         }
 
-        try lib.internal_format(writer, "\n\nPartitions:\n", .{});
+        try lib.format(writer, "\n\nPartitions:\n", .{});
         for (mbr.partitions) |partition, partition_index| {
             if (partition.size_in_lba != 0) {
-                try lib.internal_format(writer, "[{}]\n", .{partition_index});
-                try lib.internal_format(writer, "\tBoot indicator: 0x{x}\n", .{partition.boot_indicator});
-                try lib.internal_format(writer, "\tStarting CHS: 0x{x}\n", .{partition.starting_chs});
-                try lib.internal_format(writer, "\tOS type: 0x{x}\n", .{partition.os_type});
-                try lib.internal_format(writer, "\tEnding CHS: 0x{x}\n", .{partition.ending_chs});
-                try lib.internal_format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
-                try lib.internal_format(writer, "\tSize in LBA: 0x{x}\n", .{partition.size_in_lba});
+                try lib.format(writer, "[{}]\n", .{partition_index});
+                try lib.format(writer, "\tBoot indicator: 0x{x}\n", .{partition.boot_indicator});
+                try lib.format(writer, "\tStarting CHS: 0x{x}\n", .{partition.starting_chs});
+                try lib.format(writer, "\tOS type: 0x{x}\n", .{partition.os_type});
+                try lib.format(writer, "\tEnding CHS: 0x{x}\n", .{partition.ending_chs});
+                try lib.format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
+                try lib.format(writer, "\tSize in LBA: 0x{x}\n", .{partition.size_in_lba});
             }
         }
     }

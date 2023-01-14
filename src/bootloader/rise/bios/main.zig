@@ -3,7 +3,10 @@ const log = lib.log.scoped(.bios);
 const privileged = @import("privileged");
 const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
+const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalHeap = privileged.PhysicalHeap;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const BIOS = privileged.BIOS;
 
@@ -33,16 +36,16 @@ var bios_disk = BIOS.Disk{
 
 pub const writer = privileged.E9Writer{ .context = {} };
 
-// pub const std_options = struct {
-//     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-//         _ = level;
-//         _ = scope;
-//         writer.print(format, args) catch unreachable;
-//         writer.writeByte('\n') catch unreachable;
-//     }
-//
-//     pub const log_level = .debug;
-// };
+pub const std_options = struct {
+    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        _ = level;
+        _ = scope;
+        writer.print(format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+    }
+
+    pub const log_level = .debug;
+};
 
 pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
     _ = stack_trace;
@@ -79,6 +82,7 @@ export fn _start() callconv(.C) noreturn {
     var file_parser = lib.FileParser.init(rise_files_file);
     while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
         if (file_count == files.len) @panic("max files");
+        log.debug("About to read the file: {s}", .{file_descriptor.guest});
         const file_content = fat_cache.read_file(allocator, file_descriptor.guest) catch @panic("cant read file");
         files[file_count] = .{
             .path = file_descriptor.guest,
@@ -87,6 +91,19 @@ export fn _start() callconv(.C) noreturn {
         file_count += 1;
     }
 
+
+    const LongModeVirtualAddressSpace = privileged.ArchVirtualAddressSpace(.x86_64);
+    var kernel_address_space = blk: {
+        const allocation_result = physical_heap.page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_kernel_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap kernel address space");
+        const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
+            .address = PhysicalAddress(.local).new(allocation_result.address),
+            .size = LongModeVirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
+        };
+        break :blk LongModeVirtualAddressSpace.kernel_bsp(kernel_address_space_physical_region);
+    };
+
+    _ = kernel_address_space;
+
     while (true) {
         writer.writeAll("loader is nicely loaded\n") catch unreachable;
         asm volatile (
@@ -94,8 +111,4 @@ export fn _start() callconv(.C) noreturn {
             \\hlt
         );
     }
-
-
-    //write_message("End of bootloader\n");
-    //loop();
 }

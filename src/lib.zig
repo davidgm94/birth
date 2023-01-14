@@ -257,23 +257,32 @@ pub const FileParser = struct {
     };
 
     pub fn next(parser: *FileParser) !?File {
-        while (parser.index < parser.text.len) {
+        while (parser.index < parser.text.len and parser.text[parser.index] != '}') {
             try parser.expect_char('.');
             try parser.expect_char('{');
 
-            while (parser.index < parser.text.len and parser.text[parser.index] != '}') {
+            if (parser.index < parser.text.len and parser.text[parser.index] != '}') {
                 const host_field = try parser.parse_field("host");
                 const guest_field = try parser.parse_field("guest");
+                try parser.expect_char('}');
+                parser.maybe_expect_char(',');
+                parser.skip_space();
+
                 return .{
                     .host = host_field,
-                    .guest = guest_field,
+                        .guest = guest_field,
                 };
+            } else {
+                @panic("WTF");
             }
 
-            try parser.expect_char('}');
         }
 
         return null;
+    }
+
+    inline fn consume(parser: *FileParser) void {
+        parser.index += 1;
     }
 
     fn parse_field(parser: *FileParser, field: []const u8) ![]const u8 {
@@ -291,23 +300,26 @@ pub const FileParser = struct {
             const char = parser.text[parser.index];
             const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
             if (!is_space) break;
-            parser.index += 1;
+            parser.consume();
         }
     }
 
     pub fn maybe_expect_char(parser: *FileParser, char: u8) void {
         parser.skip_space();
-        if (parser.text[parser.index] == char) parser.index += 1;
+        if (parser.text[parser.index] == char) {
+            parser.consume();
+        }
     }
 
     pub fn expect_char(parser: *FileParser, expected_char: u8) !void {
         parser.skip_space();
         const char = parser.text[parser.index];
         if (char != expected_char) {
-            common.log.debug("Expected {c}, got: {c}", .{expected_char, char});
+            common.log.debug("Expected character '{c}', got: '{c}', 0x{x}", .{expected_char, char, char});
             return Error.err;
         }
-        parser.index += 1;
+
+        parser.consume();
     }
 
     pub fn expect_string(parser: *FileParser, string: []const u8) !void {
@@ -315,7 +327,11 @@ pub const FileParser = struct {
         if (!common.equal(u8, parser.text[parser.index..][0..string.len], string)) {
             return Error.err;
         }
-        parser.index += string.len;
+
+        for (string) |_, index| {
+            _ = index;
+        parser.consume();
+        }
     }
 
     pub fn expect_quoted_string(parser: *FileParser) ![]const u8 {
@@ -323,7 +339,7 @@ pub const FileParser = struct {
         try parser.expect_char('"');
         const start_index = parser.index;
         while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
-            parser.index += 1;
+            parser.consume();
         }
         const end_index = parser.index;
         try parser.expect_char('"');

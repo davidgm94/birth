@@ -10,16 +10,16 @@ SECTIONS {
     loader_start = .;
     .text . : {
         *(.text*)
-  }:text
-  . = ALIGN(0x10);
-  .rodata . : {
-      *(.rodata*)
-  }:rodata
-  . = ALIGN(0x10);
-  .data . : {
-      *(.data*)
-          *(.bss*)
-  }:data
-  . = ALIGN(0x10);
-  loader_end = .;
+    }:text
+    . = ALIGN(0x10);
+    .rodata . : {
+        *(.rodata*)
+    }:rodata
+    . = ALIGN(0x10);
+    .data . : {
+        *(.data*)
+        *(.bss*)
+    }:data
+    . = ALIGN(0x10);
+    loader_end = .;
 }

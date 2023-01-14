@@ -26,7 +26,7 @@ const cr3 = privileged.arch.x86_64.registers.cr3;
 
 const higher_half_entry_index = 512 / 2;
 
-pub const Specific = struct {
+pub const Specific = extern struct {
     cr3: cr3 = undefined,
 
     pub fn format(specific: Specific, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -399,7 +399,7 @@ const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
-pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
+pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) privileged.ArchVirtualAddressSpace(.x86_64) {
     const pml4_physical_region = allocation_region.take_slice(@sizeOf(PML4Table));
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
     const pml4_entries = switch (lib.os) {
@@ -420,13 +420,10 @@ pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualA
         };
     }
 
-    return VirtualAddressSpace{
+    return .{
         .arch = .{
             .cr3 = cr3.from_address(pml4_physical_region.address),
         },
-        .privileged = true,
-        .owner = .kernel,
-        //.heap = Heap{},
     };
 }
 

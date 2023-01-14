@@ -34,6 +34,185 @@ const CPU = privileged.arch.CPU;
 const GDT = privileged.arch.x86_64.GDT;
 const paging = privileged.arch.paging;
 
+
+pub fn file_to_higher_half(file: []const u8) []const u8 {
+    var result = file;
+    result.ptr = file.ptr + common.config.kernel_higher_half_address;
+    return result;
+}
+
+extern const kernel_trampoline_start: *volatile u8;
+extern const kernel_trampoline_end: *volatile u8;
+
+extern fn load_kernel(bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: privileged.arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *privileged.arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
+comptime {
+    asm (
+        \\.intel_syntax noprefix
+        \\.global load_kernel
+        \\.global kernel_trampoline_start
+        \\.global kernel_trampoline_end
+        \\kernel_trampoline_start:
+        \\load_kernel:
+        \\mov cr3, rdx
+        \\lgdt [r8]
+        \\mov rsp, rcx
+        \\mov rax, 0x10
+        \\mov ds, rax
+        \\mov es, rax
+        \\mov fs, rax
+        \\mov gs, rax
+        \\mov ss, rax
+        \\call set_cs
+        \\xor rbp, rbp
+        \\jmp rsi
+        \\set_cs:
+        \\pop rax
+        \\push 0x08
+        \\push rax
+        \\retfq
+        \\kernel_trampoline_end:
+    );
+
+    assert(@offsetOf(GDT.Table, "code_64") == 0x08);
+    assert(@offsetOf(GDT.Table, "data_64") == 0x10);
+}
+
+pub const log_level = common.std.log.Level.debug;
+
+pub fn log(comptime level: common.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+    switch (common.cpu.arch) {
+        .x86_64 => {
+            if (config.real_hardware) {
+                var buffer: [4096]u8 = undefined;
+                const formatted_buffer = common.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\n", args) catch unreachable;
+
+                for (formatted_buffer) |c| {
+                    const fake_c = [2]u16{ c, 0 };
+                    _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
+                }
+            } else {
+                debug_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+            }
+        },
+        else => @compileError("Unsupported CPU architecture"),
+    }
+}
+
+pub fn panic(message: []const u8, _: ?*common.std.builtin.StackTrace, _: ?usize) noreturn {
+    UEFI.panic("{s}", .{message});
+}
+
+fn flush_new_line() !void {
+    switch (common.cpu.arch) {
+        .x86_64 => {
+            if (!config.real_hardware) {
+                try debug_writer.writeByte('\n');
+            }
+        },
+        else => @compileError("arch not supported"),
+    }
+}
+
+const MemoryManager = struct {
+    map: MemoryMap,
+    size_counters: MemoryMap.SizeCounters = .{},
+    allocator: CustomAllocator = .{
+        .callback_allocate = physical_allocate,
+        .callback_resize = physical_resize,
+        .callback_free = physical_free,
+    },
+
+    fn allocate(memory_manager: *MemoryManager, number_of_4k_pages: usize) !usize {
+        var it = memory_manager.map.iterator();
+        var index: usize = 0;
+        while (it.next(memory_manager.map)) |entry| {
+            if (entry.type == .ConventionalMemory) {
+                defer index += 1;
+
+                const number_of_page_offset = memory_manager.size_counters.counters[index];
+                if (entry.number_of_pages - number_of_page_offset >= number_of_4k_pages) {
+                    const address = entry.physical_start + (number_of_page_offset << UEFI.page_shifter);
+                    memory_manager.size_counters.counters[index] += @intCast(u32, number_of_4k_pages);
+                    return address;
+                }
+            }
+        }
+
+        return PhysicalError.oom;
+    }
+
+    pub fn generate_size_counters(memory_manager: *MemoryManager) void {
+        var memory_map_iterator = memory_manager.map.iterator();
+        var conventional_entry_count: u32 = 0;
+
+        while (memory_map_iterator.next(memory_manager.map)) |entry| {
+            conventional_entry_count += @boolToInt(entry.type == .ConventionalMemory);
+        }
+
+        const size_to_allocate_memory_map_size_counters = conventional_entry_count * @sizeOf(u32);
+
+        var conventional_memory_index: u32 = 0;
+        memory_map_iterator.reset();
+
+        while (memory_map_iterator.next(memory_manager.map)) |entry| {
+            if (entry.type == .ConventionalMemory) {
+                defer conventional_memory_index += 1;
+                if (entry.number_of_pages << UEFI.page_shifter > size_to_allocate_memory_map_size_counters) {
+                    const index = conventional_memory_index;
+                    const counters = @intToPtr([*]u32, entry.physical_start)[0..conventional_entry_count];
+                    common.std.mem.set(u32, counters, 0);
+                    counters[index] = size_to_allocate_memory_map_size_counters;
+
+                    memory_manager.size_counters = .{
+                        .counters = counters,
+                    };
+                    return;
+                }
+            }
+        }
+
+        @panic("Unable to allocate memory counters");
+    }
+};
+
+// This is only meant to allocate page tables
+fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
+    const memory_manager = @fieldParentPtr(MemoryManager, "allocator", allocator);
+    if (alignment != common.arch.valid_page_sizes[0]) {
+        @panic("wrong alignment");
+    }
+    if (!common.is_aligned(size, common.arch.valid_page_sizes[0])) {
+        @panic("wrong alignment");
+    }
+    // todo: better define types
+    const allocation = memory_manager.allocate(size >> UEFI.page_shifter) catch return CustomAllocator.Error.OutOfMemory;
+    return CustomAllocator.Result{
+        .address = allocation,
+        .size = size,
+    };
+}
+
+fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
+    _ = allocator;
+    _ = old_memory;
+    _ = old_alignment;
+    _ = new_size;
+    @panic("todo physical_resize");
+}
+
+fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
+    _ = allocator;
+    _ = memory;
+    _ = alignment;
+    @panic("todo physical_free");
+}
+
+const PhysicalError = error{
+    oom,
+};
+
 pub fn main() noreturn {
     const system_table = UEFI.get_system_table();
     const handle = UEFI.get_handle();
@@ -229,6 +408,7 @@ pub fn main() noreturn {
             true => .local,
             false => .global,
         };
+
         switch (core_locality) {
             inline else => |locality| paging.bootstrap_map(&kernel_address_space, locality, PhysicalAddress(locality).new(physical_address_value), VirtualAddress(locality).new(virtual_address_value), aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment"),
         }
@@ -302,181 +482,3 @@ pub fn main() noreturn {
 
     load_kernel(bootloader_information.to_higher_half_virtual_address().access(*BootloaderInformation), entry_point, kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
 }
-
-pub fn file_to_higher_half(file: []const u8) []const u8 {
-    var result = file;
-    result.ptr = file.ptr + common.config.kernel_higher_half_address;
-    return result;
-}
-
-extern const kernel_trampoline_start: *volatile u8;
-extern const kernel_trampoline_end: *volatile u8;
-
-extern fn load_kernel(bootloader_information: *BootloaderInformation, kernel_start_address: u64, cr3: privileged.arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *privileged.arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
-comptime {
-    asm (
-        \\.intel_syntax noprefix
-        \\.global load_kernel
-        \\.global kernel_trampoline_start
-        \\.global kernel_trampoline_end
-        \\kernel_trampoline_start:
-        \\load_kernel:
-        \\mov cr3, rdx
-        \\lgdt [r8]
-        \\mov rsp, rcx
-        \\mov rax, 0x10
-        \\mov ds, rax
-        \\mov es, rax
-        \\mov fs, rax
-        \\mov gs, rax
-        \\mov ss, rax
-        \\call set_cs
-        \\xor rbp, rbp
-        \\jmp rsi
-        \\set_cs:
-        \\pop rax
-        \\push 0x08
-        \\push rax
-        \\retfq
-        \\kernel_trampoline_end:
-    );
-
-    assert(@offsetOf(GDT.Table, "code_64") == 0x08);
-    assert(@offsetOf(GDT.Table, "data_64") == 0x10);
-}
-
-pub const log_level = common.std.log.Level.debug;
-
-pub fn log(comptime level: common.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    switch (common.cpu.arch) {
-        .x86_64 => {
-            if (config.real_hardware) {
-                var buffer: [4096]u8 = undefined;
-                const formatted_buffer = common.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\n", args) catch unreachable;
-
-                for (formatted_buffer) |c| {
-                    const fake_c = [2]u16{ c, 0 };
-                    _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
-                }
-            } else {
-                debug_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
-            }
-        },
-        else => @compileError("Unsupported CPU architecture"),
-    }
-}
-
-pub fn panic(message: []const u8, _: ?*common.std.builtin.StackTrace, _: ?usize) noreturn {
-    UEFI.panic("{s}", .{message});
-}
-
-fn flush_new_line() !void {
-    switch (common.cpu.arch) {
-        .x86_64 => {
-            if (!config.real_hardware) {
-                try debug_writer.writeByte('\n');
-            }
-        },
-        else => @compileError("arch not supported"),
-    }
-}
-
-const MemoryManager = struct {
-    map: MemoryMap,
-    size_counters: MemoryMap.SizeCounters = .{},
-    allocator: CustomAllocator = .{
-        .callback_allocate = physical_allocate,
-        .callback_resize = physical_resize,
-        .callback_free = physical_free,
-    },
-
-    fn allocate(memory_manager: *MemoryManager, number_of_4k_pages: usize) !usize {
-        var it = memory_manager.map.iterator();
-        var index: usize = 0;
-        while (it.next(memory_manager.map)) |entry| {
-            if (entry.type == .ConventionalMemory) {
-                defer index += 1;
-
-                const number_of_page_offset = memory_manager.size_counters.counters[index];
-                if (entry.number_of_pages - number_of_page_offset >= number_of_4k_pages) {
-                    const address = entry.physical_start + (number_of_page_offset << UEFI.page_shifter);
-                    memory_manager.size_counters.counters[index] += @intCast(u32, number_of_4k_pages);
-                    return address;
-                }
-            }
-        }
-
-        return PhysicalError.oom;
-    }
-
-    pub fn generate_size_counters(memory_manager: *MemoryManager) void {
-        var memory_map_iterator = memory_manager.map.iterator();
-        var conventional_entry_count: u32 = 0;
-
-        while (memory_map_iterator.next(memory_manager.map)) |entry| {
-            conventional_entry_count += @boolToInt(entry.type == .ConventionalMemory);
-        }
-
-        const size_to_allocate_memory_map_size_counters = conventional_entry_count * @sizeOf(u32);
-
-        var conventional_memory_index: u32 = 0;
-        memory_map_iterator.reset();
-
-        while (memory_map_iterator.next(memory_manager.map)) |entry| {
-            if (entry.type == .ConventionalMemory) {
-                defer conventional_memory_index += 1;
-                if (entry.number_of_pages << UEFI.page_shifter > size_to_allocate_memory_map_size_counters) {
-                    const index = conventional_memory_index;
-                    const counters = @intToPtr([*]u32, entry.physical_start)[0..conventional_entry_count];
-                    common.std.mem.set(u32, counters, 0);
-                    counters[index] = size_to_allocate_memory_map_size_counters;
-
-                    memory_manager.size_counters = .{
-                        .counters = counters,
-                    };
-                    return;
-                }
-            }
-        }
-
-        @panic("Unable to allocate memory counters");
-    }
-};
-
-// This is only meant to allocate page tables
-fn physical_allocate(allocator: *CustomAllocator, size: u64, alignment: u64) CustomAllocator.Error!CustomAllocator.Result {
-    const memory_manager = @fieldParentPtr(MemoryManager, "allocator", allocator);
-    if (alignment != common.arch.valid_page_sizes[0]) {
-        @panic("wrong alignment");
-    }
-    if (!common.is_aligned(size, common.arch.valid_page_sizes[0])) {
-        @panic("wrong alignment");
-    }
-    // todo: better define types
-    const allocation = memory_manager.allocate(size >> UEFI.page_shifter) catch return CustomAllocator.Error.OutOfMemory;
-    return CustomAllocator.Result{
-        .address = allocation,
-        .size = size,
-    };
-}
-
-fn physical_resize(allocator: *CustomAllocator, old_memory: []u8, old_alignment: u29, new_size: usize) ?usize {
-    _ = allocator;
-    _ = old_memory;
-    _ = old_alignment;
-    _ = new_size;
-    @panic("todo physical_resize");
-}
-
-fn physical_free(allocator: *CustomAllocator, memory: []u8, alignment: u29) void {
-    _ = allocator;
-    _ = memory;
-    _ = alignment;
-    @panic("todo physical_free");
-}
-
-const PhysicalError = error{
-    oom,
-};

@@ -44,21 +44,21 @@ pub const Header = extern struct {
         return @divExact(disk.sector_size, header.partition_entry_size);
     }
 
-    pub fn format(header: *const Header, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try lib.internal_format(writer, "GPT header:\n", .{});
-        try lib.internal_format(writer, "\tSignature: {s}\n", .{header.signature});
-        try lib.internal_format(writer, "\tRevision: {any}\n", .{header.revision});
-        try lib.internal_format(writer, "\tHeader size: {}\n", .{header.header_size});
-        try lib.internal_format(writer, "\tHeader CRC32: 0x{x}\n", .{header.header_crc32});
-        try lib.internal_format(writer, "\tHeader LBA: 0x{x}\n", .{header.header_lba});
-        try lib.internal_format(writer, "\tAlternate header LBA: 0x{x}\n", .{header.backup_lba});
-        try lib.internal_format(writer, "\tFirst usable LBA: 0x{x}\n", .{header.first_usable_lba});
-        try lib.internal_format(writer, "\tLast usable LBA: 0x{x}\n", .{header.last_usable_lba});
-        try lib.internal_format(writer, "\tDisk GUID: {}\n", .{header.disk_guid});
-        try lib.internal_format(writer, "\tPartition array LBA: 0x{x}\n", .{header.partition_array_lba});
-        try lib.internal_format(writer, "\tPartition entry count: {}\n", .{header.partition_entry_count});
-        try lib.internal_format(writer, "\tPartition entry size: {}\n", .{header.partition_entry_size});
-        try lib.internal_format(writer, "\tPartition array CRC32: 0x{x}\n", .{header.partition_array_crc32});
+    pub fn format(header: *const Header, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.format(writer, "GPT header:\n", .{});
+        try lib.format(writer, "\tSignature: {s}\n", .{header.signature});
+        try lib.format(writer, "\tRevision: {any}\n", .{header.revision});
+        try lib.format(writer, "\tHeader size: {}\n", .{header.header_size});
+        try lib.format(writer, "\tHeader CRC32: 0x{x}\n", .{header.header_crc32});
+        try lib.format(writer, "\tHeader LBA: 0x{x}\n", .{header.header_lba});
+        try lib.format(writer, "\tAlternate header LBA: 0x{x}\n", .{header.backup_lba});
+        try lib.format(writer, "\tFirst usable LBA: 0x{x}\n", .{header.first_usable_lba});
+        try lib.format(writer, "\tLast usable LBA: 0x{x}\n", .{header.last_usable_lba});
+        try lib.format(writer, "\tDisk GUID: {}\n", .{header.disk_guid});
+        try lib.format(writer, "\tPartition array LBA: 0x{x}\n", .{header.partition_array_lba});
+        try lib.format(writer, "\tPartition entry count: {}\n", .{header.partition_entry_count});
+        try lib.format(writer, "\tPartition entry size: {}\n", .{header.partition_entry_size});
+        try lib.format(writer, "\tPartition array CRC32: 0x{x}\n", .{header.partition_array_crc32});
     }
 
     pub fn compare(header: *const Header, other: *align(1) const Header) void {
@@ -120,7 +120,7 @@ pub const Header = extern struct {
                 }
             }
 
-            @panic("WTF");
+            @panic("todo: get_free_partition_slot");
         }
 
         pub fn get_partition_index(cache: Cache, partition: *GPT.Partition) u32 {
@@ -163,7 +163,7 @@ pub const Header = extern struct {
             try update_partition_entry(cache, new_partition_entry, GPT.Partition{
                 .partition_type_guid = switch (filesystem) {
                     .fat32 => efi_guid,
-                    else => @panic("WTF"),
+                    else => @panic("unexpected filesystem"),
                 },
                 .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
                 .first_lba = lba_start,
@@ -187,9 +187,10 @@ pub const Header = extern struct {
             const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, allocator, .{});
             const primary_gpt_header_lba = mbr_lba + 1;
             const gpt_header = try disk.read_typed_sectors(GPT.Header, primary_gpt_header_lba, allocator, .{});
+            if (gpt_header.partition_entry_count == 0) @panic("No GPT partition entries");
             assert(gpt_header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = try disk.read_slice(GPT.Partition, gpt_header.partition_entry_count, gpt_header.partition_array_lba, allocator, .{});
-
+            log.debug("GPT header: 0x{x}. Partition entries: 0x{x}", .{@ptrToInt(gpt_header), @ptrToInt(partition_entries.ptr)});
             return .{
                 .mbr = mbr,
                 .header = gpt_header,
@@ -259,7 +260,7 @@ pub const Partition = extern struct {
                 };
             }
 
-            @panic("WTF");
+            @panic("todo: fromPartitionIndex");
         }
 
         pub fn format(gpt_partition_cache: GPT.Partition.Cache, comptime filesystem: Filesystem.Type, copy_cache: ?FilesystemCacheTypes[@enumToInt(filesystem)]) !FilesystemCacheTypes[@enumToInt(filesystem)] {
@@ -300,14 +301,14 @@ pub const Partition = extern struct {
         }
     }
 
-    pub fn format(partition: *const Partition, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try lib.internal_format(writer, "GPT partition:\n", .{});
-        try lib.internal_format(writer, "\tPartition type GUID: {}\n", .{partition.partition_type_guid});
-        try lib.internal_format(writer, "\tUnique partition GUID: {}\n", .{partition.unique_partition_guid});
-        try lib.internal_format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
-        try lib.internal_format(writer, "\tLast LBA: 0x{x}\n", .{partition.last_lba});
-        try lib.internal_format(writer, "\tAttributes: {}\n", .{partition.attributes});
-        try lib.internal_format(writer, "\tPartition name: {}\n", .{lib.std.unicode.fmtUtf16le(&partition.partition_name)});
+    pub fn format(partition: *const Partition, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try lib.format(writer, "GPT partition:\n", .{});
+        try lib.format(writer, "\tPartition type GUID: {}\n", .{partition.partition_type_guid});
+        try lib.format(writer, "\tUnique partition GUID: {}\n", .{partition.unique_partition_guid});
+        try lib.format(writer, "\tFirst LBA: 0x{x}\n", .{partition.first_lba});
+        try lib.format(writer, "\tLast LBA: 0x{x}\n", .{partition.last_lba});
+        try lib.format(writer, "\tAttributes: {}\n", .{partition.attributes});
+        try lib.format(writer, "\tPartition name: {}\n", .{lib.std.unicode.fmtUtf16le(&partition.partition_name)});
     }
 };
 

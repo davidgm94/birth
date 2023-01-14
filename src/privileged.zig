@@ -16,12 +16,62 @@ pub const ELF = @import("privileged/elf.zig");
 pub const Executable = @import("privileged/executable.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const UEFI = @import("privileged/uefi.zig");
-pub const VirtualAddressSpace = @import("privileged/virtual_address_space.zig");
+pub const VirtualAddressSpace = ArchVirtualAddressSpace(lib.cpu.arch);
 pub const scheduler_type = SchedulerType.round_robin;
 pub const Scheduler = switch (scheduler_type) {
     .round_robin => @import("privileged/round_robin.zig"),
     else => @compileError("other scheduler is not supported right now"),
 };
+
+
+pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arch) type {
+    const paging = switch (desired_architecture) {
+        .x86 => arch.x86.paging,
+            .x86_64 => arch.x86_64.paging,
+            else => @compileError("error: paging"),
+    };
+
+    return extern struct {
+        const VAS = @This();
+
+        pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
+        pub fn kernel_bsp(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
+            return paging.init_kernel_bsp(physical_memory_region);
+        }
+        pub fn user(physical_address_space: *PhysicalAddressSpace) VirtualAddressSpace {
+            // TODO: defer memory free when this produces an error
+            // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
+            var virtual_address_space = VirtualAddressSpace{
+                .arch = undefined,
+            };
+
+            paging.init_user(&virtual_address_space, physical_address_space);
+
+            return virtual_address_space;
+        }
+        pub inline fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
+            paging.make_current(virtual_address_space);
+        }
+
+        pub const Flags = packed struct {
+write: bool = false,
+           cache_disable: bool = false,
+           global: bool = false,
+           execute: bool = false,
+           user: bool = false,
+
+           pub inline fn empty() Flags {
+               return .{};
+           }
+
+       pub inline fn to_arch_specific(flags: Flags, comptime locality: CoreLocality) paging.MemoryFlags {
+           return paging.new_flags(flags, locality);
+       }
+        };
+
+arch: paging.Specific,
+    };
+}
 
 const E9WriterError = error{};
 pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
@@ -158,11 +208,12 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
         pub fn is_valid(physical_address: PA) bool {
             if (physical_address == PA.null) return false;
 
-            assert(arch.max_physical_address_bit != 0);
-            const max = @as(u64, 1) << arch.max_physical_address_bit;
-            assert(max > maxInt(u32));
-
-            return physical_address.value() <= max;
+            if (arch.max_physical_address_bit != 0) {
+                const max = @as(u64, 1) << arch.max_physical_address_bit;
+                return physical_address.value() <= max;
+            } else {
+                return true;
+            }
         }
 
         pub fn value(physical_address: PA) u64 {
@@ -228,8 +279,8 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
             return @intToEnum(PhysicalAddress(.local), @enumToInt(physical_address));
         }
 
-        pub fn format(physical_address: PA, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-            try lib.internal_format(writer, "0x{x}", .{physical_address.value()});
+        pub fn format(physical_address: PA, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+            try lib.format(writer, "0x{x}", .{physical_address.value()});
         }
     };
 }
@@ -635,18 +686,24 @@ pub const MemoryManager = struct {
                 .uefi => UEFI.MemoryDescriptor,
             };
 
-            fn entry_size(entry: anytype) u64 {
-                return switch (@TypeOf(entry)) {
-                    BIOS.MemoryMapEntry => entry.len,
-                    UEFI.MemoryDescriptor => entry.number_of_pages * lib.arch.valid_page_sizes[0],
-                    else => @compileError("Type not admitted"),
-                };
-            }
+            const GenericEntry = extern struct {
+                address: u64,
+                size: u64,
+                usable: bool,
+            };
 
-            fn entry_address(entry: anytype) u64 {
+            fn get_generic_entry(entry: anytype) GenericEntry {
                 return switch (@TypeOf(entry)) {
-                    BIOS.MemoryMapEntry => entry.base,
-                    UEFI.MemoryDescriptor => entry.physical_start,
+                    BIOS.MemoryMapEntry => .{
+                        .address = entry.base,
+                        .size = entry.len,
+                        .usable = entry.base >= 1 * lib.mb,
+                    },
+                    UEFI.MemoryDescriptor => .{
+                        .address = entry.physical_start,
+                        .size = entry.number_of_pages * lib.arch.valid_page_sizes[0],
+                        .usable = @panic("UEFI usable"),
+                    },
                     else => @compileError("Type not admitted"),
                 };
             }
@@ -667,13 +724,10 @@ pub const MemoryManager = struct {
                 const entries = memory_map.region.access(EntryType);
 
                 for (entries) |entry, entry_index| {
-                    const memory_map_entry_size = entry_size(entry);
-                    const memory_map_entry_address = entry_address(entry);
-
-                    if (memory_map_entry_address > lib.maxInt(usize)) @panic("Address higher");
-                    if (memory_map_entry_address >= 1 * lib.mb and memory_map_entry_size > size_counters_size) {
+                    const generic_entry = get_generic_entry(entry);
+                    if (generic_entry.usable and generic_entry.size > size_counters_size + (if (entry_index == bootstrap_index) aligned_memory_map_size else 0)) {
                         const offset = if (bootstrap_index == entry_index) aligned_memory_map_size else 0;
-                        const size_counters = @intToPtr([*]u64, @intCast(usize, memory_map_entry_address + offset))[0..@intCast(usize, entry_count)];
+                        const size_counters = @intToPtr([*]u64, @intCast(usize, generic_entry.address + offset))[0..@intCast(usize, entry_count)];
                         size_counters[bootstrap_index] += @divExact(aligned_memory_map_size, lib.arch.valid_page_sizes[0]);
                         size_counters[entry_index] += @divExact(lib.alignForward(@intCast(usize, size_counters_size), lib.arch.valid_page_sizes[0]), lib.arch.valid_page_sizes[0]);
 
@@ -692,21 +746,29 @@ pub const MemoryManager = struct {
 
             pub fn allocate(memory_manager: MemoryManager, asked_size: u64, asked_alignment: u64) !PhysicalMemoryRegion(.global) {
                 // TODO: satisfy alignment
-                _ = asked_alignment;
-                if (asked_size % lib.arch.valid_page_sizes[0] != 0) @panic("not page-aligned allocate");
+                if (asked_size % lib.arch.valid_page_sizes[0] != 0) {
+                    log.debug("asked_size: 0x{x}", .{asked_size});
+                    @panic("not page-aligned allocate");
+                }
                 const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
 
                 const entries = Interface(loader_protocol).get_entries(memory_manager);
                 for (entries) |entry, entry_index| {
-                    const address = entry_address(entry);
-                    const size = entry_size(entry);
-                    if (address > 1 * lib.mb and size > asked_size) {
+                    const generic_entry = get_generic_entry(entry);
+                    const busy_size = memory_manager.size_counters[entry_index] * lib.arch.valid_page_sizes[0];
+                    const size_left = generic_entry.size - busy_size; 
+
+                    if (generic_entry.usable and size_left > asked_size) {
+                        if (generic_entry.address % asked_alignment != 0) @panic("WTF alignment");
+
+                        const result = .{
+                            .address = PhysicalAddress(.global).maybe_invalid(generic_entry.address).offset(busy_size),
+                            .size = asked_size,
+                        };
+
                         memory_manager.size_counters[entry_index] += four_kb_pages;
 
-                        return .{
-                            .address = PhysicalAddress(.global).new(address),
-                            .size = size,
-                        };
+                        return result;
                     }
                 }
 
@@ -734,7 +796,7 @@ pub const PhysicalHeap = extern struct {
             if (region.size > size) {
                 const result = .{
                     .address = region.address.value(),
-                    .size = region.size,
+                    .size = size,
                 };
                 region.size -= size;
                 region.address.add_offset(size);
@@ -752,14 +814,15 @@ pub const PhysicalHeap = extern struct {
                 };
                 const result = .{
                     .address = region.address.value(),
-                    .size = region.size,
+                    .size = size,
                 };
+                log.debug("result: {}", .{result});
                 region.address.add_offset(size);
                 region.size -= size;
                 return result;
             }
         }
 
-        @panic("WTF");
+        @panic("todo: allocate");
     }
 };
