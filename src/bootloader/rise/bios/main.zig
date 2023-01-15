@@ -102,7 +102,12 @@ export fn _start() callconv(.C) noreturn {
         break :blk LongModeVirtualAddressSpace.kernel_bsp(kernel_address_space_physical_region);
     };
 
-    _ = kernel_address_space;
+// pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
+    for (memory_map_entries) |entry, entry_index| {
+        log.debug("mapping entry {}...", .{entry_index});
+        const physical_address = PhysicalAddress(.global).maybe_invalid(entry.base);
+        LongModeVirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, physical_address, physical_address.to_identity_mapped_virtual_address(), entry.len, .{ .write = true, .execute = true }, physical_heap.page_allocator) catch @panic("mapping failed");
+    }
 
     while (true) {
         writer.writeAll("loader is nicely loaded\n") catch unreachable;

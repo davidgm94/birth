@@ -1548,7 +1548,7 @@ test "Basic FAT32 image" {
             };
 
             const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
-            const original_fat_cache = try FAT32.Cache.from_gpt_partition_cache(wrapped_allocator.unwrap(), original_gpt_cache, null);
+            const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache, null);
 
             const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
             const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);

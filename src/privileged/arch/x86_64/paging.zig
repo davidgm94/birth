@@ -1,7 +1,10 @@
 const lib = @import("lib");
 const alignForward = lib.alignForward;
+const alignForwardGeneric = lib.alignForwardGeneric;
 const alignBackward = lib.alignBackward;
+const alignBackwardGeneric = lib.alignBackwardGeneric;
 const isAligned = lib.isAligned;
+const isAlignedGeneric = lib.isAlignedGeneric;
 const assert = lib.assert;
 const copy = lib.copy;
 const enumCount = lib.enumCount;
@@ -16,11 +19,12 @@ const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.VirtualAddressSpace;
+const VirtualAddressSpace = privileged.ArchVirtualAddressSpace(.x86_64);
 const TranslationResult = VirtualAddressSpace.TranslationResult;
 
-const valid_page_sizes = lib.arch.valid_page_sizes;
-const reverse_valid_page_sizes = lib.arch.reverse_valid_page_sizes;
+const arch = lib.arch.x86_64;
+const valid_page_sizes = arch.valid_page_sizes;
+const reverse_valid_page_sizes = arch.reverse_valid_page_sizes;
 
 const cr3 = privileged.arch.x86_64.registers.cr3;
 
@@ -46,8 +50,6 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
         inline for (reverse_valid_page_sizes) |reverse_page_size, reverse_page_index| {
             if (size >= reverse_page_size) {
-                log.debug("Trying to map with page size 0x{x}", .{reverse_page_size});
-
                 const is_smallest_page_size = reverse_page_index == reverse_valid_page_sizes.len - 1;
 
                 if (is_smallest_page_size) {
@@ -63,7 +65,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
                     break;
                 } else {
-                    const aligned_page_address = alignForward(asked_virtual_address, reverse_page_size);
+                    const aligned_page_address = alignForwardGeneric(u64, asked_virtual_address, reverse_page_size);
                     const prologue_misalignment = aligned_page_address - asked_virtual_address;
                     const aligned_size_left = size - prologue_misalignment;
 
@@ -74,8 +76,8 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
                         const virtual_address = aligned_page_address;
                         const physical_address = asked_physical_address + prologue_misalignment;
-                        const this_page_top_physical_address = alignBackward(physical_address + aligned_size_left, reverse_page_size);
-                        const this_page_top_virtual_address = alignBackward(virtual_address + aligned_size_left, reverse_page_size);
+                        const this_page_top_physical_address = alignBackwardGeneric(u64, physical_address + aligned_size_left, reverse_page_size);
+                        const this_page_top_virtual_address = alignBackwardGeneric(u64, virtual_address + aligned_size_left, reverse_page_size);
                         const this_huge_page_size = this_page_top_virtual_address - virtual_address;
                         try map_generic(vas_cr3, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
 
@@ -112,11 +114,10 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
         assert(isAligned(asked_physical_address.value, valid_page_sizes[0]));
     }
 
-    log.debug("Trying to map 0x{x} bytes from {} to {}", .{ size, asked_physical_address, asked_virtual_address });
     try map_function(vas_cr3, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
 }
 
-pub fn map_current(asked_physical_address: usize, asked_virtual_address: usize, size: usize, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
+pub fn map_current(asked_physical_address: u64, asked_virtual_address: u64, size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     const flags = general_flags.to_arch_specific(.global);
     const vas_cr3 = cr3.read();
 
@@ -124,7 +125,7 @@ pub fn map_current(asked_physical_address: usize, asked_virtual_address: usize, 
     try map_generic(vas_cr3, asked_physical_address, asked_virtual_address, size, valid_page_sizes[0], flags, physical_allocator);
 }
 
-pub fn context_switch(vas_cr3_int: usize) void {
+pub fn context_switch(vas_cr3_int: u64) void {
     const vas_cr3 = @bitCast(cr3, vas_cr3_int);
     vas_cr3.write();
 }
@@ -139,14 +140,14 @@ fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
     _ = reverse_index;
 
     if (true) {
-        if (!isAligned(asked_physical_address, asked_page_size)) {
+        if (!isAlignedGeneric(u64, asked_physical_address, asked_page_size)) {
             log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
             @panic("Misalignment");
         }
-        if (!isAligned(asked_virtual_address, asked_page_size)) {
+        if (!isAlignedGeneric(u64, asked_virtual_address, asked_page_size)) {
             @panic("wtf 2");
         }
-        if (!isAligned(size, asked_page_size)) {
+        if (!isAlignedGeneric(u64, size, asked_page_size)) {
             log.debug("Asked size: 0x{x}. Asked page size: 0x{x}", .{ size, asked_page_size });
             @panic("wtf 3");
         }
@@ -223,14 +224,21 @@ fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags:
     try page_tables_map_4_kb_page(p_table, indices, physical_address, flags);
 }
 
+pub fn get_page_table_virtual_address(physical_address: PhysicalAddress(.local)) VirtualAddress(.local) {
+    return switch (lib.cpu.arch) {
+        .x86 => physical_address.to_identity_mapped_virtual_address(),
+        .x86_64 => switch (lib.os) {
+            .freestanding => physical_address.to_higher_half_virtual_address(),
+            .uefi => physical_address.to_identity_mapped_virtual_address(),
+            else => @compileError("OS not supported"),
+        },
+        else => @compileError("Architecture not supported"),
+    };
+}
+
 fn get_pml4_table(cr3_register: cr3) *volatile PML4Table {
     const pml4_physical_address = cr3_register.get_address();
-    const pml4_virtual_address = switch (lib.os) {
-        .freestanding => pml4_physical_address.to_higher_half_virtual_address(),
-        .uefi => pml4_physical_address.to_identity_mapped_virtual_address(),
-        else => @compileError("OS not supported"),
-    };
-
+    const pml4_virtual_address = get_page_table_virtual_address(pml4_physical_address);
     if (lib.config.safe_slow) {
         assert(pml4_virtual_address.is_valid());
     }
@@ -260,11 +268,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (lib.os) {
-        .freestanding => table_physical_address.to_higher_half_virtual_address(),
-        .uefi => table_physical_address.to_identity_mapped_virtual_address(),
-        else => @compileError("OS not supported"),
-    };
+    const table_virtual_address = get_page_table_virtual_address(table_physical_address);
 
     const is_valid = table_virtual_address.is_valid();
     if (!is_valid) {
@@ -298,7 +302,7 @@ fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, ph
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(isAligned(physical_address, valid_page_sizes[2]));
+    assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[2]));
 
     entry_pointer.* = @bitCast(PDPTE, get_page_entry(PDPTE_1GB, physical_address, flags));
 }
@@ -309,7 +313,7 @@ fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, phys
 
     if (entry_value.present) return MapError.already_present;
 
-    assert(isAligned(physical_address, valid_page_sizes[1]));
+    assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[1]));
 
     entry_pointer.* = @bitCast(PDTE, get_page_entry(PDTE_2MB, physical_address, flags));
 }
@@ -319,7 +323,7 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
 
     if (entry_pointer.present) return MapError.already_present;
 
-    assert(isAligned(physical_address, valid_page_sizes[0]));
+    assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[0]));
 
     entry_pointer.* = @bitCast(PTE, get_page_entry(PTE, physical_address, flags));
 }
@@ -350,11 +354,7 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (lib.os) {
-        .freestanding => table_physical_address.to_higher_half_virtual_address(),
-        .uefi => table_physical_address.to_identity_mapped_virtual_address(),
-        else => @compileError("OS not supported"),
-    };
+    const table_virtual_address = get_page_table_virtual_address(table_physical_address);
     if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
     return table_virtual_address.access(*volatile PDTable);
 }
@@ -384,11 +384,7 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
     };
 
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = switch (lib.os) {
-        .freestanding => table_physical_address.to_higher_half_virtual_address(),
-        .uefi => table_physical_address.to_identity_mapped_virtual_address(),
-        else => @compileError("OS not supported"),
-    };
+    const table_virtual_address = get_page_table_virtual_address(table_physical_address);
 
     if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
 
@@ -399,7 +395,7 @@ const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
-pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) privileged.ArchVirtualAddressSpace(.x86_64) {
+pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
     const pml4_physical_region = allocation_region.take_slice(@sizeOf(PML4Table));
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
     const pml4_entries = switch (lib.os) {

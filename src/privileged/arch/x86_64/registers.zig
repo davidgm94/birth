@@ -56,7 +56,7 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn get_address(self: cr3) PhysicalAddress(.local) {
-        return PhysicalAddress(.local).new(@as(usize, self.address) << @bitOffsetOf(cr3, "address"));
+        return PhysicalAddress(.local).new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
     }
 };
 

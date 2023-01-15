@@ -50,6 +50,7 @@ pub const alignForwardGeneric = mem.alignForwardGeneric;
 pub const alignBackward = mem.alignBackward;
 pub const alignBackwardGeneric = mem.alignBackwardGeneric;
 pub const isAligned = mem.isAligned;
+pub const isAlignedGeneric = mem.isAlignedGeneric;
 pub const reverse = mem.reverse;
 
 pub const random = std.rand;

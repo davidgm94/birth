@@ -25,23 +25,22 @@ pub const Scheduler = switch (scheduler_type) {
 
 
 pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arch) type {
-    const paging = switch (desired_architecture) {
-        .x86 => arch.x86.paging,
+    return extern struct {
+        const VAS = @This();
+        pub const paging = switch (desired_architecture) {
+            .x86 => arch.x86.paging,
             .x86_64 => arch.x86_64.paging,
             else => @compileError("error: paging"),
     };
-
-    return extern struct {
-        const VAS = @This();
 
         pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
         pub fn kernel_bsp(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
             return paging.init_kernel_bsp(physical_memory_region);
         }
-        pub fn user(physical_address_space: *PhysicalAddressSpace) VirtualAddressSpace {
+        pub fn user(physical_address_space: *PhysicalAddressSpace) VAS {
             // TODO: defer memory free when this produces an error
             // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
-            var virtual_address_space = VirtualAddressSpace{
+            var virtual_address_space = VAS{
                 .arch = undefined,
             };
 
@@ -49,7 +48,7 @@ pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arc
 
             return virtual_address_space;
         }
-        pub inline fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
+        pub inline fn make_current(virtual_address_space: *const VAS) void {
             paging.make_current(virtual_address_space);
         }
 
@@ -69,7 +68,7 @@ write: bool = false,
        }
         };
 
-arch: paging.Specific,
+        arch: paging.Specific,
     };
 }
 
@@ -765,6 +764,8 @@ pub const MemoryManager = struct {
                             .address = PhysicalAddress(.global).maybe_invalid(generic_entry.address).offset(busy_size),
                             .size = asked_size,
                         };
+
+                        log.debug("page allocation done: (0x{x}, 0x{x})", .{result.address, result.size});
 
                         memory_manager.size_counters[entry_index] += four_kb_pages;
 

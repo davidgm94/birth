@@ -10,4 +10,8 @@ pub fn CPU_stop() noreturn {
     }
 }
 
-pub const paging = struct {};
+pub const paging = struct {
+    pub const Specific = extern struct {
+        foo: u32,
+    };
+};
