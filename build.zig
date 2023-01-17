@@ -268,7 +268,6 @@ const Kernel = struct {
         }
 
         kernel.disk_image_builder_run_step.step.dependOn(&kernel.executable.step);
-        kernel.disk_image_builder_run_step.step.dependOn(kernel.builder.default_step);
     }
 
     const Error = error{

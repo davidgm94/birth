@@ -54,6 +54,7 @@ mov %ss:(.esp), %esp
 sti
 .byte 0xcd
 .interrupt_number: .byte 0
+cli
 
 mov %esp, %ss:(.esp)
 mov %ss:(.out_registers), %esp
@@ -80,6 +81,7 @@ mov %eax, %cr0
 jmp $0x8, $.bits32
 
 err:
+cld
 cli
 hlt
 
@@ -96,6 +98,7 @@ pop %ebp
 pop %edi
 pop %esi
 pop %ebx
+
 
 ret
 

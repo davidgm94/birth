@@ -1031,17 +1031,17 @@ pub const Cache = extern struct {
         return result;
     }
 
-    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, provided_buffer: ?[]const u8, copy_cache: ?FAT32.Cache) !u32 {
+    pub fn allocate_new_directory(cache: Cache, containing_cluster: u32, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache) !u32 {
         var clusters = [1]u32{0};
-        try cache.allocate_clusters(&clusters, provided_buffer);
+        try cache.allocate_clusters(&clusters, allocator);
         const cluster = clusters[0];
         const lba = cache.cluster_to_sector(cluster);
         log.debug("Directory cluster LBA: 0x{x}", .{lba});
-        const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba, provided_buffer);
+        const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba, allocator, .{});
 
         var copy_entry: ?*FAT32.DirectoryEntry = null;
         if (copy_cache) |cp_cache| {
-            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.cluster_to_sector(cluster), null);
+            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.cluster_to_sector(cluster), allocator, .{});
             copy_entry = &entries[0];
         }
         const attributes = Attributes{
@@ -1548,11 +1548,11 @@ test "Basic FAT32 image" {
             };
 
             const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
-            const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache, null);
+            const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache);
 
             const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
             const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
-            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, wrapped_allocator.unwrap(), original_fat_cache);
+            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, original_fat_cache);
 
             for (directories) |directory| {
                 try fat_partition_cache.make_new_directory(directory, null, original_fat_cache);
@@ -1560,7 +1560,7 @@ test "Basic FAT32 image" {
 
             for (files) |file| {
                 log.debug("Commanding to add file {s}", .{file.path});
-                try fat_partition_cache.create_file(file.path, file.content, null, original_fat_cache);
+                try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache);
             }
 
             try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());

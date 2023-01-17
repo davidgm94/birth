@@ -60,7 +60,8 @@ pub const Disk = extern struct {
 
     pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
         const sector_count = @divExact(@sizeOf(T), disk.sector_size);
-        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, try disk.get_provided_buffer(T, 1, allocator, options.force));
+        const provided_buffer = try disk.get_provided_buffer(T, 1, allocator, options.force);
+        const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("Sector count mismatch");
         // Don't need to write back since it's a memory disk
         const result = @ptrCast(*T, @alignCast(@alignOf(T), read_result.buffer));

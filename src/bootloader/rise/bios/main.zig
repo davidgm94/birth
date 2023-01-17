@@ -36,26 +36,27 @@ var bios_disk = BIOS.Disk{
 
 pub const writer = privileged.E9Writer{ .context = {} };
 
-pub const std_options = struct {
-    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        _ = level;
-        _ = scope;
-        writer.print(format, args) catch unreachable;
-        writer.writeByte('\n') catch unreachable;
-    }
-
-    pub const log_level = .debug;
-};
+// pub const std_options = struct {
+//     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+//         _ = level;
+//         _ = scope;
+//         writer.print(format, args) catch unreachable;
+//         writer.writeByte('\n') catch unreachable;
+//     }
+//
+//     pub const log_level = .debug;
+// };
 
 pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
     _ = stack_trace;
     _ = ret_addr;
 
     while (true) {
+        asm volatile("cli");
         writer.writeAll("PANIC: ") catch unreachable;
         writer.writeAll(message) catch unreachable;
         writer.writeByte('\n') catch unreachable;
-        asm volatile ("cli\nhlt");
+        asm volatile ("hlt");
     }
 }
 
@@ -63,6 +64,7 @@ var files: [16]struct { path: []const u8, content: []const u8 } = undefined;
 var file_count: u8 = 0;
 
 export fn _start() callconv(.C) noreturn {
+    writer.writeAll("Hello loader\n") catch unreachable;
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
     const memory_map_result = MemoryMap.fromBIOS(memory_map_entries);
@@ -90,7 +92,7 @@ export fn _start() callconv(.C) noreturn {
         };
         file_count += 1;
     }
-
+    writer.writeAll("Bye loader\n") catch unreachable;
 
     const LongModeVirtualAddressSpace = privileged.ArchVirtualAddressSpace(.x86_64);
     var kernel_address_space = blk: {
