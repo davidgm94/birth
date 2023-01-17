@@ -156,31 +156,29 @@ const Kernel = struct {
                                 try kernel.bootloader_executables.append(bootloader_exe);
                             },
                             .bios => {
-                                const bootloader_exe = kernel.builder.addExecutable("rise.elf", "src/bootloader/rise/bios/main.zig");
-                                bootloader_exe.addAssemblyFile("src/bootloader/rise/bios/bios.S");
-                                bootloader_exe.setTarget(get_target(.x86, false));
-                                bootloader_exe.setOutputDir(cache_dir);
-                                bootloader_exe.addPackage(lib_package);
-                                bootloader_exe.addPackage(privileged_package);
-                                bootloader_exe.setLinkerScriptPath(host.build.FileSource.relative("src/bootloader/rise/bios.ld"));
-                                bootloader_exe.link_gc_sections = true;
-                                bootloader_exe.want_lto = true;
-                                bootloader_exe.strip = true;
-                                bootloader_exe.setBuildMode(.ReleaseSmall);
+                                const stages = [_]comptime_int{1, 2};
 
-                                try kernel.bootloader_executables.append(bootloader_exe);
+                                inline for (stages) |stage| {
+                                    const stage_ascii = [1]u8{'0' + @intCast(u8, stage)};
+                                    const stage_string = "stage" ++ &stage_ascii;
+                                    const stage_path = "src/bootloader/rise/bios/" ++ stage_string ++ "/";
 
-                                const loader_64 = kernel.builder.addExecutable("loader64", "src/bootloader/rise/bios/loader64.zig");
-                                loader_64.setTarget(get_target(.x86_64, false));
-                                loader_64.setOutputDir(cache_dir);
-                                loader_64.addPackage(lib_package);
-                                loader_64.addPackage(privileged_package);
-                                loader_64.link_gc_sections = true;
-                                loader_64.want_lto = true;
-                                loader_64.strip = true;
-                                loader_64.setBuildMode(.ReleaseSmall);
+                                    const executable = kernel.builder.addExecutable(stage_string, stage_path ++ "main.zig");
+                                    executable.addAssemblyFile(stage_path ++ "assembly.S");
+                                    executable.setTarget(get_target(if (stage == 1) .x86 else .x86_64, false));
+                                    executable.setOutputDir(cache_dir);
+                                    executable.addPackage(lib_package);
+                                    executable.addPackage(privileged_package);
+                                    executable.setLinkerScriptPath(host.build.FileSource.relative(stage_path ++ "linker_script.ld"));
+                                    executable.red_zone = false;
+                                    executable.link_gc_sections = true;
+                                    executable.want_lto = true;
+                                    executable.strip = true;
+                                    executable.entry_symbol_name = "entry_point";
+                                    executable.setBuildMode(.ReleaseSmall);
 
-                                try kernel.bootloader_executables.append(loader_64);
+                                    try kernel.bootloader_executables.append(executable);
+                                }
                             },
                         }
                     },

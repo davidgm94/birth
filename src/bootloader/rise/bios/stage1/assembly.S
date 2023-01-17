@@ -81,7 +81,6 @@ mov %eax, %cr0
 jmp $0x8, $.bits32
 
 err:
-cld
 cli
 hlt
 

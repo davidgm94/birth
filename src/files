@@ -1,2 +1,2 @@
+.{ .host = "zig-cache/stage2", .guest = "/STAGE2" },
 .{ .host = "zig-cache/kernel.elf", .guest = "/KERNEL" },
-.{ .host = "zig-cache/loader64", .guest = "/LOADER64" },

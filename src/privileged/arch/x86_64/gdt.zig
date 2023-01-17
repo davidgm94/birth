@@ -33,24 +33,26 @@ pub const Table = extern struct {
         assert(@offsetOf(Table, "tss_descriptor") == entry_count * @sizeOf(Entry));
     }
 
-    pub fn setup(gdt: *Table, offset: u64) void {
-        const descriptor = gdt.fill_with_offset(offset);
+    pub fn setup(gdt: *Table, offset: u64, comptime flush_segment_registers: bool) void {
+        const descriptor = gdt.fill_with_kernel_memory_offset(offset);
         load(descriptor);
 
-        // Flush segments
-        asm volatile (
-            \\xor %%rax, %%rax
-            \\mov %[data_segment_selector], %%rax
-            \\mov %%rax, %%ds
-            \\mov %%rax, %%es
-            \\mov %%rax, %%fs
-            \\mov %%rax, %%gs
-            :
-            : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
-        );
+        if (flush_segment_registers) {
+            // Flush segments
+            asm volatile (
+                    \\xor %%rax, %%rax
+                    \\mov %[data_segment_selector], %%rax
+                    \\mov %%rax, %%ds
+                    \\mov %%rax, %%es
+                    \\mov %%rax, %%fs
+                    \\mov %%rax, %%gs
+                    :
+                    : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
+                    );
+        }
     }
 
-    pub fn fill_with_offset(gdt: *Table, offset: u64) DescriptorTable.Register {
+    pub fn fill_with_kernel_memory_offset(gdt: *Table, offset: u64) DescriptorTable.Register {
         gdt.* = Table{
             .tss_descriptor = undefined, // Leave it undefined until later
         };

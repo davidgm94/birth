@@ -618,7 +618,7 @@ pub fn main() anyerror!void {
                 break :blk;
             }
 
-            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/rise.elf", max_file_length);
+            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/stage1", max_file_length);
             const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
             assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
             try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);

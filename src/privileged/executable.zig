@@ -17,22 +17,10 @@ pub const DetectError = error{
 pub const Format = enum(u8) {
     ELF = 0,
     X = 1,
-
-    pub fn detect(executable_file: []const u8) DetectError!Format {
-        if (ELF.is_valid(executable_file)) {
-            return Format.ELF;
-        }
-
-        return DetectError.unrecognized_format;
-    }
 };
 
 pub fn load_into_kernel_memory(physical_address_space: *PhysicalAddressSpace, file: []const u8) !InKernelMemory {
-    const result = try switch (try Format.detect(file)) {
-        .ELF => ELF.load_into_kernel_memory(physical_address_space, file),
-        else => unreachable,
-    };
-
+    const result = try ELF.load_into_kernel_memory(physical_address_space, file);
     return result;
 }
 

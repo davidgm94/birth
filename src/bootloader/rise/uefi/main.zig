@@ -427,7 +427,7 @@ pub fn main() noreturn {
         const gdt_page_count = 1;
         const gdt_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
         const gdt_descriptor_identity = gdt_physical_address.to_identity_mapped_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
-        gdt_descriptor_identity.* = gdt_physical_address.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_offset(common.config.kernel_higher_half_address);
+        gdt_descriptor_identity.* = gdt_physical_address.to_identity_mapped_virtual_address().access(*GDT.Table).fill_with_kernel_memory_offset(common.config.kernel_higher_half_address);
         break :blk gdt_physical_address.to_higher_half_virtual_address().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
     };
 

@@ -9,6 +9,7 @@ const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const BIOS = privileged.BIOS;
+const x86_64_GDT = privileged.arch.x86_64.GDT;
 
 export fn loop() noreturn {
     asm volatile (
@@ -36,16 +37,16 @@ var bios_disk = BIOS.Disk{
 
 pub const writer = privileged.E9Writer{ .context = {} };
 
-// pub const std_options = struct {
-//     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-//         _ = level;
-//         _ = scope;
-//         writer.print(format, args) catch unreachable;
-//         writer.writeByte('\n') catch unreachable;
-//     }
-//
-//     pub const log_level = .debug;
-// };
+pub const std_options = struct {
+    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        _ = level;
+        _ = scope;
+        writer.print(format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+    }
+
+    pub const log_level = .debug;
+};
 
 pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
     _ = stack_trace;
@@ -63,7 +64,12 @@ pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usiz
 var files: [16]struct { path: []const u8, content: []const u8 } = undefined;
 var file_count: u8 = 0;
 
-export fn _start() callconv(.C) noreturn {
+
+var gdt = x86_64_GDT.Table{
+    .tss_descriptor = undefined,
+};
+
+export fn entry_point() callconv(.C) noreturn {
     writer.writeAll("Hello loader\n") catch unreachable;
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
@@ -104,18 +110,91 @@ export fn _start() callconv(.C) noreturn {
         break :blk LongModeVirtualAddressSpace.kernel_bsp(kernel_address_space_physical_region);
     };
 
-// pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     for (memory_map_entries) |entry, entry_index| {
         log.debug("mapping entry {}...", .{entry_index});
         const physical_address = PhysicalAddress(.global).maybe_invalid(entry.base);
         LongModeVirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, physical_address, physical_address.to_identity_mapped_virtual_address(), entry.len, .{ .write = true, .execute = true }, physical_heap.page_allocator) catch @panic("mapping failed");
     }
 
-    while (true) {
-        writer.writeAll("loader is nicely loaded\n") catch unreachable;
-        asm volatile (
-            \\cli
-            \\hlt
-        );
+    for (files) |file| {
+        if (lib.equal(u8, file.path, "/STAGE2")) {
+            var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
+
+            const program_headers = parser.getProgramHeaders();
+            for (program_headers) |*ph| {
+                switch (ph.type) {
+                    .load => {
+                        if (ph.size_in_memory == 0) continue;
+
+                        if (!ph.flags.readable) {
+                            @panic("ELF program segment is marked as non-readable");
+                        }
+
+                        if (ph.size_in_file != ph.size_in_memory) {
+                            @panic("ELF program segment file size is smaller than memory size");
+                        }
+
+                        const dst_slice = @intToPtr([*]u8, @intCast(usize, ph.physical_address))[0..@intCast(usize, ph.size_in_memory)];
+                        const src_slice = @intToPtr([*]const u8, @ptrToInt(file.content.ptr) + @intCast(usize, ph.offset))[0..@intCast(usize, ph.size_in_file)];
+                        if (!(dst_slice.len >= src_slice.len)) {
+                            @panic("WTFFFFFFF");
+                        }
+
+                        lib.copy(u8, dst_slice, src_slice);
+                    },
+                        else => {
+                            log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
+                        },
+                }
+            }
+
+            // Enable PAE
+            {
+                var cr4 = asm volatile (
+                        \\mov %%cr4, %[cr4]
+                        : [cr4] "=r" (-> u32),
+                        );
+                cr4 |= (1 << 5);
+                asm volatile(
+                        \\mov %[cr4], %%cr4 
+                        :: [cr4] "r" (cr4));
+            }
+
+            kernel_address_space.make_current();
+
+            // Enable long mode 
+            {
+                var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
+                efer.LME = true;
+                efer.write();
+            }
+
+            // Enable paging
+            {
+                var cr0 = asm volatile (
+                        \\mov %%cr0, %[cr0]
+                        : [cr0] "=r" (-> u32),
+                        );
+                cr0 |= (1 << 31);
+                asm volatile(
+                        \\mov %[cr0], %%cr0 
+                        :: [cr0] "r" (cr0));
+            }
+
+            writer.writeAll("Long mode activated!\n") catch unreachable;
+
+            gdt.setup(0, false);
+
+            comptime {
+                lib.assert(@offsetOf(x86_64_GDT.Table, "code_64") == 0x08);
+            }
+
+            asm volatile(
+                \\jmp $0x8, $0x10000
+            );
+            @panic("todo: parser");
+        }
     }
+
+    @panic("loader not found");
 }

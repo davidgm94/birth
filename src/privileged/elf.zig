@@ -2,7 +2,7 @@ const lib = @import("lib");
 const alignForward = lib.alignForward;
 const assert = lib.assert;
 const copy = lib.copy;
-const ELF = lib.ELF;
+const ELF = lib.ELF(64);
 const isAligned = lib.isAligned;
 const log = lib.log.scoped(.ELF);
 const string_eq = lib.string_eq;
@@ -19,11 +19,6 @@ pub const ELFResult = struct {
     entry_point: u64,
 };
 
-pub fn is_valid(file: []const u8) bool {
-    const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), file.ptr));
-    return file_header.is_valid();
-}
-
 const Error = error{
     program_header_not_page_aligned,
     program_header_offset_not_page_aligned,
@@ -31,18 +26,13 @@ const Error = error{
 };
 
 pub fn load_into_kernel_memory(physical_address_space: *PhysicalAddressSpace, file: []const u8) !Executable.InKernelMemory {
-    const file_header = @ptrCast(*const ELF.FileHeader, @alignCast(@alignOf(ELF.FileHeader), file.ptr));
-    if (!file_header.is_valid()) @panic("Trying to load as ELF file a corrupted ELF file");
+    var parser = try ELF.Parser.init(file);
 
-    assert(file_header.program_header_size == @sizeOf(ELF.ProgramHeader));
-    assert(file_header.section_header_size == @sizeOf(ELF.SectionHeader));
     // TODO: further checking
-    log.debug("SH entry count: {}. PH entry count: {}", .{ file_header.section_header_entry_count, file_header.program_header_entry_count });
-    log.debug("SH size: {}. PH size: {}", .{ file_header.section_header_size, file_header.program_header_size });
-    const program_headers = @intToPtr([*]const ELF.ProgramHeader, @ptrToInt(file_header) + file_header.program_header_offset)[0..file_header.program_header_entry_count];
+    const program_headers = parser.getProgramHeaders();
 
     var result = Executable.InKernelMemory{
-        .entry_point = file_header.entry,
+        .entry_point = parser.getEntryPoint(),
     };
 
     for (program_headers) |*ph| {
