@@ -11,6 +11,7 @@ const Bootloader = host.Bootloader;
 const Cpu = host.Cpu;
 const CrossTarget = host.CrossTarget;
 const DiskType = host.DiskType;
+const Emulator = host.Emulator;
 const FilesystemType = host.FilesystemType;
 const Target = host.Target;
 
@@ -24,15 +25,34 @@ const Configuration = struct {
     boot_protocol: Bootloader.Protocol,
 };
 
+const default_configuration = Configuration{
+    .bootloader = .rise,
+    .architecture = .x86_64,
+    .boot_protocol = .bios,
+};
+
+pub fn get_emulators(comptime configuration: Configuration) []const Emulator{
+    return switch (configuration.bootloader) {
+        .rise, .limine => switch (configuration.architecture) {
+            .x86_64 => switch (configuration.boot_protocol) {
+                .bios => &.{ .qemu },
+                .uefi => &.{ .qemu },
+            },
+            else => @compileError("Architecture not supported"),
+        },
+    };
+}
+
 pub fn build(builder: *host.build.Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
-    // Initialize package dependencies here
     lib_package.dependencies = &.{lib_package};
     rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
     user_package.dependencies = &.{lib_package};
     privileged_package.dependencies = &.{ lib_package, privileged_package };
+
+    const disk_image_builder = createDiskImageBuilder(builder);
 
     inline for (host.bootloaders) |bootloader, bootloader_index| {
         const bootloader_id = @intToEnum(host.Bootloader.ID, bootloader_index);
@@ -45,81 +65,46 @@ pub fn build(builder: *host.build.Builder) !void {
                     .boot_protocol = boot_protocol,
                 };
 
-
                 const prefix = @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol) ++ "_";
                 const bootloader_build = try createBootloader(builder, configuration, prefix);
                 _ = bootloader_build;
 
                 const cpu_driver = try createCPUDriver(builder, configuration, prefix);
                 _ = cpu_driver;
+
+                const disk_image_builder_run_step = disk_image_builder.run();
+                disk_image_builder_run_step.addArg(prefix);
+
+                const emulators = comptime get_emulators(configuration);
+                inline for (emulators) |emulator| {
+                    switch (emulator) {
+                        .qemu => {
+                            const qemu_executable = "qemu-system-" ++ switch (configuration.architecture) {
+                                else => @tagName(configuration.architecture),
+                            };
+                            _ = qemu_executable;
+                            //return Error.not_implemented;
+                        },
+                    }
+                }
             }
         }
     }
 
-    // const kernel = b.allocator.create(Kernel) catch @panic("unable to allocate memory for kernel builder");
-    // const emulator = Kernel.Options.RunOptions.Emulator.qemu;
-    // kernel.* = Kernel{
-    //     .builder = b,
-    //     .options = .{
-    //         .arch = .{
-    //             .x86_64 = .{
-    //                 .bootloader = .rise,
-    //                 .boot_protocol = .bios,
-    //             },
-    //         },
-    //         .run = .{
-    //             .memory = .{
-    //                 .amount = 4,
-    //                 .unit = .G,
-    //             },
-    //             .emulator = blk: {
-    //                 switch (emulator) {
-    //                     .qemu => {
-    //                         break :blk .{
-    //                             .qemu = .{
-    //                                 .vga = .std,
-    //                                 .smp = null,
-    //                                 .log = .{
-    //                                     .file = null,
-    //                                     .guest_errors = true,
-    //                                     .cpu = false,
-    //                                     .assembly = false,
-    //                                     .interrupts = true,
-    //                                     .pmode_exceptions = true,
-    //                                 },
-    //                                 .virtualize = true,
-    //                                 .print_command = true,
-    //                             },
-    //                         };
-    //                     },
-    //                     .bochs => break :blk .{ .bochs = {} },
-    //                 }
-    //             },
-    //         },
-    //     },
-    // };
+    const test_step = builder.step("test", "Run unit tests");
 
-    //kernel.create() catch |err| {
-    //    host.getStdOut().writeAll("error: ") catch unreachable;
-    //    host.getStdOut().writeAll(@errorName(err)) catch unreachable;
-    //    host.getStdOut().writer().writeByte('\n') catch unreachable;
-    //    @panic("building the kernel failed");
-    //};
+    const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
+       .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
+    };
 
-    //const test_step = b.step("test", "Run unit tests");
-
-    //const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
-    //    .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
-    //};
-
-    //for (native_tests) |native_test| {
-    //    const test_exe = b.addTestExe(native_test.name, native_test.zig_source_file);
-    //    test_exe.setTarget(b.standardTargetOptions(.{}));
-    //    test_exe.setBuildMode(b.standardReleaseOptions());
-    //    test_exe.setOutputDir("zig-cache");
-    //    const run_test_step = test_exe.run();
-    //    test_step.dependOn(&run_test_step.step);
-    //}
+    for (native_tests) |native_test| {
+       const test_exe = builder.addTestExe(native_test.name, native_test.zig_source_file);
+       test_exe.setTarget(builder.standardTargetOptions(.{}));
+       test_exe.setBuildMode(builder.standardReleaseOptions());
+       test_exe.setOutputDir("zig-cache");
+       const run_test_step = test_exe.run();
+       test_step.dependOn(&run_test_step.step);
+    }
 }
 
 const BootloaderBuild = struct {
@@ -242,27 +227,17 @@ fn createCPUDriver(builder: *Builder, comptime configuration: Configuration, com
     return cpu_driver;
 }
 
-// const DiskDependencies = struct {
-// bootloader_build: BootloaderBuild, cpu_driver: *LibExeObjStep,
-// };
-//
-// fn create_disk(builder: *Builder, disk_dependencies: ?DiskDependencies, comptime prefix: []const u8) *RunStep {
-//     const disk_image_builder = builder.addExecutable("disk_image_builder", "src/disk_image_builder.zig");
-//     disk_image_builder.setOutputDir(cache_dir);
-//     disk_image_builder.setBuildMode(builder.standardReleaseOptions());
-//     builder.default_step.dependOn(&disk_image_builder.step);
-//
-//     const run_step = disk_image_builder.run();
-//     run_step.addArg(prefix);
-//
-//     for (bootloader_build.executables) |bootloader_executable| {
-//         run_step.step.dependOn(&bootloader_executable.step);
-//     }
-//
-//     run_step.step.dependOn(&cpu_driver.step);
-//
-//     const named_step = 
-// }
+fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
+    const disk_image_builder = builder.addExecutable("disk_image_builder", "src/disk_image_builder.zig");
+    disk_image_builder.setOutputDir(cache_dir);
+    disk_image_builder.setBuildMode(builder.standardReleaseOptions());
+    builder.default_step.dependOn(&disk_image_builder.step);
+
+    return disk_image_builder;
+}
+
+fn initPackageDependencies() void {
+}
 
 var lib_package = host.build.Pkg{
     .name = "lib",

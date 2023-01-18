@@ -1,0 +1,26 @@
+{
+    "memory": {
+        "amount": "4",
+        "unit": "GB"
+    },
+    "virtualize": false,
+    "vga": "std",
+    "smp": null,
+    "reboot": false,
+    "shutdown": false,
+    "debugcon": "stdio",
+    "log": {
+        "file": null,
+        "guest_errors": true,
+        "assembly": true,
+        "interrupts": true,
+    },
+    "trace": [
+        "nvme",
+        "pci",
+        "ide",
+        "ata",
+        "ahci",
+        "sata"
+    ],
+}

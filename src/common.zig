@@ -367,3 +367,7 @@ pub const TraditionalExecutionMode = enum {
     privileged,
     user,
 };
+
+pub const Emulator = enum {
+    qemu,
+};
