@@ -189,6 +189,7 @@ export fn entry_point() callconv(.C) noreturn {
                 lib.assert(@offsetOf(x86_64_GDT.Table, "code_64") == 0x08);
             }
 
+            // TODO: figure out a way to make this not hardcoded
             asm volatile(
                 \\jmp $0x8, $0x10000
             );

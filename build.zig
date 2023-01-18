@@ -12,6 +12,9 @@ const kernel_name = "kernel.elf";
 const kernel_path = cache_dir ++ kernel_name;
 
 pub fn build(b: *host.build.Builder) void {
+    const ci = b.option(bool, "ci", "CI mode") orelse false;
+    host.log.debug("CI: {}", .{ci});
+
     const kernel = b.allocator.create(Kernel) catch @panic("unable to allocate memory for kernel builder");
     const emulator = Kernel.Options.RunOptions.Emulator.qemu;
     kernel.* = Kernel{
@@ -43,7 +46,7 @@ pub fn build(b: *host.build.Builder) void {
                                         .interrupts = true,
                                         .pmode_exceptions = true,
                                     },
-                                    .virtualize = false,
+                                    .virtualize = true,
                                     .print_command = true,
                                 },
                             };
