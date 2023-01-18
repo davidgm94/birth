@@ -317,3 +317,53 @@ pub const PartitionTableType = enum {
     mbr,
     gpt,
 };
+
+pub const Bootloader = struct {
+    supported_architectures: []const Architecture,
+
+    pub const Architecture = struct {
+        id: Cpu.Arch,
+        supported_protocols: []const Protocol,
+    };
+
+    pub const Protocol = enum {
+        bios,
+        uefi,
+    };
+
+    pub const ID = enum(u1) {
+        rise = 0,
+        limine = 1,
+
+    };
+
+    pub const count = enumCount(ID);
+};
+
+pub const bootloaders = blk: {
+    var loaders: [Bootloader.count]Bootloader = undefined;
+
+    loaders[@enumToInt(Bootloader.ID.rise)] = .{
+        .supported_architectures = &.{
+            .{
+                .id = .x86_64,
+                .supported_protocols = &.{ .bios, .uefi },
+            },
+        },
+    };
+    loaders[@enumToInt(Bootloader.ID.limine)] = .{
+        .supported_architectures = &.{
+            .{
+                .id = .x86_64,
+                .supported_protocols = &.{ .bios, .uefi },
+            },
+        },
+    };
+
+    break :blk loaders;
+};
+
+pub const TraditionalExecutionMode = enum {
+    privileged,
+    user,
+};

@@ -369,6 +369,7 @@ pub fn ELF(comptime bits: comptime_int) type {
                 const file_header = @ptrCast(*const FileHeader, @alignCast(@alignOf(FileHeader), &file[0]));
                 try file_header.validate();
 
+
                 return Parser {
                     .file_header = file_header,
                 };
@@ -450,6 +451,7 @@ magic: u8 = magic,
            AMD64 = 0x3e,
        };
 
+       // TODO: further checking
        pub fn validate(file_header: *const FileHeader) Parser.Error!void {
            if (file_header.magic != FileHeader.magic) {
                return Parser.Error.invalid_magic;
@@ -478,7 +480,7 @@ magic: u8 = magic,
 
         pub const ProgramHeader = switch (is_64) {
             true => extern struct {
-type: Type = .load,
+            type: Type = .load,
           flags: Flags, //= @enumToInt(Flags.readable) | @enumToInt(Flags.executable),
           offset: u64,
           virtual_address: u64,

@@ -116,6 +116,45 @@ export fn entry_point() callconv(.C) noreturn {
         LongModeVirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, physical_address, physical_address.to_identity_mapped_virtual_address(), entry.len, .{ .write = true, .execute = true }, physical_heap.page_allocator) catch @panic("mapping failed");
     }
 
+    // Enable PAE
+    {
+        var cr4 = asm volatile (
+                \\mov %%cr4, %[cr4]
+                : [cr4] "=r" (-> u32),
+                );
+        cr4 |= (1 << 5);
+        asm volatile(
+                \\mov %[cr4], %%cr4 
+                :: [cr4] "r" (cr4));
+    }
+
+    kernel_address_space.make_current();
+
+    // Enable long mode 
+    {
+        var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
+        efer.LME = true;
+        efer.write();
+    }
+
+    // Enable paging
+    {
+        var cr0 = asm volatile (
+                \\mov %%cr0, %[cr0]
+                : [cr0] "=r" (-> u32),
+                );
+        cr0 |= (1 << 31);
+        asm volatile(
+                \\mov %[cr0], %%cr0 
+                :: [cr0] "r" (cr0));
+    }
+
+    writer.writeAll("Long mode activated!\n") catch unreachable;
+
+    gdt.setup(0, false);
+
+    writer.writeAll("GDT loaded!\n") catch unreachable;
+
     for (files) |file| {
         if (lib.equal(u8, file.path, "/STAGE2")) {
             var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
@@ -148,42 +187,6 @@ export fn entry_point() callconv(.C) noreturn {
                 }
             }
 
-            // Enable PAE
-            {
-                var cr4 = asm volatile (
-                        \\mov %%cr4, %[cr4]
-                        : [cr4] "=r" (-> u32),
-                        );
-                cr4 |= (1 << 5);
-                asm volatile(
-                        \\mov %[cr4], %%cr4 
-                        :: [cr4] "r" (cr4));
-            }
-
-            kernel_address_space.make_current();
-
-            // Enable long mode 
-            {
-                var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
-                efer.LME = true;
-                efer.write();
-            }
-
-            // Enable paging
-            {
-                var cr0 = asm volatile (
-                        \\mov %%cr0, %[cr0]
-                        : [cr0] "=r" (-> u32),
-                        );
-                cr0 |= (1 << 31);
-                asm volatile(
-                        \\mov %[cr0], %%cr0 
-                        :: [cr0] "r" (cr0));
-            }
-
-            writer.writeAll("Long mode activated!\n") catch unreachable;
-
-            gdt.setup(0, false);
 
             comptime {
                 lib.assert(@offsetOf(x86_64_GDT.Table, "code_64") == 0x08);
@@ -191,8 +194,8 @@ export fn entry_point() callconv(.C) noreturn {
 
             // TODO: figure out a way to make this not hardcoded
             asm volatile(
-                \\jmp $0x8, $0x10000
-            );
+                    \\jmp $0x8, $0x10000
+                    );
             @panic("todo: parser");
         }
     }
