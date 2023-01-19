@@ -4,7 +4,7 @@ const SimpleR64 = lib.arch.x86_64.registers.SimpleR64;
 const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 
 const privileged = @import("privileged");
-const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalAddress = privileged.GenericPhysicalAddress(.x86_64);
 
 pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,
@@ -55,7 +55,7 @@ pub const cr3 = packed struct(u64) {
         return self_int == other_int;
     }
 
-    pub inline fn get_address(self: cr3) PhysicalAddress(.local) {
+    pub inline fn getAddress(self: cr3) PhysicalAddress(.local) {
         return PhysicalAddress(.local).new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
     }
 };

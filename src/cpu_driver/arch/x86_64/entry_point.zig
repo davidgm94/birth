@@ -73,7 +73,7 @@ export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation
                     const physical_address = PhysicalAddress(.local).new(entry.physical_start + used_byte_count);
                     bootloader_information.counters[memory_map_conventional_entry_index] += @intCast(u32, alignForward(physical_regions_allocation_size, valid_page_sizes[0]) >> page_shifter(valid_page_sizes[0]));
 
-                    const free_regions = physical_address.to_higher_half_virtual_address().access([*]PhysicalAddressSpace.Region)[0..entry_count];
+                    const free_regions = physical_address.toHigherHalfVirtualAddress().access([*]PhysicalAddressSpace.Region)[0..entry_count];
                     memory_map_iterator.reset();
                     memory_map_conventional_entry_index = 0;
 
@@ -182,13 +182,13 @@ fn kernel_startup(init_file: []const u8) noreturn {
 
 fn dispatch(core_director_data: *CoreDirectorData) noreturn {
     if (core_director_data != current_core_director_data) {
-        core_director_data.context_switch();
+        core_director_data.contextSwitch();
         current_core_director_data = core_director_data;
     }
 
     const dispatcher_handle = core_director_data.dispatcher_handle;
     const dispatcher = dispatcher_handle.access(*CoreDirectorSharedGeneric);
-    const disabled_area = dispatcher.get_disabled_save_area();
+    const disabled_area = dispatcher.getDisabledSaveArea();
     logger.warn("todo: time", .{});
 
     switch (dispatcher.disabled != 0) {
@@ -270,7 +270,7 @@ fn spawn_init_common(spawn_state: *SpawnState) !*CoreDirectorData {
 fn init_page_tables(spawn_state: *SpawnState) VirtualAddressSpace {
     _ = spawn_state;
     const address_space = VirtualAddressSpace.user(&rise.bootstrap_address_space);
-    address_space.make_current();
+    address_space.makeCurrent();
     return address_space;
 }
 
@@ -300,7 +300,7 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
     //}
 
     //logger.debug("cnode: task", .{});
-    spawn_state.cnodes.task = Capabilities.locate_slot(root_cn[0].get_cnode().to_local(), @enumToInt(Capabilities.RootCNodeSlot.task));
+    spawn_state.cnodes.task = Capabilities.locate_slot(root_cn[0].get_cnode().toLocal(), @enumToInt(Capabilities.RootCNodeSlot.task));
     try Capabilities.new(.l2cnode, (try rise.bootstrap_address_space.allocate(Capabilities.Size.l2cnode, valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, rise.core_id, cnode_many_ptr(spawn_state.cnodes.task orelse unreachable));
 
     //logger.debug("cnode: page", .{});
@@ -339,14 +339,14 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
     //}
 
     //logger.debug("cnode: init dcb", .{});
-    const init_dcb_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
+    const init_dcb_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().toLocal(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
     try Capabilities.new(.dispatcher, (try rise.bootstrap_address_space.allocate(Capabilities.Size.dispatcher, valid_page_sizes[0])).address, Capabilities.Size.dispatcher, 0, rise.core_id, cnode_many_ptr(init_dcb_cte));
 
     const init_dispatcher_data = init_dcb_cte.capability.object.dispatcher.current;
 
     //try root_cn[0].copy_to_cnode(spawn_state.cnodes.task orelse unreachable, @enumToInt(Capabilities.TaskCNodeSlot.root), false, 0, 0);
 
-    const init_dispatcher_frame_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher_frame));
+    const init_dispatcher_frame_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().toLocal(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher_frame));
     try Capabilities.new(.frame, (try rise.bootstrap_address_space.allocate(Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size)).address, Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size, rise.core_id, cnode_many_ptr(init_dispatcher_frame_cte));
 
     try init_dispatcher_frame_cte.copy_to_cte(&init_dispatcher_data.dispatcher_cte, false, 0, 0);
@@ -375,7 +375,7 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
     //const process_manager_cap_cte = Capabilities.locate_slot(spawn_state.cnodes.task.?.get_cnode().to_local(), @enumToInt(Capabilities.TaskCNodeSlot.process_manager));
     //try Capabilities.new(.process_manager, .null, 0, 0, rise.core_id, cnode_many_ptr(process_manager_cap_cte));
 
-    const init_handle = init_dispatcher_frame_cte.capability.object.frame.base.to_higher_half_virtual_address();
+    const init_handle = init_dispatcher_frame_cte.capability.object.frame.base.toHigherHalfVirtualAddress();
     //const &init_handle.access(*arch.Dispatcher).base;
     const init_core_director = init_handle.access(*CoreDirectorSharedGeneric);
     init_core_director.disabled = @boolToInt(true);
@@ -383,7 +383,7 @@ fn spawn_module(spawn_state: *SpawnState) !*CoreDirectorData {
 
     try root_cn[0].copy_to_cte(&init_dispatcher_data.cspace, false, 0, 0);
 
-    init_dispatcher_data.dispatcher_handle = init_handle.to_local();
+    init_dispatcher_data.dispatcher_handle = init_handle.toLocal();
     init_dispatcher_data.disabled = true;
     privileged.Scheduler.make_runnable(init_dispatcher_data);
 

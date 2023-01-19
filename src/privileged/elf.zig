@@ -58,7 +58,7 @@ pub fn load_into_kernel_memory(physical_address_space: *PhysicalAddressSpace, fi
                 assert(misalignment == 0);
 
                 const segment_physical_region = try physical_address_space.allocate(segment_size, page_size);
-                const segment_virtual_region = segment_physical_region.to_higher_half_virtual_address();
+                const segment_virtual_region = segment_physical_region.toHigherHalfVirtualAddress();
 
                 const dst_slice = segment_virtual_region.offset(misalignment).access(u8)[0..ph.size_in_memory];
                 const src_slice = @intToPtr([*]const u8, @ptrToInt(file.ptr) + ph.offset)[0..ph.size_in_file];

@@ -95,12 +95,12 @@ fn update_end(cte: *CTE) void {
         }
         if (node.left) |left| {
             if (left.mdb_node.end_root == node.end_root) {
-                end = PhysicalAddress(.global).maybe_invalid(@max(end.value(), left.mdb_node.end.value()));
+                end = PhysicalAddress(.global).maybeInvalid(@max(end.value(), left.mdb_node.end.value()));
             }
         }
         if (node.right) |right| {
             if (right.mdb_node.end_root == node.end_root) {
-                end = PhysicalAddress(.global).maybe_invalid(@max(end.value(), right.mdb_node.end.value()));
+                end = PhysicalAddress(.global).maybeInvalid(@max(end.value(), right.mdb_node.end.value()));
             }
         }
 

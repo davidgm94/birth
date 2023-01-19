@@ -78,6 +78,8 @@ pub fn build(builder: *host.build.Builder) !void {
                 inline for (emulators) |emulator| {
                     const step_prefix = prefix ++ "_" ++ @tagName(emulator);
                     const emulator_step = try EmulatorSteps.Interface(configuration, emulator, step_prefix).create(builder, &emulator_steps);
+                    emulator_step.run.dependOn(builder.default_step);
+                    emulator_step.debug.dependOn(builder.default_step);
                     emulator_step.run.dependOn(&disk_image_builder_run_step.step);
                     emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
 
@@ -377,27 +379,26 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                                 executable.link_gc_sections = true;
                                 executable.want_lto = true;
                                 executable.strip = true;
-                                executable.entry_symbol_name = "entry_point";
                                 executable.setBuildMode(.ReleaseSmall);
+                                executable.entry_symbol_name = "entry_point";
 
                                 try bootloader_executables.append(executable);
                             }
                         },
-                            .uefi => {
-                                const executable = builder.addExecutable("BOOTX64", rise_loader_path ++ "uefi/main.zig");
-                                executable.setTarget(.{
-                                        .cpu_arch = .x86_64,
-                                        .os_tag = .uefi,
-                                        .abi = .msvc,
-                                        });
-                                                            
-                                executable.setOutputDir(cache_dir);
-                                executable.addPackage(lib_package);
-                                executable.addPackage(privileged_package);
-                                executable.strip = true;
-                                executable.setBuildMode(.ReleaseSafe);
-                                try bootloader_executables.append(executable);
-                            },
+                        .uefi => {
+                            const executable = builder.addExecutable("BOOTX64", rise_loader_path ++ "uefi/main.zig");
+                            executable.setTarget(.{
+                                    .cpu_arch = .x86_64,
+                                    .os_tag = .uefi,
+                                    .abi = .msvc,
+                                    });
+                            executable.setOutputDir(cache_dir);
+                            executable.addPackage(lib_package);
+                            executable.addPackage(privileged_package);
+                            executable.strip = true;
+                            executable.setBuildMode(.ReleaseSafe);
+                            try bootloader_executables.append(executable);
+                        },
                     }
                 },
                 else => @compileError("Architecture not supported"),

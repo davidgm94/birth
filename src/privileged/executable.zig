@@ -35,7 +35,7 @@ pub const InKernelMemory = struct {
     pub fn load_into_user_memory(executable: InKernelMemory, physical_allocator: *Allocator) !u64 {
         log.debug("Assuming user memory right now...", .{});
         for (executable.sections[0..executable.section_count]) |section| {
-            const physical_address = section.kernel_address.to_physical_address();
+            const physical_address = section.kernel_address.toPhysicalAddress();
             const virtual_address = section.user_address;
             const size = section.size;
             const flags = section.flags;

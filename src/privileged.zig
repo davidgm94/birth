@@ -2,10 +2,6 @@
 
 const lib = @import("lib");
 const assert = lib.assert;
-const log = lib.log.scoped(.Privileged);
-const isAligned = lib.isAligned;
-const alignForward = lib.alignForward;
-const alignBackward = lib.alignBackward;
 const maxInt = lib.maxInt;
 const Allocator = lib.Allocator;
 
@@ -16,15 +12,14 @@ pub const ELF = @import("privileged/elf.zig");
 pub const Executable = @import("privileged/executable.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
 pub const UEFI = @import("privileged/uefi.zig");
-pub const VirtualAddressSpace = ArchVirtualAddressSpace(lib.cpu.arch);
+pub const VirtualAddressSpace = GenericVirtualAddressSpace(lib.cpu.arch);
 pub const scheduler_type = SchedulerType.round_robin;
 pub const Scheduler = switch (scheduler_type) {
     .round_robin => @import("privileged/round_robin.zig"),
     else => @compileError("other scheduler is not supported right now"),
 };
 
-
-pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arch) type {
+pub fn GenericVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arch) type {
     return extern struct {
         const VAS = @This();
         pub const paging = switch (desired_architecture) {
@@ -34,8 +29,8 @@ pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arc
     };
 
         pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
-        pub fn kernel_bsp(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
-            return paging.init_kernel_bsp(physical_memory_region);
+        pub fn kernelBSP(physical_memory_region: GenericPhysicalMemoryRegion(.x86_64, .local)) VAS {
+            return paging.initKernelBSP(physical_memory_region);
         }
         pub fn user(physical_address_space: *PhysicalAddressSpace) VAS {
             // TODO: defer memory free when this produces an error
@@ -48,12 +43,12 @@ pub fn ArchVirtualAddressSpace(comptime desired_architecture: lib.Target.Cpu.Arc
 
             return virtual_address_space;
         }
-        pub inline fn make_current(virtual_address_space: *const VAS) void {
+        pub inline fn makeCurrent(virtual_address_space: *const VAS) void {
             paging.make_current(virtual_address_space);
         }
 
         pub const Flags = packed struct {
-write: bool = false,
+            write: bool = false,
            cache_disable: bool = false,
            global: bool = false,
            execute: bool = false,
@@ -63,7 +58,7 @@ write: bool = false,
                return .{};
            }
 
-       pub inline fn to_arch_specific(flags: Flags, comptime locality: CoreLocality) paging.MemoryFlags {
+       pub inline fn toArchitectureSpecific(flags: Flags, comptime locality: CoreLocality) paging.MemoryFlags {
            return paging.new_flags(flags, locality);
        }
         };
@@ -77,18 +72,6 @@ pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
 
 fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
     return arch.io.write_bytes(bytes);
-}
-fn e9_write(_: void, bytes: []const u8) error{}!usize {
-    const bytes_left = asm volatile (
-        \\cld
-        \\rep outsb
-        : [ret] "={ecx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
-          [src] "{esi}" (bytes.ptr),
-          [len] "{ecx}" (bytes.len),
-    );
-
-    return bytes.len - bytes_left;
 }
 
 pub const ResourceOwner = enum(u2) {
@@ -143,10 +126,10 @@ pub const CoreDirectorData = extern struct {
     next: ?*CoreDirectorData,
     previous: ?*CoreDirectorData,
 
-    pub fn context_switch(core_director_data: *CoreDirectorData) void {
+    pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
         arch.paging.context_switch(core_director_data.vspace);
         context_switch_counter += 1;
-        log.warn("implement LDT", .{});
+        // TODO: implement LDT
     }
 
     var context_switch_counter: usize = 0;
@@ -168,7 +151,7 @@ pub const CoreDirectorSharedGeneric = extern struct {
     systime_frequency: u64,
     core_id: CoreId,
 
-    pub fn get_disabled_save_area(core_director_shared_generic: *CoreDirectorSharedGeneric) *arch.Registers {
+    pub fn getDisabledSaveArea(core_director_shared_generic: *CoreDirectorSharedGeneric) *arch.Registers {
         const core_director_shared_arch = @fieldParentPtr(arch.CoreDirectorShared, "base", core_director_shared_generic);
         return &core_director_shared_arch.disabled_save_area;
     }
@@ -180,98 +163,112 @@ pub const CoreLocality = enum {
 };
 
 pub fn PhysicalAddress(comptime locality: CoreLocality) type {
-    return enum(u64) {
+    return GenericPhysicalAddressExtended(lib.cpu.arch, locality);
+}
+
+pub fn GenericPhysicalAddress(comptime architecture: lib.Target.Cpu.Arch) fn(comptime locality: CoreLocality) type {
+    return struct {
+        fn result(comptime locality: CoreLocality) type {
+            return GenericPhysicalAddressExtended(architecture, locality);
+        }
+    }.result;
+}
+
+pub fn GenericPhysicalAddressExtended(comptime architecture: lib.Target.Cpu.Arch, comptime locality: CoreLocality) type {
+    const Usize = TargetUsize(architecture);
+    return enum(Usize) {
         null = 0,
         _,
 
         const PA = @This();
+        const VA = GenericVirtualAddressExtended(architecture, locality);
 
-        pub fn new(new_value: u64) PA {
+        pub fn new(new_value: Usize) PA {
             const physical_address = @intToEnum(PA, new_value);
 
-            if (!physical_address.is_valid()) {
+            if (!physical_address.isValid()) {
                 @panic("Physical address is invalid");
             }
 
             return physical_address;
         }
 
-        pub fn temporary_invalid() PA {
-            return maybe_invalid(0);
+        pub fn temporaryInvalid() PA {
+            return maybeInvalid(0);
         }
 
-        pub fn maybe_invalid(new_value: u64) PA {
+        pub fn maybeInvalid(new_value: Usize) PA {
             return @intToEnum(PA, new_value);
         }
 
-        pub fn is_valid(physical_address: PA) bool {
+        pub fn isValid(physical_address: PA) bool {
             if (physical_address == PA.null) return false;
 
             if (arch.max_physical_address_bit != 0) {
-                const max = @as(u64, 1) << arch.max_physical_address_bit;
+                const max = @as(Usize, 1) << arch.max_physical_address_bit;
                 return physical_address.value() <= max;
             } else {
                 return true;
             }
         }
 
-        pub fn value(physical_address: PA) u64 {
+        pub fn value(physical_address: PA) Usize {
             return @enumToInt(physical_address);
         }
 
-        pub fn is_equal(physical_address: PA, other: PA) bool {
+        pub fn isEqual(physical_address: PA, other: PA) bool {
             return physical_address.value == other.value;
         }
 
-        pub fn is_aligned(physical_address: PA, alignment: u64) bool {
+        pub fn isAligned(physical_address: PA, alignment: Usize) bool {
             return lib.is_aligned(physical_address.value(), alignment);
         }
 
-        pub fn belongs_to_region(physical_address: PA, region: PhysicalMemoryRegion) bool {
+        pub fn belongsToRegion(physical_address: PA, region: PhysicalMemoryRegion) bool {
             return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
         }
 
-        pub fn offset(physical_address: PA, asked_offset: u64) PA {
+        pub fn offset(physical_address: PA, asked_offset: Usize) PA {
             return @intToEnum(PA, @enumToInt(physical_address) + asked_offset);
         }
 
-        pub fn add_offset(physical_address: *PA, asked_offset: u64) void {
+        pub fn addOffset(physical_address: *PA, asked_offset: Usize) void {
             physical_address.* = physical_address.offset(asked_offset);
         }
 
-        pub fn aligned_forward(physical_address: PA, alignment: u64) PA {
-            return @intToEnum(PA, alignForward(physical_address.value(), alignment));
+        pub fn alignedForward(physical_address: PA, alignment: Usize) PA {
+            return @intToEnum(PA, lib.alignForward(physical_address.value(), alignment));
         }
 
-        pub fn aligned_backward(physical_address: PA, alignment: u64) PA {
-            return @intToEnum(PA, alignBackward(physical_address.value(), alignment));
+        pub fn alignedBackward(physical_address: PA, alignment: Usize) PA {
+            return @intToEnum(PA, lib.alignBackward(physical_address.value(), alignment));
         }
 
-        pub fn align_forward(physical_address: *PA, alignment: u64) void {
+        pub fn alignForward(physical_address: *PA, alignment: Usize) void {
             physical_address.* = physical_address.aligned_forward(alignment);
         }
 
-        pub fn align_backward(physical_address: *PA, alignment: u64) void {
+        pub fn alignBackward(physical_address: *PA, alignment: Usize) void {
             physical_address.* = physical_address.aligned_backward(alignment);
         }
 
-        pub fn to_identity_mapped_virtual_address(physical_address: PA) VirtualAddress(locality) {
-            return VirtualAddress(locality).new(physical_address.value());
+        pub fn toIdentityMappedVirtualAddress(physical_address: PA) VA {
+            return VA.new(physical_address.value());
         }
 
-        pub fn to_higher_half_virtual_address(physical_address: PA) VirtualAddress(locality) {
-            const address = VirtualAddress(locality).new(physical_address.value() + lib.config.kernel_higher_half_address);
+        pub fn toHigherHalfVirtualAddress(physical_address: PA) VA {
+            const address = VA.new(physical_address.value() + lib.config.kernel_higher_half_address);
             return address;
         }
 
-        pub fn to_global(physical_address: PA) PhysicalAddress(.global) {
+        pub fn toGlobal(physical_address: PA) PhysicalAddress(.global) {
             comptime {
                 assert(locality == .local);
             }
             return @intToEnum(PhysicalAddress(.global), @enumToInt(physical_address));
         }
 
-        pub fn to_local(physical_address: PA) PhysicalAddress(.local) {
+        pub fn toLocal(physical_address: PA) PhysicalAddress(.local) {
             comptime {
                 assert(locality == .global);
             }
@@ -284,16 +281,37 @@ pub fn PhysicalAddress(comptime locality: CoreLocality) type {
     };
 }
 
+fn TargetUsize(comptime architecture: lib.Target.Cpu.Arch) type {
+    return switch (architecture) {
+        .x86 => u32,
+        .x86_64 => u64,
+        else => @compileError("Architecture not supported"),
+    };
+}
+
 pub fn VirtualAddress(comptime locality: CoreLocality) type {
-    return enum(u64) {
+    return GenericVirtualAddressExtended(lib.cpu.arch, locality);
+}
+
+pub fn GenericVirtualAddress(comptime architecture: lib.Target.Cpu.Arch) fn(comptime locality: CoreLocality) type {
+    return struct {
+        fn result(comptime locality: CoreLocality) type {
+            return GenericVirtualAddressExtended(architecture, locality);
+        }
+    }.result;
+}
+
+pub fn GenericVirtualAddressExtended(comptime architecture: lib.Target.Cpu.Arch, comptime locality: CoreLocality) type {
+    const Usize = TargetUsize(architecture);
+    return enum(Usize) {
         null = 0,
         _,
 
         const VA = @This();
 
-        pub fn new(new_value: u64) VA {
+        pub fn new(new_value: Usize) VA {
             const virtual_address = @intToEnum(VA, new_value);
-            assert(virtual_address.is_valid());
+            assert(virtual_address.isValid());
             return virtual_address;
         }
 
@@ -301,60 +319,60 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
             return VA.null;
         }
 
-        pub fn value(virtual_address: VA) u64 {
+        pub fn value(virtual_address: VA) Usize {
             return @enumToInt(virtual_address);
         }
 
-        pub fn is_valid(virtual_address: VA) bool {
+        pub fn isValid(virtual_address: VA) bool {
             return virtual_address != VA.null;
         }
 
         pub fn access(virtual_address: VA, comptime Ptr: type) Ptr {
-            return @intToPtr(Ptr, @intCast(usize, virtual_address.value()));
+            return @intToPtr(Ptr, safeArchitectureCast(@src(), virtual_address.value()));
         }
 
-        pub fn offset(virtual_address: VA, asked_offset: u64) VA {
+        pub fn offset(virtual_address: VA, asked_offset: Usize) VA {
             return @intToEnum(VA, virtual_address.value() + asked_offset);
         }
 
-        pub fn add_offset(virtual_address: *VA, asked_offset: u64) void {
+        pub fn addOffset(virtual_address: *VA, asked_offset: Usize) void {
             virtual_address.* = virtual_address.offset(asked_offset);
         }
 
-        pub fn aligned_forward(virtual_address: VA, alignment: u64) VA {
+        pub fn alignedForward(virtual_address: VA, alignment: Usize) VA {
             return @intToEnum(VA, lib.align_forward(virtual_address.value(), alignment));
         }
 
-        pub fn aligned_backward(virtual_address: VA, alignment: u64) VA {
+        pub fn alignedBackward(virtual_address: VA, alignment: Usize) VA {
             return @intToEnum(VA, lib.align_backward(virtual_address.value(), alignment));
         }
 
-        pub fn align_forward(virtual_address: *VA, alignment: u64) void {
+        pub fn alignForward(virtual_address: *VA, alignment: Usize) void {
             virtual_address.* = virtual_address.aligned_forward(alignment);
         }
 
-        pub fn align_backward(virtual_address: *VA, alignment: u64) void {
+        pub fn alignBackward(virtual_address: *VA, alignment: Usize) void {
             virtual_address.* = virtual_address.aligned_backward(alignment);
         }
 
-        pub fn is_aligned(virtual_address: VA, alignment: u64) bool {
+        pub fn isAligned(virtual_address: VA, alignment: Usize) bool {
             return lib.is_aligned(virtual_address.value(), alignment);
         }
 
-        pub fn to_physical_address(virtual_address: VA) PhysicalAddress(locality) {
+        pub fn toPhysicalAddress(virtual_address: VA) PhysicalAddress(locality) {
             assert(virtual_address.value() >= lib.config.kernel_higher_half_address);
             const address = PhysicalAddress(locality).new(virtual_address.value() - lib.config.kernel_higher_half_address);
             return address;
         }
 
-        pub fn to_local(virtual_address: VA) VirtualAddress(.local) {
+        pub fn toLocal(virtual_address: VA) VirtualAddress(.local) {
             comptime {
                 assert(locality == .global);
             }
             return @intToEnum(VirtualAddress(.local), @enumToInt(virtual_address));
         }
 
-        pub fn to_global(virtual_address: VA) VirtualAddress(.global) {
+        pub fn toGlobal(virtual_address: VA) VirtualAddress(.global) {
             comptime {
                 assert(locality == .local);
             }
@@ -368,27 +386,34 @@ pub fn VirtualAddress(comptime locality: CoreLocality) type {
 }
 
 pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
+    return GenericPhysicalMemoryRegion(lib.cpu.arch, locality);
+}
+
+pub fn GenericPhysicalMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, comptime locality: CoreLocality) type {
+    const Usize = TargetUsize(architecture);
+
     return extern struct {
-        address: PhysicalAddress(locality),
+        address: GenericPhysicalAddressExtended(architecture, locality),
         size: u64,
 
-        const PMR = PhysicalMemoryRegion(locality);
+        const PMR = @This();
+        const VMR = GenericVirtualMemoryRegion(architecture, locality);
 
-        pub fn to_higher_half_virtual_address(physical_memory_region: PMR) VirtualMemoryRegion(locality) {
-            return VirtualMemoryRegion(locality){
-                .address = physical_memory_region.address.to_higher_half_virtual_address(),
+        pub fn toHigherHalfVirtualAddress(physical_memory_region: PMR) VMR {
+            return VMR {
+                .address = physical_memory_region.address.toHigherHalfVirtualAddress(),
                 .size = physical_memory_region.size,
             };
         }
 
-        pub fn to_identity_mapped_virtual_address(physical_memory_region: PMR) VirtualMemoryRegion(locality) {
-            return VirtualMemoryRegion(locality){
-                .address = physical_memory_region.address.to_identity_mapped_virtual_address(),
+        pub fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VMR {
+            return VMR {
+                .address = physical_memory_region.address.toIdentityMappedVirtualAddress(),
                 .size = physical_memory_region.size,
             };
         }
 
-        pub fn offset(physical_memory_region: PMR, asked_offset: u64) PMR {
+        pub fn offset(physical_memory_region: PMR, asked_offset: Usize) PMR {
             assert(asked_offset < physical_memory_region.size);
 
             var result = physical_memory_region;
@@ -397,12 +422,12 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
             return result;
         }
 
-        pub fn add_offset(physical_memory_region: *PMR, asked_offset: u64) void {
+        pub fn addOffset(physical_memory_region: *PMR, asked_offset: Usize) void {
             physical_memory_region.* = physical_memory_region.offset(asked_offset);
         }
 
         /// Result: chop, the rest is modified through the pointer
-        pub fn chop(physical_memory_region: *PMR, asked_offset: u64) PMR {
+        pub fn chop(physical_memory_region: *PMR, asked_offset: Usize) PMR {
             const ptr_result = physical_memory_region.offset(asked_offset);
             const result = PMR{
                 .address = physical_memory_region.address,
@@ -413,7 +438,7 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
             return result;
         }
 
-        pub fn take_slice(physical_memory_region: PMR, size: u64) PMR {
+        pub fn takeSlice(physical_memory_region: PMR, size: Usize) PMR {
             assert(size < physical_memory_region.size);
 
             var result = physical_memory_region;
@@ -424,11 +449,16 @@ pub fn PhysicalMemoryRegion(comptime locality: CoreLocality) type {
 }
 
 pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
+    return GenericVirtualMemoryRegion(lib.cpu.arch, locality);
+}
+pub fn GenericVirtualMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, comptime locality: CoreLocality) type {
+    const Usize = TargetUsize(architecture);
+
     return struct {
         address: VA,
         size: u64,
 
-        const VA = VirtualAddress(locality);
+        const VA = GenericVirtualAddressExtended(architecture, locality);
         const VMR = @This();
 
         pub fn new(address: VA, size: u64) VMR {
@@ -438,15 +468,18 @@ pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
             };
         }
 
-        pub fn access_bytes(virtual_memory_region: VMR) []u8 {
-            return virtual_memory_region.address.access([*]u8)[0..virtual_memory_region.size];
+        pub fn accessBytes(virtual_memory_region: VMR) []u8 {
+            const result = virtual_memory_region.address.access([*]u8)[0..virtual_memory_region.size];
+            return result;
         }
 
         pub fn access(virtual_memory_region: VMR, comptime T: type) []T {
-            return virtual_memory_region.address.access([*]T)[0..@intCast(usize, @divExact(virtual_memory_region.size, @sizeOf(T)))];
+            const slice_len = @divExact(virtual_memory_region.size, @sizeOf(T));
+            const result = virtual_memory_region.address.access([*]T)[0..safeArchitectureCast(@src(), slice_len)];
+            return result;
         }
 
-        pub fn offset(virtual_memory_region: VMR, asked_offset: u64) VMR {
+        pub fn offset(virtual_memory_region: VMR, asked_offset: Usize) VMR {
             assert(asked_offset < virtual_memory_region.size);
 
             var result = virtual_memory_region;
@@ -454,6 +487,13 @@ pub fn VirtualMemoryRegion(comptime locality: CoreLocality) type {
             result.size -= asked_offset;
             return result;
         }
+    };
+}
+
+pub inline fn safeArchitectureCast(src: lib.SourceLocation, value: anytype) usize {
+    return switch (@sizeOf(@TypeOf(value)) > @sizeOf(usize)) {
+        true => if (value <= lib.maxInt(usize)) @intCast(usize, value) else @panic("safeArchitectureCast:\n " ++ src.fn_name ++ "\n" ++ src.file ++ "\n"),
+        false => value,
     };
 }
 
@@ -504,8 +544,8 @@ pub const PhysicalAddressSpace = extern struct {
 
     pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion(.local) {
         if (size >= valid_page_sizes[0]) {
-            if (!isAligned(size, valid_page_sizes[0])) {
-                log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
+            if (!lib.isAligned(size, valid_page_sizes[0])) {
+                //log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
                 return AllocateError.not_base_page_aligned;
             }
 
@@ -513,14 +553,14 @@ pub const PhysicalAddressSpace = extern struct {
 
             const allocated_region = blk: {
                 while (node_ptr) |node| : (node_ptr = node.next) {
-                    const result_address = node.descriptor.address.aligned_forward(page_size);
+                    const result_address = node.descriptor.address.alignedForward(page_size);
                     const size_up = size + result_address.value() - node.descriptor.address.value();
                     if (node.descriptor.size > size_up) {
                         const allocated_region = PhysicalMemoryRegion(.local){
                             .address = result_address,
                             .size = size,
                         };
-                        node.descriptor.address.add_offset(size_up);
+                        node.descriptor.address.addOffset(size_up);
                         node.descriptor.size -= size_up;
 
                         break :blk allocated_region;
@@ -540,7 +580,7 @@ pub const PhysicalAddressSpace = extern struct {
 
             // For now, just zero it out.
             // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys the upcoming zero flag
-            const region_bytes = allocated_region.to_higher_half_virtual_address().access_bytes();
+            const region_bytes = allocated_region.toHigherHalfVirtualAddress().accessBytes();
             lib.zero(region_bytes);
 
             return allocated_region;
@@ -554,7 +594,7 @@ pub const PhysicalAddressSpace = extern struct {
                 }
             } else {
                 var heap_region = try physical_address_space.allocate(valid_page_sizes[1], valid_page_sizes[0]);
-                const region_ptr = heap_region.chop(@sizeOf(Region)).address.to_higher_half_virtual_address().access(*Region);
+                const region_ptr = heap_region.chop(@sizeOf(Region)).address.toHigherHalfVirtualAddress().access(*Region);
                 region_ptr.* = .{
                     .descriptor = heap_region,
                 };
@@ -624,206 +664,210 @@ const LoaderProtocol = enum {
     uefi,
 };
 
-pub const MemoryMap = struct {
-    type: LoaderProtocol,
-    region: VirtualMemoryRegion(.global),
-    descriptor_size: u32,
-    descriptor_version: u32 = 1,
-    loader: LoaderProtocol,
+pub fn MemoryMap(comptime architecture: lib.Target.Cpu.Arch) type {
+    return struct {
+        type: LoaderProtocol,
+          region: GenericVirtualMemoryRegion(architecture, .global),
+          descriptor_size: u32,
+          descriptor_version: u32 = 1,
+          loader: LoaderProtocol,
 
-    pub fn fromBIOS(entries: []const BIOS.MemoryMapEntry) struct { entry_index: usize, memory_map: MemoryMap } {
-        const entry_total_size = entries.len * @sizeOf(BIOS.MemoryMapEntry);
-        const bootstrap_index = blk: {
-            for (entries) |entry, entry_index| {
-                if (entry.is_low_memory()) continue;
-                if (entry.base < lib.maxInt(usize) and entry.len >= entry_total_size) {
-                    break :blk entry_index;
-                }
-            }
+          pub fn getEntries(memory_map: MemoryMap(architecture), comptime EntryType: type) []EntryType {
+              const entries = memory_map.region.access(EntryType);
+              return entries;
+          }
 
-            @panic("todo");
-        };
+          pub fn fromBIOS(entries: []const BIOS.MemoryMapEntry) struct { entry_index: u32, memory_map: MemoryMap(architecture) } {
+              const entry_total_size = entries.len * @sizeOf(BIOS.MemoryMapEntry);
+              const bootstrap_index = blk: {
+                  for (entries) |entry, entry_index| {
+                      if (entry.isLowMemory()) continue;
+                      if (entry.base < lib.maxInt(usize) and entry.len >= entry_total_size) {
+                          break :blk entry_index;
+                      }
+                  }
 
-        const bootstrap_entry = entries[bootstrap_index];
-        const dst = @intToPtr([*]BIOS.MemoryMapEntry, @intCast(usize, bootstrap_entry.base))[0..entries.len];
-        lib.copy(BIOS.MemoryMapEntry, dst, entries);
+                  @panic("todo");
+              };
 
-        return .{ .entry_index = bootstrap_index, .memory_map = MemoryMap{
-            .type = .bios,
-            .region = .{
-                .address = VirtualAddress(.global).new(bootstrap_entry.base),
-                .size = entry_total_size,
-            },
-            .descriptor_size = @sizeOf(BIOS.MemoryMapEntry),
-            .loader = .bios,
-        } };
-    }
-};
+              const bootstrap_memory_region = entries[bootstrap_index].toPhysicalMemoryRegion().toIdentityMappedVirtualAddress();
+              const dst = bootstrap_memory_region.access(BIOS.MemoryMapEntry);
+              lib.copy(BIOS.MemoryMapEntry, dst, entries);
 
-pub const MemoryManager = struct {
-    memory_map: MemoryMap,
-    size_counters: []u64,
-    allocator: Allocator,
-
-    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        const memory_manager = @fieldParentPtr(MemoryManager, "allocator", allocator);
-        return switch (memory_manager.memory_map.loader) {
-            inline else => |loader_protocol| blk: {
-                const allocation_result = try Interface(loader_protocol).allocate(memory_manager.*, size, alignment);
-                break :blk .{
-                    .address = allocation_result.address.value(),
-                    .size = allocation_result.size,
-                };
-            },
-        };
-    }
-
-    pub fn Interface(comptime loader_protocol: LoaderProtocol) type {
-        return struct {
-            const EntryType = switch (loader_protocol) {
-                .bios => BIOS.MemoryMapEntry,
-                .uefi => UEFI.MemoryDescriptor,
-            };
-
-            const GenericEntry = extern struct {
-                address: u64,
-                size: u64,
-                usable: bool,
-            };
-
-            fn get_generic_entry(entry: anytype) GenericEntry {
-                return switch (@TypeOf(entry)) {
-                    BIOS.MemoryMapEntry => .{
-                        .address = entry.base,
-                        .size = entry.len,
-                        .usable = entry.base >= 1 * lib.mb,
-                    },
-                    UEFI.MemoryDescriptor => .{
-                        .address = entry.physical_start,
-                        .size = entry.number_of_pages * lib.arch.valid_page_sizes[0],
-                        .usable = @panic("UEFI usable"),
-                    },
-                    else => @compileError("Type not admitted"),
-                };
-            }
-
-            pub fn get_entries(memory_manager: MemoryManager) []EntryType {
-                const entries = memory_manager.memory_map.region.access(EntryType);
-                return entries;
-            }
-
-            pub fn from_memory_map(memory_map: MemoryMap, bootstrap_index: usize) MemoryManager {
-                comptime {
-                    assert(lib.arch.valid_page_sizes[0] == 0x1000);
-                }
-                const aligned_memory_map_size = lib.alignForward(@intCast(usize, memory_map.region.size), lib.arch.valid_page_sizes[0]);
-                const entry_count = @divExact(memory_map.region.size, memory_map.descriptor_size);
-                const size_counters_size = entry_count * @sizeOf(u64);
-
-                const entries = memory_map.region.access(EntryType);
-
-                for (entries) |entry, entry_index| {
-                    const generic_entry = get_generic_entry(entry);
-                    if (generic_entry.usable and generic_entry.size > size_counters_size + (if (entry_index == bootstrap_index) aligned_memory_map_size else 0)) {
-                        const offset = if (bootstrap_index == entry_index) aligned_memory_map_size else 0;
-                        const size_counters = @intToPtr([*]u64, @intCast(usize, generic_entry.address + offset))[0..@intCast(usize, entry_count)];
-                        size_counters[bootstrap_index] += @divExact(aligned_memory_map_size, lib.arch.valid_page_sizes[0]);
-                        size_counters[entry_index] += @divExact(lib.alignForward(@intCast(usize, size_counters_size), lib.arch.valid_page_sizes[0]), lib.arch.valid_page_sizes[0]);
-
-                        return MemoryManager{
-                            .memory_map = memory_map,
-                            .size_counters = size_counters,
-                            .allocator = .{
-                                .callback_allocate = MemoryManager.allocate,
-                            },
-                        };
-                    }
-                }
-
-                @panic("cannot create from_memory_map");
-            }
-
-            pub fn allocate(memory_manager: MemoryManager, asked_size: u64, asked_alignment: u64) !PhysicalMemoryRegion(.global) {
-                // TODO: satisfy alignment
-                if (asked_size % lib.arch.valid_page_sizes[0] != 0) {
-                    log.debug("asked_size: 0x{x}", .{asked_size});
-                    @panic("not page-aligned allocate");
-                }
-                const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
-
-                const entries = Interface(loader_protocol).get_entries(memory_manager);
-                for (entries) |entry, entry_index| {
-                    const generic_entry = get_generic_entry(entry);
-                    const busy_size = memory_manager.size_counters[entry_index] * lib.arch.valid_page_sizes[0];
-                    const size_left = generic_entry.size - busy_size; 
-
-                    if (generic_entry.usable and size_left > asked_size) {
-                        if (generic_entry.address % asked_alignment != 0) @panic("WTF alignment");
-
-                        const result = .{
-                            .address = PhysicalAddress(.global).maybe_invalid(generic_entry.address).offset(busy_size),
-                            .size = asked_size,
-                        };
-
-                        log.debug("page allocation done: (0x{x}, 0x{x})", .{result.address, result.size});
-
-                        memory_manager.size_counters[entry_index] += four_kb_pages;
-
-                        return result;
-                    }
-                }
-
-                return Allocator.Allocate.Error.OutOfMemory;
-            }
-        };
-    }
-};
-
-pub const PhysicalHeap = extern struct {
-    allocator: Allocator = .{
-        .callback_allocate = callback_allocate,
-    },
-    regions: [6]PhysicalMemoryRegion(.global) = lib.zeroes([6]PhysicalMemoryRegion(.global)),
-    page_allocator: *Allocator,
-
-    const Region = extern struct {
-        descriptor: PhysicalMemoryRegion,
+              return .{
+                  .entry_index = bootstrap_index,
+                      .memory_map = .{
+                          .type = .bios,
+                          .region = .{
+                              .address = bootstrap_memory_region.address,
+                              .size = entry_total_size,
+                          },
+                          .descriptor_size = @sizeOf(BIOS.MemoryMapEntry),
+                          .loader = .bios,
+                      } };
+          }
     };
+}
 
-    pub fn callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        _ = alignment;
-        const physical_heap = @fieldParentPtr(PhysicalHeap, "allocator", allocator);
-        for (physical_heap.regions) |*region| {
-            if (region.size > size) {
-                const result = .{
-                    .address = region.address.value(),
-                    .size = size,
-                };
-                region.size -= size;
-                region.address.add_offset(size);
-                return result;
-            }
+pub fn MemoryManager(comptime architecture: lib.Target.Cpu.Arch) type {
+    return struct {
+        memory_map: MemoryMap(architecture),
+        size_counters: []u64,
+        allocator: Allocator,
+
+        pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+            const memory_manager = @fieldParentPtr(MemoryManager(architecture), "allocator", allocator);
+            return switch (memory_manager.memory_map.loader) {
+                inline else => |loader_protocol| blk: {
+                    const allocation_result = try Interface(loader_protocol).allocate(memory_manager.*, size, alignment);
+break :blk .{
+           .address = allocation_result.address.value(),
+               .size = allocation_result.size,
+       };
+                },
+            };
         }
 
-        const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
-        for (physical_heap.regions) |*region| {
-            if (region.size == 0) {
-                const allocated_region = try physical_heap.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
-                region.* = .{
-                    .address = PhysicalAddress(.global).new(allocated_region.address),
-                    .size = allocated_region.size,
-                };
-                const result = .{
-                    .address = region.address.value(),
-                    .size = size,
-                };
-                log.debug("result: {}", .{result});
-                region.address.add_offset(size);
-                region.size -= size;
-                return result;
-            }
-        }
+            pub fn Interface(comptime loader_protocol: LoaderProtocol) type {
+                return struct {
+                    const EntryType = switch (loader_protocol) {
+                        .bios => BIOS.MemoryMapEntry,
+                        .uefi => UEFI.MemoryDescriptor,
+                    };
 
-        @panic("todo: allocate");
-    }
-};
+                    const GenericEntry = extern struct {
+address: u64,
+             size: u64,
+             usable: bool,
+                    };
+
+                    fn get_generic_entry(entry: anytype) GenericEntry {
+                        return switch (@TypeOf(entry)) {
+                            BIOS.MemoryMapEntry => .{
+                                .address = entry.base,
+                                    .size = entry.len,
+                                    .usable = entry.base >= 1 * lib.mb,
+                            },
+                                UEFI.MemoryDescriptor => .{
+                                    .address = entry.physical_start,
+                                    .size = entry.number_of_pages * lib.arch.valid_page_sizes[0],
+                                    .usable = @panic("UEFI usable"),
+                                },
+                                else => @compileError("Type not admitted"),
+                        };
+                    }
+
+                    pub fn fromMemoryMap(memory_map: MemoryMap(architecture), bootstrap_index: u32) MemoryManager(architecture) {
+                        comptime {
+                            assert(lib.arch.valid_page_sizes[0] == 0x1000);
+                        }
+                        const aligned_memory_map_size = lib.alignForwardGeneric(u64, memory_map.region.size, lib.arch.valid_page_sizes[0]);
+                        const entry_count = @divExact(memory_map.region.size, memory_map.descriptor_size);
+                        const size_counters_size = entry_count * @sizeOf(u64);
+
+                        const entries = memory_map.region.access(EntryType);
+
+                        for (entries) |entry, entry_index| {
+                            const generic_entry = get_generic_entry(entry);
+                            if (generic_entry.usable and generic_entry.size > size_counters_size + (if (entry_index == bootstrap_index) aligned_memory_map_size else 0)) {
+                                const offset = if (bootstrap_index == entry_index) aligned_memory_map_size else 0;
+                                const size_counters = @intToPtr([*]u64, safeArchitectureCast(@src(), generic_entry.address + offset))[0..safeArchitectureCast(@src(), entry_count)];
+                                size_counters[bootstrap_index] += @divExact(aligned_memory_map_size, lib.arch.valid_page_sizes[0]);
+                                size_counters[entry_index] += @divExact(lib.alignForwardGeneric(u64, size_counters_size, lib.arch.valid_page_sizes[0]), lib.arch.valid_page_sizes[0]);
+
+                                return .{
+                                    .memory_map = memory_map,
+                                        .size_counters = size_counters,
+                                        .allocator = .{
+                                            .callback_allocate = MemoryManager(architecture).allocate,
+                                        },
+                                };
+                            }
+                        }
+
+                        @panic("cannot create from_memory_map");
+                    }
+
+                    pub fn allocate(memory_manager: MemoryManager(architecture), asked_size: u64, asked_alignment: u64) !GenericPhysicalMemoryRegion(architecture, .global) {
+                        // TODO: satisfy alignment
+                        if (asked_size % lib.arch.valid_page_sizes[0] != 0) {
+                            @panic("not page-aligned allocate");
+                        }
+                        const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
+
+                        const entries = memory_manager.memory_map.getEntries(EntryType);
+                        for (entries) |entry, entry_index| {
+                            const generic_entry = get_generic_entry(entry);
+                            const busy_size = memory_manager.size_counters[entry_index] * lib.arch.valid_page_sizes[0];
+                            const size_left = generic_entry.size - busy_size; 
+
+                            if (generic_entry.usable and size_left > asked_size) {
+                                if (generic_entry.address % asked_alignment != 0) @panic("WTF alignment");
+
+                                const result = .{
+                                    .address = GenericPhysicalAddressExtended(architecture, .global).maybeInvalid(generic_entry.address).offset(busy_size),
+                                        .size = asked_size,
+                                };
+
+                                memory_manager.size_counters[entry_index] += four_kb_pages;
+
+                                return result;
+                            }
+                        }
+
+                        return Allocator.Allocate.Error.OutOfMemory;
+                    }
+                };
+            }
+    };
+}
+
+pub fn PhysicalHeap(comptime architecture: lib.Target.Cpu.Arch) type {
+    return  extern struct {
+allocator: Allocator = .{
+               .callback_allocate = callback_allocate,
+           },
+regions: [6]GenericPhysicalMemoryRegion(architecture, .global) = lib.zeroes([6]GenericPhysicalMemoryRegion(architecture, .global)),
+         page_allocator: *Allocator,
+
+         const Region = extern struct {
+descriptor: PhysicalMemoryRegion,
+         };
+
+           pub fn callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+               _ = alignment;
+               const physical_heap = @fieldParentPtr(PhysicalHeap(architecture), "allocator", allocator);
+               for (physical_heap.regions) |*region| {
+                   if (region.size > size) {
+                       const result = .{
+                           .address = region.address.value(),
+                               .size = size,
+                       };
+                       region.size -= size;
+                       region.address.addOffset(size);
+                       return result;
+                   }
+               }
+
+               const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
+               for (physical_heap.regions) |*region| {
+                   if (region.size == 0) {
+                       const allocated_region = try physical_heap.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                       region.* = .{
+                           .address = GenericPhysicalAddressExtended(architecture, .global).new(allocated_region.address),
+                               .size = allocated_region.size,
+                       };
+                       const result = .{
+                           .address = region.address.value(),
+                               .size = size,
+                       };
+                       region.address.addOffset(size);
+                       region.size -= size;
+                       return result;
+                   }
+               }
+
+               @panic("todo: allocate");
+           }
+    };
+}

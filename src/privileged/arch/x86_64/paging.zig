@@ -15,11 +15,10 @@ const Allocator = lib.Allocator;
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
 const panic = privileged.panic;
-const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalAddress = privileged.GenericPhysicalAddress(.x86_64);
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.ArchVirtualAddressSpace(.x86_64);
+const VirtualAddress = privileged.GenericVirtualAddress(.x86_64);
+const VirtualAddressSpace = privileged.GenericVirtualAddressSpace(.x86_64);
 const TranslationResult = VirtualAddressSpace.TranslationResult;
 
 const arch = lib.arch.x86_64;
@@ -103,7 +102,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
 
 pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     // TODO: use flags
-    const flags = general_flags.to_arch_specific(locality);
+    const flags = general_flags.toArchitectureSpecific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
 
     if (lib.config.safe_slow) {
@@ -118,7 +117,7 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
 }
 
 pub fn map_current(asked_physical_address: u64, asked_virtual_address: u64, size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
-    const flags = general_flags.to_arch_specific(.global);
+    const flags = general_flags.toArchitectureSpecific(.global);
     const vas_cr3 = cr3.read();
 
     // TODO: figure out page size better
@@ -226,10 +225,10 @@ fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags:
 
 pub fn get_page_table_virtual_address(physical_address: PhysicalAddress(.local)) VirtualAddress(.local) {
     return switch (lib.cpu.arch) {
-        .x86 => physical_address.to_identity_mapped_virtual_address(),
+        .x86 => physical_address.toIdentityMappedVirtualAddress(),
         .x86_64 => switch (lib.os) {
-            .freestanding => physical_address.to_higher_half_virtual_address(),
-            .uefi => physical_address.to_identity_mapped_virtual_address(),
+            .freestanding => physical_address.toHigherHalfVirtualAddress(),
+            .uefi => physical_address.toIdentityMappedVirtualAddress(),
             else => @compileError("OS not supported"),
         },
         else => @compileError("Architecture not supported"),
@@ -237,7 +236,7 @@ pub fn get_page_table_virtual_address(physical_address: PhysicalAddress(.local))
 }
 
 fn get_pml4_table(cr3_register: cr3) *volatile PML4Table {
-    const pml4_physical_address = cr3_register.get_address();
+    const pml4_physical_address = cr3_register.getAddress();
     const pml4_virtual_address = get_page_table_virtual_address(pml4_physical_address);
     if (lib.config.safe_slow) {
         assert(pml4_virtual_address.is_valid());
@@ -270,7 +269,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
     const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
     const table_virtual_address = get_page_table_virtual_address(table_physical_address);
 
-    const is_valid = table_virtual_address.is_valid();
+    const is_valid = table_virtual_address.isValid();
     if (!is_valid) {
         log.debug("check pdp table valid: {}", .{is_valid});
     }
@@ -395,19 +394,26 @@ const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
-pub fn init_kernel_bsp(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
-    const pml4_physical_region = allocation_region.take_slice(@sizeOf(PML4Table));
+pub fn initKernelBSP(allocation_region: privileged.GenericPhysicalMemoryRegion(.x86_64, .local)) VirtualAddressSpace {
+    const pml4_physical_region = allocation_region.takeSlice(@sizeOf(PML4Table));
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
-    const pml4_entries = switch (lib.os) {
-        .freestanding => pml4_physical_region.to_higher_half_virtual_address().access(PML4TE),
-        .uefi => pml4_physical_region.to_identity_mapped_virtual_address().access(PML4TE),
-        else => @compileError("OS not supported"),
+
+    log.debug("PML4", .{});
+    const pml4_entries = switch (lib.cpu.arch) {
+        .x86 => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
+        .x86_64 => switch (lib.os) {
+            .freestanding => pml4_physical_region.toHigherHalfVirtualAddress().access(PML4TE),
+            .uefi => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
+            else => @compileError("OS not supported"),
+        },
+        else => @compileError("Architecture panic"),
     };
 
     for (pml4_entries[0..half_entry_count]) |*entry| {
         entry.* = @bitCast(PML4TE, @as(u64, 0));
     }
 
+    log.debug("PML4 entries", .{});
     for (pml4_entries[half_entry_count..]) |*entry, i| {
         entry.* = PML4TE{
             .present = true,
@@ -434,7 +440,7 @@ pub fn init_user(virtual_address_space: *VirtualAddressSpace, physical_address_s
         .cr3 = cr3.from_address(pml4_physical_region.address),
     };
 
-    const pml4_virtual_address = pml4_physical_region.address.to_higher_half_virtual_address();
+    const pml4_virtual_address = pml4_physical_region.address.toHigherHalfVirtualAddress();
     const pml4 = pml4_virtual_address.access(*PML4Table);
     const lower_half_pml4 = pml4[0 .. pml4.len / 2];
     const higher_half_pml4 = pml4[0 .. pml4.len / 2];
@@ -481,14 +487,14 @@ pub fn from_current(owner: privileged.ResourceOwner) VirtualAddressSpace {
 }
 
 pub fn map_kernel_address_space_higher_half(new_cr3: cr3, kernel_cr3: cr3) void {
-    const cr3_physical_address = new_cr3.get_address();
-    const cr3_virtual_address = cr3_physical_address.to_higher_half_virtual_address();
+    const cr3_physical_address = new_cr3.getAddress();
+    const cr3_virtual_address = cr3_physical_address.toHigherHalfVirtualAddress();
     // TODO: maybe user flag is not necessary?
     const pml4 = cr3_virtual_address.access(*PML4Table);
     for (pml4[0..0x100]) |*entry| {
         entry.* = zeroes(PML4TE);
     }
-    copy(PML4TE, pml4[0x100..], kernel_cr3.get_address().to_higher_half_virtual_address().access(*PML4Table)[0x100..]);
+    copy(PML4TE, pml4[0x100..], kernel_cr3.getAddress().toHigherHalfVirtualAddress().access(*PML4Table)[0x100..]);
 }
 
 fn compute_indices(virtual_address: u64) Indices {
@@ -513,13 +519,13 @@ pub fn register_physical_allocator(allocator: *Allocator) void {
 }
 
 pub fn map_device(asked_physical_address: PhysicalAddress(.global), size: u64) !VirtualAddress(.global) {
-    try map_function(cr3.read(), asked_physical_address.value(), asked_physical_address.to_higher_half_virtual_address().value(), size, .{
+    try map_function(cr3.read(), asked_physical_address.value(), asked_physical_address.toHigherHalfVirtualAddress().value(), size, .{
         .read_write = true,
         .cache_disable = true,
         .global = true,
     }, paging_physical_allocator orelse unreachable);
 
-    return asked_physical_address.to_higher_half_virtual_address();
+    return asked_physical_address.toHigherHalfVirtualAddress();
 }
 
 pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags, comptime core_locality: privileged.CoreLocality) MemoryFlags {

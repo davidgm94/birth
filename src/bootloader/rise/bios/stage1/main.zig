@@ -1,9 +1,11 @@
 const lib = @import("lib");
 const log = lib.log.scoped(.bios);
 const privileged = @import("privileged");
+const GenericPhysicalAddress = privileged.GenericPhysicalAddress;
+const GenericPhysicalMemoryRegion = privileged.GenericPhysicalMemoryRegion;
+const GenericVirtualAddressSpace = privileged.GenericVirtualAddressSpace;
 const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
-const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalHeap = privileged.PhysicalHeap;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
@@ -73,9 +75,9 @@ export fn entry_point() callconv(.C) noreturn {
     writer.writeAll("Hello loader\n") catch unreachable;
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
-    const memory_map_result = MemoryMap.fromBIOS(memory_map_entries);
-    var memory_manager = MemoryManager.Interface(.bios).from_memory_map(memory_map_result.memory_map, memory_map_result.entry_index);
-    var physical_heap = PhysicalHeap{
+    const memory_map_result = MemoryMap(.x86_64).fromBIOS(memory_map_entries);
+    var memory_manager = MemoryManager(.x86_64).Interface(.bios).fromMemoryMap(memory_map_result.memory_map, memory_map_result.entry_index);
+    var physical_heap = PhysicalHeap(.x86_64){
         .page_allocator = &memory_manager.allocator,
     };
     const allocator = &physical_heap.allocator;
@@ -98,22 +100,23 @@ export fn entry_point() callconv(.C) noreturn {
         };
         file_count += 1;
     }
-    writer.writeAll("Bye loader\n") catch unreachable;
 
-    const LongModeVirtualAddressSpace = privileged.ArchVirtualAddressSpace(.x86_64);
+
+    const LongModeVirtualAddressSpace = GenericVirtualAddressSpace(.x86_64);
     var kernel_address_space = blk: {
         const allocation_result = physical_heap.page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_kernel_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap kernel address space");
-        const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
-            .address = PhysicalAddress(.local).new(allocation_result.address),
+        const kernel_address_space_physical_region = GenericPhysicalMemoryRegion(.x86_64, .local){
+            .address = privileged.GenericPhysicalAddressExtended(.x86_64, .local).new(allocation_result.address),
             .size = LongModeVirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
         };
-        break :blk LongModeVirtualAddressSpace.kernel_bsp(kernel_address_space_physical_region);
+        const result = LongModeVirtualAddressSpace.kernelBSP(kernel_address_space_physical_region);
+        break :blk result;
     };
 
     for (memory_map_entries) |entry, entry_index| {
         log.debug("mapping entry {}...", .{entry_index});
-        const physical_address = PhysicalAddress(.global).maybe_invalid(entry.base);
-        LongModeVirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, physical_address, physical_address.to_identity_mapped_virtual_address(), entry.len, .{ .write = true, .execute = true }, physical_heap.page_allocator) catch @panic("mapping failed");
+        const physical_address = privileged.GenericPhysicalAddressExtended(.x86_64, .global).maybeInvalid(entry.base);
+        LongModeVirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, physical_address, physical_address.toIdentityMappedVirtualAddress(), entry.len, .{ .write = true, .execute = true }, physical_heap.page_allocator) catch @panic("mapping failed");
     }
 
     // Enable PAE
@@ -128,7 +131,7 @@ export fn entry_point() callconv(.C) noreturn {
                 :: [cr4] "r" (cr4));
     }
 
-    kernel_address_space.make_current();
+    kernel_address_space.makeCurrent();
 
     // Enable long mode 
     {
@@ -187,18 +190,47 @@ export fn entry_point() callconv(.C) noreturn {
                 }
             }
 
-
             comptime {
                 lib.assert(@offsetOf(x86_64_GDT.Table, "code_64") == 0x08);
             }
 
-            // TODO: figure out a way to make this not hardcoded
             asm volatile(
-                    \\jmp $0x8, $0x10000
+                    \\mov %[entry_point_low], %%edi
+                    \\mov %[entry_point_high], %%esi
+                    \\jmp $0x8, $bits64
+                    \\bits64:
+                    //0:  48 31 c0                xor    rax,rax
+                    \\.byte 0x48
+                    \\.byte 0x31
+                    \\.byte 0xc0
+                    //3:  89 f0                   mov    eax,esi
+                    \\.byte 0x89
+                    \\.byte 0xf0
+                    //5:  48 c1 e0 20             shl    rax,0x20
+                    \\.byte 0x48
+                    \\.byte 0xc1
+                    \\.byte 0xe0
+                    \\.byte 0x20
+                    //9:  48 09 f8                or     rax,rdi
+                    \\.byte 0x48
+                    \\.byte 0x09
+                    \\.byte 0xf8
+                    //c:  ff e0                   jmp    rax
+                    \\.byte 0xff
+                    \\.byte 0xe0
+                    :
+                    : [entry_point_low] "r" (@truncate(u32, parser.getEntryPoint())),
+                [entry_point_high] "r" (@truncate(u32, parser.getEntryPoint() >> 32))
                     );
-            @panic("todo: parser");
         }
     }
 
     @panic("loader not found");
+}
+
+comptime {
+    asm (
+    \\.global load64
+    \\load64:
+    );
 }

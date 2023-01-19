@@ -332,9 +332,9 @@ pub const Capability = extern struct {
     pub fn get_address(capability: Capability) PhysicalAddress(.global) {
         switch (capability.type) {
             // TODO: returning global for a local makes no sense here?
-            .l1cnode => return capability.object.l1cnode.cnode.to_global(),
-            .l2cnode => return capability.object.l2cnode.cnode.to_global(),
-            .dispatcher => return VirtualAddress(.global).new(@ptrToInt(capability.object.dispatcher.current)).to_physical_address(),
+            .l1cnode => return capability.object.l1cnode.cnode.toGlobal(),
+            .l2cnode => return capability.object.l2cnode.cnode.toGlobal(),
+            .dispatcher => return VirtualAddress(.global).new(@ptrToInt(capability.object.dispatcher.current)).toPhysicalAddress(),
             .frame => return capability.object.frame.base,
             .kernel,
             .performance_monitor,
@@ -943,7 +943,7 @@ pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize
 }
 
 fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_size: u64, count: usize) !void {
-    const virtual_address = address.to_higher_half_virtual_address();
+    const virtual_address = address.toHigherHalfVirtualAddress();
 
     switch (capability_type) {
         .frame,
@@ -992,8 +992,8 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
 fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, object_size: u64, count: usize, owner: CoreId, cte_ptr: [*]CTE) !void {
     assert(capability_type != .null);
     assert(!capability_type.is_mapping());
-    const global_physical_address = address.to_global();
-    const global_address = address.to_higher_half_virtual_address();
+    const global_physical_address = address.toGlobal();
+    const global_address = address.toHigherHalfVirtualAddress();
 
     if (owner == core_id) {
         try zero_objects(capability_type, address, object_size, count);
@@ -1154,5 +1154,5 @@ pub const args_size = 1 << args_bits;
 
 pub fn locate_slot(cnode: PhysicalAddress(.local), offset: Slot) *CTE {
     const total_offset = (1 << objbits_cte) * offset;
-    return cnode.to_higher_half_virtual_address().offset(total_offset).access(*CTE);
+    return cnode.toHigherHalfVirtualAddress().offset(total_offset).access(*CTE);
 }

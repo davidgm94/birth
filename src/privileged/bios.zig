@@ -125,8 +125,15 @@ pub const MemoryMapEntry = extern struct {
     type: Type,
     unused: u32 = 0,
 
-    pub fn is_low_memory(entry: MemoryMapEntry) bool {
+    pub fn isLowMemory(entry: MemoryMapEntry) bool {
         return entry.base < lib.mb;
+    }
+
+    pub fn toPhysicalMemoryRegion(entry: MemoryMapEntry) privileged.GenericPhysicalMemoryRegion(.x86_64, .global) {
+        return .{
+            .address = privileged.GenericPhysicalAddressExtended(.x86_64, .global).new(entry.base),
+            .size = entry.len,
+        };
     }
 
     const Type = enum(u32) {
