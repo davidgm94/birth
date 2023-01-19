@@ -251,7 +251,8 @@ pub const FileParser = struct {
     };
 
     pub const File = struct {
-        host: []const u8,
+        host_path: []const u8,
+        host_base: []const u8,
         guest: []const u8,
     };
 
@@ -261,15 +262,17 @@ pub const FileParser = struct {
             try parser.expect_char('{');
 
             if (parser.index < parser.text.len and parser.text[parser.index] != '}') {
-                const host_field = try parser.parse_field("host");
+                const host_path_field = try parser.parse_field("host_path");
+                const host_base_field = try parser.parse_field("host_base");
                 const guest_field = try parser.parse_field("guest");
                 try parser.expect_char('}');
                 parser.maybe_expect_char(',');
                 parser.skip_space();
 
                 return .{
-                    .host = host_field,
-                        .guest = guest_field,
+                    .host_path = host_path_field,
+                    .host_base = host_base_field,
+                    .guest = guest_field,
                 };
             } else {
                 @panic("WTF");

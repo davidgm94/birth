@@ -8,6 +8,14 @@ pub const mb = kb * 1024;
 pub const gb = mb * 1024;
 pub const tb = gb * 1024;
 
+pub const SizeUnit = enum(u64) {
+    byte = 1,
+    kilobyte = 1024,
+    megabyte = 1024 * 1024,
+    gigabyte = 1024 * 1024 * 1024,
+    terabyte = 1024 * 1024 * 1024 * 1024,
+};
+
 pub const std = @import("std");
 pub const Target = std.Target;
 pub const Cpu = Target.Cpu;

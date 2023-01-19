@@ -1,7 +1,7 @@
 {
     "memory": {
         "amount": "4",
-        "unit": "GB"
+        "unit": "gigabyte"
     },
     "virtualize": false,
     "vga": "std",
@@ -13,7 +13,7 @@
         "file": null,
         "guest_errors": true,
         "assembly": true,
-        "interrupts": true,
+        "interrupts": true
     },
     "trace": [
         "nvme",
@@ -22,5 +22,5 @@
         "ata",
         "ahci",
         "sata"
-    ],
+    ]
 }

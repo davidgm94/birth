@@ -76,7 +76,7 @@ pub const ImageConfig = struct {
     partition_table: common.PartitionTableType,
     partition: PartitionConfig,
 
-    pub const default_path = "src/image_config.json";
+    pub const default_path = "config/image_config.json";
 
     pub fn get(allocator: common.ZigAllocator, path: []const u8) !ImageConfig {
         const image_config_file = cwd().readFileAlloc(allocator, path, common.maxInt(usize)) catch unreachable;

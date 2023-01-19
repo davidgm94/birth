@@ -5,6 +5,7 @@ const Builder = host.build.Builder;
 const FileSource = host.build.FileSource;
 const LibExeObjStep = host.build.LibExeObjStep;
 const RunStep = host.build.RunStep;
+const Step = host.build.Step;
 
 const assert = host.assert;
 const Bootloader = host.Bootloader;
@@ -31,17 +32,7 @@ const default_configuration = Configuration{
     .boot_protocol = .bios,
 };
 
-pub fn get_emulators(comptime configuration: Configuration) []const Emulator{
-    return switch (configuration.bootloader) {
-        .rise, .limine => switch (configuration.architecture) {
-            .x86_64 => switch (configuration.boot_protocol) {
-                .bios => &.{ .qemu },
-                .uefi => &.{ .qemu },
-            },
-            else => @compileError("Architecture not supported"),
-        },
-    };
-}
+const default_emulator = Emulator.qemu;
 
 pub fn build(builder: *host.build.Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
@@ -54,11 +45,18 @@ pub fn build(builder: *host.build.Builder) !void {
 
     const disk_image_builder = createDiskImageBuilder(builder);
 
+    const build_steps = blk: {
+    var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
+
     inline for (host.bootloaders) |bootloader, bootloader_index| {
         const bootloader_id = @intToEnum(host.Bootloader.ID, bootloader_index);
 
+        var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
+
         inline for (bootloader.supported_architectures) |architecture| {
+            var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
             inline for (architecture.supported_protocols) |boot_protocol| {
+                var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
                 const configuration = .{
                     .bootloader = bootloader_id,
                     .architecture = architecture.id,
@@ -75,21 +73,34 @@ pub fn build(builder: *host.build.Builder) !void {
                 const disk_image_builder_run_step = disk_image_builder.run();
                 disk_image_builder_run_step.addArg(prefix);
 
-                const emulators = comptime get_emulators(configuration);
+                const emulators = comptime getEmulators(configuration);
+
                 inline for (emulators) |emulator| {
-                    switch (emulator) {
-                        .qemu => {
-                            const qemu_executable = "qemu-system-" ++ switch (configuration.architecture) {
-                                else => @tagName(configuration.architecture),
-                            };
-                            _ = qemu_executable;
-                            //return Error.not_implemented;
-                        },
+                    const step_prefix = prefix ++ "_" ++ @tagName(emulator);
+                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, step_prefix).create(builder, &emulator_steps);
+                    emulator_step.run.dependOn(&disk_image_builder_run_step.step);
+                    emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
+
+                    if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture.id and default_configuration.boot_protocol == boot_protocol) {
+                        const default_run_step = builder.step("run", "Run " ++ step_prefix);
+                        const default_debug_step = builder.step("debug", "Debug " ++ step_prefix);
+                        default_run_step.dependOn(&emulator_step.run);
+                        default_debug_step.dependOn(&emulator_step.debug);
                     }
                 }
+
+                try boot_protocol_steps.append(.{ .emulator_steps = emulator_steps.items });
             }
+
+            try architecture_steps.append(.{ .boot_protocol_steps = boot_protocol_steps.items });
         }
+
+        try bootloader_steps.append( .{ .architecture_steps = architecture_steps.items });
     }
+
+    break :blk BuildSteps{ .bootloader_steps = bootloader_steps.items };
+    };
+    _ = build_steps;
 
     const test_step = builder.step("test", "Run unit tests");
 
@@ -107,10 +118,232 @@ pub fn build(builder: *host.build.Builder) !void {
     }
 }
 
+pub fn getEmulators(comptime configuration: Configuration) []const Emulator{
+    return switch (configuration.bootloader) {
+        .rise, .limine => switch (configuration.architecture) {
+            .x86_64 => switch (configuration.boot_protocol) {
+                .bios => &.{ .qemu },
+                .uefi => &.{ .qemu },
+            },
+            else => @compileError("Architecture not supported"),
+        },
+    };
+}
+
+const BuildSteps = struct {
+    bootloader_steps: []const BootloaderSteps,
+};
+
+const BootloaderSteps = struct {
+    architecture_steps: []const ArchitectureSteps,
+};
+
+const ArchitectureSteps = struct {
+    boot_protocol_steps: []const BootProtocolSteps,
+};
+
+const BootProtocolSteps = struct {
+    emulator_steps: []const EmulatorSteps,
+};
+
+const EmulatorSteps = struct {
+    builder: *Builder,
+    run: Step,
+    debug: Step,
+
+    fn Interface(comptime configuration: Configuration, comptime emulator: Emulator, comptime step_prefix: []const u8) type {
+        return switch (emulator) {
+            .qemu => struct {
+                const qemu_executable = "qemu-system-" ++ switch (configuration.architecture) {
+                    else => @tagName(configuration.architecture),
+                };
+
+
+                fn create(builder: *Builder, list: *host.ArrayList(EmulatorSteps)) !*EmulatorSteps {
+                    const new_one = try list.addOne();
+                    new_one.* = .{
+                        .builder = builder,
+                            .run = Step.init(.custom, step_prefix ++ "_run_", builder.allocator, run),
+                            .debug = Step.init(.custom, step_prefix ++ "_debug_", builder.allocator, debug),
+                    };
+
+                    const run_step = builder.step(step_prefix ++ "_run", "Run " ++ step_prefix);
+                    const debug_step = builder.step(step_prefix ++ "_debug", "Debug " ++ step_prefix);
+                    run_step.dependOn(&new_one.run);
+                    debug_step.dependOn(&new_one.debug);
+
+                    return new_one;
+                }
+
+                fn run(step: *Step) !void {
+                    const emulator_steps = @fieldParentPtr(EmulatorSteps, "run", step);
+                    const arguments = try qemuCommon(emulator_steps);
+                    for (arguments.list.items) |argument| {
+                        host.log.debug("{s}", .{argument});
+                    }
+                    var process = host.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
+                    _ = try process.spawnAndWait();
+                }
+
+                fn debug(step: *Step) !void {
+                    const emulator_steps = @fieldParentPtr(EmulatorSteps, "debug", step);
+                    var arguments = try qemuCommon(emulator_steps);
+                    
+                    if (!arguments.config.isVirtualizing()) {
+                        try arguments.list.append("-S");
+                    }
+
+                    try arguments.list.append("-s");
+
+                    return Error.not_implemented;
+                }
+
+                fn qemuCommon(emulator_steps: *EmulatorSteps) !struct {config: Arguments, list: host.ArrayList([]const u8) } {
+                    const builder = emulator_steps.builder;
+                    const config_file = try readConfig(builder, emulator);
+                    var token_stream = host.json.TokenStream.init(config_file);
+                    const arguments = try host.json.parse(Arguments, &token_stream, .{ .allocator = builder.allocator });
+
+                    var argument_list = host.ArrayList([]const u8).init(builder.allocator);
+
+                    try argument_list.append(qemu_executable);
+
+                    switch (configuration.boot_protocol) {
+                        .uefi => try argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" }),
+                        else => {},
+                    }
+
+                    const image_config = try host.ImageConfig.get(builder.allocator, host.ImageConfig.default_path);
+                    const disk_path = try host.concat(builder.allocator, u8, &.{ cache_dir, image_config.image_name });
+                    try argument_list.appendSlice( &.{ "-drive", builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
+
+                    if (!arguments.reboot) {
+                        try argument_list.append("-no-reboot");
+                    }
+
+                    if (!arguments.shutdown) {
+                        try argument_list.append("-no-shutdown");
+                    }
+
+                    if (arguments.vga) |vga| {
+                        try argument_list.append("-vga");
+                        try argument_list.append(@tagName(vga));
+                    }
+
+                    if (arguments.smp) |smp| {
+                        try argument_list.append("-smp");
+                        const smp_string = builder.fmt("{}", .{smp});
+                        try argument_list.append(smp_string);
+                    }
+
+                    if (arguments.debugcon) |debugcon| {
+                        try argument_list.append("-debugcon");
+                        try argument_list.append(@tagName(debugcon));
+                    }
+
+                    if (arguments.memory) |memory| {
+                        try argument_list.append("-m");
+                        const memory_argument = builder.fmt("{}{c}", .{memory.amount, @as(u8, switch (memory.unit) {
+                            .kilobyte => 'K',
+                            .megabyte => 'M',
+                            .gigabyte => 'G',
+                            else => unreachable,
+                        })});
+                        try argument_list.append(memory_argument);
+                    }
+
+                    if (arguments.isVirtualizing()) {
+                        try argument_list.appendSlice(&.{
+                                "-accel",
+                                switch (host.os) {
+                                .windows => "whpx",
+                                .linux => "kvm",
+                                .macos => "hvf",
+                                else => @compileError("OS not supported"),
+                                },
+                                "-cpu",
+                                "host",
+                                });
+                    } else {
+                        if (arguments.log) |log_configuration| {
+                            var log_what = host.ArrayList(u8).init(builder.allocator);
+
+                            if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
+                            if (log_configuration.interrupts) try log_what.appendSlice("int,");
+                            if (log_configuration.assembly) try log_what.appendSlice("in_asm,");
+
+                            if (log_what.items.len > 0) {
+                                // Delete the last comma
+                                _ = log_what.pop();
+
+                                try argument_list.append("-d");
+                                try argument_list.append(log_what.items);
+                            }
+
+                            if (log_configuration.file) |log_file| {
+                                try argument_list.append("-D");
+                                try argument_list.append(log_file);
+                            }
+                        }
+
+                        if (arguments.trace) |tracees| {
+                            for (tracees) |tracee| {
+                                const tracee_slice = builder.fmt("-{s}*", .{tracee});
+                                try argument_list.append("-trace");
+                                try argument_list.append(tracee_slice);
+                            }
+                        }
+                    }
+
+                    return .{ .config = arguments, .list = argument_list };
+                }
+               
+                const Arguments = struct {
+                    memory: ?struct {
+                        amount: u64,
+                        unit: host.SizeUnit,
+                    },
+                    virtualize: ?bool,
+                    vga: ?enum {
+                        std,
+                    },
+                    smp: ?usize,
+                    reboot: bool,
+                    shutdown: bool,
+                    debugcon: ?enum {
+                        stdio,
+                    },
+                    log: ?struct {
+                        file: ?[]const u8,
+                        guest_errors: bool,
+                        assembly: bool,
+                        interrupts: bool,
+                    },
+                    trace: ?[]const []const u8,
+
+                    pub fn isVirtualizing(arguments: Arguments) bool {
+                        return (arguments.virtualize orelse false) and host.cpu.arch == configuration.architecture;
+                    }
+                };
+
+            },
+        };
+    }
+};
+
+
+fn readConfig(builder: *Builder, comptime emulator: Emulator) ![]const u8 {
+    const config_file = switch (emulator) {
+        else => try host.cwd().readFileAlloc(builder.allocator, "config/" ++ @tagName(emulator) ++ ".json", host.maxInt(usize)),
+    };
+
+    return config_file;
+}
+
+
 const BootloaderBuild = struct {
     executables: []const *LibExeObjStep,
 };
-
 
 const Error = error {
     not_implemented,
@@ -171,7 +404,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
             }
         },
             .limine => {
-                const executable = builder.addExecutable("limine.elf", "src/bootloader/limine/limine.zig");
+                const executable = builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
                 executable.setTarget(get_target(.x86_64, .privileged));
                 executable.setOutputDir(cache_dir);
                 executable.addPackage(lib_package);
@@ -236,9 +469,6 @@ fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
     return disk_image_builder;
 }
 
-fn initPackageDependencies() void {
-}
-
 var lib_package = host.build.Pkg{
     .name = "lib",
     .source = host.build.FileSource.relative("src/lib.zig"),
@@ -264,173 +494,7 @@ var user_package = host.build.Pkg{
     .source = host.build.FileSource.relative("src/user.zig"),
 };
 
-// const Kernel = struct {
-//     builder: *host.build.Builder,
-//     bootloader_executables: host.ArrayList(*host.build.LibExeObjStep) = undefined,
-//     executable: *host.build.LibExeObjStep = undefined,
-//     //userspace_programs: []*host.build.LibExeObjStep = &.{},
-//     options: Options,
-//     boot_image_step: host.build.Step = undefined,
-//     disk_count: u64 = 0,
-//     disk_step: host.build.Step = undefined,
-//     debug_step: host.build.Step = undefined,
-//     disk_image_builder_run_step: *host.build.RunStep = undefined,
-//     run_argument_list: host.ArrayList([]const u8) = undefined,
-//     debug_argument_list: host.ArrayList([]const u8) = undefined,
-//     gdb_script: *host.build.WriteFileStep = undefined,
-//
-//     fn create(kernel: *Kernel) !void {
-//
-//         try kernel.create_bootloader();
-//         kernel.create_executable();
-//         try kernel.create_disassembly_step();
-//         kernel.create_disk();
-//         try kernel.create_run_and_debug_steps();
-//     }
-//
-//
-//     const Error = error{
-//         not_implemented,
-//         module_file_not_found,
-//     };
-//
 //     fn create_run_and_debug_steps(kernel: *Kernel) !void {
-//         kernel.run_argument_list = host.ArrayList([]const u8).init(kernel.builder.allocator);
-//         switch (kernel.options.run.emulator) {
-//             .qemu => {
-//                 const qemu_name = try host.concat(kernel.builder.allocator, u8, &.{ "qemu-system-", @tagName(kernel.options.arch) });
-//                 try kernel.run_argument_list.append(qemu_name);
-//
-//                 if (!kernel.options.is_virtualizing()) {
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-nvme*");
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-pci*");
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-ide*");
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-ata*");
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-ahci*");
-//                     try kernel.run_argument_list.append("-trace");
-//                     try kernel.run_argument_list.append("-sata*");
-//                 }
-//
-//                 // Boot device
-//                 switch (kernel.options.arch) {
-//                     .x86_64 => {
-//                         if (kernel.options.arch.x86_64.boot_protocol == .uefi) {
-//                             try kernel.run_argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" });
-//                         }
-//                     },
-//                     else => return Error.not_implemented,
-//                 }
-//
-//                 {
-//                     try kernel.run_argument_list.append("-no-reboot");
-//                     try kernel.run_argument_list.append("-no-shutdown");
-//                 }
-//
-//                 {
-//                     const memory_arg = kernel.builder.fmt("{}{s}", .{ kernel.options.run.memory.amount, @tagName(kernel.options.run.memory.unit) });
-//                     try kernel.run_argument_list.append("-m");
-//                     try kernel.run_argument_list.append(memory_arg);
-//                 }
-//
-//                 if (kernel.options.run.emulator.qemu.smp) |smp_count| {
-//                     try kernel.run_argument_list.append("-smp");
-//                     try kernel.run_argument_list.append(kernel.builder.fmt("{}", .{smp_count}));
-//                 }
-//
-//                 if (kernel.options.run.emulator.qemu.vga) |vga_option| {
-//                     try kernel.run_argument_list.append("-vga");
-//                     try kernel.run_argument_list.append(@tagName(vga_option));
-//                 } else {
-//                     try kernel.run_argument_list.append("-vga");
-//                     try kernel.run_argument_list.append("none");
-//                     try kernel.run_argument_list.append("-display");
-//                     try kernel.run_argument_list.append("none");
-//                     //kernel.run_argument_list.append("-nographic") ;
-//                 }
-//
-//                 if (kernel.options.arch == .x86_64) {
-//                     try kernel.run_argument_list.append("-debugcon");
-//                     try kernel.run_argument_list.append("stdio");
-//                 }
-//
-//                 try kernel.run_argument_list.append("-global");
-//                 try kernel.run_argument_list.append("virtio-mmio.force-legacy=false");
-//
-//                 const image_config = try host.ImageConfig.get(kernel.builder.allocator, host.ImageConfig.default_path);
-//                 const disk_path = try host.concat(kernel.builder.allocator, u8, &.{ cache_dir, image_config.image_name });
-//                 // TODO: don't ignore system interface
-//                 try kernel.run_argument_list.appendSlice(
-//                 //&.{ "-hda", disk_path });
-//                 &.{ "-drive", kernel.builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
-//
-//                 kernel.debug_argument_list = try kernel.run_argument_list.clone();
-//                 if (kernel.options.is_virtualizing()) {
-//                     const args = &.{
-//                         "-accel",
-//                         switch (host.os) {
-//                             .windows => "whpx",
-//                             .linux => "kvm",
-//                             .macos => "hvf",
-//                             else => @compileError("OS not supported"),
-//                         },
-//                         "-cpu",
-//                         "host",
-//                     };
-//                     try kernel.run_argument_list.appendSlice(args);
-//                     try kernel.debug_argument_list.appendSlice(args);
-//                 } else {
-//                     if (kernel.options.run.emulator.qemu.log) |log_options| {
-//                         var log_what = host.ArrayList(u8).init(kernel.builder.allocator);
-//                         if (log_options.guest_errors) try log_what.appendSlice("guest_errors,");
-//                         if (log_options.cpu) try log_what.appendSlice("cpu,");
-//                         if (log_options.interrupts) try log_what.appendSlice("int,");
-//                         if (log_options.assembly) try log_what.appendSlice("in_asm,");
-//                         if (log_options.pmode_exceptions) try log_what.appendSlice("pcall,");
-//
-//                         if (log_what.items.len > 0) {
-//                             // Delete the last comma
-//                             _ = log_what.pop();
-//
-//                             const log_flag = "-d";
-//                             try kernel.run_argument_list.append(log_flag);
-//                             try kernel.debug_argument_list.append(log_flag);
-//                             try kernel.run_argument_list.append(log_what.items);
-//                             try kernel.debug_argument_list.append(log_what.items);
-//                         }
-//
-//                         if (log_options.file) |log_file| {
-//                             const log_file_flag = "-D";
-//                             try kernel.run_argument_list.append(log_file_flag);
-//                             try kernel.debug_argument_list.append(log_file_flag);
-//                             try kernel.run_argument_list.append(log_file);
-//                             try kernel.debug_argument_list.append(log_file);
-//                         }
-//                     }
-//                 }
-//
-//                 if (!kernel.options.is_virtualizing()) {
-//                     try kernel.debug_argument_list.append("-S");
-//                 }
-//
-//                 try kernel.debug_argument_list.append("-s");
-//             },
-//             .bochs => {
-//                 try kernel.run_argument_list.append("bochs");
-//             },
-//         }
-//
-//         const run_command = kernel.builder.addSystemCommand(kernel.run_argument_list.items);
-//         run_command.step.dependOn(kernel.builder.default_step);
-//         run_command.step.dependOn(&kernel.disk_image_builder_run_step.step);
-//
-//         const run_step = kernel.builder.step("run", "run step");
-//         run_step.dependOn(&run_command.step);
-//
 //         var gdb_script_buffer = host.ArrayList(u8).init(kernel.builder.allocator);
 //         switch (kernel.options.arch) {
 //             .x86, .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
@@ -463,151 +527,6 @@ var user_package = host.build.Pkg{
 //         const debug_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
 //         debug_step.dependOn(&kernel.debug_step);
 //     }
-//
-//     const Options = struct {
-//         arch: Options.ArchSpecific,
-//         run: RunOptions,
-//
-//         const x86_64 = struct {
-//             bootloader: Bootloader,
-//             boot_protocol: BootProtocol,
-//
-//             const BootProtocol = enum {
-//                 bios,
-//                 uefi,
-//             };
-//
-//             const Bootloader = enum {
-//                 rise,
-//                 limine,
-//             };
-//         };
-//
-//         const ArchSpecific = union(Cpu.Arch) {
-//             arm,
-//             armeb,
-//             aarch64,
-//             aarch64_be,
-//             aarch64_32,
-//             arc,
-//             avr,
-//             bpfel,
-//             bpfeb,
-//             csky,
-//             hexagon,
-//             m68k,
-//             mips,
-//             mipsel,
-//             mips64,
-//             mips64el,
-//             msp430,
-//             powerpc,
-//             powerpcle,
-//             powerpc64,
-//             powerpc64le,
-//             r600,
-//             amdgcn,
-//             riscv32,
-//             riscv64,
-//             sparc,
-//             sparc64,
-//             sparcel,
-//             s390x,
-//             tce,
-//             tcele,
-//             thumb,
-//             thumbeb,
-//             x86,
-//             x86_64: x86_64,
-//             xcore,
-//             nvptx,
-//             nvptx64,
-//             le32,
-//             le64,
-//             amdil,
-//             amdil64,
-//             hsail,
-//             hsail64,
-//             spir,
-//             spir64,
-//             kalimba,
-//             shave,
-//             lanai,
-//             wasm32,
-//             wasm64,
-//             renderscript32,
-//             renderscript64,
-//             ve,
-//             spu_2,
-//             spirv32,
-//             spirv64,
-//             dxil,
-//             loongarch32,
-//             loongarch64,
-//         };
-//
-//         const RunOptions = struct {
-//             memory: Memory,
-//             emulator: union(Emulator) {
-//                 qemu: QEMU,
-//                 bochs: Bochs,
-//             },
-//
-//             const Emulator = enum {
-//                 qemu,
-//                 bochs,
-//             };
-//
-//             const Memory = struct {
-//                 amount: u64,
-//                 unit: Unit,
-//
-//                 const Unit = enum(u3) {
-//                     K = 1,
-//                     M = 2,
-//                     G = 3,
-//                     T = 4,
-//                 };
-//             };
-//
-//             const QEMU = struct {
-//                 vga: ?VGA,
-//                 log: ?LogOptions,
-//                 smp: ?u64,
-//                 virtualize: bool,
-//                 print_command: bool,
-//                 const VGA = enum {
-//                     std,
-//                     virtio,
-//                 };
-//             };
-//
-//             const Bochs = struct {};
-//
-//             const DiskOptions = struct {
-//                 interface: host.DiskType,
-//                 filesystem: host.FilesystemType,
-//             };
-//
-//             const LogOptions = struct {
-//                 file: ?[]const u8,
-//                 guest_errors: bool,
-//                 cpu: bool,
-//                 interrupts: bool,
-//                 assembly: bool,
-//                 pmode_exceptions: bool,
-//             };
-//         };
-//
-//         fn is_virtualizing(options: Options) bool {
-//             return switch (options.run.emulator) {
-//                 .qemu => options.run.emulator.qemu.virtualize and host.cpu.arch == options.arch,
-//                 .bochs => false,
-//             };
-//         }
-//     };
-//
-// };
 //
 // fn do_debug_step(step: *host.build.Step) !void {
 //     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
