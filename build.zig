@@ -55,8 +55,11 @@ pub fn build(builder: *host.build.Builder) !void {
 
         inline for (bootloader.supported_architectures) |architecture| {
             var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
-            const cpu_driver = try createCPUDriver(builder, architecture.id);
+            const cpu_driver = try createCPUDriver(builder, architecture.id, false);
             _ = cpu_driver;
+            // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
+            // _ = cpu_driver_test;
+
             inline for (architecture.supported_protocols) |boot_protocol| {
                 var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
                 const configuration = .{
@@ -456,9 +459,12 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
     return bootloader_build;
 }
 
-fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*LibExeObjStep {
+fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, comptime test_executable: bool) !*LibExeObjStep {
     const path = "src/cpu_driver/arch/" ++ @tagName(architecture) ++ "/";
-    const cpu_driver = builder.addExecutable("cpu_driver_" ++ @tagName(architecture), path ++ "entry_point.zig");
+    const cpu_driver = if (test_executable) builder.addTestExe("cpu_driver_test_" ++ @tagName(architecture), path ++ "entry_point.zig") else builder.addExecutable("cpu_driver_" ++ @tagName(architecture), path ++ "entry_point.zig");
+    if (test_executable) {
+        cpu_driver.test_runner = path ++ "test_runner.zig";
+    }
     const target = getTarget(architecture, .privileged);
     cpu_driver.setTarget(target);
     cpu_driver.setBuildMode(cpu_driver.builder.standardReleaseOptions());
@@ -469,7 +475,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*
     cpu_driver.strip = false;
     cpu_driver.red_zone = false;
     cpu_driver.omit_frame_pointer = false;
-    cpu_driver.entry_symbol_name = "kernel_entry_point";
+    cpu_driver.entry_symbol_name = "entry_point";
 
     cpu_driver.addPackage(lib_package);
     cpu_driver.addPackage(bootloader_package);

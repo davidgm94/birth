@@ -190,7 +190,6 @@ pub const Header = extern struct {
             if (gpt_header.partition_entry_count == 0) @panic("No GPT partition entries");
             assert(gpt_header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = try disk.read_slice(GPT.Partition, gpt_header.partition_entry_count, gpt_header.partition_array_lba, allocator, .{});
-            log.debug("GPT header: 0x{x}. Partition entries: 0x{x}", .{@ptrToInt(gpt_header), @ptrToInt(partition_entries.ptr)});
             return .{
                 .mbr = mbr,
                 .header = gpt_header,

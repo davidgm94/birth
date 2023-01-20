@@ -159,6 +159,9 @@ export fn entry_point() callconv(.C) noreturn {
                 lib.assert(@offsetOf(x86_64_GDT.Table, "code_64") == 0x08);
             }
 
+            const stack_allocation = physical_heap.page_allocator.allocateBytes(0x4000, 0x1000) catch @panic("Stack allocation");
+            const stack_top = stack_allocation.address + stack_allocation.size;
+
     // Enable PAE
     {
         var cr4 = asm volatile (
@@ -202,6 +205,7 @@ export fn entry_point() callconv(.C) noreturn {
                     \\mov %[entry_point_low], %%edi
                     \\mov %[entry_point_high], %%esi
                     \\mov %[bootloader_information], %%edx
+                    \\mov %[stack_top], %%ecx
                     \\jmp $0x8, $bits64
                     \\bits64:
                     //0:  48 31 c0                xor    rax,rax
@@ -226,13 +230,24 @@ export fn entry_point() callconv(.C) noreturn {
                     \\.byte 0x89
                     \\.byte 0xd7
 
+                    // 0:  48 31 ed                xor    rbp,rbp
+                    \\.byte 0x48
+                    \\.byte 0x31
+                    \\.byte 0xed
+
+                    // 3:  48 89 cc                mov    rsp,rcx
+                    \\.byte 0x48
+                    \\.byte 0x89
+                    \\.byte 0xcc
+
                     //c:  ff e0                   jmp    rax
                     \\.byte 0xff
                     \\.byte 0xe0
                     :
                     : [entry_point_low] "{edi}" (@truncate(u32, parser.getEntryPoint())),
                 [entry_point_high] "{esi}" (@truncate(u32, parser.getEntryPoint() >> 32)),
-                [bootloader_information] "{edx}" (bootloader_information)
+                [bootloader_information] "{edx}" (bootloader_information),
+                [stack_top] "{ecx}" (stack_top)
                     );
         }
     }
