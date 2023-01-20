@@ -46,89 +46,88 @@ pub fn build(builder: *host.build.Builder) !void {
     const disk_image_builder = createDiskImageBuilder(builder);
 
     const build_steps = blk: {
-    var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
+        var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
 
-    inline for (host.bootloaders) |bootloader, bootloader_index| {
-        const bootloader_id = @intToEnum(host.Bootloader.ID, bootloader_index);
+        inline for (host.bootloaders) |bootloader, bootloader_index| {
+            const bootloader_id = @intToEnum(host.Bootloader.ID, bootloader_index);
 
-        var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
+            var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
 
-        inline for (bootloader.supported_architectures) |architecture| {
-            var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
-            const cpu_driver = try createCPUDriver(builder, architecture.id, false);
-            _ = cpu_driver;
-            // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
-            // _ = cpu_driver_test;
+            inline for (bootloader.supported_architectures) |architecture| {
+                var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
+                const cpu_driver = try createCPUDriver(builder, architecture.id, false);
+                _ = cpu_driver;
+                // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
+                // _ = cpu_driver_test;
 
-            inline for (architecture.supported_protocols) |boot_protocol| {
-                var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
-                const configuration = .{
-                    .bootloader = bootloader_id,
-                    .architecture = architecture.id,
-                    .boot_protocol = boot_protocol,
-                };
+                inline for (architecture.supported_protocols) |boot_protocol| {
+                    var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
+                    const configuration = .{
+                        .bootloader = bootloader_id,
+                        .architecture = architecture.id,
+                        .boot_protocol = boot_protocol,
+                    };
 
-                const suffix = "_" ++ @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol);
-                const bootloader_build = try createBootloader(builder, configuration, suffix);
-                _ = bootloader_build;
+                    const suffix = "_" ++ @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol);
+                    const bootloader_build = try createBootloader(builder, configuration, suffix);
+                    _ = bootloader_build;
 
+                    const disk_image_builder_run_step = disk_image_builder.run();
+                    disk_image_builder_run_step.addArgs(&.{ @tagName(configuration.bootloader), @tagName(configuration.architecture), @tagName(configuration.boot_protocol) });
 
-                const disk_image_builder_run_step = disk_image_builder.run();
-                disk_image_builder_run_step.addArgs(&.{@tagName(configuration.bootloader), @tagName(configuration.architecture), @tagName(configuration.boot_protocol)});
+                    const emulators = comptime getEmulators(configuration);
 
-                const emulators = comptime getEmulators(configuration);
+                    inline for (emulators) |emulator| {
+                        const step_suffix = suffix ++ @tagName(emulator);
+                        const emulator_step = try EmulatorSteps.Interface(configuration, emulator, suffix, step_suffix).create(builder, &emulator_steps);
+                        emulator_step.run.dependOn(builder.default_step);
+                        emulator_step.debug.dependOn(builder.default_step);
+                        emulator_step.run.dependOn(&disk_image_builder_run_step.step);
+                        emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
 
-                inline for (emulators) |emulator| {
-                    const step_suffix = suffix ++ @tagName(emulator);
-                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, suffix, step_suffix).create(builder, &emulator_steps);
-                    emulator_step.run.dependOn(builder.default_step);
-                    emulator_step.debug.dependOn(builder.default_step);
-                    emulator_step.run.dependOn(&disk_image_builder_run_step.step);
-                    emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
-
-                    if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture.id and default_configuration.boot_protocol == boot_protocol) {
-                        const default_run_step = builder.step("run", "Run " ++ step_suffix);
-                        const default_debug_step = builder.step("debug", "Debug " ++ step_suffix);
-                        default_run_step.dependOn(&emulator_step.run);
-                        default_debug_step.dependOn(&emulator_step.debug);
+                        if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture.id and default_configuration.boot_protocol == boot_protocol) {
+                            const default_run_step = builder.step("run", "Run " ++ step_suffix);
+                            const default_debug_step = builder.step("debug", "Debug " ++ step_suffix);
+                            default_run_step.dependOn(&emulator_step.run);
+                            default_debug_step.dependOn(&emulator_step.debug);
+                        }
                     }
+
+                    try boot_protocol_steps.append(.{ .emulator_steps = emulator_steps.items });
                 }
 
-                try boot_protocol_steps.append(.{ .emulator_steps = emulator_steps.items });
+                try architecture_steps.append(.{ .boot_protocol_steps = boot_protocol_steps.items });
             }
 
-            try architecture_steps.append(.{ .boot_protocol_steps = boot_protocol_steps.items });
+            try bootloader_steps.append(.{ .architecture_steps = architecture_steps.items });
         }
 
-        try bootloader_steps.append( .{ .architecture_steps = architecture_steps.items });
-    }
-
-    break :blk BuildSteps{ .bootloader_steps = bootloader_steps.items };
+        break :blk BuildSteps{ .bootloader_steps = bootloader_steps.items };
     };
     _ = build_steps;
 
     const test_step = builder.step("test", "Run unit tests");
 
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
-       .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
+        .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
     };
 
     for (native_tests) |native_test| {
-       const test_exe = builder.addTestExe(native_test.name, native_test.zig_source_file);
-       test_exe.setTarget(builder.standardTargetOptions(.{}));
-       test_exe.setBuildMode(builder.standardReleaseOptions());
-       test_exe.setOutputDir("zig-cache");
-       const run_test_step = test_exe.run();
-       test_step.dependOn(&run_test_step.step);
+        const test_exe = builder.addTestExe(native_test.name, native_test.zig_source_file);
+        test_exe.setTarget(builder.standardTargetOptions(.{}));
+        test_exe.setBuildMode(builder.standardReleaseOptions());
+        test_exe.setOutputDir("zig-cache");
+        const run_test_step = test_exe.run();
+        test_step.dependOn(&run_test_step.step);
     }
 }
 
-pub fn getEmulators(comptime configuration: Configuration) []const Emulator{
+pub fn getEmulators(comptime configuration: Configuration) []const Emulator {
     return switch (configuration.bootloader) {
         .rise, .limine => switch (configuration.architecture) {
             .x86_64 => switch (configuration.boot_protocol) {
-                .bios => &.{ .qemu },
-                .uefi => &.{ .qemu },
+                .bios => &.{.qemu},
+                .uefi => &.{.qemu},
             },
             else => @compileError("Architecture not supported"),
         },
@@ -165,12 +164,11 @@ const EmulatorSteps = struct {
                     else => @tagName(configuration.architecture),
                 };
 
-
                 fn create(builder: *Builder, list: *host.ArrayList(EmulatorSteps)) !*EmulatorSteps {
                     const new_one = try list.addOne();
                     new_one.* = .{
                         .builder = builder,
-                        .run = Step.init(.custom,  "_run_" ++ step_suffix, builder.allocator, run),
+                        .run = Step.init(.custom, "_run_" ++ step_suffix, builder.allocator, run),
                         .debug = Step.init(.custom, "_debug_" ++ step_suffix, builder.allocator, debug),
                         .gdb_script = Step.init(.custom, "_gdb_script_" ++ step_suffix, builder.allocator, gdbScript),
                     };
@@ -200,7 +198,7 @@ const EmulatorSteps = struct {
                     const builder = emulator_steps.builder;
 
                     var arguments = try qemuCommon(emulator_steps);
-                    
+
                     if (!arguments.config.isVirtualizing()) {
                         try arguments.list.append("-S");
                     }
@@ -238,7 +236,7 @@ const EmulatorSteps = struct {
                     try host.cwd().writeFile(gdb_script_path, gdb_script_buffer.items);
                 }
 
-                fn qemuCommon(emulator_steps: *EmulatorSteps) !struct {config: Arguments, list: host.ArrayList([]const u8) } {
+                fn qemuCommon(emulator_steps: *EmulatorSteps) !struct { config: Arguments, list: host.ArrayList([]const u8) } {
                     const builder = emulator_steps.builder;
                     const config_file = try readConfig(builder, emulator);
                     var token_stream = host.json.TokenStream.init(config_file);
@@ -255,7 +253,7 @@ const EmulatorSteps = struct {
 
                     const image_config = try host.ImageConfig.get(builder.allocator, host.ImageConfig.default_path);
                     const disk_path = try host.concat(builder.allocator, u8, &.{ cache_dir, image_config.image_name });
-                    try argument_list.appendSlice( &.{ "-drive", builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
+                    try argument_list.appendSlice(&.{ "-drive", builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
 
                     if (!arguments.reboot) {
                         try argument_list.append("-no-reboot");
@@ -283,27 +281,27 @@ const EmulatorSteps = struct {
 
                     if (arguments.memory) |memory| {
                         try argument_list.append("-m");
-                        const memory_argument = builder.fmt("{}{c}", .{memory.amount, @as(u8, switch (memory.unit) {
+                        const memory_argument = builder.fmt("{}{c}", .{ memory.amount, @as(u8, switch (memory.unit) {
                             .kilobyte => 'K',
                             .megabyte => 'M',
                             .gigabyte => 'G',
                             else => unreachable,
-                        })});
+                        }) });
                         try argument_list.append(memory_argument);
                     }
 
                     if (arguments.isVirtualizing()) {
                         try argument_list.appendSlice(&.{
-                                "-accel",
-                                switch (host.os) {
+                            "-accel",
+                            switch (host.os) {
                                 .windows => "whpx",
                                 .linux => "kvm",
                                 .macos => "hvf",
                                 else => @compileError("OS not supported"),
-                                },
-                                "-cpu",
-                                "host",
-                                });
+                            },
+                            "-cpu",
+                            "host",
+                        });
                     } else {
                         if (arguments.log) |log_configuration| {
                             var log_what = host.ArrayList(u8).init(builder.allocator);
@@ -337,7 +335,7 @@ const EmulatorSteps = struct {
 
                     return .{ .config = arguments, .list = argument_list };
                 }
-               
+
                 const Arguments = struct {
                     memory: ?struct {
                         amount: u64,
@@ -365,12 +363,10 @@ const EmulatorSteps = struct {
                         return (arguments.virtualize orelse false) and host.cpu.arch == configuration.architecture;
                     }
                 };
-
             },
         };
     }
 };
-
 
 fn readConfig(builder: *Builder, comptime emulator: Emulator) ![]const u8 {
     const config_file = switch (emulator) {
@@ -380,16 +376,15 @@ fn readConfig(builder: *Builder, comptime emulator: Emulator) ![]const u8 {
     return config_file;
 }
 
-
 const BootloaderBuild = struct {
     executables: []const *LibExeObjStep,
 };
 
-const Error = error {
+const Error = error{
     not_implemented,
 };
 
-fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime suffix: []const u8) !BootloaderBuild{
+fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime suffix: []const u8) !BootloaderBuild {
     var bootloader_executables = host.ArrayList(*LibExeObjStep).init(builder.allocator);
 
     switch (configuration.bootloader) {
@@ -414,17 +409,17 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             executable.want_lto = true;
                             executable.strip = true;
                             executable.setBuildMode(.ReleaseSmall);
-                            executable.entry_symbol_name = "entry_point";
+                            executable.entry_symbol_name = "entryPoint";
 
                             try bootloader_executables.append(executable);
                         },
                         .uefi => {
                             const executable = builder.addExecutable("BOOTX64", rise_loader_path ++ "uefi/main.zig");
                             executable.setTarget(.{
-                                    .cpu_arch = .x86_64,
-                                    .os_tag = .uefi,
-                                    .abi = .msvc,
-                                    });
+                                .cpu_arch = .x86_64,
+                                .os_tag = .uefi,
+                                .abi = .msvc,
+                            });
                             executable.setOutputDir(cache_dir);
                             executable.addPackage(lib_package);
                             executable.addPackage(privileged_package);
@@ -437,15 +432,15 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                 else => @compileError("Architecture not supported"),
             }
         },
-            .limine => {
-                const executable = builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
-                executable.setTarget(getTarget(.x86_64, .privileged));
-                executable.setOutputDir(cache_dir);
-                executable.addPackage(lib_package);
-                executable.addPackage(privileged_package);
-                
-                try bootloader_executables.append(executable);
-            },
+        .limine => {
+            const executable = builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
+            executable.setTarget(getTarget(.x86_64, .privileged));
+            executable.setOutputDir(cache_dir);
+            executable.addPackage(lib_package);
+            executable.addPackage(privileged_package);
+
+            try bootloader_executables.append(executable);
+        },
     }
 
     const bootloader_build = .{
@@ -475,7 +470,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     cpu_driver.strip = false;
     cpu_driver.red_zone = false;
     cpu_driver.omit_frame_pointer = false;
-    cpu_driver.entry_symbol_name = "entry_point";
+    cpu_driver.entry_symbol_name = "entryPoint";
 
     cpu_driver.addPackage(lib_package);
     cpu_driver.addPackage(bootloader_package);
@@ -493,7 +488,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     }
 
     builder.default_step.dependOn(&cpu_driver.step);
-    
+
     return cpu_driver;
 }
 
@@ -551,10 +546,10 @@ fn getTarget(comptime asked_arch: Cpu.Arch, comptime execution_mode: host.Tradit
 
     const target = CrossTarget{
         .cpu_arch = asked_arch,
-            .os_tag = .freestanding,
-            .abi = .none,
-            .cpu_features_add = enabled_features,
-            .cpu_features_sub = disabled_features,
+        .os_tag = .freestanding,
+        .abi = .none,
+        .cpu_features_add = enabled_features,
+        .cpu_features_sub = disabled_features,
     };
 
     return target;

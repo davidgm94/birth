@@ -310,7 +310,7 @@ pub fn main() noreturn {
         UEFI.result(@src(), boot_services.getMemoryMap(&memory_map_size, memory_manager.map.region.address.access([*]MemoryDescriptor), &memory_map_key, &memory_map_descriptor_size, &memory_manager.map.descriptor_version));
         memory_manager.map.region.size = @intCast(u32, memory_map_size);
         memory_manager.map.descriptor_size = @intCast(u32, memory_map_descriptor_size);
-        assert(memory_map_size % memory_manager.map.descriptor_size == 0);
+        assert(lib.isAligned(memory_map_size, memory_manager.map.descriptor_size));
         log.debug("Memory map size: {}", .{memory_map_size});
 
         log.debug("Exiting boot services...", .{});

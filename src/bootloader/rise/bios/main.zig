@@ -26,18 +26,6 @@ export fn loop() noreturn {
 
 extern const loader_start: u8;
 extern const loader_end: u8;
-var bios_disk = BIOS.Disk{
-    .disk = .{
-        // TODO:
-        .disk_size = 64 * 1024 * 1024,
-        .sector_size = 0x200,
-        .callbacks = .{
-            .read = BIOS.Disk.read,
-            .write = BIOS.Disk.write,
-        },
-        .type = .bios,
-    },
-};
 
 pub const writer = privileged.E9Writer{ .context = {} };
 
@@ -62,7 +50,20 @@ var gdt = x86_64_GDT.Table{
     .tss_descriptor = undefined,
 };
 
-export fn entry_point() callconv(.C) noreturn {
+export fn entryPoint() callconv(.C) noreturn {
+    var bios_disk = BIOS.Disk{
+        .disk = .{
+            // TODO:
+            .disk_size = 64 * 1024 * 1024,
+                .sector_size = 0x200,
+                .callbacks = .{
+                    .read = BIOS.Disk.read,
+                    .write = BIOS.Disk.write,
+                },
+                .type = .bios,
+        },
+    };
+
     writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
@@ -74,7 +75,7 @@ export fn entry_point() callconv(.C) noreturn {
     const allocator = &physical_heap.allocator;
 
     if (bios_disk.disk.sector_size != 0x200) {
-       @panic("Wtf");
+        @panic("Wtf");
     }
 
     const bootloader_information = allocator.create(bootloader.Information) catch @panic("can't allocate for BootloaderInformation");
@@ -89,21 +90,20 @@ export fn entry_point() callconv(.C) noreturn {
         const file_content = fat_cache.read_file(allocator, file_descriptor.guest) catch @panic("cant read file");
         files[file_count] = .{
             .path = file_descriptor.guest,
-            .content = file_content,
+                .content = file_content,
         };
         file_count += 1;
     }
-
 
     const LongModeVirtualAddressSpace = GenericVirtualAddressSpace(.x86_64);
     var kernel_address_space = blk: {
         const allocation_result = physical_heap.page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_kernel_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap kernel address space");
         const kernel_address_space_physical_region = GenericPhysicalMemoryRegion(.x86_64, .local){
             .address = privileged.GenericPhysicalAddressExtended(.x86_64, .local).new(allocation_result.address),
-            .size = LongModeVirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
+                .size = LongModeVirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
         };
         const result = LongModeVirtualAddressSpace.kernelBSP(kernel_address_space_physical_region);
-        break :blk result;
+break :blk result;
     };
 
     for (memory_map_entries) |entry| {
@@ -162,45 +162,46 @@ export fn entry_point() callconv(.C) noreturn {
             const stack_allocation = physical_heap.page_allocator.allocateBytes(0x4000, 0x1000) catch @panic("Stack allocation");
             const stack_top = stack_allocation.address + stack_allocation.size;
 
-    // Enable PAE
-    {
-        var cr4 = asm volatile (
-                \\mov %%cr4, %[cr4]
-                : [cr4] "=r" (-> u32),
-                );
-        cr4 |= (1 << 5);
-        asm volatile(
-                \\mov %[cr4], %%cr4 
-                :: [cr4] "r" (cr4));
-    }
+            // Enable PAE
+            {
+                var cr4 = asm volatile (
+                        \\mov %%cr4, %[cr4]
+                        : [cr4] "=r" (-> u32),
+                        );
+                cr4 |= (1 << 5);
+                asm volatile(
+                        \\mov %[cr4], %%cr4 
+                        :: [cr4] "r" (cr4));
+            }
 
-    kernel_address_space.makeCurrent();
+            kernel_address_space.makeCurrent();
 
-    // Enable long mode 
-    {
-        var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
-        efer.LME = true;
-        efer.NXE = true;
-        efer.SCE = true;
-        efer.write();
-    }
+            // Enable long mode 
+            {
+                var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
+                efer.LME = true;
+                efer.NXE = true;
+                efer.SCE = true;
+                efer.write();
+            }
 
-    // Enable paging
-    {
-        var cr0 = asm volatile (
-                \\mov %%cr0, %[cr0]
-                : [cr0] "=r" (-> u32),
-                );
-        cr0 |= (1 << 31);
-        asm volatile(
-                \\mov %[cr0], %%cr0 
-                :: [cr0] "r" (cr0));
-    }
+            // Enable paging
+            {
+                var cr0 = asm volatile (
+                        \\mov %%cr0, %[cr0]
+                        : [cr0] "=r" (-> u32),
+                        );
+                cr0 |= (1 << 31);
+                asm volatile(
+                        \\mov %[cr0], %%cr0 
+                        :: [cr0] "r" (cr0));
+            }
 
-    gdt.setup(0, false);
+            gdt.setup(0, false);
 
-    writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
+            writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
+            // Hardcode the trampoline here since this is a 32-bit executable and assembling 64-bit code is not allowed
             asm volatile(
                     \\mov %[entry_point_low], %%edi
                     \\mov %[entry_point_high], %%esi

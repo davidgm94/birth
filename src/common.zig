@@ -346,7 +346,6 @@ pub const Bootloader = struct {
     pub const ID = enum(u1) {
         rise = 0,
         limine = 1,
-
     };
 
     pub const count = enumCount(ID);

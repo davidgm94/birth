@@ -2,7 +2,7 @@ const lib = @import("lib");
 const privileged = @import("privileged");
 const assert = lib.assert;
 
-var buffer = [1]u8{0} ** (0x200 * 0x10);
+var buffer = [1]u8{0} ** (0x200 * 0x4);
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -146,11 +146,11 @@ pub const MemoryMapEntry = extern struct {
 };
 
 var memory_map_entries: [max_memory_entry_count]MemoryMapEntry = undefined;
-var memory_map_entry_count: usize = 0;
-const max_memory_entry_count = 128;
+const max_memory_entry_count = 32;
 
 pub fn e820_init() ![]MemoryMapEntry {
     var registers = Registers{};
+    var memory_map_entry_count: usize = 0;
 
     for (memory_map_entries) |*entry, entry_index| {
         var memory_entry: MemoryMapEntry = undefined;

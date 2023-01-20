@@ -581,7 +581,7 @@ pub const BootDisk = extern struct {
     }
 };
 
-const Error = error {
+const Error = error{
     wrong_arguments,
     not_implemented,
 };
@@ -600,7 +600,7 @@ pub fn main() anyerror!void {
     const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
     const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
 
-    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{"_", @tagName(bootloader), "_", @tagName(architecture), "_", @tagName(boot_protocol)});
+    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
 
     // TODO: use a format with hex support
     const image_config = try host.ImageConfig.get(wrapped_allocator.unwrap_zig(), host.ImageConfig.default_path);
@@ -625,13 +625,13 @@ pub fn main() anyerror!void {
             var files_parser = lib.FileParser.init(configuration_file);
 
             while (try files_parser.next()) |file_descriptor| {
-                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
+                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
                     .arch => switch (architecture) {
                         inline else => |arch| "_" ++ @tagName(arch),
                     },
                     .full => unreachable,
                     .none => unreachable,
-                }});
+                } });
                 log.debug("Host relative path: {s}", .{host_relative_path});
                 const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
                 try fat_partition_cache.create_file(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null);
@@ -639,12 +639,12 @@ pub fn main() anyerror!void {
 
             blk: {
                 const file_content = configuration_file;
-                const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name});
+                const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
                 try fat_partition_cache.create_file(guest_file_path, file_content, wrapped_allocator.unwrap(), null);
                 break :blk;
             }
 
-            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{"zig-cache/", "loader", suffix}), max_file_length);
+            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix }), max_file_length);
             const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
             assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
             try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
@@ -659,13 +659,15 @@ pub fn main() anyerror!void {
             const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
             if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
             const dap_top = stack_top - stack_size;
+            if (aligned_file_size > dap_top) @panic("File too big");
+            log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
             const dap = MBR.DAP{
                 .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
                 .offset = @intCast(u16, dap_top - aligned_file_size),
                 .segment = 0x0,
                 .lba = partition_first_usable_lba,
             };
-            
+
             if (dap_top - dap.offset < aligned_file_size) {
                 @panic("unable to fit file read from disk");
             }

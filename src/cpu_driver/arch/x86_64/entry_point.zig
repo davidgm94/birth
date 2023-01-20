@@ -2,22 +2,25 @@ const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log;
 
+const bootloader = @import("bootloader");
+
 const privileged = @import("privileged");
 
-const writer = privileged.E9Writer{ .context = {} };
+pub const writer = privileged.E9Writer{ .context = {} };
 
-export fn entry_point() callconv(.C) noreturn {
-    writer.writeAll("Hello CPU driver\n") catch unreachable;
-    log.debug("Hello logger", .{});
+export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
+    log.debug("Starting...", .{});
+    log.debug("debug information: {}", .{bootloader_information});
     while (true) {}
 }
 
-var log_buffer: [4096]u8 = undefined;
 pub const std_options = struct {
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
         _ = level;
         _ = scope;
-        lib.format(writer, format ++ "\n", args) catch unreachable;
+        writer.writeAll("[CPU DRIVER] ") catch unreachable;
+        lib.format(writer, format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
     }
 };
 // const alignForward = lib.alignForward;
