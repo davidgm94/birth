@@ -46,6 +46,9 @@ pub const equal = mem.eql;
 pub const length = mem.len;
 pub const startsWith = mem.startsWith;
 pub const endsWith = mem.endsWith;
+pub const indexOf = mem.indexOf;
+// Ideal for small inputs
+pub const indexOfPosLinear = mem.indexOfPosLinear;
 pub const lastIndexOf = mem.lastIndexOf;
 pub const asBytes = mem.asBytes;
 pub const readIntBig = mem.readIntBig;
@@ -120,6 +123,7 @@ pub const SourceLocation = std_builtin.SourceLocation;
 // META PROGRAMMING
 pub const fields = std.meta.fields;
 pub const IntType = std.meta.Int;
+pub const stringToEnum = std.meta.stringToEnum;
 
 const math = std.math;
 pub const maxInt = math.maxInt;

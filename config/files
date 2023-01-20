@@ -1,1 +1,1 @@
-.{ .host_path = "zig-cache", .host_base = "cpu_driver", .guest = "/CPUDRV" },
+.{ .host_path = "zig-cache", .host_base = "cpu_driver", .prefix_type = "arch", .guest = "/CPUDRV" },

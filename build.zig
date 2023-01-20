@@ -55,6 +55,8 @@ pub fn build(builder: *host.build.Builder) !void {
 
         inline for (bootloader.supported_architectures) |architecture| {
             var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
+            const cpu_driver = try createCPUDriver(builder, architecture.id);
+            _ = cpu_driver;
             inline for (architecture.supported_protocols) |boot_protocol| {
                 var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
                 const configuration = .{
@@ -63,29 +65,27 @@ pub fn build(builder: *host.build.Builder) !void {
                     .boot_protocol = boot_protocol,
                 };
 
-                const prefix = @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol) ++ "_";
-                const bootloader_build = try createBootloader(builder, configuration, prefix);
+                const suffix = "_" ++ @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol);
+                const bootloader_build = try createBootloader(builder, configuration, suffix);
                 _ = bootloader_build;
 
-                const cpu_driver = try createCPUDriver(builder, configuration, prefix);
-                _ = cpu_driver;
 
                 const disk_image_builder_run_step = disk_image_builder.run();
-                disk_image_builder_run_step.addArg(prefix);
+                disk_image_builder_run_step.addArgs(&.{@tagName(configuration.bootloader), @tagName(configuration.architecture), @tagName(configuration.boot_protocol)});
 
                 const emulators = comptime getEmulators(configuration);
 
                 inline for (emulators) |emulator| {
-                    const step_prefix = prefix ++ @tagName(emulator);
-                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, prefix, step_prefix).create(builder, &emulator_steps);
+                    const step_suffix = suffix ++ @tagName(emulator);
+                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, suffix, step_suffix).create(builder, &emulator_steps);
                     emulator_step.run.dependOn(builder.default_step);
                     emulator_step.debug.dependOn(builder.default_step);
                     emulator_step.run.dependOn(&disk_image_builder_run_step.step);
                     emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
 
                     if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture.id and default_configuration.boot_protocol == boot_protocol) {
-                        const default_run_step = builder.step("run", "Run " ++ step_prefix);
-                        const default_debug_step = builder.step("debug", "Debug " ++ step_prefix);
+                        const default_run_step = builder.step("run", "Run " ++ step_suffix);
+                        const default_debug_step = builder.step("debug", "Debug " ++ step_suffix);
                         default_run_step.dependOn(&emulator_step.run);
                         default_debug_step.dependOn(&emulator_step.debug);
                     }
@@ -154,8 +154,8 @@ const EmulatorSteps = struct {
     debug: Step,
     gdb_script: Step,
 
-    fn Interface(comptime configuration: Configuration, comptime emulator: Emulator, comptime prefix: []const u8, comptime step_prefix: []const u8) type {
-        const gdb_script_path = "zig-cache/" ++ prefix ++ "gdb_script";
+    fn Interface(comptime configuration: Configuration, comptime emulator: Emulator, comptime suffix: []const u8, comptime step_suffix: []const u8) type {
+        const gdb_script_path = "zig-cache/" ++ "gdb_script_" ++ suffix;
         return switch (emulator) {
             .qemu => struct {
                 const qemu_executable = "qemu-system-" ++ switch (configuration.architecture) {
@@ -167,15 +167,15 @@ const EmulatorSteps = struct {
                     const new_one = try list.addOne();
                     new_one.* = .{
                         .builder = builder,
-                        .run = Step.init(.custom, step_prefix ++ "_run_", builder.allocator, run),
-                        .debug = Step.init(.custom, step_prefix ++ "_debug_", builder.allocator, debug),
-                        .gdb_script = Step.init(.custom, step_prefix ++ "_gdb_script_", builder.allocator, gdbScript),
+                        .run = Step.init(.custom,  "_run_" ++ step_suffix, builder.allocator, run),
+                        .debug = Step.init(.custom, "_debug_" ++ step_suffix, builder.allocator, debug),
+                        .gdb_script = Step.init(.custom, "_gdb_script_" ++ step_suffix, builder.allocator, gdbScript),
                     };
 
                     new_one.debug.dependOn(&new_one.gdb_script);
 
-                    const run_step = builder.step(step_prefix ++ "_run", "Run " ++ step_prefix);
-                    const debug_step = builder.step(step_prefix ++ "_debug", "Debug " ++ step_prefix);
+                    const run_step = builder.step("run" ++ step_suffix, "Run the operating system through an emulator");
+                    const debug_step = builder.step("debug" ++ step_suffix, "Debug the operating system through an emulator");
                     run_step.dependOn(&new_one.run);
                     debug_step.dependOn(&new_one.debug);
 
@@ -226,7 +226,7 @@ const EmulatorSteps = struct {
                         else => @compileError("Architecture not supported"),
                     }
 
-                    try gdb_script_buffer.appendSlice("symbol-file zig-cache/" ++ prefix ++ "cpu_driver\n");
+                    try gdb_script_buffer.appendSlice("symbol-file zig-cache/cpu_driver_" ++ @tagName(configuration.architecture) ++ "\n");
                     try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
 
                     const base_gdb_script = try host.cwd().readFileAlloc(builder.allocator, "config/gdb_script", host.maxInt(usize));
@@ -386,7 +386,7 @@ const Error = error {
     not_implemented,
 };
 
-fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime prefix: []const u8) !BootloaderBuild{
+fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime suffix: []const u8) !BootloaderBuild{
     var bootloader_executables = host.ArrayList(*LibExeObjStep).init(builder.allocator);
 
     switch (configuration.bootloader) {
@@ -398,7 +398,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                         .bios => {
                             const bootloader_path = rise_loader_path ++ "bios/";
 
-                            const executable = builder.addExecutable(prefix ++ "loader", bootloader_path ++ "main.zig");
+                            const executable = builder.addExecutable("loader" ++ suffix, bootloader_path ++ "main.zig");
                             executable.addAssemblyFile(bootloader_path ++ "assembly.S");
                             executable.setTarget(getTarget(.x86, .privileged));
                             executable.setOutputDir(cache_dir);
@@ -456,10 +456,10 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
     return bootloader_build;
 }
 
-fn createCPUDriver(builder: *Builder, comptime configuration: Configuration, comptime prefix: []const u8) !*LibExeObjStep {
-    const path = "src/cpu_driver/arch/" ++ @tagName(configuration.architecture) ++ "/";
-    const cpu_driver = builder.addExecutable(prefix ++ "cpu_driver", path ++ "entry_point.zig");
-    const target = getTarget(configuration.architecture, .privileged);
+fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*LibExeObjStep {
+    const path = "src/cpu_driver/arch/" ++ @tagName(architecture) ++ "/";
+    const cpu_driver = builder.addExecutable("cpu_driver_" ++ @tagName(architecture), path ++ "entry_point.zig");
+    const target = getTarget(architecture, .privileged);
     cpu_driver.setTarget(target);
     cpu_driver.setBuildMode(cpu_driver.builder.standardReleaseOptions());
     cpu_driver.setOutputDir(cache_dir);
@@ -479,7 +479,7 @@ fn createCPUDriver(builder: *Builder, comptime configuration: Configuration, com
     cpu_driver.setMainPkgPath(source_root_dir);
     cpu_driver.setLinkerScriptPath(FileSource.relative(path ++ "linker_script.ld"));
 
-    switch (configuration.architecture) {
+    switch (architecture) {
         .x86_64 => {
             cpu_driver.code_model = .kernel;
         },

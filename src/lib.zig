@@ -257,7 +257,14 @@ pub const FileParser = struct {
     pub const File = struct {
         host_path: []const u8,
         host_base: []const u8,
+        prefix_type: PrefixType,
         guest: []const u8,
+    };
+
+    pub const PrefixType = enum {
+        none,
+        arch,
+        full,
     };
 
     pub fn next(parser: *FileParser) !?File {
@@ -268,6 +275,7 @@ pub const FileParser = struct {
             if (parser.index < parser.text.len and parser.text[parser.index] != '}') {
                 const host_path_field = try parser.parse_field("host_path");
                 const host_base_field = try parser.parse_field("host_base");
+                const prefix_type = common.stringToEnum(PrefixType, try parser.parse_field("prefix_type")) orelse @panic("prefix");
                 const guest_field = try parser.parse_field("guest");
                 try parser.expect_char('}');
                 parser.maybe_expect_char(',');
@@ -276,6 +284,7 @@ pub const FileParser = struct {
                 return .{
                     .host_path = host_path_field,
                     .host_base = host_base_field,
+                    .prefix_type = prefix_type,
                     .guest = guest_field,
                 };
             } else {

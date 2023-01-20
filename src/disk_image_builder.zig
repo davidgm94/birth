@@ -592,15 +592,15 @@ pub fn main() anyerror!void {
     var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
     const arguments = try host.std.process.argsAlloc(wrapped_allocator.unwrap_zig());
-    if (arguments.len != 2) {
+    if (arguments.len != 4) {
         return Error.wrong_arguments;
     }
 
-    const prefix = arguments[1];
+    const bootloader = lib.stringToEnum(lib.Bootloader.ID, arguments[1]) orelse return Error.wrong_arguments;
+    const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
+    const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
 
-    if (!lib.equal(u8, prefix, "rise_x86_64_bios_")) {
-        return Error.not_implemented;
-    }
+    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{"_", @tagName(bootloader), "_", @tagName(architecture), "_", @tagName(boot_protocol)});
 
     // TODO: use a format with hex support
     const image_config = try host.ImageConfig.get(wrapped_allocator.unwrap_zig(), host.ImageConfig.default_path);
@@ -625,7 +625,13 @@ pub fn main() anyerror!void {
             var files_parser = lib.FileParser.init(configuration_file);
 
             while (try files_parser.next()) |file_descriptor| {
-                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{file_descriptor.host_path, "/", prefix, file_descriptor.host_base});
+                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.prefix_type) {
+                    .arch => switch (architecture) {
+                        inline else => |arch| "_" ++ @tagName(arch),
+                    },
+                    .full => unreachable,
+                    .none => unreachable,
+                }});
                 log.debug("Host relative path: {s}", .{host_relative_path});
                 const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
                 try fat_partition_cache.create_file(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null);
@@ -638,7 +644,7 @@ pub fn main() anyerror!void {
                 break :blk;
             }
 
-            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{"zig-cache/", prefix, "loader"}), max_file_length);
+            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{"zig-cache/", "loader", suffix}), max_file_length);
             const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
             assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
             try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
