@@ -1,1 +1,3 @@
-pub const Limine = @import("bootloader/limine/limine.zig");
+pub const Information = extern struct {
+    foo: u32,
+};

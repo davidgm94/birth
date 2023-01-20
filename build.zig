@@ -374,11 +374,13 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                                 executable.setOutputDir(cache_dir);
                                 executable.addPackage(lib_package);
                                 executable.addPackage(privileged_package);
+                                executable.addPackage(bootloader_package);
                                 executable.setLinkerScriptPath(host.build.FileSource.relative(stage_path ++ "linker_script.ld"));
                                 executable.red_zone = false;
                                 executable.link_gc_sections = true;
                                 executable.want_lto = true;
                                 executable.strip = true;
+                                if (stage == 2) executable.code_model = .kernel;
                                 executable.setBuildMode(.ReleaseSmall);
                                 executable.entry_symbol_name = "entry_point";
 

@@ -328,7 +328,7 @@ pub fn GenericVirtualAddressExtended(comptime architecture: lib.Target.Cpu.Arch,
         }
 
         pub fn access(virtual_address: VA, comptime Ptr: type) Ptr {
-            return @intToPtr(Ptr, safeArchitectureCast(@src(), virtual_address.value()));
+            return @intToPtr(Ptr, lib.safeArchitectureCast(virtual_address.value()));
         }
 
         pub fn offset(virtual_address: VA, asked_offset: Usize) VA {
@@ -475,7 +475,7 @@ pub fn GenericVirtualMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, co
 
         pub fn access(virtual_memory_region: VMR, comptime T: type) []T {
             const slice_len = @divExact(virtual_memory_region.size, @sizeOf(T));
-            const result = virtual_memory_region.address.access([*]T)[0..safeArchitectureCast(@src(), slice_len)];
+            const result = virtual_memory_region.address.access([*]T)[0..lib.safeArchitectureCast(slice_len)];
             return result;
         }
 
@@ -490,12 +490,6 @@ pub fn GenericVirtualMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, co
     };
 }
 
-pub inline fn safeArchitectureCast(src: lib.SourceLocation, value: anytype) usize {
-    return switch (@sizeOf(@TypeOf(value)) > @sizeOf(usize)) {
-        true => if (value <= lib.maxInt(usize)) @intCast(usize, value) else @panic("safeArchitectureCast:\n " ++ src.fn_name ++ "\n" ++ src.file ++ "\n"),
-        false => value,
-    };
-}
 
 pub const PassId = u32;
 pub const CoreId = u8;
@@ -771,7 +765,7 @@ address: u64,
                             const generic_entry = get_generic_entry(entry);
                             if (generic_entry.usable and generic_entry.size > size_counters_size + (if (entry_index == bootstrap_index) aligned_memory_map_size else 0)) {
                                 const offset = if (bootstrap_index == entry_index) aligned_memory_map_size else 0;
-                                const size_counters = @intToPtr([*]u64, safeArchitectureCast(@src(), generic_entry.address + offset))[0..safeArchitectureCast(@src(), entry_count)];
+                                const size_counters = @intToPtr([*]u64, lib.safeArchitectureCast(generic_entry.address + offset))[0..lib.safeArchitectureCast(entry_count)];
                                 size_counters[bootstrap_index] += @divExact(aligned_memory_map_size, lib.arch.valid_page_sizes[0]);
                                 size_counters[entry_index] += @divExact(lib.alignForwardGeneric(u64, size_counters_size, lib.arch.valid_page_sizes[0]), lib.arch.valid_page_sizes[0]);
 
@@ -793,6 +787,7 @@ address: u64,
                         if (asked_size % lib.arch.valid_page_sizes[0] != 0) {
                             @panic("not page-aligned allocate");
                         }
+
                         const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
 
                         const entries = memory_manager.memory_map.getEntries(EntryType);

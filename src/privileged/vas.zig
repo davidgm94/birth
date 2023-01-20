@@ -272,11 +272,9 @@ pub const Region = struct {
     inline fn contains(container: Region, contained: Region) bool {
         log.debug("(0x{x}, 0x{x}) contains (0x{x}, 0x{x})?", .{ container.address.value, container.get_top_address().value, contained.address.value, contained.get_top_address().value });
         if (container.get_top_address().value <= contained.address.value) {
-            log.debug("contain1", .{});
             return false;
         }
         if (contained.get_top_address().value <= container.address.value) {
-            log.debug("contain2", .{});
             return false;
         }
         if (container.address.value < contained.address.value) {

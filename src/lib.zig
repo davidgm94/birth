@@ -138,18 +138,22 @@ pub const Allocator = extern struct {
         };
     };
 
-    pub fn allocateBytes(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
+    pub inline fn allocateBytes(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
         return try allocator.callback_allocate(allocator, size, alignment);
     }
 
-    // pub fn allocate(allocator: *Allocator, comptime T: type, len: usize) Allocate.Error![]T {
-    //     _ = allocator;
-    //     _ = len;
-    //     @panic("WTF");
-    //     // const size = @sizeOf(asdsd) * len;
-    //     // const alignment = @alignOf(asdsd);
-    //     // return try allocator.callback_allocate(allocator, size, alignment);
-    // }
+    pub inline fn allocate(allocator: *Allocator, comptime T: type, len: usize) Allocate.Error![]T {
+        const size = @sizeOf(T) * len;
+        const alignment = @alignOf(T);
+        const allocation_result = try allocator.callback_allocate(allocator, size, alignment);
+        const result = @intToPtr([*]T, safeArchitectureCast(allocation_result.address))[0..len];
+        return result;
+    }
+
+    pub inline fn create(allocator: *Allocator, comptime T: type) Allocate.Error!*T {
+        const result = try allocator.allocate(T, 1);
+        return &result[0];
+    }
 
     pub fn wrap(zig_allocator: common.ZigAllocator) Wrapped {
         return .{
@@ -583,3 +587,9 @@ name_offset: u32,
     };
 }
 
+pub inline fn safeArchitectureCast(value: anytype) usize {
+    return switch (@sizeOf(@TypeOf(value)) > @sizeOf(usize)) {
+        true => if (value <= common.maxInt(usize)) @intCast(usize, value) else @panic("safeArchitectureCast"),
+        false => value,
+    };
+}

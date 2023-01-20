@@ -12,7 +12,6 @@ const Disk = lib.Disk;
 const GPT = lib.PartitionTable.GPT;
 const MBR = lib.PartitionTable.MBR;
 const NLS = lib.NLS;
-const log = lib.log.scoped(.FAT32);
 
 pub const count = 2;
 pub const volumes_lba = GPT.reserved_partition_size / GPT.max_block_size / 2;
@@ -616,7 +615,6 @@ pub const Cache = extern struct {
             const alloc_result = try allocator.allocateBytes(@sizeOf(u32) * cluster_count, @alignOf(u32));
             break :blk @intToPtr([*]u32, alloc_result.address)[0..cluster_count];
         };
-        log.debug("Cluster count: {}", .{cluster_count});
         try cache.allocate_clusters(clusters, allocator);
 
         for (clusters) |cluster, cluster_index| {
@@ -990,9 +988,7 @@ pub const Cache = extern struct {
                     const last_current_cluster = @intCast(u32, entry_iterator.cluster);
                     assert(last_current_cluster == current_cluster);
                     const element_offset = @divExact(@ptrToInt(cluster_entry) - @ptrToInt(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
-                    log.debug("Element offset: {}. Free slots: {}", .{ element_offset, free_slots });
                     const entry_start_index = element_offset - (free_slots - 1);
-                    log.debug("Entry start index: {}", .{entry_start_index});
 
                     var entry_index = entry_start_index;
                     for (entry.long_name_entries) |*long_name_entry| {
@@ -1036,7 +1032,6 @@ pub const Cache = extern struct {
         try cache.allocate_clusters(&clusters, allocator);
         const cluster = clusters[0];
         const lba = cache.cluster_to_sector(cluster);
-        log.debug("Directory cluster LBA: 0x{x}", .{lba});
         const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba, allocator, .{});
 
         var copy_entry: ?*FAT32.DirectoryEntry = null;
@@ -1071,14 +1066,11 @@ pub const Cache = extern struct {
         fat_directory_entries[1].name = dot_dot_entry_name;
         // TODO: Fix this
         fat_directory_entries[1].set_first_cluster(if (containing_cluster == cache.get_root_cluster()) 0 else containing_cluster);
-        if (copy_entry) |cp_entry| {
-            const copy_cluster = cp_entry.get_first_cluster();
-            const dot_entry_cluster = fat_directory_entries[0].get_first_cluster();
-            const dot_dot_entry_cluster = fat_directory_entries[1].get_first_cluster();
-            log.debug("Copy cluster: {}", .{copy_cluster});
-            log.debug("Dot cluster: {}", .{dot_entry_cluster});
-            log.debug("Dot dot cluster: {}", .{dot_dot_entry_cluster});
-        }
+        // if (copy_entry) |cp_entry| {
+        //     const copy_cluster = cp_entry.get_first_cluster();
+        //     const dot_entry_cluster = fat_directory_entries[0].get_first_cluster();
+        //     const dot_dot_entry_cluster = fat_directory_entries[1].get_first_cluster();
+        // }
 
         // TODO: zero initialize the unused part of the cluster
         try cache.disk.write_typed_sectors(FAT32.DirectoryEntry.Sector, fat_directory_entries, lba, false);
@@ -1148,12 +1140,10 @@ pub const Cache = extern struct {
 
         entry_loop: while (dir_tokenizer.next()) |entry_name| : (directories += 1) {
             const is_last = dir_tokenizer.is_last();
-            log.debug("Searching for entry #{}: {s} in absolute path: {s}. Last: {}", .{ directories, entry_name, absolute_path, is_last });
 
             const copy_entry: ?*FAT32.DirectoryEntry = blk: {
                 if (copy_cache) |cc| {
                     const name = absolute_path[0..dir_tokenizer.index];
-                    log.debug("Entry name: {s}", .{name});
                     const entry_result = try cc.get_directory_entry(name, allocator, null);
                     break :blk entry_result.directory_entry;
                 } else break :blk null;
@@ -1196,7 +1186,6 @@ pub const Cache = extern struct {
                                 var arr: [long_name_u16.len]u8 = [1]u8{0} ** long_name_u16.len;
                                 const long_name_u8 = blk: {
                                     for (long_name_u16) |u16_ch, index| {
-                                        log.debug("[{}]: {u}", .{ index, u16_ch });
                                         if (u16_ch == 0) {
                                             break :blk arr[0..index];
                                         } else if (u16_ch <= lib.maxInt(u8)) {
@@ -1209,7 +1198,6 @@ pub const Cache = extern struct {
                                     @panic("wtf");
                                 };
 
-                                log.debug("Long name \"{s}\" ({}). Entry name \"{s}\"({})", .{ long_name_u8, long_name_u8.len, entry_name, entry_name.len });
                                 // TODO: compare long name entry
                                 if (lib.equal(u8, long_name_u8, entry_name)) {
                                     const normal_entry = &directory_entries_in_cluster[entry_index];
@@ -1373,17 +1361,14 @@ const MountedPartition = struct {
     }
 
     fn copy_file(partition: MountedPartition, allocator: lib.ZigAllocator, file_path: []const u8, file_content: []const u8) !void {
-        log.debug("Making sure path is created...", .{});
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const file_name = file_path[last_slash_index + 1 ..];
         assert(file_name.len > 0);
         try host.cwd().writeFile(file_name, file_content);
         const dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        log.debug("Creating path to {s}", .{dir});
         const destination_dir = try partition.join_with_root(allocator, dir);
         const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
         try host.spawnProcess(mkdir_process_args, allocator);
-        log.debug("Copying file...", .{});
         const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
         try host.spawnProcess(copy_process_args, allocator);
         try host.cwd().deleteFile(file_name);
@@ -1559,13 +1544,14 @@ test "Basic FAT32 image" {
             }
 
             for (files) |file| {
-                log.debug("Commanding to add file {s}", .{file.path});
                 try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache);
             }
 
             try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
             try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
         },
-        else => log.debug("Skipping for missing `parted` dependency...", .{}),
+        else => {
+            //log.debug("Skipping for missing `parted` dependency...", .{}),
+        }
     }
 }

@@ -1,25 +1,32 @@
-ENTRY(entry_point)
-PHDRS {
-    none   PT_NULL FLAGS(0);
-    text   PT_LOAD FLAGS((1 << 2) | (1 << 0) /* Readable | Executable */);
-    rodata PT_LOAD FLAGS((1 << 2)            /* Readable */);
-    data   PT_LOAD FLAGS((1 << 2) | (1 << 1) /* Readable | Writeable  */);
-}
-
 SECTIONS {
-    . = 0x10000;
-    .text . : {
-        entry_point
-        *(.text*)
-    }:text
-    . = ALIGN(0x10);
-    .rodata . : {
-        *(.rodata*)
-    }:rodata
-    . = ALIGN(0x10);
-    .data . : {
-        *(.data*)
-        *(.bss*)
-    }:data
-    . = ALIGN(0x10);
+  . = 0xFFFFFFFF80000000;
+  kernel_start = .;
+
+  . = ALIGN(4K);
+
+  text_section_start = .;
+  .text . : {
+    *(.text*)
+  }:text
+  
+  . = ALIGN(4K);
+  text_section_end = .;
+
+  rodata_section_start = .;
+  .rodata . : {
+    *(.rodata*)
+  }:rodata
+
+  . = ALIGN(4K);
+  rodata_section_end = .;
+
+  data_section_start = .;
+  .data . : {
+    *(.data*)
+    *(.bss*)
+  }:data
+
+  . = ALIGN(4K);
+  data_section_end = .;
+  kernel_end = .;
 }
