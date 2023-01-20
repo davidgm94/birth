@@ -50,6 +50,7 @@ const MemoryMap = struct {
 };
 
 export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
+    writer.writeAll("Hello CPU driver\n") catch unreachable;
     logger.debug("Hello kernel", .{});
     paging.register_physical_allocator(&rise.physical_allocator);
     IDT.setup();
@@ -478,17 +479,16 @@ fn enable_fpu() void {
 pub const writer = privileged.E9Writer{ .context = {} };
 
 pub const std_options = struct {
-pub const log_level = lib.log.Level.debug;
-pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-    writer.writeAll(prefix) catch unreachable;
+    pub const log_level = lib.log.Level.debug;
+    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+        const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+        writer.writeAll(prefix) catch unreachable;
 
-    writer.print(format, args) catch unreachable;
-    writer.writeByte('\n') catch unreachable;
-}
+        writer.print(format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+    }
 };
-
 
 pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     asm volatile (

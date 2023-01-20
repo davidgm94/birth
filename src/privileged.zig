@@ -183,7 +183,7 @@ pub fn GenericPhysicalAddressExtended(comptime architecture: lib.Target.Cpu.Arch
         const PA = @This();
         const VA = GenericVirtualAddressExtended(architecture, locality);
 
-        pub fn new(new_value: Usize) PA {
+        pub inline fn new(new_value: Usize) PA {
             const physical_address = @intToEnum(PA, new_value);
 
             if (!physical_address.isValid()) {
@@ -193,15 +193,15 @@ pub fn GenericPhysicalAddressExtended(comptime architecture: lib.Target.Cpu.Arch
             return physical_address;
         }
 
-        pub fn temporaryInvalid() PA {
+        pub inline fn temporaryInvalid() PA {
             return maybeInvalid(0);
         }
 
-        pub fn maybeInvalid(new_value: Usize) PA {
+        pub inline fn maybeInvalid(new_value: Usize) PA {
             return @intToEnum(PA, new_value);
         }
 
-        pub fn isValid(physical_address: PA) bool {
+        pub inline fn isValid(physical_address: PA) bool {
             if (physical_address == PA.null) return false;
 
             if (arch.max_physical_address_bit != 0) {
@@ -212,63 +212,63 @@ pub fn GenericPhysicalAddressExtended(comptime architecture: lib.Target.Cpu.Arch
             }
         }
 
-        pub fn value(physical_address: PA) Usize {
+        pub inline fn value(physical_address: PA) Usize {
             return @enumToInt(physical_address);
         }
 
-        pub fn isEqual(physical_address: PA, other: PA) bool {
+        pub inline fn isEqual(physical_address: PA, other: PA) bool {
             return physical_address.value == other.value;
         }
 
-        pub fn isAligned(physical_address: PA, alignment: Usize) bool {
+        pub inline fn isAligned(physical_address: PA, alignment: Usize) bool {
             return lib.is_aligned(physical_address.value(), alignment);
         }
 
-        pub fn belongsToRegion(physical_address: PA, region: PhysicalMemoryRegion) bool {
+        pub inline fn belongsToRegion(physical_address: PA, region: PhysicalMemoryRegion) bool {
             return physical_address.value >= region.address.value and physical_address.value < region.address.value + region.size;
         }
 
-        pub fn offset(physical_address: PA, asked_offset: Usize) PA {
+        pub inline fn offset(physical_address: PA, asked_offset: Usize) PA {
             return @intToEnum(PA, @enumToInt(physical_address) + asked_offset);
         }
 
-        pub fn addOffset(physical_address: *PA, asked_offset: Usize) void {
+        pub inline fn addOffset(physical_address: *PA, asked_offset: Usize) void {
             physical_address.* = physical_address.offset(asked_offset);
         }
 
-        pub fn alignedForward(physical_address: PA, alignment: Usize) PA {
+        pub inline fn alignedForward(physical_address: PA, alignment: Usize) PA {
             return @intToEnum(PA, lib.alignForward(physical_address.value(), alignment));
         }
 
-        pub fn alignedBackward(physical_address: PA, alignment: Usize) PA {
+        pub inline fn alignedBackward(physical_address: PA, alignment: Usize) PA {
             return @intToEnum(PA, lib.alignBackward(physical_address.value(), alignment));
         }
 
-        pub fn alignForward(physical_address: *PA, alignment: Usize) void {
+        pub inline fn alignForward(physical_address: *PA, alignment: Usize) void {
             physical_address.* = physical_address.aligned_forward(alignment);
         }
 
-        pub fn alignBackward(physical_address: *PA, alignment: Usize) void {
+        pub inline fn alignBackward(physical_address: *PA, alignment: Usize) void {
             physical_address.* = physical_address.aligned_backward(alignment);
         }
 
-        pub fn toIdentityMappedVirtualAddress(physical_address: PA) VA {
+        pub inline fn toIdentityMappedVirtualAddress(physical_address: PA) VA {
             return VA.new(physical_address.value());
         }
 
-        pub fn toHigherHalfVirtualAddress(physical_address: PA) VA {
+        pub inline fn toHigherHalfVirtualAddress(physical_address: PA) VA {
             const address = VA.new(physical_address.value() + lib.config.kernel_higher_half_address);
             return address;
         }
 
-        pub fn toGlobal(physical_address: PA) PhysicalAddress(.global) {
+        pub inline fn toGlobal(physical_address: PA) PhysicalAddress(.global) {
             comptime {
                 assert(locality == .local);
             }
             return @intToEnum(PhysicalAddress(.global), @enumToInt(physical_address));
         }
 
-        pub fn toLocal(physical_address: PA) PhysicalAddress(.local) {
+        pub inline fn toLocal(physical_address: PA) PhysicalAddress(.local) {
             comptime {
                 assert(locality == .global);
             }
@@ -309,70 +309,70 @@ pub fn GenericVirtualAddressExtended(comptime architecture: lib.Target.Cpu.Arch,
 
         const VA = @This();
 
-        pub fn new(new_value: Usize) VA {
+        pub inline fn new(new_value: Usize) VA {
             const virtual_address = @intToEnum(VA, new_value);
             assert(virtual_address.isValid());
             return virtual_address;
         }
 
-        pub fn invalid() VA {
+        pub inline fn invalid() VA {
             return VA.null;
         }
 
-        pub fn value(virtual_address: VA) Usize {
+        pub inline fn value(virtual_address: VA) Usize {
             return @enumToInt(virtual_address);
         }
 
-        pub fn isValid(virtual_address: VA) bool {
+        pub inline fn isValid(virtual_address: VA) bool {
             return virtual_address != VA.null;
         }
 
-        pub fn access(virtual_address: VA, comptime Ptr: type) Ptr {
+        pub inline fn access(virtual_address: VA, comptime Ptr: type) Ptr {
             return @intToPtr(Ptr, lib.safeArchitectureCast(virtual_address.value()));
         }
 
-        pub fn offset(virtual_address: VA, asked_offset: Usize) VA {
+        pub inline fn offset(virtual_address: VA, asked_offset: Usize) VA {
             return @intToEnum(VA, virtual_address.value() + asked_offset);
         }
 
-        pub fn addOffset(virtual_address: *VA, asked_offset: Usize) void {
+        pub inline fn addOffset(virtual_address: *VA, asked_offset: Usize) void {
             virtual_address.* = virtual_address.offset(asked_offset);
         }
 
-        pub fn alignedForward(virtual_address: VA, alignment: Usize) VA {
+        pub inline fn alignedForward(virtual_address: VA, alignment: Usize) VA {
             return @intToEnum(VA, lib.align_forward(virtual_address.value(), alignment));
         }
 
-        pub fn alignedBackward(virtual_address: VA, alignment: Usize) VA {
+        pub inline fn alignedBackward(virtual_address: VA, alignment: Usize) VA {
             return @intToEnum(VA, lib.align_backward(virtual_address.value(), alignment));
         }
 
-        pub fn alignForward(virtual_address: *VA, alignment: Usize) void {
+        pub inline fn alignForward(virtual_address: *VA, alignment: Usize) void {
             virtual_address.* = virtual_address.aligned_forward(alignment);
         }
 
-        pub fn alignBackward(virtual_address: *VA, alignment: Usize) void {
+        pub inline fn alignBackward(virtual_address: *VA, alignment: Usize) void {
             virtual_address.* = virtual_address.aligned_backward(alignment);
         }
 
-        pub fn isAligned(virtual_address: VA, alignment: Usize) bool {
+        pub inline fn isAligned(virtual_address: VA, alignment: Usize) bool {
             return lib.is_aligned(virtual_address.value(), alignment);
         }
 
-        pub fn toPhysicalAddress(virtual_address: VA) PhysicalAddress(locality) {
+        pub inline fn toPhysicalAddress(virtual_address: VA) PhysicalAddress(locality) {
             assert(virtual_address.value() >= lib.config.kernel_higher_half_address);
             const address = PhysicalAddress(locality).new(virtual_address.value() - lib.config.kernel_higher_half_address);
             return address;
         }
 
-        pub fn toLocal(virtual_address: VA) VirtualAddress(.local) {
+        pub inline fn toLocal(virtual_address: VA) VirtualAddress(.local) {
             comptime {
                 assert(locality == .global);
             }
             return @intToEnum(VirtualAddress(.local), @enumToInt(virtual_address));
         }
 
-        pub fn toGlobal(virtual_address: VA) VirtualAddress(.global) {
+        pub inline fn toGlobal(virtual_address: VA) VirtualAddress(.global) {
             comptime {
                 assert(locality == .local);
             }
@@ -399,21 +399,21 @@ pub fn GenericPhysicalMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, c
         const PMR = @This();
         const VMR = GenericVirtualMemoryRegion(architecture, locality);
 
-        pub fn toHigherHalfVirtualAddress(physical_memory_region: PMR) VMR {
+        pub inline fn toHigherHalfVirtualAddress(physical_memory_region: PMR) VMR {
             return VMR {
                 .address = physical_memory_region.address.toHigherHalfVirtualAddress(),
                 .size = physical_memory_region.size,
             };
         }
 
-        pub fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VMR {
+        pub inline fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VMR {
             return VMR {
                 .address = physical_memory_region.address.toIdentityMappedVirtualAddress(),
                 .size = physical_memory_region.size,
             };
         }
 
-        pub fn offset(physical_memory_region: PMR, asked_offset: Usize) PMR {
+        pub inline fn offset(physical_memory_region: PMR, asked_offset: Usize) PMR {
             assert(asked_offset < physical_memory_region.size);
 
             var result = physical_memory_region;
@@ -422,12 +422,12 @@ pub fn GenericPhysicalMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, c
             return result;
         }
 
-        pub fn addOffset(physical_memory_region: *PMR, asked_offset: Usize) void {
+        pub inline fn addOffset(physical_memory_region: *PMR, asked_offset: Usize) void {
             physical_memory_region.* = physical_memory_region.offset(asked_offset);
         }
 
         /// Result: chop, the rest is modified through the pointer
-        pub fn chop(physical_memory_region: *PMR, asked_offset: Usize) PMR {
+        pub inline fn chop(physical_memory_region: *PMR, asked_offset: Usize) PMR {
             const ptr_result = physical_memory_region.offset(asked_offset);
             const result = PMR{
                 .address = physical_memory_region.address,
@@ -438,7 +438,7 @@ pub fn GenericPhysicalMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, c
             return result;
         }
 
-        pub fn takeSlice(physical_memory_region: PMR, size: Usize) PMR {
+        pub inline fn takeSlice(physical_memory_region: PMR, size: Usize) PMR {
             assert(size < physical_memory_region.size);
 
             var result = physical_memory_region;
@@ -468,18 +468,18 @@ pub fn GenericVirtualMemoryRegion(comptime architecture: lib.Target.Cpu.Arch, co
             };
         }
 
-        pub fn accessBytes(virtual_memory_region: VMR) []u8 {
+        pub inline fn accessBytes(virtual_memory_region: VMR) []u8 {
             const result = virtual_memory_region.address.access([*]u8)[0..virtual_memory_region.size];
             return result;
         }
 
-        pub fn access(virtual_memory_region: VMR, comptime T: type) []T {
+        pub inline fn access(virtual_memory_region: VMR, comptime T: type) []T {
             const slice_len = @divExact(virtual_memory_region.size, @sizeOf(T));
             const result = virtual_memory_region.address.access([*]T)[0..lib.safeArchitectureCast(slice_len)];
             return result;
         }
 
-        pub fn offset(virtual_memory_region: VMR, asked_offset: Usize) VMR {
+        pub inline fn offset(virtual_memory_region: VMR, asked_offset: Usize) VMR {
             assert(asked_offset < virtual_memory_region.size);
 
             var result = virtual_memory_region;

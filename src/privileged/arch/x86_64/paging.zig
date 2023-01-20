@@ -113,7 +113,6 @@ pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime local
     // TODO: use flags
     const flags = general_flags.toArchitectureSpecific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
-    log.debug("Mapping. CR3: {}. Physical: {}. Virtual: {}. Size: 0x{x}", .{vas_cr3, asked_physical_address, asked_virtual_address, size});
 
     // if (!asked_physical_address.isValid()) return Error.invalid_physical;
     // if (!asked_virtual_address.isValid()) return Error.invalid_virtual;
@@ -145,6 +144,7 @@ pub fn context_switch(vas_cr3_int: u64) void {
     const vas_cr3 = @bitCast(cr3, vas_cr3_int);
     vas_cr3.write();
 }
+
 fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     const reverse_index = switch (asked_page_size) {
         reverse_valid_page_sizes[0] => 0,

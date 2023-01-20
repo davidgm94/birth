@@ -74,5 +74,6 @@ pub inline fn write_bytes(bytes: []const u8) usize {
           [src] "{rsi}" (bytes.ptr),
           [len] "{rcx}" (bytes.len),
     );
+
     return bytes.len - bytes_left;
 }

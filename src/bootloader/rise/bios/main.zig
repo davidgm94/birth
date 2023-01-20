@@ -41,17 +41,6 @@ var bios_disk = BIOS.Disk{
 
 pub const writer = privileged.E9Writer{ .context = {} };
 
-pub const std_options = struct {
-    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        _ = level;
-        _ = scope;
-        writer.print(format, args) catch unreachable;
-        writer.writeByte('\n') catch unreachable;
-    }
-
-    pub const log_level = .debug;
-};
-
 pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
     _ = stack_trace;
     _ = ret_addr;
@@ -74,7 +63,7 @@ var gdt = x86_64_GDT.Table{
 };
 
 export fn entry_point() callconv(.C) noreturn {
-    writer.writeAll("Hello loader\n") catch unreachable;
+    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
     BIOS.a20_enable() catch @panic("can't enable a20");
     const memory_map_entries = BIOS.e820_init() catch @panic("can't init e820");
     const memory_map_result = MemoryMap(.x86_64).fromBIOS(memory_map_entries);
@@ -126,7 +115,7 @@ export fn entry_point() callconv(.C) noreturn {
 
 
     for (files) |file| {
-        if (lib.equal(u8, file.path, "/STAGE2")) {
+        if (lib.equal(u8, file.path, "/CPUDRV")) {
             var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
 
             const program_headers = parser.getProgramHeaders();
@@ -205,13 +194,9 @@ export fn entry_point() callconv(.C) noreturn {
                 :: [cr0] "r" (cr0));
     }
 
-    writer.writeAll("Long mode activated!\n") catch unreachable;
-
     gdt.setup(0, false);
 
-    writer.writeAll("GDT loaded!\n") catch unreachable;
-
-            //log.debug("Bootloader information: 0x{x}", .{@ptrToInt(bootloader_information)});
+    writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
             asm volatile(
                     \\mov %[entry_point_low], %%edi

@@ -32,7 +32,7 @@ const default_configuration = Configuration{
     .boot_protocol = .bios,
 };
 
-const default_emulator = Emulator.qemu;
+const default_emulator = .qemu;
 
 pub fn build(builder: *host.build.Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
@@ -76,8 +76,8 @@ pub fn build(builder: *host.build.Builder) !void {
                 const emulators = comptime getEmulators(configuration);
 
                 inline for (emulators) |emulator| {
-                    const step_prefix = prefix ++ "_" ++ @tagName(emulator);
-                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, step_prefix).create(builder, &emulator_steps);
+                    const step_prefix = prefix ++ @tagName(emulator);
+                    const emulator_step = try EmulatorSteps.Interface(configuration, emulator, prefix, step_prefix).create(builder, &emulator_steps);
                     emulator_step.run.dependOn(builder.default_step);
                     emulator_step.debug.dependOn(builder.default_step);
                     emulator_step.run.dependOn(&disk_image_builder_run_step.step);
@@ -152,8 +152,10 @@ const EmulatorSteps = struct {
     builder: *Builder,
     run: Step,
     debug: Step,
+    gdb_script: Step,
 
-    fn Interface(comptime configuration: Configuration, comptime emulator: Emulator, comptime step_prefix: []const u8) type {
+    fn Interface(comptime configuration: Configuration, comptime emulator: Emulator, comptime prefix: []const u8, comptime step_prefix: []const u8) type {
+        const gdb_script_path = "zig-cache/" ++ prefix ++ "gdb_script";
         return switch (emulator) {
             .qemu => struct {
                 const qemu_executable = "qemu-system-" ++ switch (configuration.architecture) {
@@ -165,9 +167,12 @@ const EmulatorSteps = struct {
                     const new_one = try list.addOne();
                     new_one.* = .{
                         .builder = builder,
-                            .run = Step.init(.custom, step_prefix ++ "_run_", builder.allocator, run),
-                            .debug = Step.init(.custom, step_prefix ++ "_debug_", builder.allocator, debug),
+                        .run = Step.init(.custom, step_prefix ++ "_run_", builder.allocator, run),
+                        .debug = Step.init(.custom, step_prefix ++ "_debug_", builder.allocator, debug),
+                        .gdb_script = Step.init(.custom, step_prefix ++ "_gdb_script_", builder.allocator, gdbScript),
                     };
+
+                    new_one.debug.dependOn(&new_one.gdb_script);
 
                     const run_step = builder.step(step_prefix ++ "_run", "Run " ++ step_prefix);
                     const debug_step = builder.step(step_prefix ++ "_debug", "Debug " ++ step_prefix);
@@ -189,6 +194,8 @@ const EmulatorSteps = struct {
 
                 fn debug(step: *Step) !void {
                     const emulator_steps = @fieldParentPtr(EmulatorSteps, "debug", step);
+                    const builder = emulator_steps.builder;
+
                     var arguments = try qemuCommon(emulator_steps);
                     
                     if (!arguments.config.isVirtualizing()) {
@@ -197,7 +204,35 @@ const EmulatorSteps = struct {
 
                     try arguments.list.append("-s");
 
-                    return Error.not_implemented;
+                    var qemu_process = host.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
+                    _ = try qemu_process.spawn();
+
+                    const debugger_process_arguments = switch (host.os) {
+                        .linux => .{ "gf2", "-x", gdb_script_path },
+                        else => return Error.not_implemented,
+                    };
+
+                    var debugger_process = host.ChildProcess.init(&debugger_process_arguments, builder.allocator);
+                    _ = try debugger_process.spawnAndWait();
+                }
+
+                fn gdbScript(step: *Step) !void {
+                    const emulator_steps = @fieldParentPtr(EmulatorSteps, "gdb_script", step);
+                    const builder = emulator_steps.builder;
+
+                    var gdb_script_buffer = host.ArrayList(u8).init(builder.allocator);
+                    switch (configuration.architecture) {
+                        .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
+                        else => @compileError("Architecture not supported"),
+                    }
+
+                    try gdb_script_buffer.appendSlice("symbol-file zig-cache/" ++ prefix ++ "cpu_driver\n");
+                    try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
+
+                    const base_gdb_script = try host.cwd().readFileAlloc(builder.allocator, "config/gdb_script", host.maxInt(usize));
+                    try gdb_script_buffer.appendSlice(base_gdb_script);
+
+                    try host.cwd().writeFile(gdb_script_path, gdb_script_buffer.items);
                 }
 
                 fn qemuCommon(emulator_steps: *EmulatorSteps) !struct {config: Arguments, list: host.ArrayList([]const u8) } {
@@ -361,31 +396,24 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                 .x86_64 => {
                     switch (configuration.boot_protocol) {
                         .bios => {
-                            const stages = [_]comptime_int{1, 2};
+                            const bootloader_path = rise_loader_path ++ "bios/";
 
-                            inline for (stages) |stage| {
-                                const stage_ascii = [1]u8{'0' + @intCast(u8, stage)};
-                                const stage_string = "stage" ++ &stage_ascii;
-                                const stage_path = rise_loader_path ++ "bios/" ++ stage_string ++ "/";
+                            const executable = builder.addExecutable(prefix ++ "loader", bootloader_path ++ "main.zig");
+                            executable.addAssemblyFile(bootloader_path ++ "assembly.S");
+                            executable.setTarget(getTarget(.x86, .privileged));
+                            executable.setOutputDir(cache_dir);
+                            executable.addPackage(lib_package);
+                            executable.addPackage(privileged_package);
+                            executable.addPackage(bootloader_package);
+                            executable.setLinkerScriptPath(host.build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
+                            executable.red_zone = false;
+                            executable.link_gc_sections = true;
+                            executable.want_lto = true;
+                            executable.strip = true;
+                            executable.setBuildMode(.ReleaseSmall);
+                            executable.entry_symbol_name = "entry_point";
 
-                                const executable = builder.addExecutable(prefix ++ stage_string, stage_path ++ "main.zig");
-                                executable.addAssemblyFile(stage_path ++ "assembly.S");
-                                executable.setTarget(get_target(if (stage == 1) .x86 else .x86_64, .privileged));
-                                executable.setOutputDir(cache_dir);
-                                executable.addPackage(lib_package);
-                                executable.addPackage(privileged_package);
-                                executable.addPackage(bootloader_package);
-                                executable.setLinkerScriptPath(host.build.FileSource.relative(stage_path ++ "linker_script.ld"));
-                                executable.red_zone = false;
-                                executable.link_gc_sections = true;
-                                executable.want_lto = true;
-                                executable.strip = true;
-                                if (stage == 2) executable.code_model = .kernel;
-                                executable.setBuildMode(.ReleaseSmall);
-                                executable.entry_symbol_name = "entry_point";
-
-                                try bootloader_executables.append(executable);
-                            }
+                            try bootloader_executables.append(executable);
                         },
                         .uefi => {
                             const executable = builder.addExecutable("BOOTX64", rise_loader_path ++ "uefi/main.zig");
@@ -408,7 +436,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
         },
             .limine => {
                 const executable = builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
-                executable.setTarget(get_target(.x86_64, .privileged));
+                executable.setTarget(getTarget(.x86_64, .privileged));
                 executable.setOutputDir(cache_dir);
                 executable.addPackage(lib_package);
                 executable.addPackage(privileged_package);
@@ -431,7 +459,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
 fn createCPUDriver(builder: *Builder, comptime configuration: Configuration, comptime prefix: []const u8) !*LibExeObjStep {
     const path = "src/cpu_driver/arch/" ++ @tagName(configuration.architecture) ++ "/";
     const cpu_driver = builder.addExecutable(prefix ++ "cpu_driver", path ++ "entry_point.zig");
-    const target = get_target(configuration.architecture, .privileged);
+    const target = getTarget(configuration.architecture, .privileged);
     cpu_driver.setTarget(target);
     cpu_driver.setBuildMode(cpu_driver.builder.standardReleaseOptions());
     cpu_driver.setOutputDir(cache_dir);
@@ -497,78 +525,7 @@ var user_package = host.build.Pkg{
     .source = host.build.FileSource.relative("src/user.zig"),
 };
 
-//     fn create_run_and_debug_steps(kernel: *Kernel) !void {
-//         var gdb_script_buffer = host.ArrayList(u8).init(kernel.builder.allocator);
-//         switch (kernel.options.arch) {
-//             .x86, .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
-//             else => return Error.not_implemented,
-//         }
-//
-//         const gdb_script_chunk = if (kernel.options.is_virtualizing())
-//             \\symbol-file zig-cache/kernel.elf
-//             \\target remote localhost:1234
-//             \\c
-//         else
-//             \\symbol-file zig-cache/kernel.elf
-//             \\target remote localhost:1234
-//             \\b *0xa3b9
-//             \\c
-//             ;
-//
-//         try gdb_script_buffer.appendSlice(gdb_script_chunk);
-//
-//         kernel.gdb_script = kernel.builder.addWriteFile("gdb_script", gdb_script_buffer.items);
-//         kernel.builder.default_step.dependOn(&kernel.gdb_script.step);
-//
-//         // We need a member variable because we need consistent memory around it to do @fieldParentPtr
-//         kernel.debug_step = host.build.Step.init(.custom, "_debug_", kernel.builder.allocator, do_debug_step);
-//         //kernel.debug_step.dependOn(&kernel.boot_image_step);
-//         kernel.debug_step.dependOn(&kernel.gdb_script.step);
-//         //kernel.debug_step.dependOn(&kernel.disk_step);
-//         kernel.debug_step.dependOn(&kernel.disk_image_builder_run_step.step);
-//
-//         const debug_step = kernel.builder.step("debug", "Debug the program with QEMU and GDB");
-//         debug_step.dependOn(&kernel.debug_step);
-//     }
-//
-// fn do_debug_step(step: *host.build.Step) !void {
-//     const kernel = @fieldParentPtr(Kernel, "debug_step", step);
-//     const gdb_script_path = kernel.gdb_script.getFileSource(kernel.gdb_script.files.first.?.data.basename).?.getPath(kernel.builder);
-//     switch (host.os) {
-//         .linux, .macos => {
-//             const first_pid = try host.posix.fork();
-//             if (first_pid == 0) {
-//                 switch (host.os) {
-//                     .linux => {
-//                         var debugger_process = host.ChildProcess.init(&[_][]const u8{ "gf2", "-x", gdb_script_path }, kernel.builder.allocator);
-//                         _ = try debugger_process.spawnAndWait();
-//                     },
-//                     .macos => {
-//                         var debugger_process = host.ChildProcess.init(&[_][]const u8{ "wezterm", "start", "--cwd", kernel.builder.build_root, "--", "x86_64-elf-gdb", "-x", gdb_script_path }, kernel.builder.allocator);
-//                         _ = try debugger_process.spawnAndWait();
-//                     },
-//                     else => @compileError("OS not supported"),
-//                 }
-//             } else {
-//                 var qemu_process = host.ChildProcess.init(kernel.debug_argument_list.items, kernel.builder.allocator);
-//                 try qemu_process.spawn();
-//
-//                 _ = host.posix.waitpid(first_pid, 0);
-//                 _ = try qemu_process.kill();
-//             }
-//         },
-//         else => @panic("todo implement"),
-//     }
-// }
-//
-// const Limine = struct {
-//     const base_path = "src/bootloader/limine";
-//     const installables_path = base_path ++ "/installables";
-//     const image_path = cache_dir ++ "universal.iso";
-//     const installer = @import("src/bootloader/limine/installer.zig");
-// };
-
-fn get_target(comptime asked_arch: Cpu.Arch, comptime execution_mode: host.TraditionalExecutionMode) CrossTarget {
+fn getTarget(comptime asked_arch: Cpu.Arch, comptime execution_mode: host.TraditionalExecutionMode) CrossTarget {
     var enabled_features = Cpu.Feature.Set.empty;
     var disabled_features = Cpu.Feature.Set.empty;
 
