@@ -625,7 +625,7 @@ pub fn main() anyerror!void {
             var files_parser = lib.FileParser.init(configuration_file);
 
             while (try files_parser.next()) |file_descriptor| {
-                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.prefix_type) {
+                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
                     .arch => switch (architecture) {
                         inline else => |arch| "_" ++ @tagName(arch),
                     },
