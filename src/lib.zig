@@ -275,7 +275,7 @@ pub const FileParser = struct {
             if (parser.index < parser.text.len and parser.text[parser.index] != '}') {
                 const host_path_field = try parser.parse_field("host_path");
                 const host_base_field = try parser.parse_field("host_base");
-                const suffix_type = common.stringToEnum(SuffixType, try parser.parse_field("suffix_type")) orelse Error.err;
+                const suffix_type = common.stringToEnum(SuffixType, try parser.parse_field("suffix_type")) orelse return Error.err;
                 const guest_field = try parser.parse_field("guest");
                 try parser.expect_char('}');
                 parser.maybe_expect_char(',');
