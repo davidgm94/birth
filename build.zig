@@ -41,7 +41,8 @@ pub fn build(builder: *host.build.Builder) !void {
     lib_package.dependencies = &.{lib_package};
     rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
     user_package.dependencies = &.{lib_package};
-    privileged_package.dependencies = &.{ lib_package, privileged_package };
+    privileged_package.dependencies = &.{ lib_package, privileged_package, bootloader_package };
+    bootloader_package.dependencies = &.{ bootloader_package, lib_package, privileged_package };
 
     const disk_image_builder = createDiskImageBuilder(builder);
 
@@ -423,6 +424,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             executable.setOutputDir(cache_dir);
                             executable.addPackage(lib_package);
                             executable.addPackage(privileged_package);
+                            executable.addPackage(bootloader_package);
                             executable.strip = true;
                             executable.setBuildMode(.ReleaseSafe);
                             try bootloader_executables.append(executable);

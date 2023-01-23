@@ -599,3 +599,11 @@ pub inline fn safeArchitectureCast(value: anytype) usize {
         false => value,
     };
 }
+
+pub fn TargetUsize(comptime architecture: common.Target.Cpu.Arch) type {
+    return switch (architecture) {
+        .x86 => u32,
+        .x86_64 => u64,
+        else => @compileError("Architecture not supported"),
+    };
+}

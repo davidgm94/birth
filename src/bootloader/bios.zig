@@ -1,8 +1,15 @@
 const lib = @import("lib");
 const privileged = @import("privileged");
 const assert = lib.assert;
+const bootloader = @import("bootloader");
 
-var buffer = [1]u8{0} ** (0x200 * 0x4);
+const x86_64 = privileged.arch.x86_64;
+const PhysicalAddress = x86_64.PhysicalAddress;
+const VirtualAddress = x86_64.VirtualAddress;
+const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
+const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
+const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
+const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -14,6 +21,8 @@ inline fn offset(value: u32) u16 {
 
 pub const Disk = extern struct {
     disk: lib.Disk,
+
+    var buffer = [1]u8{0} ** (0x200 * 0x4);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
@@ -49,7 +58,7 @@ pub const Disk = extern struct {
             };
 
             int(0x13, &registers, &registers);
-            if (registers.eflags & 1 != 0) @panic("disk read failed");
+            if (registers.eflags.flags.carry_flag) @panic("disk read failed");
             const provided_buffer_offset = lba_offset * disk.sector_size;
             const bytes_to_copy = sectors_to_read * disk.sector_size;
             const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..];
@@ -85,7 +94,36 @@ const Registers = extern struct {
     fs: u16 = 0,
     es: u16 = 0,
     ds: u16 = 0,
-    eflags: u32 = 0,
+    eflags: packed struct(u32) {
+        flags: packed struct(u16) {
+            carry_flag: bool = false,
+            reserved: u1 = 1,
+            parity_flag: bool = false,
+            reserved1: u1 = 0,
+            adjust_flag: bool = false,
+            reserved2: u1 = 0,
+            zero_flag: bool = false,
+            sign_flag: bool = false,
+            trap_flag: bool = false,
+            interrupt_enabled_flag: bool = false,
+            direction_flag: bool = false,
+            overflow_flag: bool = false,
+            io_privilege_level: u2 = 0,
+            nested_task_flag: bool = false,
+            mode_flag: bool = false,
+        } = .{},
+        extended: packed struct(u16) {
+            resume_flag: bool = false,
+            virtual_8086_mode: bool = false,
+            alignment_smap_check: bool = false,
+            virtual_interrupt_flag: bool = false,
+            virtual_interrupt_pending: bool = false,
+            cpuid: bool = false,
+            reserved: u8 = 0,
+            aes_key_schedule: bool = false,
+            reserved1: bool = false,
+        } = .{},
+    } = .{},
     ebp: u32 = 0,
     edi: u32 = 0,
     esi: u32 = 0,
@@ -95,7 +133,7 @@ const Registers = extern struct {
     eax: u32 = 0,
 };
 
-fn is_a20_enabled() bool {
+fn A20IsEnabled() bool {
     const address = 0x7dfe;
     const address_with_offset = address + 0x100000;
     if (@intToPtr(*volatile u16, address).* != @intToPtr(*volatile u16, address_with_offset).*) {
@@ -113,27 +151,20 @@ fn is_a20_enabled() bool {
 
 const A20Error = error{a20_not_enabled};
 
-pub fn a20_enable() A20Error!void {
-    if (!is_a20_enabled()) {
+pub fn A20Enable() A20Error!void {
+    if (!A20IsEnabled()) {
         return A20Error.a20_not_enabled;
     }
+    // TODO:
 }
 
 pub const MemoryMapEntry = extern struct {
-    base: u64,
-    len: u64,
+    region: PhysicalMemoryRegion(.global),
     type: Type,
     unused: u32 = 0,
 
     pub fn isLowMemory(entry: MemoryMapEntry) bool {
-        return entry.base < lib.mb;
-    }
-
-    pub fn toPhysicalMemoryRegion(entry: MemoryMapEntry) privileged.GenericPhysicalMemoryRegion(.x86_64, .global) {
-        return .{
-            .address = privileged.GenericPhysicalAddressExtended(.x86_64, .global).new(entry.base),
-            .size = entry.len,
-        };
+        return entry.region.address.value() < lib.mb;
     }
 
     const Type = enum(u32) {
@@ -148,32 +179,39 @@ pub const MemoryMapEntry = extern struct {
 var memory_map_entries: [max_memory_entry_count]MemoryMapEntry = undefined;
 const max_memory_entry_count = 32;
 
-pub fn e820_init() ![]MemoryMapEntry {
-    var registers = Registers{};
-    var memory_map_entry_count: usize = 0;
+pub const E820Iterator = extern struct {
+    registers: Registers = .{},
+    index: u32 = 0,
 
-    for (memory_map_entries) |*entry, entry_index| {
-        var memory_entry: MemoryMapEntry = undefined;
-        if (registers.es != 0) @panic("Register ES not zero");
-        registers.eax = 0xe820;
-        registers.ecx = 24;
-        registers.edx = 0x534d4150;
-        registers.edi = @ptrToInt(&memory_entry);
+    pub fn next(iterator: *E820Iterator) ?MemoryMapEntry {
+        var memory_map_entry: MemoryMapEntry = undefined;
 
-        int(0x15, &registers, &registers);
+        iterator.registers.eax = 0xe820;
+        iterator.registers.ecx = 24;
+        iterator.registers.edx = 0x534d4150;
+        iterator.registers.edi = @ptrToInt(&memory_map_entry);
 
-        if (registers.eflags & 1 == 1) {
-            memory_map_entry_count = entry_index;
-            return memory_map_entries[0..memory_map_entry_count];
-        }
+        int(0x15, &iterator.registers, &iterator.registers);
 
-        entry.* = memory_entry;
-
-        if (registers.ebx == 0) {
-            memory_map_entry_count = entry_index + 1;
-            return memory_map_entries[0..memory_map_entry_count];
+        if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
+            iterator.index += 1;
+            return memory_map_entry;
+        } else {
+            return null;
         }
     }
 
-    @panic("Memory map entry count");
+    pub fn reset(iterator: *E820Iterator) void {
+        iterator.registers.ebx = 0;
+        iterator.index = 0;
+    }
+};
+
+pub fn fetchMemoryEntries(memory_map: *bootloader.MemoryMap) void {
+    var iterator = E820Iterator{};
+    while (iterator.next()) |entry| {
+        memory_map.native.bios.descriptors[iterator.index] = entry;
+    }
+
+    memory_map.entry_count = iterator.index;
 }

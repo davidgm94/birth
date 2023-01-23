@@ -4,7 +4,13 @@ const SimpleR64 = lib.arch.x86_64.registers.SimpleR64;
 const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 
 const privileged = @import("privileged");
-const PhysicalAddress = privileged.GenericPhysicalAddress(.x86_64);
+const x86_64 = privileged.arch.x86_64;
+const PhysicalAddress = x86_64.PhysicalAddress;
+const VirtualAddress = x86_64.VirtualAddress;
+const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
+const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
+const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
+const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 
 pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,

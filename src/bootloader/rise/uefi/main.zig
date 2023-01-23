@@ -5,8 +5,8 @@ const Allocator = lib.Allocator;
 const ELF = lib.ELF(64);
 const log = lib.log.scoped(.UEFI);
 
-const privileged = @import("privileged");
-const UEFI = privileged.UEFI;
+const bootloader = @import("bootloader");
+const UEFI = bootloader.UEFI;
 const BootloaderInformation = UEFI.BootloaderInformation;
 const BootServices = UEFI.BootServices;
 const ConfigurationTable = UEFI.ConfigurationTable;
@@ -24,16 +24,16 @@ const page_table_estimated_size = UEFI.page_table_estimated_size;
 const SimpleFilesystemProtocol = UEFI.SimpleFilesystemProtocol;
 const SystemTable = UEFI.SystemTable;
 
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.VirtualAddressSpace;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const privileged = @import("privileged");
+const PhysicalAddress = privileged.arch.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;
+const VirtualAddress = privileged.arch.VirtualAddress;
+const VirtualAddressSpace = privileged.arch.VirtualAddressSpace;
+const VirtualMemoryRegion = privileged.arch.VirtualMemoryRegion;
 
 const CPU = privileged.arch.CPU;
 const GDT = privileged.arch.x86_64.GDT;
 const paging = privileged.arch.paging;
-
 
 pub fn file_to_higher_half(file: []const u8) []const u8 {
     var result = file;
@@ -97,7 +97,7 @@ pub const std_options = struct {
                     writer.print(prefix ++ format ++ "\n", args) catch unreachable;
                 }
             },
-                else => @compileError("Unsupported CPU architecture"),
+            else => @compileError("Unsupported CPU architecture"),
         }
     }
 };
@@ -252,6 +252,7 @@ pub fn main() noreturn {
 
         @panic("Unable to find RSDP");
     };
+    _ = rsdp_physical_address;
 
     const filesystem_root = blk: {
         const loaded_image = Protocol.open(LoadedImageProtocol, boot_services, handle);
@@ -286,198 +287,201 @@ pub fn main() noreturn {
 
     log.debug("kernel file size: {}. bm: {}", .{ kernel_file.size, bootstrap_memory.len });
     const kernel_file_content = kernel_file.read(bootstrap_memory[0..kernel_file.size]);
+    _ = kernel_file_content;
     const init_file_content = init_file.read(bootstrap_memory[kernel_file.size .. kernel_file.size + init_file.size]);
     log.debug("init file content: {}", .{init_file_content.len});
 
-    log.debug("Trying to get memory map", .{});
+    @panic("todo: memory map");
 
-    var memory_manager = MemoryManager{
-        .map = UEFI.MemoryMap{
-            .region = .{
-                .address = VirtualAddress(.global).new(@ptrToInt(bootstrap_memory.ptr) + total_file_size),
-                .size = 0,
-            },
-            .descriptor_size = 0,
-        },
-    };
-
-    {
-        var memory_map_key: usize = 0;
-        var memory_map_size: usize = 0;
-        var memory_map_descriptor_size: usize = 0;
-        _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_manager.map.descriptor_version);
-
-        UEFI.result(@src(), boot_services.getMemoryMap(&memory_map_size, memory_manager.map.region.address.access([*]MemoryDescriptor), &memory_map_key, &memory_map_descriptor_size, &memory_manager.map.descriptor_version));
-        memory_manager.map.region.size = @intCast(u32, memory_map_size);
-        memory_manager.map.descriptor_size = @intCast(u32, memory_map_descriptor_size);
-        assert(lib.isAligned(memory_map_size, memory_manager.map.descriptor_size));
-        log.debug("Memory map size: {}", .{memory_map_size});
-
-        log.debug("Exiting boot services...", .{});
-        UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
-    }
-
-    memory_manager.generate_size_counters();
-
-    var elf_parser = ELF.Parser.init(kernel_file_content) catch |err| {
-        privileged.panic("Failed to initialize ELF parser: {}", .{err});
-    };
-
-    const program_headers = elf_parser.getProgramHeaders();
-    var program_segments: []ProgramSegment = &.{};
-    program_segments.ptr = @intToPtr([*]ProgramSegment, memory_manager.allocate(lib.alignForward(@sizeOf(ProgramSegment) * program_headers.len, UEFI.page_size) >> UEFI.page_shifter) catch @panic("unable to allocate memory for program segments"));
-    assert(program_segments.len == 0);
-
-    var all_segments_size: u32 = 0;
-
-    for (program_headers) |*ph| {
-        switch (ph.type) {
-            .load => {
-                if (ph.size_in_memory == 0) continue;
-                const address_misalignment = ph.virtual_address & (UEFI.page_size - 1);
-
-                if (address_misalignment != 0) {
-                    @panic("ELF PH segment size is supposed to be page-aligned");
-                }
-
-                if (!lib.isAligned(ph.offset, UEFI.page_size)) {
-                    @panic("ELF PH offset is supposed to be page-aligned");
-                }
-
-                if (!ph.flags.readable) {
-                    @panic("ELF program segment is marked as non-readable");
-                }
-
-                if (ph.size_in_file != ph.size_in_memory) {
-                    @panic("ELF program segment file size is smaller than memory size");
-                }
-
-                const segment_index = program_segments.len;
-                program_segments.len += 1;
-                const segment = &program_segments[segment_index];
-                segment.* = .{
-                    .physical = 0, // batch allocate later
-                    .virtual = ph.virtual_address,
-                    .size = @intCast(u32, ph.size_in_memory),
-                    .file_offset = @intCast(u32, ph.offset),
-                    .mappings = .{
-                        .write = ph.flags.writable,
-                        .execute = ph.flags.executable,
-                    },
-                };
-
-                const aligned_segment_size = @intCast(u32, lib.alignForward(segment.size + address_misalignment, UEFI.page_size));
-                all_segments_size += aligned_segment_size;
-            },
-            else => {
-                log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
-            },
-        }
-    }
-
-    var kernel_address_space = blk: {
-        log.debug("Big chunk", .{});
-        const chunk_address = memory_manager.allocate(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space >> UEFI.page_shifter) catch @panic("Unable to get physical memory to bootstrap kernel address space");
-        const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
-            .address = PhysicalAddress(.local).new(chunk_address),
-            .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
-        };
-        break :blk VirtualAddressSpace.kernelBSP(kernel_address_space_physical_region);
-    };
-
-    log.debug("Allocate aligned: {}", .{all_segments_size});
-    const segments_allocation = memory_manager.allocate(all_segments_size >> UEFI.page_shifter) catch @panic("Unable to allocate memory for kernel segments");
-    var allocated_segment_memory: u32 = 0;
-
-    for (program_segments) |*segment| {
-        const virtual_address_value = segment.virtual & 0xffff_ffff_ffff_f000;
-        const address_misalignment = @intCast(u32, segment.virtual - virtual_address_value);
-        const aligned_segment_size = @intCast(u32, lib.alignForward(segment.size + address_misalignment, UEFI.page_size));
-        const physical_address_value = segments_allocation + allocated_segment_memory; // UEFI uses identity mapping
-        segment.physical = physical_address_value + address_misalignment;
-        allocated_segment_memory += aligned_segment_size;
-        const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
-        const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_file_content.ptr) + segment.file_offset)[0..segment.size];
-        if (!(dst_slice.len >= src_slice.len)) {
-            @panic("WTFFFFFFF");
-        }
-        assert(dst_slice.len >= src_slice.len);
-        lib.copy(u8, dst_slice, src_slice);
-        const core_locality: privileged.CoreLocality = switch (segment.mappings.write) {
-            true => .local,
-            false => .global,
-        };
-
-        switch (core_locality) {
-            inline else => |locality| paging.bootstrap_map(&kernel_address_space, locality, PhysicalAddress(locality).new(physical_address_value), VirtualAddress(locality).new(virtual_address_value), aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment"),
-        }
-    }
-
-    assert(allocated_segment_memory == all_segments_size);
-
-    const stack_top = blk: {
-        const stack_page_count = 10;
-        const stack_size = stack_page_count << UEFI.page_shifter;
-        const stack_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
-        break :blk stack_physical_address.toHigherHalfVirtualAddress().value() + stack_size;
-    };
-
-    const gdt_descriptor = blk: {
-        const gdt_page_count = 1;
-        const gdt_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
-        const gdt_descriptor_identity = gdt_physical_address.toIdentityMappedVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
-        gdt_descriptor_identity.* = gdt_physical_address.toIdentityMappedVirtualAddress().access(*GDT.Table).fill_with_kernel_memory_offset(lib.config.kernel_higher_half_address);
-        break :blk gdt_physical_address.toHigherHalfVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
-    };
-
-    {
-        const trampoline_code_start = @ptrToInt(&load_kernel);
-        const trampoline_code_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
-        const code_physical_base_page = PhysicalAddress(.local).new(lib.alignBackward(trampoline_code_start, UEFI.page_size));
-        const misalignment = trampoline_code_start - code_physical_base_page.value();
-        const trampoline_size_to_map = lib.alignForward(misalignment + trampoline_code_size, UEFI.page_size);
-        paging.bootstrap_map(&kernel_address_space, .local, code_physical_base_page, code_physical_base_page.toIdentityMappedVirtualAddress(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
-    }
-
-    var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(lib.alignForward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
-
-    // map bootstrap pages
-    {
-        const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootstrap_memory.ptr));
-        paging.bootstrap_map(&kernel_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
-    }
-
-    // Map all usable memory to avoid kernel delays later
-    // TODO:
-    // 1. Divide memory per CPU to avoid shared memory
-    // 2. User manager
-    var map_iterator = memory_manager.map.iterator();
-    while (map_iterator.next(memory_manager.map)) |entry| {
-        if (entry.type == .ConventionalMemory) {
-            const physical_address = PhysicalAddress(.local).new(entry.physical_start);
-            const virtual_address = physical_address.toHigherHalfVirtualAddress();
-            const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
-            paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
-        }
-    }
-
-    var allocated_size: usize = 0;
-    for (memory_manager.size_counters.counters) |counter| {
-        allocated_size += counter;
-    }
-
-    log.debug("Allocated size: 0x{x}", .{allocated_size * lib.arch.valid_page_sizes[0]});
-
-    const bootloader_information_ptr = bootloader_information.toIdentityMappedVirtualAddress().access(*BootloaderInformation);
-    bootloader_information_ptr.* = .{
-        .kernel_segments = program_segments,
-        .memory_map = memory_manager.map.to_higher_half(),
-        .counters = memory_manager.size_counters.to_higher_half(),
-        .rsdp_physical_address = rsdp_physical_address,
-        .kernel_file = file_to_higher_half(kernel_file_content),
-        .init_file = file_to_higher_half(init_file_content),
-    };
-    log.debug("KF: {}. IF: {}.", .{ bootloader_information_ptr.kernel_file.len, bootloader_information_ptr.init_file.len });
-
-    load_kernel(bootloader_information.toHigherHalfVirtualAddress().access(*BootloaderInformation), elf_parser.getEntryPoint(), kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
+    // log.debug("Trying to get memory map", .{});
+    //
+    // var memory_manager = MemoryManager{
+    //     .map = UEFI.MemoryMap{
+    //         .region = .{
+    //             .address = VirtualAddress(.global).new(@ptrToInt(bootstrap_memory.ptr) + total_file_size),
+    //             .size = 0,
+    //         },
+    //         .descriptor_size = 0,
+    //     },
+    // };
+    //
+    // {
+    //     var memory_map_key: usize = 0;
+    //     var memory_map_size: usize = 0;
+    //     var memory_map_descriptor_size: usize = 0;
+    //     _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_manager.map.descriptor_version);
+    //
+    //     UEFI.result(@src(), boot_services.getMemoryMap(&memory_map_size, memory_manager.map.region.address.access([*]MemoryDescriptor), &memory_map_key, &memory_map_descriptor_size, &memory_manager.map.descriptor_version));
+    //     memory_manager.map.region.size = @intCast(u32, memory_map_size);
+    //     memory_manager.map.descriptor_size = @intCast(u32, memory_map_descriptor_size);
+    //     assert(lib.isAligned(memory_map_size, memory_manager.map.descriptor_size));
+    //     log.debug("Memory map size: {}", .{memory_map_size});
+    //
+    //     log.debug("Exiting boot services...", .{});
+    //     UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
+    // }
+    //
+    // memory_manager.generate_size_counters();
+    //
+    // var elf_parser = ELF.Parser.init(kernel_file_content) catch |err| {
+    //     privileged.panic("Failed to initialize ELF parser: {}", .{err});
+    // };
+    //
+    // const program_headers = elf_parser.getProgramHeaders();
+    // var program_segments: []ProgramSegment = &.{};
+    // program_segments.ptr = @intToPtr([*]ProgramSegment, memory_manager.allocate(lib.alignForward(@sizeOf(ProgramSegment) * program_headers.len, UEFI.page_size) >> UEFI.page_shifter) catch @panic("unable to allocate memory for program segments"));
+    // assert(program_segments.len == 0);
+    //
+    // var all_segments_size: u32 = 0;
+    //
+    // for (program_headers) |*ph| {
+    //     switch (ph.type) {
+    //         .load => {
+    //             if (ph.size_in_memory == 0) continue;
+    //             const address_misalignment = ph.virtual_address & (UEFI.page_size - 1);
+    //
+    //             if (address_misalignment != 0) {
+    //                 @panic("ELF PH segment size is supposed to be page-aligned");
+    //             }
+    //
+    //             if (!lib.isAligned(ph.offset, UEFI.page_size)) {
+    //                 @panic("ELF PH offset is supposed to be page-aligned");
+    //             }
+    //
+    //             if (!ph.flags.readable) {
+    //                 @panic("ELF program segment is marked as non-readable");
+    //             }
+    //
+    //             if (ph.size_in_file != ph.size_in_memory) {
+    //                 @panic("ELF program segment file size is smaller than memory size");
+    //             }
+    //
+    //             const segment_index = program_segments.len;
+    //             program_segments.len += 1;
+    //             const segment = &program_segments[segment_index];
+    //             segment.* = .{
+    //                 .physical = 0, // batch allocate later
+    //                 .virtual = ph.virtual_address,
+    //                 .size = @intCast(u32, ph.size_in_memory),
+    //                 .file_offset = @intCast(u32, ph.offset),
+    //                 .mappings = .{
+    //                     .write = ph.flags.writable,
+    //                     .execute = ph.flags.executable,
+    //                 },
+    //             };
+    //
+    //             const aligned_segment_size = @intCast(u32, lib.alignForward(segment.size + address_misalignment, UEFI.page_size));
+    //             all_segments_size += aligned_segment_size;
+    //         },
+    //         else => {
+    //             log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
+    //         },
+    //     }
+    // }
+    //
+    // var kernel_address_space = blk: {
+    //     log.debug("Big chunk", .{});
+    //     const chunk_address = memory_manager.allocate(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space >> UEFI.page_shifter) catch @panic("Unable to get physical memory to bootstrap kernel address space");
+    //     const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
+    //         .address = PhysicalAddress(.local).new(chunk_address),
+    //         .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
+    //     };
+    //     break :blk VirtualAddressSpace.kernelBSP(kernel_address_space_physical_region);
+    // };
+    //
+    // log.debug("Allocate aligned: {}", .{all_segments_size});
+    // const segments_allocation = memory_manager.allocate(all_segments_size >> UEFI.page_shifter) catch @panic("Unable to allocate memory for kernel segments");
+    // var allocated_segment_memory: u32 = 0;
+    //
+    // for (program_segments) |*segment| {
+    //     const virtual_address_value = segment.virtual & 0xffff_ffff_ffff_f000;
+    //     const address_misalignment = @intCast(u32, segment.virtual - virtual_address_value);
+    //     const aligned_segment_size = @intCast(u32, lib.alignForward(segment.size + address_misalignment, UEFI.page_size));
+    //     const physical_address_value = segments_allocation + allocated_segment_memory; // UEFI uses identity mapping
+    //     segment.physical = physical_address_value + address_misalignment;
+    //     allocated_segment_memory += aligned_segment_size;
+    //     const dst_slice = @intToPtr([*]u8, segment.physical)[0..segment.size];
+    //     const src_slice = @intToPtr([*]const u8, @ptrToInt(kernel_file_content.ptr) + segment.file_offset)[0..segment.size];
+    //     if (!(dst_slice.len >= src_slice.len)) {
+    //         @panic("WTFFFFFFF");
+    //     }
+    //     assert(dst_slice.len >= src_slice.len);
+    //     lib.copy(u8, dst_slice, src_slice);
+    //     const core_locality: privileged.CoreLocality = switch (segment.mappings.write) {
+    //         true => .local,
+    //         false => .global,
+    //     };
+    //
+    //     switch (core_locality) {
+    //         inline else => |locality| paging.bootstrap_map(&kernel_address_space, locality, PhysicalAddress(locality).new(physical_address_value), VirtualAddress(locality).new(virtual_address_value), aligned_segment_size, .{ .write = segment.mappings.write, .execute = segment.mappings.execute }, &memory_manager.allocator) catch @panic("unable to map program segment"),
+    //     }
+    // }
+    //
+    // assert(allocated_segment_memory == all_segments_size);
+    //
+    // const stack_top = blk: {
+    //     const stack_page_count = 10;
+    //     const stack_size = stack_page_count << UEFI.page_shifter;
+    //     const stack_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(stack_page_count) catch @panic("Unable to allocate memory for stack"));
+    //     break :blk stack_physical_address.toHigherHalfVirtualAddress().value() + stack_size;
+    // };
+    //
+    // const gdt_descriptor = blk: {
+    //     const gdt_page_count = 1;
+    //     const gdt_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
+    //     const gdt_descriptor_identity = gdt_physical_address.toIdentityMappedVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
+    //     gdt_descriptor_identity.* = gdt_physical_address.toIdentityMappedVirtualAddress().access(*GDT.Table).fill_with_kernel_memory_offset(lib.config.kernel_higher_half_address);
+    //     break :blk gdt_physical_address.toHigherHalfVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
+    // };
+    //
+    // {
+    //     const trampoline_code_start = @ptrToInt(&load_kernel);
+    //     const trampoline_code_size = @ptrToInt(&kernel_trampoline_end) - @ptrToInt(&kernel_trampoline_start);
+    //     const code_physical_base_page = PhysicalAddress(.local).new(lib.alignBackward(trampoline_code_start, UEFI.page_size));
+    //     const misalignment = trampoline_code_start - code_physical_base_page.value();
+    //     const trampoline_size_to_map = lib.alignForward(misalignment + trampoline_code_size, UEFI.page_size);
+    //     paging.bootstrap_map(&kernel_address_space, .local, code_physical_base_page, code_physical_base_page.toIdentityMappedVirtualAddress(), trampoline_size_to_map, .{ .write = false, .execute = true }, &memory_manager.allocator) catch @panic("Unable to map kernel trampoline code");
+    // }
+    //
+    // var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(lib.alignForward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
+    //
+    // // map bootstrap pages
+    // {
+    //     const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootstrap_memory.ptr));
+    //     paging.bootstrap_map(&kernel_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
+    // }
+    //
+    // // Map all usable memory to avoid kernel delays later
+    // // TODO:
+    // // 1. Divide memory per CPU to avoid shared memory
+    // // 2. User manager
+    // var map_iterator = memory_manager.map.iterator();
+    // while (map_iterator.next(memory_manager.map)) |entry| {
+    //     if (entry.type == .ConventionalMemory) {
+    //         const physical_address = PhysicalAddress(.local).new(entry.physical_start);
+    //         const virtual_address = physical_address.toHigherHalfVirtualAddress();
+    //         const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
+    //         paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
+    //     }
+    // }
+    //
+    // var allocated_size: usize = 0;
+    // for (memory_manager.size_counters.counters) |counter| {
+    //     allocated_size += counter;
+    // }
+    //
+    // log.debug("Allocated size: 0x{x}", .{allocated_size * lib.arch.valid_page_sizes[0]});
+    //
+    // const bootloader_information_ptr = bootloader_information.toIdentityMappedVirtualAddress().access(*BootloaderInformation);
+    // bootloader_information_ptr.* = .{
+    //     .kernel_segments = program_segments,
+    //     .memory_map = memory_manager.map.to_higher_half(),
+    //     .counters = memory_manager.size_counters.to_higher_half(),
+    //     .rsdp_physical_address = rsdp_physical_address,
+    //     .kernel_file = file_to_higher_half(kernel_file_content),
+    //     .init_file = file_to_higher_half(init_file_content),
+    // };
+    // log.debug("KF: {}. IF: {}.", .{ bootloader_information_ptr.kernel_file.len, bootloader_information_ptr.init_file.len });
+    //
+    // load_kernel(bootloader_information.toHigherHalfVirtualAddress().access(*BootloaderInformation), elf_parser.getEntryPoint(), kernel_address_space.arch.cr3, stack_top, gdt_descriptor);
 }

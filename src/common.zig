@@ -338,7 +338,7 @@ pub const Bootloader = struct {
         supported_protocols: []const Protocol,
     };
 
-    pub const Protocol = enum {
+    pub const Protocol = enum(u8) {
         bios,
         uefi,
     };

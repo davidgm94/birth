@@ -15,17 +15,18 @@ const Allocator = lib.Allocator;
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
 const panic = privileged.panic;
-const PhysicalAddress = privileged.GenericPhysicalAddress(.x86_64);
-const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-const VirtualAddress = privileged.GenericVirtualAddress(.x86_64);
-const VirtualAddressSpace = privileged.GenericVirtualAddressSpace(.x86_64);
-const TranslationResult = VirtualAddressSpace.TranslationResult;
 
-const arch = lib.arch.x86_64;
-const valid_page_sizes = arch.valid_page_sizes;
-const reverse_valid_page_sizes = arch.reverse_valid_page_sizes;
+const valid_page_sizes = lib.arch.x86_64.valid_page_sizes;
+const reverse_valid_page_sizes = lib.arch.x86_64.reverse_valid_page_sizes;
 
-const cr3 = privileged.arch.x86_64.registers.cr3;
+const x86_64 = privileged.arch.x86_64;
+const cr3 = x86_64.registers.cr3;
+const PhysicalAddress = x86_64.PhysicalAddress;
+const VirtualAddress = x86_64.VirtualAddress;
+const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
+const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
+const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
+const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 
 const higher_half_entry_index = 512 / 2;
 
@@ -100,7 +101,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
     }
 }
 
-const Error = error {
+const Error = error{
     invalid_physical,
     invalid_virtual,
     invalid_size,
@@ -109,7 +110,7 @@ const Error = error {
     unaligned_size,
 };
 
-pub fn bootstrap_map(virtual_address_space: *VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
+pub fn bootstrap_map(virtual_address_space: *x86_64.VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     // TODO: use flags
     const flags = general_flags.toArchitectureSpecific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
@@ -413,7 +414,7 @@ const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
-pub fn initKernelBSP(allocation_region: privileged.GenericPhysicalMemoryRegion(.x86_64, .local)) VirtualAddressSpace {
+pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
     const pml4_physical_region = allocation_region.takeSlice(@sizeOf(PML4Table));
     const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
 
@@ -448,7 +449,7 @@ pub fn initKernelBSP(allocation_region: privileged.GenericPhysicalMemoryRegion(.
     };
 }
 
-pub fn make_current(virtual_address_space: *const VirtualAddressSpace) void {
+pub fn makeCurrent(virtual_address_space: *const VirtualAddressSpace) void {
     virtual_address_space.arch.cr3.write();
 }
 
@@ -547,7 +548,7 @@ pub fn map_device(asked_physical_address: PhysicalAddress(.global), size: u64) !
     return asked_physical_address.toHigherHalfVirtualAddress();
 }
 
-pub inline fn new_flags(general_flags: VirtualAddressSpace.Flags, comptime core_locality: privileged.CoreLocality) MemoryFlags {
+pub inline fn newFlags(general_flags: VirtualAddressSpace.Flags, comptime core_locality: privileged.CoreLocality) MemoryFlags {
     return MemoryFlags{
         .read_write = general_flags.write,
         .user = general_flags.user,
