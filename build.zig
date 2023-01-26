@@ -491,8 +491,6 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
 
     builder.default_step.dependOn(&cpu_driver.step);
 
-    host.log.debug("Creating CPU driver", .{});
-
     return cpu_driver;
 }
 

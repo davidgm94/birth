@@ -5,6 +5,8 @@ const lib = @import("lib");
 const Allocator = lib.Allocator;
 const Protocol = lib.Bootloader.Protocol;
 
+const privileged = @import("privileged");
+
 const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     .x86 => switch (lib.os) {
         // Using BIOS
@@ -23,14 +25,30 @@ const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
+const AddressInterface = privileged.Address.Interface;
+
 pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
     memory_map: MemoryMap,
-    size_counters: [MemoryMap.entry_count]u32 = [1]u32{0} ** MemoryMap.entry_count,
     // Page allocator
-    allocator: Allocator = .{
-        .callback_allocate = allocate,
-    },
+    pages: Pages,
+    heap: Heap,
+    regions: [6]PMR = lib.zeroes([6]PMR),
+
+    const PMR = AddressInterface(u64).PhysicalMemoryRegion(.global);
+
+    const Pages = extern struct {
+        allocator: Allocator = .{
+            .callback_allocate = pageAllocate,
+        },
+        size_counters: [MemoryMap.entry_count]u32 = [1]u32{0} ** MemoryMap.entry_count,
+    };
+
+    const Heap = extern struct {
+        allocator: Allocator = .{
+            .callback_allocate = heapAllocate,
+        },
+    };
 
     const GetError = error{
         out_of_memory,
@@ -49,8 +67,10 @@ pub const Information = extern struct {
                             .bios = .{},
                         },
                     },
+                    .pages = .{},
+                    .heap = .{},
                 };
-                result.size_counters[iterator.index] = @sizeOf(Information);
+                result.pages.size_counters[iterator.index] = @sizeOf(Information);
                 BIOS.fetchMemoryEntries(&result.memory_map);
                 return result;
             }
@@ -59,7 +79,7 @@ pub const Information = extern struct {
         return GetError.out_of_memory;
     }
 
-    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+    pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         _ = alignment;
         _ = size;
         const memory_manager = @fieldParentPtr(MemoryMapManager, "allocator", allocator);
@@ -73,6 +93,13 @@ pub const Information = extern struct {
         }
 
         return Allocator.Allocate.Error.OutOfMemory;
+    }
+
+    pub fn heapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        _ = alignment;
+        _ = size;
+        _ = allocator;
+        @panic("todo: heap allocate");
     }
 };
 

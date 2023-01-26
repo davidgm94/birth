@@ -5,7 +5,7 @@ const assert = lib.assert;
 const maxInt = lib.maxInt;
 const Allocator = lib.Allocator;
 
-pub const addresses = @import("privileged/addresses.zig");
+pub const Address = @import("privileged/address.zig");
 pub const arch = @import("privileged/arch.zig");
 pub const Capabilities = @import("privileged/capabilities.zig");
 pub const ELF = @import("privileged/elf.zig");

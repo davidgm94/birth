@@ -76,7 +76,7 @@ export fn entryPoint() callconv(.C) noreturn {
     // var physical_heap = PhysicalHeap(.x86_64){
     //     .page_allocator = &memory_manager.allocator,
     // };
-    const page_allocator = &bootloader_information.allocator;
+    const page_allocator = &bootloader_information.pages.allocator;
     const allocator: *lib.Allocator = undefined; //= &physical_heap.allocator;
     //
     if (true) @panic("Implement memory map");

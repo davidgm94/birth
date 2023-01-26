@@ -4,12 +4,13 @@ const assert = lib.assert;
 const bootloader = @import("bootloader");
 
 const x86_64 = privileged.arch.x86_64;
-const PhysicalAddress = x86_64.PhysicalAddress;
-const VirtualAddress = x86_64.VirtualAddress;
-const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
-const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
-const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
-const VirtualAddressSpace = x86_64.VirtualAddressSpace;
+const AddressInterface = x86_64.AddressInterface;
+const PhysicalAddress = AddressInterface.PhysicalAddress;
+const VirtualAddress = AddressInterface.VirtualAddress;
+const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
+const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
+const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
+const VirtualAddressSpace = AddressInterface.VirtualAddressSpace;
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
