@@ -344,7 +344,6 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
     assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[0]));
 
     entry_pointer.* = @bitCast(PTE, get_page_entry(PTE, physical_address, flags));
-    log.debug("Final Entry: {}", .{entry_pointer.*});
 }
 
 fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_allocator: *Allocator) *volatile PDTable {

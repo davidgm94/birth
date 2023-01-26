@@ -4,13 +4,12 @@ const assert = lib.assert;
 const bootloader = @import("bootloader");
 
 const x86_64 = privileged.arch.x86_64;
-const AddressInterface = x86_64.AddressInterface;
-const PhysicalAddress = AddressInterface.PhysicalAddress;
-const VirtualAddress = AddressInterface.VirtualAddress;
-const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
-const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
-const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
-const VirtualAddressSpace = AddressInterface.VirtualAddressSpace;
+const PhysicalAddress = x86_64.PhysicalAddress;
+const VirtualAddress = x86_64.VirtualAddress;
+const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
+const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
+const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
+const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -164,8 +163,12 @@ pub const MemoryMapEntry = extern struct {
     type: Type,
     unused: u32 = 0,
 
-    pub fn isLowMemory(entry: MemoryMapEntry) bool {
+    pub inline fn isLowMemory(entry: MemoryMapEntry) bool {
         return entry.region.address.value() < lib.mb;
+    }
+
+    pub inline fn isUsable(entry: MemoryMapEntry) bool {
+        return entry.type == .usable and !entry.isLowMemory();
     }
 
     const Type = enum(u32) {
@@ -211,7 +214,7 @@ pub const E820Iterator = extern struct {
 pub fn fetchMemoryEntries(memory_map: *bootloader.MemoryMap) void {
     var iterator = E820Iterator{};
     while (iterator.next()) |entry| {
-        memory_map.native.bios.descriptors[iterator.index] = entry;
+        memory_map.getEntry(.bios, iterator.index).* = entry;
     }
 
     memory_map.entry_count = iterator.index;

@@ -125,7 +125,7 @@ test {
 }
 
 pub const Allocator = extern struct {
-    callback_allocate: *const Allocate.Fn,
+    callbacks: Callbacks align(8),
 
     pub const Allocate = struct {
         pub const Result = struct {
@@ -138,8 +138,20 @@ pub const Allocator = extern struct {
         };
     };
 
+    /// Necessary to do this hack
+    const Callbacks = switch (common.cpu.arch) {
+        .x86 => extern struct {
+            allocate: *const Allocate.Fn,
+            allocate_padding: u32 = 0,
+        },
+        .x86_64 => extern struct {
+            allocate: *const Allocate.Fn,
+        },
+        else => @compileError("Architecture not supported"),
+    };
+
     pub inline fn allocateBytes(allocator: *Allocator, size: u64, alignment: u64) Allocate.Error!Allocate.Result {
-        return try allocator.callback_allocate(allocator, size, alignment);
+        return try allocator.callbacks.allocate(allocator, size, alignment);
     }
 
     pub inline fn allocate(allocator: *Allocator, comptime T: type, len: usize) Allocate.Error![]T {
@@ -158,7 +170,9 @@ pub const Allocator = extern struct {
     pub fn wrap(zig_allocator: common.ZigAllocator) Wrapped {
         return .{
             .allocator = .{
-                .callback_allocate = Wrapped.wrapped_callback_allocate,
+                .callbacks = .{
+                    .allocate = Wrapped.wrapped_callback_allocate,
+                },
             },
             .zig = .{
                 .ptr = zig_allocator.ptr,

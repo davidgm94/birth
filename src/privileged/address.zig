@@ -88,8 +88,8 @@ pub fn Interface(comptime Usize: type) type {
                     };
                 }
 
-                pub inline fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) PhysicalMemoryRegion(core_locality) {
-                    return VirtualMemoryRegion(core_locality){
+                pub inline fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VirtualMemoryRegion(core_locality) {
+                    return .{
                         .address = physical_memory_region.address.toIdentityMappedVirtualAddress(),
                         .size = physical_memory_region.size,
                     };
@@ -276,7 +276,8 @@ pub fn Interface(comptime Usize: type) type {
                 };
 
                 pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
-                pub fn kernelBSP(physical_memory_region: PhysicalMemoryRegion(architecture, .local)) VAS {
+
+                pub fn kernelBSP(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
                     return paging.initKernelBSP(physical_memory_region);
                 }
 

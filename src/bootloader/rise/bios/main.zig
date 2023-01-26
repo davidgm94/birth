@@ -68,18 +68,8 @@ export fn entryPoint() callconv(.C) noreturn {
     BIOS.A20Enable() catch @panic("can't enable a20");
 
     const bootloader_information = bootloader.Information.fromBIOS() catch @panic("Can't get bootloader information");
-
-    // Look for a bootstrapping memory region
-
-    // const memory_map_result = MemoryMap(.x86_64).fromBIOS(memory_map_entries);
-    // var memory_manager = MemoryManager(.x86_64).Interface(.bios).fromMemoryMap(memory_map_result.memory_map, memory_map_result.entry_index);
-    // var physical_heap = PhysicalHeap(.x86_64){
-    //     .page_allocator = &memory_manager.allocator,
-    // };
-    const page_allocator = &bootloader_information.pages.allocator;
-    const allocator: *lib.Allocator = undefined; //= &physical_heap.allocator;
-    //
-    if (true) @panic("Implement memory map");
+    const page_allocator = &bootloader_information.page.allocator;
+    const allocator = &bootloader_information.heap.allocator;
 
     if (bios_disk.disk.sector_size != 0x200) {
         @panic("Wtf");
@@ -109,7 +99,8 @@ export fn entryPoint() callconv(.C) noreturn {
         break :blk result;
     };
 
-    for (bootloader_information.memory_map.getNativeIterator()) |entry| {
+    const entries = bootloader_information.memory_map.getNativeEntries(.bios);
+    for (entries) |entry| {
         if (entry.type == .usable) {
             VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("mapping failed");
         }
@@ -160,6 +151,8 @@ export fn entryPoint() callconv(.C) noreturn {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
             }
 
+            log.debug("Size of information: 0x{x}", .{@sizeOf(bootloader.Information)});
+
             const stack_allocation = page_allocator.allocateBytes(0x4000, 0x1000) catch @panic("Stack allocation");
             const stack_top = stack_allocation.address + stack_allocation.size;
 
@@ -203,6 +196,8 @@ export fn entryPoint() callconv(.C) noreturn {
             }
 
             gdt.setup(0, false);
+
+            bootloader.Information.printBootloaderInfo();
 
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
@@ -261,9 +256,13 @@ export fn entryPoint() callconv(.C) noreturn {
     @panic("loader not found");
 }
 
-comptime {
-    asm (
-        \\.global load64
-        \\load64:
-    );
-}
+pub const std_options = struct {
+    pub const log_level = lib.std.log.Level.debug;
+
+    pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        _ = scope;
+        _ = level;
+        lib.format(writer, format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+    }
+};

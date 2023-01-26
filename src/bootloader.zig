@@ -29,25 +29,40 @@ const AddressInterface = privileged.Address.Interface;
 
 pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
+    size: u32 = @sizeOf(Information),
     memory_map: MemoryMap,
     // Page allocator
-    pages: Pages,
+    page: Pages,
     heap: Heap,
-    regions: [6]PMR = lib.zeroes([6]PMR),
 
-    const PMR = AddressInterface(u64).PhysicalMemoryRegion(.global);
+    pub fn printBootloaderInfo() void {
+        lib.log.debug("Offset memory map: {}", .{@offsetOf(Information, "memory_map")});
+        lib.log.debug("Offset page: {}", .{@offsetOf(Information, "page")});
+        lib.log.debug("Offset heap: {}", .{@offsetOf(Information, "heap")});
+        lib.log.debug("Size of memory map entry: {}", .{@sizeOf(UEFI.MemoryDescriptor)});
+    }
+
+    // TODO:
+    const AI = AddressInterface(u64);
+    const PA = AI.PhysicalAddress(.global);
+    const PMR = AI.PhysicalMemoryRegion(.global);
 
     const Pages = extern struct {
         allocator: Allocator = .{
-            .callback_allocate = pageAllocate,
+            .callbacks = .{
+                .allocate = pageAllocate,
+            },
         },
-        size_counters: [MemoryMap.entry_count]u32 = [1]u32{0} ** MemoryMap.entry_count,
+        counters: [MemoryMap.entry_count]u32 = [1]u32{0} ** MemoryMap.entry_count,
     };
 
     const Heap = extern struct {
         allocator: Allocator = .{
-            .callback_allocate = heapAllocate,
+            .callbacks = .{
+                .allocate = heapAllocate,
+            },
         },
+        regions: [6]PMR = lib.zeroes([6]PMR),
     };
 
     const GetError = error{
@@ -62,15 +77,12 @@ pub const Information = extern struct {
                 const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*Information);
                 result.* = .{
                     .protocol = .bios,
-                    .memory_map = .{
-                        .native = .{
-                            .bios = .{},
-                        },
-                    },
-                    .pages = .{},
+                    .memory_map = .{},
+                    .page = .{},
                     .heap = .{},
                 };
-                result.pages.size_counters[iterator.index] = @sizeOf(Information);
+
+                result.page.counters[iterator.index] = lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]) / lib.arch.valid_page_sizes[0];
                 BIOS.fetchMemoryEntries(&result.memory_map);
                 return result;
             }
@@ -80,35 +92,86 @@ pub const Information = extern struct {
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        _ = alignment;
-        _ = size;
-        const memory_manager = @fieldParentPtr(MemoryMapManager, "allocator", allocator);
-        _ = memory_manager;
+        const bootloader_information = @fieldParentPtr(Information, "page", @fieldParentPtr(Pages, "allocator", allocator));
+
+        if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+        if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+        const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
 
         if (current_protocol) |protocol| {
-            switch (protocol) {
-                .bios => @panic("using bios"),
-                .uefi => @panic("using uefi"),
+            const entries = bootloader_information.memory_map.getNativeEntries(protocol);
+            for (entries) |entry, entry_index| {
+                const busy_size = bootloader_information.page.counters[entry_index] * lib.arch.valid_page_sizes[0];
+                const size_left = entry.region.size - busy_size;
+                if (entry.isUsable() and size_left > size) {
+                    if (entry.region.address.isAligned(alignment)) {
+                        const result = Allocator.Allocate.Result{
+                            .address = entry.region.address.offset(busy_size).value(),
+                            .size = size,
+                        };
+
+                        bootloader_information.page.counters[entry_index] += four_kb_pages;
+
+                        return result;
+                    }
+                }
             }
+
+            return Allocator.Allocate.Error.OutOfMemory;
         }
 
         return Allocator.Allocate.Error.OutOfMemory;
     }
 
     pub fn heapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        const bootloader_information = @fieldParentPtr(Information, "heap", @fieldParentPtr(Heap, "allocator", allocator));
+        for (bootloader_information.heap.regions) |*region| {
+            if (region.size > size) {
+                const result = .{
+                    .address = region.address.value(),
+                    .size = size,
+                };
+                region.size -= size;
+                region.address.addOffset(size);
+                return result;
+            }
+        }
+        const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
+        for (bootloader_information.heap.regions) |*region| {
+            if (region.size == 0) {
+                const allocated_region = try bootloader_information.page.allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                region.* = .{
+                    .address = PA.new(allocated_region.address),
+                    .size = allocated_region.size,
+                };
+                const result = .{
+                    .address = region.address.value(),
+                    .size = size,
+                };
+                region.address.addOffset(size);
+                region.size -= size;
+                return result;
+            }
+        }
+
         _ = alignment;
-        _ = size;
-        _ = allocator;
         @panic("todo: heap allocate");
+        //             _ = alignment;
+        //             const physical_heap = @fieldParentPtr(PhysicalHeap(architecture), "allocator", allocator);
+        //             for (physical_heap.regions) |*region| {
+        //             }
+        //
+        //
+        //             @panic("todo: allocate");
+        //         }
     }
 };
 
 pub const MemoryMap = extern struct {
-    native: extern union {
-        uefi: UEFIMemoryMap,
-        bios: BIOSMemoryMap,
-    },
+    buffer: [size]u8 = [1]u8{0} ** size,
     entry_count: u32 = 0,
+
+    pub const size = 48 * 128;
 
     const BIOSMemoryMap = extern struct {
         descriptors: [entry_count]BIOS.MemoryMapEntry = [1]BIOS.MemoryMapEntry{lib.zeroes(BIOS.MemoryMapEntry)} ** entry_count,
@@ -121,147 +184,34 @@ pub const MemoryMap = extern struct {
 
     const entry_count = 128;
 
-    pub fn getNativeIterator(memory_map: *MemoryMap, comptime protocol: Protocol) EntryIterator(protocol) {
-        _ = memory_map;
-        return EntryIterator(protocol){};
+    pub fn getNativeEntries(memory_map: *MemoryMap, comptime protocol: Protocol) []const EntryType(protocol) {
+        return switch (protocol) {
+            .bios => @ptrCast([*]const BIOS.MemoryMapEntry, @alignCast(@alignOf(BIOS.MemoryMapEntry), &memory_map.buffer))[0..entry_count],
+            .uefi => @panic("todo: uefi native iterator"),
+        };
+    }
+
+    pub fn getEntry(memory_map: *MemoryMap, comptime protocol: Protocol, index: usize) *EntryType(protocol) {
+        return switch (protocol) {
+            .bios => &@ptrCast([*]BIOS.MemoryMapEntry, @alignCast(@alignOf(BIOS.MemoryMapEntry), &memory_map.buffer[index * @sizeOf(BIOS.MemoryMapEntry)]))[0],
+            .uefi => @panic("todo: uefi native iterator"),
+        };
     }
 
     fn EntryIterator(comptime protocol: Protocol) type {
-        _ = protocol;
-        return struct {};
+        const Entry = EntryType(protocol);
+        return struct {
+            entries: []const Entry,
+            index: usize = 0,
+
+            const Iterator = @This();
+        };
     }
 };
 
-const MemoryMapManager = extern struct {
-    memory_map: MemoryMap,
-    size_counters: [MemoryMap.entry_count]u32,
-    allocator: Allocator,
-};
-
-// pub fn MemoryManager(comptime architecture: lib.Target.Cpu.Arch) type {
-//     return extern struct {
-//         memory_map: MemoryMap(architecture),
-//         size_counters_region: PMR,
-//         allocator: Allocator,
-//
-//         const PA = addresses.PhysicalAddress(architecture, .global);
-//         const PMR = addresses.PhysicalMemoryRegion(architecture, .global);
-//         const VMR = addresses.VirtualMemoryRegion(architecture, .global);
-//         const MM = @This();
-//
-//
-//         pub fn Interface(comptime loader_protocol: LoaderProtocol) type {
-//             return extern struct {
-//                 const EntryType = switch (loader_protocol) {
-//                     .bios => bootloader.BIOS.MemoryMapEntry,
-//                     .uefi => bootloader.UEFI.MemoryDescriptor,
-//                 };
-//
-//                 const GenericEntry = extern struct {
-//                     region: PMR,
-//                     usable: bool,
-//                 };
-//
-//                 fn getGenericEntry(entry: anytype) GenericEntry {
-//                     return switch (@TypeOf(entry)) {
-//                         bootloader.BIOS.MemoryMapEntry => .{
-//                             .region = entry.region,
-//                             .usable = entry.region.address.value() >= 1 * lib.mb,
-//                         },
-//                         bootloader.UEFI.MemoryDescriptor => .{
-//                             .region = PMR{
-//                                 .address = PA.new(entry.physical_start),
-//                                 .size = entry.number_of_pages * lib.arch.valid_page_sizes[0],
-//                             },
-//                             .usable = @panic("UEFI usable"),
-//                         },
-//                         else => @compileError("Type not admitted"),
-//                     };
-//                 }
-//
-//
-//                 pub fn allocate(memory_manager: MemoryManager(architecture), asked_size: u64, asked_alignment: u64) !PMR {
-//                     // TODO: satisfy alignment
-//                     if (asked_size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) @panic("not page-aligned allocate");
-//
-//                     const four_kb_pages = @divExact(asked_size, lib.arch.valid_page_sizes[0]);
-//
-//                     const entries = memory_manager.memory_map.getEntries(EntryType);
-//                     for (entries) |entry, entry_index| {
-//                         const generic_entry = getGenericEntry(entry);
-//                         const busy_size = memory_manager.getSizeCounters()[entry_index] * lib.arch.valid_page_sizes[0];
-//                         const size_left = generic_entry.region.size - busy_size;
-//
-//                         if (generic_entry.usable and size_left > asked_size) {
-//                             if (generic_entry.region.address.isAligned(asked_alignment)) {
-//                                 const result = .{
-//                                     .address = generic_entry.region.address.offset(busy_size),
-//                                     .size = asked_size,
-//                                 };
-//
-//                                 memory_manager.getSizeCounters()[entry_index] += four_kb_pages;
-//
-//                                 return result;
-//                             }
-//                         }
-//                     }
-//
-//                     return Allocator.Allocate.Error.OutOfMemory;
-//                 }
-//             };
-//         }
-//     };
-// }
-
-// pub fn PhysicalHeap(comptime architecture: lib.Target.Cpu.Arch) type {
-//     const PA = addresses.PhysicalAddress(architecture, .global);
-//     const PMR = addresses.PhysicalMemoryRegion(architecture, .global);
-//
-//     return extern struct {
-//         allocator: Allocator = .{
-//             .callback_allocate = callback_allocate,
-//         },
-//         regions: [6]addresses.PhysicalMemoryRegion(architecture, .global) = lib.zeroes([6]PMR),
-//         page_allocator: *Allocator,
-//
-//         const Region = extern struct {
-//             descriptor: PMR,
-//         };
-//
-//         pub fn callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-//             _ = alignment;
-//             const physical_heap = @fieldParentPtr(PhysicalHeap(architecture), "allocator", allocator);
-//             for (physical_heap.regions) |*region| {
-//                 if (region.size > size) {
-//                     const result = .{
-//                         .address = region.address.value(),
-//                         .size = size,
-//                     };
-//                     region.size -= size;
-//                     region.address.addOffset(size);
-//                     return result;
-//                 }
-//             }
-//
-//             const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
-//             for (physical_heap.regions) |*region| {
-//                 if (region.size == 0) {
-//                     const allocated_region = try physical_heap.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
-//                     region.* = .{
-//                         .address = PA.new(allocated_region.address),
-//                         .size = allocated_region.size,
-//                     };
-//                     const result = .{
-//                         .address = region.address.value(),
-//                         .size = size,
-//                     };
-//                     region.address.addOffset(size);
-//                     region.size -= size;
-//                     return result;
-//                 }
-//             }
-//
-//             @panic("todo: allocate");
-//         }
-//     };
-// }
+fn EntryType(comptime protocol: Protocol) type {
+    return switch (protocol) {
+        .bios => BIOS.MemoryMapEntry,
+        .uefi => UEFI.MemoryDescriptor,
+    };
+}

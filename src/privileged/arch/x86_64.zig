@@ -3,9 +3,13 @@ const assert = lib.assert;
 const cpuid = lib.arch.x86_64.CPUID;
 
 const privileged = @import("privileged");
-pub const AddressInterface = privileged.Address.Interface(u64);
-const VirtualAddress = AddressInterface.VirtualAddress;
-const VirtualAddressSpace = AddressInterface.VirtualAddressSpace;
+const AddressInterface = privileged.Address.Interface(u64);
+pub const PhysicalAddress = AddressInterface.PhysicalAddress;
+pub const VirtualAddress = AddressInterface.VirtualAddress;
+pub const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
+pub const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
+pub const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
+pub const VirtualAddressSpace = AddressInterface.VirtualAddressSpace(.x86_64);
 
 pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
 pub const APIC = @import("x86_64/apic.zig");

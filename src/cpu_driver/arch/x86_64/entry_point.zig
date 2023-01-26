@@ -9,8 +9,8 @@ const privileged = @import("privileged");
 pub const writer = privileged.E9Writer{ .context = {} };
 
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
+    if (bootloader_information.size != @sizeOf(bootloader.Information)) @panic("Bootloader information size doesn't match");
     log.debug("Starting...", .{});
-    log.debug("debug information: {}", .{bootloader_information});
     while (true) {}
 }
 
@@ -23,6 +23,13 @@ pub const std_options = struct {
         writer.writeByte('\n') catch unreachable;
     }
 };
+
+pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    writer.writeAll("PANIC: ") catch unreachable;
+    writer.writeAll(message) catch unreachable;
+    writer.writeByte('\n') catch unreachable;
+    while (true) {}
+}
 // const alignForward = lib.alignForward;
 // const logger = lib.log.scoped(.EntryPoint);
 // const cpuid = lib.arch.x86_64.cpuid;
