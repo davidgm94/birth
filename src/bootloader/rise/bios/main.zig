@@ -197,8 +197,6 @@ export fn entryPoint() callconv(.C) noreturn {
 
             gdt.setup(0, false);
 
-            bootloader.Information.printBootloaderInfo();
-
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
             // Hardcode the trampoline here since this is a 32-bit executable and assembling 64-bit code is not allowed

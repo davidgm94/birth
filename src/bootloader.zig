@@ -35,13 +35,6 @@ pub const Information = extern struct {
     page: Pages,
     heap: Heap,
 
-    pub fn printBootloaderInfo() void {
-        lib.log.debug("Offset memory map: {}", .{@offsetOf(Information, "memory_map")});
-        lib.log.debug("Offset page: {}", .{@offsetOf(Information, "page")});
-        lib.log.debug("Offset heap: {}", .{@offsetOf(Information, "heap")});
-        lib.log.debug("Size of memory map entry: {}", .{@sizeOf(UEFI.MemoryDescriptor)});
-    }
-
     // TODO:
     const AI = AddressInterface(u64);
     const PA = AI.PhysicalAddress(.global);

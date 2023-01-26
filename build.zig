@@ -33,6 +33,7 @@ const default_configuration = Configuration{
 };
 
 const default_emulator = .qemu;
+const entry_point_name = "entryPoint";
 
 pub fn build(builder: *host.build.Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
@@ -410,7 +411,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             executable.want_lto = true;
                             executable.strip = true;
                             executable.setBuildMode(.ReleaseSmall);
-                            executable.entry_symbol_name = "entryPoint";
+                            executable.entry_symbol_name = entry_point_name;
 
                             try bootloader_executables.append(executable);
                         },
@@ -472,7 +473,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     cpu_driver.strip = false;
     cpu_driver.red_zone = false;
     cpu_driver.omit_frame_pointer = false;
-    cpu_driver.entry_symbol_name = "entryPoint";
+    cpu_driver.entry_symbol_name = entry_point_name;
 
     cpu_driver.addPackage(lib_package);
     cpu_driver.addPackage(bootloader_package);
