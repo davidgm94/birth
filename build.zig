@@ -21,7 +21,7 @@ const cache_dir = "zig-cache/";
 // const kernel_path = cache_dir ++ kernel_name;
 
 const Configuration = struct {
-    bootloader: Bootloader.ID,
+    bootloader: Bootloader,
     architecture: Cpu.Arch,
     boot_protocol: Bootloader.Protocol,
 };
@@ -47,28 +47,28 @@ pub fn build(builder: *host.build.Builder) !void {
     const disk_image_builder = createDiskImageBuilder(builder);
 
     const build_steps = blk: {
-        var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
+        var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
 
-        inline for (host.bootloaders) |bootloader, bootloader_index| {
-            const bootloader_id = @intToEnum(host.Bootloader.ID, bootloader_index);
+        inline for (host.supported_architectures) |architecture, architecture_index| {
+            const cpu_driver = try createCPUDriver(builder, architecture, false);
+            _ = cpu_driver;
+            // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
+            // _ = cpu_driver_test;
 
-            var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
+            const bootloaders = host.architecture_bootloader_map[architecture_index];
+            var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
 
-            inline for (bootloader.supported_architectures) |architecture| {
-                var boot_protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
-                const cpu_driver = try createCPUDriver(builder, architecture.id, false);
-                _ = cpu_driver;
-                // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
-                // _ = cpu_driver_test;
+            inline for (bootloaders) |bootloader| {
+                const bootloader_id = bootloader.id;
+                var protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
 
-                inline for (architecture.supported_protocols) |boot_protocol| {
+                inline for (bootloader.protocols) |protocol| {
                     var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
                     const configuration = .{
                         .bootloader = bootloader_id,
-                        .architecture = architecture.id,
-                        .boot_protocol = boot_protocol,
+                        .architecture = architecture,
+                        .boot_protocol = protocol,
                     };
-
                     const suffix = "_" ++ @tagName(configuration.bootloader) ++ "_" ++ @tagName(configuration.architecture) ++ "_" ++ @tagName(configuration.boot_protocol);
                     const bootloader_build = try createBootloader(builder, configuration, suffix);
                     _ = bootloader_build;
@@ -86,7 +86,7 @@ pub fn build(builder: *host.build.Builder) !void {
                         emulator_step.run.dependOn(&disk_image_builder_run_step.step);
                         emulator_step.debug.dependOn(&disk_image_builder_run_step.step);
 
-                        if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture.id and default_configuration.boot_protocol == boot_protocol) {
+                        if (emulator == default_emulator and default_configuration.bootloader == bootloader_id and default_configuration.architecture == architecture and default_configuration.boot_protocol == protocol) {
                             const default_run_step = builder.step("run", "Run " ++ step_suffix);
                             const default_debug_step = builder.step("debug", "Debug " ++ step_suffix);
                             default_run_step.dependOn(&emulator_step.run);
@@ -94,17 +94,18 @@ pub fn build(builder: *host.build.Builder) !void {
                         }
                     }
 
-                    try boot_protocol_steps.append(.{ .emulator_steps = emulator_steps.items });
+                    try protocol_steps.append(.{ .emulator_steps = emulator_steps.items });
                 }
 
-                try architecture_steps.append(.{ .boot_protocol_steps = boot_protocol_steps.items });
+                try bootloader_steps.append(.{ .protocol_steps = protocol_steps.items });
             }
 
-            try bootloader_steps.append(.{ .architecture_steps = architecture_steps.items });
+            try architecture_steps.append(.{ .bootloader_steps = bootloader_steps.items });
         }
 
-        break :blk BuildSteps{ .bootloader_steps = bootloader_steps.items };
+        break :blk BuildSteps{ .architecture_steps = architecture_steps.items };
     };
+
     _ = build_steps;
 
     const test_step = builder.step("test", "Run unit tests");
@@ -136,15 +137,14 @@ pub fn getEmulators(comptime configuration: Configuration) []const Emulator {
 }
 
 const BuildSteps = struct {
+    architecture_steps: []const ArchitectureSteps,
+};
+const ArchitectureSteps = struct {
     bootloader_steps: []const BootloaderSteps,
 };
 
 const BootloaderSteps = struct {
-    architecture_steps: []const ArchitectureSteps,
-};
-
-const ArchitectureSteps = struct {
-    boot_protocol_steps: []const BootProtocolSteps,
+    protocol_steps: []const BootProtocolSteps,
 };
 
 const BootProtocolSteps = struct {
@@ -490,6 +490,8 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     }
 
     builder.default_step.dependOn(&cpu_driver.step);
+
+    host.log.debug("Creating CPU driver", .{});
 
     return cpu_driver;
 }

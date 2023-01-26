@@ -596,7 +596,7 @@ pub fn main() anyerror!void {
         return Error.wrong_arguments;
     }
 
-    const bootloader = lib.stringToEnum(lib.Bootloader.ID, arguments[1]) orelse return Error.wrong_arguments;
+    const bootloader = lib.stringToEnum(lib.Bootloader, arguments[1]) orelse return Error.wrong_arguments;
     const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
     const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
 

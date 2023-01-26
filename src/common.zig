@@ -330,48 +330,89 @@ pub const PartitionTableType = enum {
     gpt,
 };
 
-pub const Bootloader = struct {
-    supported_architectures: []const Architecture,
+// pub const Bootloader = struct {
+//     supported_architectures: []const Architecture,
+//
+//     pub const Architecture = struct {
+//         id: Cpu.Arch,
+//         supported_protocols: []const Protocol,
+//     };
+//
+//     pub const Protocol = enum(u8) {
+//         bios,
+//         uefi,
+//     };
+//
+//     pub const ID = enum(u1) {
+//         rise = 0,
+//         limine = 1,
+//     };
+//
+//     pub const count = enumCount(ID);
+// };
 
-    pub const Architecture = struct {
-        id: Cpu.Arch,
-        supported_protocols: []const Protocol,
+// pub const bootloaders = blk: {
+//     var loaders: [Bootloader.count]Bootloader = undefined;
+//
+//     loaders[@enumToInt(Bootloader.ID.rise)] = .{
+//         .supported_architectures = &.{
+//             .{
+//                 .id = .x86_64,
+//                 .supported_protocols = &.{ .bios, .uefi },
+//             },
+//         },
+//     };
+//     loaders[@enumToInt(Bootloader.ID.limine)] = .{
+//         .supported_architectures = &.{
+//             .{
+//                 .id = .x86_64,
+//                 .supported_protocols = &.{ .bios, .uefi },
+//             },
+//         },
+//     };
+//
+//     break :blk loaders;
+// };
+
+pub const supported_architectures = [_]Cpu.Arch{.x86_64};
+
+pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
+    inline for (supported_architectures) |architecture, index| {
+        if (arch == architecture) return index;
+    }
+
+    @panic("WTF");
+}
+pub const architecture_bootloader_map = blk: {
+    var array: [supported_architectures.len][]const ArchitectureBootloader = undefined;
+
+    array[architectureIndex(.x86_64)] = &.{
+        .{
+            .id = .rise,
+            .protocols = &.{ .bios, .uefi },
+        },
+        .{
+            .id = .limine,
+            .protocols = &.{ .bios, .uefi },
+        },
     };
+
+    break :blk array;
+};
+
+pub const Bootloader = enum(u8) {
+    rise,
+    limine,
 
     pub const Protocol = enum(u8) {
         bios,
         uefi,
     };
-
-    pub const ID = enum(u1) {
-        rise = 0,
-        limine = 1,
-    };
-
-    pub const count = enumCount(ID);
 };
 
-pub const bootloaders = blk: {
-    var loaders: [Bootloader.count]Bootloader = undefined;
-
-    loaders[@enumToInt(Bootloader.ID.rise)] = .{
-        .supported_architectures = &.{
-            .{
-                .id = .x86_64,
-                .supported_protocols = &.{ .bios, .uefi },
-            },
-        },
-    };
-    loaders[@enumToInt(Bootloader.ID.limine)] = .{
-        .supported_architectures = &.{
-            .{
-                .id = .x86_64,
-                .supported_protocols = &.{ .bios, .uefi },
-            },
-        },
-    };
-
-    break :blk loaders;
+pub const ArchitectureBootloader = struct {
+    id: Bootloader,
+    protocols: []const Bootloader.Protocol,
 };
 
 pub const TraditionalExecutionMode = enum {
