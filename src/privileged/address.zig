@@ -71,6 +71,14 @@ pub fn Interface(comptime Usize: type) type {
                     _ = virtual_address;
                     return true;
                 }
+
+                pub inline fn offset(virtual_address: VA, asked_offset: Usize) VA {
+                    return @intToEnum(VA, virtual_address.value() + asked_offset);
+                }
+
+                pub inline fn negative_offset(virtual_address: VA, asked_offset: Usize) VA {
+                    return @intToEnum(VA, virtual_address.value() - asked_offset);
+                }
             };
         }
 

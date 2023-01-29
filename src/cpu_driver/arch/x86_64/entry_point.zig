@@ -5,81 +5,43 @@ const log = lib.log;
 const bootloader = @import("bootloader");
 
 const privileged = @import("privileged");
+const stopCPU = privileged.arch.stopCPU;
 
-pub const writer = privileged.E9Writer{ .context = {} };
+const writer = privileged.E9Writer{ .context = {} };
+
+fn todoEndEntryPoint() noreturn {
+    @panic("end of entry point");
+}
+
+pub const panic = privileged.zigPanic;
+
+pub const std_options = struct {
+    pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        _ = level;
+        writer.writeAll("[CPU DRIVER] ") catch unreachable;
+        writer.writeByte('[') catch unreachable;
+        writer.writeAll(@tagName(scope)) catch unreachable;
+        writer.writeAll("] ") catch unreachable;
+        lib.format(writer, format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+    }
+
+    pub const log_level = lib.log.Level.debug;
+};
 
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     if (bootloader_information.size != @sizeOf(bootloader.Information)) @panic("Bootloader information size doesn't match");
     log.debug("Starting...", .{});
-    while (true) {}
-}
-
-pub const std_options = struct {
-    pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        _ = level;
-        _ = scope;
-        writer.writeAll("[CPU DRIVER] ") catch unreachable;
-        lib.format(writer, format, args) catch unreachable;
-        writer.writeByte('\n') catch unreachable;
+    var total_page_count: u32 = 0;
+    for (bootloader_information.page.counters) |page_counter| {
+        total_page_count += page_counter;
     }
-};
+    log.debug("Total page count: {}. Total memory: 0x{x}", .{ total_page_count, total_page_count << lib.arch.page_shifter(0x1000) });
 
-pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
-    writer.writeAll("PANIC: ") catch unreachable;
-    writer.writeAll(message) catch unreachable;
-    writer.writeByte('\n') catch unreachable;
-    while (true) {}
+    todoEndEntryPoint();
 }
-// const alignForward = lib.alignForward;
-// const logger = lib.log.scoped(.EntryPoint);
-// const cpuid = lib.arch.x86_64.cpuid;
-// const page_shifter = lib.arch.page_shifter;
-// const valid_page_sizes = lib.arch.valid_page_sizes;
-//
-// const privileged = @import("privileged");
-// const Capabilities = privileged.Capabilities;
-// const CoreDirectorData = privileged.CoreDirectorData;
-// const CoreSupervisorData = privileged.CoreSupervisorData;
-// const CoreDirectorSharedGeneric = privileged.CoreDirectorSharedGeneric;
-// const PhysicalAddress = privileged.PhysicalAddress;
-// const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-// const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-// const SpawnState = privileged.SpawnState;
-// const VirtualAddress = privileged.VirtualAddress;
-// const VirtualAddressSpace = privileged.VirtualAddressSpace;
-// const UEFI = privileged.UEFI;
-//
-// const APIC = privileged.arch.x86_64.APIC;
-// const GDT = privileged.arch.x86_64.GDT;
-// const IDT = privileged.arch.x86_64.IDT;
-// const paging = privileged.arch.paging;
-// const Syscall = privileged.arch.x86_64.Syscall;
-// const cr0 = privileged.arch.x86_64.registers.cr0;
-// const cr4 = privileged.arch.x86_64.registers.cr4;
-// const IA32_EFER = privileged.arch.x86_64.registers.IA32_EFER;
-// const IA32_PAT = privileged.arch.x86_64.registers.IA32_PAT;
-//
-// const rise = @import("rise");
-//
-// const MemoryMap = struct {
-//     const Entry = struct {
-//         physical_address: PhysicalAddress,
-//         size: u64,
-//         native_attributes: u64,
-//         tag: Type,
-//         const Type = enum {
-//             usable,
-//             bootloader_reserved,
-//             bootloader_information,
-//             bootloader_reclaimable,
-//             firmware_reserved,
-//             firmware_reclaimable,
-//             reserved,
-//         };
-//     };
-// };
-//
-// export fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
+
+// fn kernel_entry_point(bootloader_information: *UEFI.BootloaderInformation) noreturn {
 //     writer.writeAll("Hello CPU driver\n") catch unreachable;
 //     logger.debug("Hello kernel", .{});
 //     paging.register_physical_allocator(&rise.physical_allocator);
@@ -197,6 +159,57 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 //
 //     kernel_startup(bootloader_information.init_file);
 // }
+
+// const alignForward = lib.alignForward;
+// const logger = lib.log.scoped(.EntryPoint);
+// const cpuid = lib.arch.x86_64.cpuid;
+// const page_shifter = lib.arch.page_shifter;
+// const valid_page_sizes = lib.arch.valid_page_sizes;
+//
+// const privileged = @import("privileged");
+// const Capabilities = privileged.Capabilities;
+// const CoreDirectorData = privileged.CoreDirectorData;
+// const CoreSupervisorData = privileged.CoreSupervisorData;
+// const CoreDirectorSharedGeneric = privileged.CoreDirectorSharedGeneric;
+// const PhysicalAddress = privileged.PhysicalAddress;
+// const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+// const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
+// const SpawnState = privileged.SpawnState;
+// const VirtualAddress = privileged.VirtualAddress;
+// const VirtualAddressSpace = privileged.VirtualAddressSpace;
+// const UEFI = privileged.UEFI;
+//
+// const APIC = privileged.arch.x86_64.APIC;
+// const GDT = privileged.arch.x86_64.GDT;
+// const IDT = privileged.arch.x86_64.IDT;
+// const paging = privileged.arch.paging;
+// const Syscall = privileged.arch.x86_64.Syscall;
+// const cr0 = privileged.arch.x86_64.registers.cr0;
+// const cr4 = privileged.arch.x86_64.registers.cr4;
+// const IA32_EFER = privileged.arch.x86_64.registers.IA32_EFER;
+// const IA32_PAT = privileged.arch.x86_64.registers.IA32_PAT;
+//
+// const rise = @import("rise");
+//
+// const MemoryMap = struct {
+//     const Entry = struct {
+//         physical_address: PhysicalAddress,
+//         size: u64,
+//         native_attributes: u64,
+//         tag: Type,
+//         const Type = enum {
+//             usable,
+//             bootloader_reserved,
+//             bootloader_information,
+//             bootloader_reclaimable,
+//             firmware_reserved,
+//             firmware_reclaimable,
+//             reserved,
+//         };
+//     };
+// };
+//
+// export
 //
 // fn kernel_startup(init_file: []const u8) noreturn {
 //     if (APIC.is_bsp) {
@@ -505,20 +518,6 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 //     logger.debug("Status word: 0x{x}", .{status_word});
 //     // should we ldmxcsr ?
 // }
-//
-// pub const writer = privileged.E9Writer{ .context = {} };
-//
-// pub const std_options = struct {
-//     pub const log_level = lib.log.Level.debug;
-//     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-//         const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-//         const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-//         writer.writeAll(prefix) catch unreachable;
-//
-//         writer.print(format, args) catch unreachable;
-//         writer.writeByte('\n') catch unreachable;
-//     }
-// };
 //
 // pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 //     asm volatile (

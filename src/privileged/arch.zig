@@ -11,7 +11,7 @@ const arch = switch (lib.cpu.arch) {
 };
 
 pub const CoreDirectorShared = arch.CoreDirectorShared;
-pub const CPU_stop = arch.CPU_stop;
+pub const stopCPU = arch.stopCPU;
 pub const paging = arch.paging;
 pub const Registers = arch.Registers;
 

@@ -6,6 +6,7 @@ const Allocator = lib.Allocator;
 const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged");
+const AddressInterface = privileged.Address.Interface;
 
 const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     .x86 => switch (lib.os) {
@@ -16,7 +17,7 @@ const current_protocol: ?Protocol = switch (lib.cpu.arch) {
         else => @compileError("Unexpected operating system"),
     },
     .x86_64 => switch (lib.os) {
-        // Kernel
+        // CPU driver
         .freestanding => null,
         // Using UEFI
         .uefi => .uefi,
@@ -25,15 +26,38 @@ const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
-const AddressInterface = privileged.Address.Interface;
+pub const CPUDriverMappings = extern struct {
+    text: Mapping = .{},
+    data: Mapping = .{},
+    rodata: Mapping = .{},
+    stack: Mapping = .{},
+
+    const Mapping = extern struct {
+        const AI = AddressInterface(u64);
+        const PA = AI.PhysicalAddress(.local);
+        const VA = AI.VirtualAddress(.local);
+
+        physical: PA = PA.invalid(),
+        virtual: VA = .null,
+        size: u64 = 0,
+    };
+};
 
 pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
     size: u32 = @sizeOf(Information),
+    entry_point: u64,
     memory_map: MemoryMap,
     // Page allocator
     page: Pages,
     heap: Heap,
+    cpu_driver_mappings: CPUDriverMappings,
+    architecture: switch (lib.cpu.arch) {
+        .x86, .x86_64 => extern struct {
+            rsdp_address: u64,
+        },
+        else => @compileError("Architecture not supported"),
+    },
 
     // TODO:
     const AI = AddressInterface(u64);
@@ -58,11 +82,7 @@ pub const Information = extern struct {
         regions: [6]PMR = lib.zeroes([6]PMR),
     };
 
-    const GetError = error{
-        out_of_memory,
-    };
-
-    pub fn fromBIOS() GetError!*Information {
+    pub fn fromBIOS(rsdp_address: u64) !*Information {
         var iterator = BIOS.E820Iterator{};
         while (iterator.next()) |entry| {
             if (!entry.isLowMemory() and entry.region.size > @sizeOf(Information)) {
@@ -70,18 +90,29 @@ pub const Information = extern struct {
                 const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*Information);
                 result.* = .{
                     .protocol = .bios,
+                    .entry_point = 0,
                     .memory_map = .{},
                     .page = .{},
                     .heap = .{},
+                    .cpu_driver_mappings = .{},
+                    .architecture = .{
+                        .rsdp_address = rsdp_address,
+                    },
                 };
 
                 result.page.counters[iterator.index] = lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]) / lib.arch.valid_page_sizes[0];
                 BIOS.fetchMemoryEntries(&result.memory_map);
+
+                result.cpu_driver_mappings.stack.size = 0x4000;
+                const stack_allocation = try result.page.allocator.allocateBytes(result.cpu_driver_mappings.stack.size, lib.arch.valid_page_sizes[0]);
+                result.cpu_driver_mappings.stack.physical = AddressInterface(u64).PhysicalAddress(.local).new(stack_allocation.address);
+                result.cpu_driver_mappings.stack.virtual = result.cpu_driver_mappings.stack.physical.toIdentityMappedVirtualAddress();
+
                 return result;
             }
         }
 
-        return GetError.out_of_memory;
+        return Allocator.Allocate.Error.OutOfMemory;
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {

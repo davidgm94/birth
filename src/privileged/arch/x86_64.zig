@@ -22,7 +22,7 @@ pub const registers = @import("x86_64/registers.zig");
 pub const Syscall = @import("x86_64/syscall.zig");
 pub const TSS = @import("x86_64/tss.zig");
 
-pub inline fn CPU_stop() noreturn {
+pub inline fn stopCPU() noreturn {
     while (true) {
         asm volatile (
             \\cli

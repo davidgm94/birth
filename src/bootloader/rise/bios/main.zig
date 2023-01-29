@@ -4,6 +4,8 @@ const privileged = @import("privileged");
 const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
 const PhysicalHeap = privileged.PhysicalHeap;
+const writer = privileged.writer;
+pub const panic = privileged.zigPanic;
 
 const x86_64 = privileged.arch.x86_64;
 const GDT = x86_64.GDT;
@@ -27,21 +29,6 @@ export fn loop() noreturn {
 
 extern const loader_start: u8;
 extern const loader_end: u8;
-
-pub const writer = privileged.E9Writer{ .context = {} };
-
-pub fn panic(message: []const u8, stack_trace: ?*lib.StackTrace, ret_addr: ?usize) noreturn {
-    _ = stack_trace;
-    _ = ret_addr;
-
-    while (true) {
-        asm volatile ("cli");
-        writer.writeAll("PANIC: ") catch unreachable;
-        writer.writeAll(message) catch unreachable;
-        writer.writeByte('\n') catch unreachable;
-        asm volatile ("hlt");
-    }
-}
 
 var files: [16]struct { path: []const u8, content: []const u8 } = undefined;
 var file_count: u8 = 0;
@@ -67,7 +54,8 @@ export fn entryPoint() callconv(.C) noreturn {
     writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
     BIOS.A20Enable() catch @panic("can't enable a20");
 
-    const bootloader_information = bootloader.Information.fromBIOS() catch @panic("Can't get bootloader information");
+    const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
+    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address) catch @panic("Can't get bootloader information");
     const page_allocator = &bootloader_information.page.allocator;
     const allocator = &bootloader_information.heap.allocator;
 
@@ -129,6 +117,17 @@ export fn entryPoint() callconv(.C) noreturn {
                         const physical_address = PhysicalAddress(.local).new(physical_allocation.address);
                         const virtual_address = VirtualAddress(.local).new(ph.virtual_address);
 
+                        switch (ph.flags.executable) {
+                            true => switch (ph.flags.writable) {
+                                true => @panic("Text section is not supposed to be writable"),
+                                false => bootloader_information.cpu_driver_mappings.text.virtual = virtual_address,
+                            },
+                            false => switch (ph.flags.writable) {
+                                true => bootloader_information.cpu_driver_mappings.data.virtual = virtual_address,
+                                false => bootloader_information.cpu_driver_mappings.rodata.virtual = virtual_address,
+                            },
+                        }
+
                         VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch {
                             @panic("Mapping failed");
                         };
@@ -147,14 +146,17 @@ export fn entryPoint() callconv(.C) noreturn {
                 }
             }
 
+            bootloader_information.cpu_driver_mappings.stack.virtual = bootloader_information.cpu_driver_mappings.text.virtual.negative_offset(bootloader_information.cpu_driver_mappings.stack.size);
+            log.debug("Text VA: 0x{x}. Stack VA: 0x{x}", .{ bootloader_information.cpu_driver_mappings.text.virtual.value(), bootloader_information.cpu_driver_mappings.stack.virtual.value() });
+            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information.cpu_driver_mappings.stack.physical, bootloader_information.cpu_driver_mappings.stack.virtual, bootloader_information.cpu_driver_mappings.stack.size, .{ .write = true, .execute = false }, page_allocator) catch {
+                @panic("Mapping failed");
+            };
+
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
             }
 
-            log.debug("Size of information: 0x{x}", .{@sizeOf(bootloader.Information)});
-
-            const stack_allocation = page_allocator.allocateBytes(0x4000, 0x1000) catch @panic("Stack allocation");
-            const stack_top = stack_allocation.address + stack_allocation.size;
+            bootloader_information.entry_point = parser.getEntryPoint();
 
             // Enable PAE
             {
@@ -199,59 +201,53 @@ export fn entryPoint() callconv(.C) noreturn {
 
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
-            // Hardcode the trampoline here since this is a 32-bit executable and assembling 64-bit code is not allowed
-            asm volatile (
-                \\mov %[entry_point_low], %%edi
-                \\mov %[entry_point_high], %%esi
-                \\mov %[bootloader_information], %%edx
-                \\mov %[stack_top], %%ecx
-                \\jmp $0x8, $bits64
-                \\bits64:
-                //0:  48 31 c0                xor    rax,rax
-                \\.byte 0x48
-                \\.byte 0x31
-                \\.byte 0xc0
-                //3:  89 f0                   mov    eax,esi
-                \\.byte 0x89
-                \\.byte 0xf0
-                //5:  48 c1 e0 20             shl    rax,0x20
-                \\.byte 0x48
-                \\.byte 0xc1
-                \\.byte 0xe0
-                \\.byte 0x20
-                //9:  48 09 f8                or     rax,rdi
-                \\.byte 0x48
-                \\.byte 0x09
-                \\.byte 0xf8
-
-                // 0:  48 89 d7                mov    rdi,rdx
-                \\.byte 0x48
-                \\.byte 0x89
-                \\.byte 0xd7
-
-                // 0:  48 31 ed                xor    rbp,rbp
-                \\.byte 0x48
-                \\.byte 0x31
-                \\.byte 0xed
-
-                // 3:  48 89 cc                mov    rsp,rcx
-                \\.byte 0x48
-                \\.byte 0x89
-                \\.byte 0xcc
-
-                //c:  ff e0                   jmp    rax
-                \\.byte 0xff
-                \\.byte 0xe0
-                :
-                : [entry_point_low] "{edi}" (@truncate(u32, parser.getEntryPoint())),
-                  [entry_point_high] "{esi}" (@truncate(u32, parser.getEntryPoint() >> 32)),
-                  [bootloader_information] "{edx}" (bootloader_information),
-                  [stack_top] "{ecx}" (stack_top),
-            );
+            if (bootloader_information.entry_point != 0) {
+                const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
+                const stack_offset = @offsetOf(bootloader.Information, "cpu_driver_mappings") + @offsetOf(bootloader.CPUDriverMappings, "stack");
+                log.debug("BI: 0x{x}. Entry point offset: 0x{x}. Stack offset: 0x{x}. Stack: {}", .{ @ptrToInt(bootloader_information), entry_point_offset, stack_offset, bootloader_information.cpu_driver_mappings.stack });
+                trampoline(@ptrToInt(bootloader_information), entry_point_offset, stack_offset);
+            }
         }
     }
 
     @panic("loader not found");
+}
+
+// TODO: stop this weird stack manipulation and actually learn x86 calling convention
+pub extern fn trampoline(bootloader_information: u64, entry_point_offset: u64, stack_offset: u64) noreturn;
+comptime {
+    asm (
+        \\.global trampoline
+        \\trampoline:
+        \\push %eax
+        \\jmp $0x8, $bits64
+        \\bits64:
+        // When working with registers here without REX.W 0x48 prefix, we are actually working with 64-bit ones
+        \\pop %eax 
+        // RDI: bootloader_information
+        \\pop %edi 
+        \\pop %eax
+        // RAX: entry_point
+        \\.byte 0x48
+        \\mov (%edi, %eax, 1), %eax
+        // RSI: stack mapping offset
+        \\pop %esi
+        \\.byte 0x48
+        \\add %edi, %esi
+        \\.byte 0x48
+        \\add $0x8, %esi
+        \\.byte 0x48
+        \\mov (%esi), %ecx
+        \\.byte 0x48
+        \\addl 0x8(%esi), %ecx
+        \\.byte 0x48
+        \\mov %ecx, %esp
+        \\.byte 0x48
+        \\xor %ebp, %ebp
+        // jmp rax
+        \\.byte 0xff
+        \\.byte 0xe0
+    );
 }
 
 pub const std_options = struct {

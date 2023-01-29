@@ -1,6 +1,6 @@
 pub const io = @import("x86/io.zig");
 
-pub fn CPU_stop() noreturn {
+pub fn stopCPU() noreturn {
     while (true) {
         asm volatile (
             \\cli

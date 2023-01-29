@@ -17,10 +17,13 @@ pub const Scheduler = switch (scheduler_type) {
     else => @compileError("other scheduler is not supported right now"),
 };
 
+pub const ACPI = @import("privileged/acpi.zig");
+
 const bootloader = @import("bootloader");
 
-const E9WriterError = error{};
+pub const E9WriterError = error{};
 pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
+pub const writer = E9Writer{ .context = {} };
 
 fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
     return arch.io.write_bytes(bytes);
@@ -142,8 +145,46 @@ pub const SpawnState = struct {
     argument_page_address: arch.PhysicalAddress(.local) = .null,
 };
 
+const panic_logger = lib.log.scoped(.PANIC);
+
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    const panic_logger = lib.log.scoped(.PANIC);
     panic_logger.err(format, arguments);
-    arch.CPU_stop();
+    arch.stopCPU();
+}
+
+pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    panic("{s}", .{message});
+}
+
+pub fn dumpStackTrace(start_address: usize, frame_pointer: usize) void {
+    _ = frame_pointer;
+    _ = start_address;
+    @panic("TODO: stack trace");
+    // if (use_zig_stack_iterator) {
+    //     var stack_iterator = common.StackIterator.init(start_address, frame_pointer);
+    //     log.err("Stack trace:", .{});
+    //     var stack_trace_i: u64 = 0;
+    //     while (stack_iterator.next()) |return_address| : (stack_trace_i += 1) {
+    //         if (return_address != 0) {
+    //             log.err("{}: 0x{x}", .{ stack_trace_i, return_address });
+    //         }
+    //     }
+    // } else {
+    //     log.debug("============= STACK TRACE =============", .{});
+    //     var ip = start_address;
+    //     var stack_trace_depth: u64 = 0;
+    //     var maybe_bp = @intToPtr(?[*]usize, frame_pointer);
+    //     while (true) {
+    //         defer stack_trace_depth += 1;
+    //         if (ip != 0) log.debug("{}: 0x{x}", .{ stack_trace_depth, ip });
+    //         if (maybe_bp) |bp| {
+    //             ip = bp[1];
+    //             maybe_bp = @intToPtr(?[*]usize, bp[0]);
+    //         } else {
+    //             break;
+    //         }
+    //     }
+    //
+    //     log.debug("============= STACK TRACE =============", .{});
+    // }
 }

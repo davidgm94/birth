@@ -25,11 +25,13 @@ const SimpleFilesystemProtocol = UEFI.SimpleFilesystemProtocol;
 const SystemTable = UEFI.SystemTable;
 
 const privileged = @import("privileged");
+pub const panic = privileged.zigPanic;
 const PhysicalAddress = privileged.arch.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;
 const VirtualAddress = privileged.arch.VirtualAddress;
 const VirtualAddressSpace = privileged.arch.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.arch.VirtualMemoryRegion;
+const writer = privileged.writer;
 
 const CPU = privileged.arch.CPU;
 const GDT = privileged.arch.x86_64.GDT;
@@ -101,12 +103,6 @@ pub const std_options = struct {
         }
     }
 };
-
-pub var writer = privileged.E9Writer{ .context = {} };
-
-pub fn panic(message: []const u8, _: ?*lib.std.builtin.StackTrace, _: ?usize) noreturn {
-    UEFI.panic("{s}", .{message});
-}
 
 fn flush_new_line() !void {
     switch (lib.cpu.arch) {
@@ -222,7 +218,7 @@ pub fn main() noreturn {
     const out = system_table.con_out orelse @panic("con out");
     UEFI.result(@src(), out.reset(true));
     UEFI.result(@src(), out.clearScreen());
-    flush_new_line() catch unreachable;
+    writer.writeByte('\n') catch unreachable;
 
     const revision_string = switch (system_table.firmware_revision) {
         SystemTable.revision_1_02 => "1.02",

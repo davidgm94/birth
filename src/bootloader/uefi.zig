@@ -20,7 +20,7 @@ pub const uefi_error = Status.err;
 
 const str16 = lib.std.unicode.utf8ToUtf16LeStringLiteral;
 
-const CPU_stop = privileged.arch.CPU_stop;
+const stopCPU = privileged.arch.stopCPU;
 pub const page_size = 0x1000;
 pub const page_shifter = lib.arch.page_shifter(page_size);
 
@@ -29,6 +29,7 @@ const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+pub const panic = privileged.panic;
 
 pub const MemoryMap = struct {
     region: VirtualMemoryRegion(.global),
@@ -97,10 +98,6 @@ pub fn result(src: lib.SourceLocation, status: Status) void {
     uefi_error(status) catch |err| {
         panic("UEFI error {} at {s}:{}:{} in function {s}", .{ err, src.file, src.line, src.column, src.fn_name });
     };
-}
-pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    lib.std.log.scoped(.PANIC).err(format, arguments);
-    CPU_stop();
 }
 
 pub const File = struct {

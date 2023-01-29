@@ -1,8 +1,9 @@
 const lib = @import("lib");
-const privileged = @import("privileged");
 const assert = lib.assert;
 const bootloader = @import("bootloader");
 
+const privileged = @import("privileged");
+const ACPI = privileged.ACPI;
 const x86_64 = privileged.arch.x86_64;
 const PhysicalAddress = x86_64.PhysicalAddress;
 const VirtualAddress = x86_64.VirtualAddress;
@@ -218,4 +219,46 @@ pub fn fetchMemoryEntries(memory_map: *bootloader.MemoryMap) void {
     }
 
     memory_map.entry_count = iterator.index;
+}
+
+const FindRSDPResult = union(enum) {
+    descriptor1: *ACPI.RSDP.Descriptor1,
+    descriptor2: *ACPI.RSDP.Descriptor2,
+};
+
+fn wrapSumBytes(bytes: []const u8) u8 {
+    var result: u8 = 0;
+    for (bytes) |byte| {
+        result +%= byte;
+    }
+    return result;
+}
+
+pub fn findRSDP() ?u64 {
+    const ebda_address = @intToPtr(*u16, 0x41e).*;
+    const main_bios_area_base_address = 0xe0000;
+    const RSDP_PTR = "RSD PTR ".*;
+
+    const pointers = [2]u32{ ebda_address, main_bios_area_base_address };
+    const limits = [2]u32{ ebda_address + @intCast(u32, @enumToInt(lib.SizeUnit.kilobyte)), @intCast(u32, @enumToInt(lib.SizeUnit.megabyte)) };
+    for (pointers) |pointer, index| {
+        var ptr = pointer;
+        const limit = limits[index];
+
+        while (ptr < limit) : (ptr += 16) {
+            const rsdp_descriptor = @intToPtr(*ACPI.RSDP.Descriptor1, ptr);
+            if (lib.equal(u8, &rsdp_descriptor.signature, &RSDP_PTR)) {
+                switch (rsdp_descriptor.revision) {
+                    0 => if (wrapSumBytes(lib.asBytes(rsdp_descriptor)) == 0) return @ptrToInt(rsdp_descriptor),
+                    2 => {
+                        const rsdp_descriptor2 = @fieldParentPtr(ACPI.RSDP.Descriptor2, "descriptor1", rsdp_descriptor);
+                        if (wrapSumBytes(lib.asBytes(rsdp_descriptor2)) == 0) return @ptrToInt(rsdp_descriptor);
+                    },
+                    else => unreachable,
+                }
+            }
+        }
+    }
+
+    return null;
 }
