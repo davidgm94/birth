@@ -51,11 +51,8 @@ pub fn build(builder: *host.build.Builder) !void {
         var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
 
         inline for (host.supported_architectures) |architecture, architecture_index| {
-            const cpu_driver = try createCPUDriver(builder, architecture, false);
+            const cpu_driver = try createCPUDriver(builder, architecture);
             _ = cpu_driver;
-            // const cpu_driver_test = try createCPUDriver(builder, architecture.id, true);
-            // _ = cpu_driver_test;
-
             const bootloaders = host.architecture_bootloader_map[architecture_index];
             var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
 
@@ -457,12 +454,9 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
     return bootloader_build;
 }
 
-fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, comptime test_executable: bool) !*LibExeObjStep {
-    const path = "src/cpu_driver/arch/" ++ @tagName(architecture) ++ "/";
-    const cpu_driver = if (test_executable) builder.addTestExe("cpu_driver_test_" ++ @tagName(architecture), path ++ "entry_point.zig") else builder.addExecutable("cpu_driver_" ++ @tagName(architecture), path ++ "entry_point.zig");
-    if (test_executable) {
-        cpu_driver.test_runner = path ++ "test_runner.zig";
-    }
+fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*LibExeObjStep {
+    const cpu_driver_path = "src/cpu_driver/";
+    const cpu_driver = builder.addExecutable("cpu_driver_" ++ @tagName(architecture), cpu_driver_path ++ "entry_point.zig");
     const target = getTarget(architecture, .privileged);
     cpu_driver.setTarget(target);
     cpu_driver.setBuildMode(cpu_driver.builder.standardReleaseOptions());
@@ -481,7 +475,11 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     cpu_driver.addPackage(privileged_package);
 
     cpu_driver.setMainPkgPath(source_root_dir);
-    cpu_driver.setLinkerScriptPath(FileSource.relative(path ++ "linker_script.ld"));
+    cpu_driver.setLinkerScriptPath(FileSource.relative(cpu_driver_path ++ "arch/" ++ switch (architecture) {
+        .x86_64 => "x86/64/",
+        .x86 => "x86/32/",
+        else => @compileError("Architecture not supported"),
+    } ++ "linker_script.ld"));
 
     switch (architecture) {
         .x86_64 => {

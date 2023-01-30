@@ -18,15 +18,6 @@ const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 const bootloader = @import("bootloader");
 const BIOS = bootloader.BIOS;
 
-export fn loop() noreturn {
-    asm volatile (
-        \\cli
-        \\hlt
-    );
-
-    while (true) {}
-}
-
 extern const loader_start: u8;
 extern const loader_end: u8;
 

@@ -9,7 +9,7 @@ pub const reverse_valid_page_sizes = blk: {
 pub const default_page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
 
-pub const registers = @import("x86_64/registers.zig");
+pub const registers = @import("x86/64/registers.zig");
 
 pub const CPUID = extern struct {
     eax: u32,

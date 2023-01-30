@@ -11,16 +11,16 @@ pub const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
 pub const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
 pub const VirtualAddressSpace = AddressInterface.VirtualAddressSpace(.x86_64);
 
-pub const DescriptorTable = @import("x86_64/descriptor_table.zig");
-pub const APIC = @import("x86_64/apic.zig");
-pub const GDT = @import("x86_64/gdt.zig");
-pub const IDT = @import("x86_64/idt.zig");
-pub const io = @import("x86_64/io.zig");
-pub const paging = @import("x86_64/paging.zig");
-pub const PIC = @import("x86_64/pic.zig");
-pub const registers = @import("x86_64/registers.zig");
-pub const Syscall = @import("x86_64/syscall.zig");
-pub const TSS = @import("x86_64/tss.zig");
+pub const DescriptorTable = @import("x86/64/descriptor_table.zig");
+pub const APIC = @import("x86/64/apic.zig");
+pub const GDT = @import("x86/64/gdt.zig");
+pub const IDT = @import("x86/64/idt.zig");
+pub const io = @import("x86/64/io.zig");
+pub const paging = @import("x86/64/paging.zig");
+pub const PIC = @import("x86/64/pic.zig");
+pub const registers = @import("x86/64/registers.zig");
+pub const Syscall = @import("x86/64/syscall.zig");
+pub const TSS = @import("x86/64/tss.zig");
 
 pub inline fn stopCPU() noreturn {
     while (true) {
