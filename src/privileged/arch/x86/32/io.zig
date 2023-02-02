@@ -1,4 +1,4 @@
-pub inline fn write_bytes(bytes: []const u8) usize {
+pub inline fn writeBytes(bytes: []const u8) usize {
     const bytes_left = asm volatile (
         \\cld
         \\rep outsb

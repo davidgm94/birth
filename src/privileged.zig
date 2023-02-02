@@ -26,7 +26,7 @@ pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
 pub const writer = E9Writer{ .context = {} };
 
 fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
-    return arch.io.write_bytes(bytes);
+    return arch.io.writeBytes(bytes);
 }
 
 pub const ResourceOwner = enum(u2) {

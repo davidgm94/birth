@@ -8,43 +8,9 @@ const Protocol = lib.Bootloader.Protocol;
 const privileged = @import("privileged");
 const AddressInterface = privileged.Address.Interface;
 
-const current_protocol: ?Protocol = switch (lib.cpu.arch) {
-    .x86 => switch (lib.os) {
-        // Using BIOS
-        .freestanding => .bios,
-        // Using UEFI
-        .uefi => .uefi,
-        else => @compileError("Unexpected operating system"),
-    },
-    .x86_64 => switch (lib.os) {
-        // CPU driver
-        .freestanding => null,
-        // Using UEFI
-        .uefi => .uefi,
-        else => @compileError("Unexpected operating system"),
-    },
-    else => @compileError("Architecture not supported"),
-};
-
-pub const CPUDriverMappings = extern struct {
-    text: Mapping = .{},
-    data: Mapping = .{},
-    rodata: Mapping = .{},
-    stack: Mapping = .{},
-
-    const Mapping = extern struct {
-        const AI = AddressInterface(u64);
-        const PA = AI.PhysicalAddress(.local);
-        const VA = AI.VirtualAddress(.local);
-
-        physical: PA = PA.invalid(),
-        virtual: VA = .null,
-        size: u64 = 0,
-    };
-};
-
 pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
+    bootloader: lib.Bootloader,
     size: u32 = @sizeOf(Information),
     entry_point: u64,
     memory_map: MemoryMap,
@@ -90,6 +56,7 @@ pub const Information = extern struct {
                 const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*Information);
                 result.* = .{
                     .protocol = .bios,
+                    .bootloader = .rise,
                     .entry_point = 0,
                     .memory_map = .{},
                     .page = .{},
@@ -180,15 +147,42 @@ pub const Information = extern struct {
 
         _ = alignment;
         @panic("todo: heap allocate");
-        //             _ = alignment;
-        //             const physical_heap = @fieldParentPtr(PhysicalHeap(architecture), "allocator", allocator);
-        //             for (physical_heap.regions) |*region| {
-        //             }
-        //
-        //
-        //             @panic("todo: allocate");
-        //         }
     }
+};
+
+const current_protocol: ?Protocol = switch (lib.cpu.arch) {
+    .x86 => switch (lib.os) {
+        // Using BIOS
+        .freestanding => .bios,
+        // Using UEFI
+        .uefi => .uefi,
+        else => @compileError("Unexpected operating system"),
+    },
+    .x86_64 => switch (lib.os) {
+        // CPU driver
+        .freestanding => null,
+        // Using UEFI
+        .uefi => .uefi,
+        else => @compileError("Unexpected operating system"),
+    },
+    else => @compileError("Architecture not supported"),
+};
+
+pub const CPUDriverMappings = extern struct {
+    text: Mapping = .{},
+    data: Mapping = .{},
+    rodata: Mapping = .{},
+    stack: Mapping = .{},
+
+    const Mapping = extern struct {
+        const AI = AddressInterface(u64);
+        const PA = AI.PhysicalAddress(.local);
+        const VA = AI.VirtualAddress(.local);
+
+        physical: PA = PA.invalid(),
+        virtual: VA = .null,
+        size: u64 = 0,
+    };
 };
 
 pub const MemoryMap = extern struct {

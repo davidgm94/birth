@@ -205,12 +205,37 @@ pub const E820Iterator = extern struct {
             return null;
         }
     }
-
-    pub fn reset(iterator: *E820Iterator) void {
-        iterator.registers.ebx = 0;
-        iterator.index = 0;
-    }
 };
+
+pub fn getMemoryMapEntryCount() u32 {
+    var entry_count: u32 = 0;
+    var iterator = E820Iterator{};
+
+    while (iterator.next()) |_| {
+        entry_count += 1;
+    }
+
+    return entry_count;
+}
+
+const SuitableEntry = extern struct {
+    region: PhysicalMemoryRegion(.local),
+    index: u32,
+};
+
+pub fn findSuitableEntry(size: u32) ?SuitableEntry {
+    var iterator = E820Iterator{};
+    while (iterator.next()) |entry| {
+        if (entry.isUsable() and entry.region.size > size) {
+            return .{
+                .region = entry.region,
+                .index = iterator.index,
+            };
+        }
+    }
+
+    return null;
+}
 
 pub fn fetchMemoryEntries(memory_map: *bootloader.MemoryMap) void {
     var iterator = E820Iterator{};
@@ -234,7 +259,7 @@ fn wrapSumBytes(bytes: []const u8) u8 {
     return result;
 }
 
-pub fn findRSDP() ?u64 {
+pub fn findRSDP() ?u32 {
     const ebda_address = @intToPtr(*u16, 0x41e).*;
     const main_bios_area_base_address = 0xe0000;
     const RSDP_PTR = "RSD PTR ".*;

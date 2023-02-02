@@ -113,9 +113,11 @@ pub fn build(builder: *host.build.Builder) !void {
     };
 
     for (native_tests) |native_test| {
-        const test_exe = builder.addTestExe(native_test.name, native_test.zig_source_file);
-        test_exe.setTarget(builder.standardTargetOptions(.{}));
-        test_exe.setBuildMode(builder.standardReleaseOptions());
+        const test_exe = builder.addTest(.{
+            .name = native_test.name,
+            .root_source_file = FileSource.relative(native_test.zig_source_file),
+            .kind = .test_exe,
+        });
         test_exe.setOutputDir("zig-cache");
         const run_test_step = test_exe.run();
         test_step.dependOn(&run_test_step.step);
@@ -395,9 +397,13 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                         .bios => {
                             const bootloader_path = rise_loader_path ++ "bios/";
 
-                            const executable = builder.addExecutable("loader" ++ suffix, bootloader_path ++ "main.zig");
+                            const executable = builder.addExecutable(.{
+                                .name = "loader" ++ suffix,
+                                .root_source_file = FileSource.relative(bootloader_path ++ "main.zig"),
+                                .target = getTarget(.x86, .privileged),
+                                .optimize = .ReleaseSmall,
+                            });
                             executable.addAssemblyFile(bootloader_path ++ "assembly.S");
-                            executable.setTarget(getTarget(.x86, .privileged));
                             executable.setOutputDir(cache_dir);
                             executable.addPackage(lib_package);
                             executable.addPackage(privileged_package);
@@ -407,24 +413,26 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             executable.link_gc_sections = true;
                             executable.want_lto = true;
                             executable.strip = true;
-                            executable.setBuildMode(.ReleaseSmall);
                             executable.entry_symbol_name = entry_point_name;
 
                             try bootloader_executables.append(executable);
                         },
                         .uefi => {
-                            const executable = builder.addExecutable("BOOTX64", rise_loader_path ++ "uefi/main.zig");
-                            executable.setTarget(.{
-                                .cpu_arch = .x86_64,
-                                .os_tag = .uefi,
-                                .abi = .msvc,
+                            const executable = builder.addExecutable(.{
+                                .name = "BOOTX64",
+                                .root_source_file = FileSource.relative(rise_loader_path ++ "uefi/main.zig"),
+                                .target = .{
+                                    .cpu_arch = .x86_64,
+                                    .os_tag = .uefi,
+                                    .abi = .msvc,
+                                },
+                                .optimize = .ReleaseSafe,
                             });
                             executable.setOutputDir(cache_dir);
                             executable.addPackage(lib_package);
                             executable.addPackage(privileged_package);
                             executable.addPackage(bootloader_package);
                             executable.strip = true;
-                            executable.setBuildMode(.ReleaseSafe);
                             try bootloader_executables.append(executable);
                         },
                     }
@@ -433,8 +441,11 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
             }
         },
         .limine => {
-            const executable = builder.addExecutable("limine", "src/bootloader/limine/limine.zig");
-            executable.setTarget(getTarget(.x86_64, .privileged));
+            const executable = builder.addExecutable(.{
+                .name = "limine",
+                .root_source_file = FileSource.relative("src/bootloader/limine/limine.zig"),
+                .target = getTarget(.x86_64, .privileged),
+            });
             executable.setOutputDir(cache_dir);
             executable.addPackage(lib_package);
             executable.addPackage(privileged_package);
@@ -456,10 +467,12 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
 
 fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*LibExeObjStep {
     const cpu_driver_path = "src/cpu_driver/";
-    const cpu_driver = builder.addExecutable("cpu_driver_" ++ @tagName(architecture), cpu_driver_path ++ "entry_point.zig");
-    const target = getTarget(architecture, .privileged);
-    cpu_driver.setTarget(target);
-    cpu_driver.setBuildMode(cpu_driver.builder.standardReleaseOptions());
+    const cpu_driver = builder.addExecutable(.{
+        .name = "cpu_driver_" ++ @tagName(architecture),
+        .root_source_file = FileSource.relative(cpu_driver_path ++ "entry_point.zig"),
+        .target = getTarget(architecture, .privileged),
+        .linkage = .static,
+    });
     cpu_driver.setOutputDir(cache_dir);
     cpu_driver.force_pic = true;
     cpu_driver.disable_stack_probing = true;
@@ -494,9 +507,11 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*
 }
 
 fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
-    const disk_image_builder = builder.addExecutable("disk_image_builder", "src/disk_image_builder.zig");
+    const disk_image_builder = builder.addExecutable(.{
+        .name = "disk_image_builder",
+        .root_source_file = FileSource.relative("src/disk_image_builder.zig"),
+    });
     disk_image_builder.setOutputDir(cache_dir);
-    disk_image_builder.setBuildMode(builder.standardReleaseOptions());
     builder.default_step.dependOn(&disk_image_builder.step);
 
     return disk_image_builder;

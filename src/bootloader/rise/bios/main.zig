@@ -1,9 +1,10 @@
 const lib = @import("lib");
 const log = lib.log;
 const privileged = @import("privileged");
+const ACPI = privileged.ACPI;
 const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
-const PhysicalHeap = privileged.PhysicalHeap;
+const PhysicalHeap = privileged.PhyicalHeap;
 const writer = privileged.writer;
 pub const panic = privileged.zigPanic;
 
@@ -29,6 +30,23 @@ var gdt = GDT.Table{
 };
 
 export fn entryPoint() callconv(.C) noreturn {
+    BIOS.A20Enable() catch @panic("can't enable a20");
+    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
+
+    const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
+    const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
+    const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
+    const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
+    const cpu_count = madt.getCPUCount();
+
+    const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
+    _ = memory_map_entry_count;
+    log.debug("CPU count: {}", .{cpu_count});
+
+    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address) catch @panic("Can't get bootloader information");
+    const page_allocator = &bootloader_information.page.allocator;
+    const allocator = &bootloader_information.heap.allocator;
+
     var bios_disk = BIOS.Disk{
         .disk = .{
             // TODO:
@@ -41,18 +59,6 @@ export fn entryPoint() callconv(.C) noreturn {
             .type = .bios,
         },
     };
-
-    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
-    BIOS.A20Enable() catch @panic("can't enable a20");
-
-    const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
-    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address) catch @panic("Can't get bootloader information");
-    const page_allocator = &bootloader_information.page.allocator;
-    const allocator = &bootloader_information.heap.allocator;
-
-    if (bios_disk.disk.sector_size != 0x200) {
-        @panic("Wtf");
-    }
 
     const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, allocator) catch @panic("can't load gpt cache");
     const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
