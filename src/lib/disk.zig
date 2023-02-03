@@ -1,6 +1,5 @@
-const host = @import("../host.zig");
+const lib = @import("lib");
 
-const lib = @import("../lib.zig");
 const FAT32 = lib.Filesystem.FAT32;
 const GPT = lib.PartitionTable.GPT;
 const MBR = lib.PartitionTable.MBR;
@@ -124,43 +123,6 @@ pub const Disk = extern struct {
             handle: lib.File,
             size: usize,
         };
-
-        pub fn fromZero(sector_count: usize, sector_size: u16) !Image {
-            const disk_bytes = try host.allocateZeroMemory(sector_count * sector_size);
-            var disk_image = Image{
-                .disk = .{
-                    .type = .memory,
-                    .callbacks = .{
-                        .read = read,
-                        .write = write,
-                    },
-                    .disk_size = disk_bytes.len,
-                    .sector_size = sector_size,
-                },
-                .buffer_ptr = disk_bytes.ptr,
-            };
-
-            return disk_image;
-        }
-
-        pub fn fromFile(file_path: []const u8, sector_size: u16, allocator: lib.ZigAllocator) !Image {
-            const disk_memory = try host.cwd().readFileAlloc(allocator, file_path, lib.maxInt(usize));
-
-            var disk_image = Image{
-                .disk = .{
-                    .type = .memory,
-                    .callbacks = .{
-                        .read = read,
-                        .write = write,
-                    },
-                    .disk_size = disk_memory.len,
-                    .sector_size = sector_size,
-                },
-                .buffer_ptr = disk_memory.ptr,
-            };
-
-            return disk_image;
-        }
 
         pub inline fn get_buffer(disk_image: Image) []u8 {
             return disk_image.buffer_ptr[0..disk_image.disk.disk_size];

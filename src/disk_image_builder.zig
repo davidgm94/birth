@@ -1,5 +1,6 @@
 const host = @import("host.zig");
-const lib = @import("lib.zig");
+const lib = @import("lib");
+const bootloader = @import("bootloader");
 
 const assert = lib.assert;
 const log = lib.log.scoped(.DiskImageBuilder);
@@ -16,70 +17,46 @@ const stack_size = 0x1000;
 
 // TODO: introduce Limine in this executable
 
-//const BootImage = struct {
-//fn build(step: *host.build.Step) !void {
-//const kernel = @fieldParentPtr(Kernel, "boot_image_step", step);
-
-//switch (kernel.options.arch) {
-//.x86_64 => {
-//switch (kernel.options.arch.x86_64.bootloader) {
-//.rise_uefi => {
-//var cache_dir_handle = try std.fs.cwd().openDir(kernel.builder.cache_root, .{});
-//defer cache_dir_handle.close();
-//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-//const current_directory = cwd();
-//current_directory.deleteFile(Limine.image_path) catch {};
-//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-//try Dir.copyFile(cache_dir_handle, "BOOTX64.efi", img_efi_dir, "BOOTX64.EFI", .{});
-//try Dir.copyFile(cache_dir_handle, "kernel.elf", img_dir, "kernel.elf", .{});
-//// TODO: copy all userspace programs
-//try Dir.copyFile(cache_dir_handle, "init", img_dir, "init", .{});
-//},
-//.rise_bios => {},
-//.limine => {
-//const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
-//const current_directory = cwd();
-//current_directory.deleteFile(Limine.image_path) catch {};
-//const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
-//const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
-
-//const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
-
-//const limine_efi_bin_file = "limine-cd-efi.bin";
-//const files_to_copy_from_limine_dir = [_][]const u8{
-//"limine.cfg",
-//"limine.sys",
-//"limine-cd.bin",
-//limine_efi_bin_file,
-//};
-
-//for (files_to_copy_from_limine_dir) |filename| {
-//try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
-//}
-//try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
-//try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
-
-//const xorriso_executable = switch (common.os) {
-//.windows => "tools/xorriso-windows/xorriso.exe",
-//else => "xorriso",
-//};
-//var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
-//// Ignore stderr and stdout
-//xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
-//xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
-//xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
-//_ = try xorriso_process.spawnAndWait();
-
-//try Limine.installer.install(Limine.image_path, false, null);
-//},
-//}
-//},
-//else => unreachable,
-//}
-//}
-//};
+// fn build(step: *host.build.Step) !void {
+//
+//     .limine => {
+//         const img_dir_path = kernel.builder.fmt("{s}/img_dir", .{kernel.builder.cache_root});
+//         const current_directory = cwd();
+//         current_directory.deleteFile(Limine.image_path) catch {};
+//         const img_dir = try current_directory.makeOpenPath(img_dir_path, .{});
+//         const img_efi_dir = try img_dir.makeOpenPath("EFI/BOOT", .{});
+//
+//         const limine_dir = try current_directory.openDir(Limine.installables_path, .{});
+//
+//         const limine_efi_bin_file = "limine-cd-efi.bin";
+//         const files_to_copy_from_limine_dir = [_][]const u8{
+//             "limine.cfg",
+//             "limine.sys",
+//             "limine-cd.bin",
+//             limine_efi_bin_file,
+//         };
+//
+//         for (files_to_copy_from_limine_dir) |filename| {
+//             try Dir.copyFile(limine_dir, filename, img_dir, filename, .{});
+//         }
+//         try Dir.copyFile(limine_dir, "BOOTX64.EFI", img_efi_dir, "BOOTX64.EFI", .{});
+//         try Dir.copyFile(current_directory, kernel_path, img_dir, path.basename(kernel_path), .{});
+//
+//         const xorriso_executable = switch (common.os) {
+//             .windows => "tools/xorriso-windows/xorriso.exe",
+//             else => "xorriso",
+//         };
+//         var xorriso_process = ChildProcess.init(&.{ xorriso_executable, "-as", "mkisofs", "-quiet", "-b", "limine-cd.bin", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "--efi-boot", limine_efi_bin_file, "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label", img_dir_path, "-o", Limine.image_path }, kernel.builder.allocator);
+//         // Ignore stderr and stdout
+//         xorriso_process.stdin_behavior = ChildProcess.StdIo.Ignore;
+//         xorriso_process.stdout_behavior = ChildProcess.StdIo.Ignore;
+//         xorriso_process.stderr_behavior = ChildProcess.StdIo.Ignore;
+//         _ = try xorriso_process.spawnAndWait();
+//
+//         try Limine.installer.install(Limine.image_path, false, null);
+//     },
+// }
+// }
 
 pub const BootDisk = extern struct {
     bpb: MBR.BIOSParameterBlock.DOS7_1_79,
@@ -596,15 +573,15 @@ pub fn main() anyerror!void {
         return Error.wrong_arguments;
     }
 
-    const bootloader = lib.stringToEnum(lib.Bootloader, arguments[1]) orelse return Error.wrong_arguments;
+    const bootloader_id = lib.stringToEnum(lib.Bootloader, arguments[1]) orelse return Error.wrong_arguments;
     const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
     const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
 
-    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
+    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader_id), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
 
     // TODO: use a format with hex support
     const image_config = try host.ImageConfig.get(wrapped_allocator.unwrap_zig(), host.ImageConfig.default_path);
-    var disk_image = try Disk.Image.fromZero(image_config.sector_count, image_config.sector_size);
+    var disk_image = try host.diskImageFromZero(image_config.sector_count, image_config.sector_size);
     const disk = &disk_image.disk;
     const gpt_cache = try GPT.create(disk, null);
     var partition_name_buffer: [256]u16 = undefined;
@@ -644,40 +621,69 @@ pub fn main() anyerror!void {
                 break :blk;
             }
 
-            const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix }), max_file_length);
-            const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
-            assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
-            try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
+            switch (bootloader_id) {
+                .limine => {
+                    const LimineInstaller = @import("bootloader/limine/installer.zig");
+                    try LimineInstaller.install(disk_image.get_buffer(), false, null);
+                    const limine_installable_path = "src/bootloader/limine/installables";
+                    const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
 
-            // Build our own assembler
-            const boot_disk_mbr_lba = 0;
-            const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
-            const dap_offset = @offsetOf(BootDisk, "dap");
-            lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-            assert(dap_offset == 0x1ae);
-            const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
-            const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
-            if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
-            const dap_top = stack_top - stack_size;
-            if (aligned_file_size > dap_top) @panic("File too big");
-            log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
-            const dap = MBR.DAP{
-                .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
-                .offset = @intCast(u16, dap_top - aligned_file_size),
-                .segment = 0x0,
-                .lba = partition_first_usable_lba,
-            };
+                    const limine_cfg = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.cfg", max_file_length);
+                    try fat_partition_cache.create_file("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null);
+                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
+                    try fat_partition_cache.create_file("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null);
 
-            if (dap_top - dap.offset < aligned_file_size) {
-                @panic("unable to fit file read from disk");
+                    switch (architecture) {
+                        .x86_64 => {
+                            try fat_partition_cache.make_new_directory("/BOOT", wrapped_allocator.unwrap(), null);
+                            try fat_partition_cache.make_new_directory("/BOOT/EFI", wrapped_allocator.unwrap(), null);
+                            try fat_partition_cache.create_file("/BOOT/EFI/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null);
+                        },
+                        else => unreachable,
+                    }
+                },
+                .rise => switch (boot_protocol) {
+                    .bios => {
+                        const loader_file_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix });
+                        log.debug("trying to load file: {s}", .{loader_file_path});
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
+                        const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
+                        assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
+                        try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
+
+                        // Build our own assembler
+                        const boot_disk_mbr_lba = 0;
+                        const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
+                        const dap_offset = @offsetOf(BootDisk, "dap");
+                        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
+                        assert(dap_offset == 0x1ae);
+                        const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
+                        const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
+                        if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
+                        const dap_top = stack_top - stack_size;
+                        if (aligned_file_size > dap_top) host.std.debug.panic("File size: 0x{x} bytes", .{aligned_file_size});
+                        log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
+                        const dap = MBR.DAP{
+                            .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
+                            .offset = @intCast(u16, dap_top - aligned_file_size),
+                            .segment = 0x0,
+                            .lba = partition_first_usable_lba,
+                        };
+
+                        if (dap_top - dap.offset < aligned_file_size) {
+                            @panic("unable to fit file read from disk");
+                        }
+
+                        if (dap.offset - 0x600 < aligned_file_size) {
+                            @panic("unable to fit loaded executable in memory");
+                        }
+
+                        try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
+                        try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
+                    },
+                    .uefi => @panic("rise uefi"),
+                },
             }
-
-            if (dap.offset - 0x600 < aligned_file_size) {
-                @panic("unable to fit loaded executable in memory");
-            }
-
-            try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
-            try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
         },
         else => @panic("Filesystem not supported"),
     }

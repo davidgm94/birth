@@ -1,20 +1,21 @@
-const host = @import("src/host.zig");
+const std = @import("std");
+const common = @import("src/common.zig");
 
 // Build types
-const Builder = host.build.Builder;
-const FileSource = host.build.FileSource;
-const LibExeObjStep = host.build.LibExeObjStep;
-const RunStep = host.build.RunStep;
-const Step = host.build.Step;
+const Builder = std.build.Builder;
+const FileSource = std.build.FileSource;
+const LibExeObjStep = std.build.LibExeObjStep;
+const RunStep = std.build.RunStep;
+const Step = std.build.Step;
 
-const assert = host.assert;
-const Bootloader = host.Bootloader;
-const Cpu = host.Cpu;
-const CrossTarget = host.CrossTarget;
-const DiskType = host.DiskType;
-const Emulator = host.Emulator;
-const FilesystemType = host.FilesystemType;
-const Target = host.Target;
+const assert = std.debug.assert;
+const Bootloader = common.Bootloader;
+const Cpu = common.Cpu;
+const CrossTarget = common.CrossTarget;
+const DiskType = common.DiskType;
+const Emulator = common.Emulator;
+const FilesystemType = common.FilesystemType;
+const Target = common.Target;
 
 const source_root_dir = "src";
 const cache_dir = "zig-cache/";
@@ -27,7 +28,7 @@ const Configuration = struct {
 };
 
 const default_configuration = Configuration{
-    .bootloader = .rise,
+    .bootloader = .limine,
     .architecture = .x86_64,
     .boot_protocol = .bios,
 };
@@ -35,33 +36,34 @@ const default_configuration = Configuration{
 const default_emulator = .qemu;
 const entry_point_name = "entryPoint";
 
-pub fn build(builder: *host.build.Builder) !void {
+pub fn build(builder: *Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
-    lib_package.dependencies = &.{lib_package};
+    lib_package.dependencies = &.{ lib_package, host_package };
     rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
     user_package.dependencies = &.{lib_package};
     privileged_package.dependencies = &.{ lib_package, privileged_package, bootloader_package };
     bootloader_package.dependencies = &.{ bootloader_package, lib_package, privileged_package };
+    host_package.dependencies = &.{ host_package, lib_package };
 
     const disk_image_builder = createDiskImageBuilder(builder);
 
     const build_steps = blk: {
-        var architecture_steps = host.ArrayList(ArchitectureSteps).init(builder.allocator);
+        var architecture_steps = std.ArrayList(ArchitectureSteps).init(builder.allocator);
 
-        inline for (host.supported_architectures) |architecture, architecture_index| {
+        inline for (common.supported_architectures) |architecture, architecture_index| {
             const cpu_driver = try createCPUDriver(builder, architecture);
             _ = cpu_driver;
-            const bootloaders = host.architecture_bootloader_map[architecture_index];
-            var bootloader_steps = host.ArrayList(BootloaderSteps).init(builder.allocator);
+            const bootloaders = common.architecture_bootloader_map[architecture_index];
+            var bootloader_steps = std.ArrayList(BootloaderSteps).init(builder.allocator);
 
             inline for (bootloaders) |bootloader| {
                 const bootloader_id = bootloader.id;
-                var protocol_steps = host.ArrayList(BootProtocolSteps).init(builder.allocator);
+                var protocol_steps = std.ArrayList(BootProtocolSteps).init(builder.allocator);
 
                 inline for (bootloader.protocols) |protocol| {
-                    var emulator_steps = host.ArrayList(EmulatorSteps).init(builder.allocator);
+                    var emulator_steps = std.ArrayList(EmulatorSteps).init(builder.allocator);
                     const configuration = .{
                         .bootloader = bootloader_id,
                         .architecture = architecture,
@@ -119,6 +121,8 @@ pub fn build(builder: *host.build.Builder) !void {
             .kind = .test_exe,
         });
         test_exe.setOutputDir("zig-cache");
+        test_exe.addPackage(lib_package);
+        test_exe.addPackage(host_package);
         const run_test_step = test_exe.run();
         test_step.dependOn(&run_test_step.step);
     }
@@ -165,7 +169,7 @@ const EmulatorSteps = struct {
                     else => @tagName(configuration.architecture),
                 };
 
-                fn create(builder: *Builder, list: *host.ArrayList(EmulatorSteps)) !*EmulatorSteps {
+                fn create(builder: *Builder, list: *std.ArrayList(EmulatorSteps)) !*EmulatorSteps {
                     const new_one = try list.addOne();
                     new_one.* = .{
                         .builder = builder,
@@ -188,9 +192,9 @@ const EmulatorSteps = struct {
                     const emulator_steps = @fieldParentPtr(EmulatorSteps, "run", step);
                     const arguments = try qemuCommon(emulator_steps);
                     for (arguments.list.items) |argument| {
-                        host.log.debug("{s}", .{argument});
+                        std.log.debug("{s}", .{argument});
                     }
-                    var process = host.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
+                    var process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
                     _ = try process.spawnAndWait();
                 }
 
@@ -206,15 +210,15 @@ const EmulatorSteps = struct {
 
                     try arguments.list.append("-s");
 
-                    var qemu_process = host.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
+                    var qemu_process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
                     _ = try qemu_process.spawn();
 
-                    const debugger_process_arguments = switch (host.os) {
+                    const debugger_process_arguments = switch (common.os) {
                         .linux => .{ "gf2", "-x", gdb_script_path },
                         else => return Error.not_implemented,
                     };
 
-                    var debugger_process = host.ChildProcess.init(&debugger_process_arguments, builder.allocator);
+                    var debugger_process = std.ChildProcess.init(&debugger_process_arguments, builder.allocator);
                     _ = try debugger_process.spawnAndWait();
                 }
 
@@ -222,7 +226,7 @@ const EmulatorSteps = struct {
                     const emulator_steps = @fieldParentPtr(EmulatorSteps, "gdb_script", step);
                     const builder = emulator_steps.builder;
 
-                    var gdb_script_buffer = host.ArrayList(u8).init(builder.allocator);
+                    var gdb_script_buffer = std.ArrayList(u8).init(builder.allocator);
                     switch (configuration.architecture) {
                         .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
                         else => @compileError("Architecture not supported"),
@@ -231,19 +235,19 @@ const EmulatorSteps = struct {
                     try gdb_script_buffer.appendSlice("symbol-file zig-cache/cpu_driver_" ++ @tagName(configuration.architecture) ++ "\n");
                     try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
 
-                    const base_gdb_script = try host.cwd().readFileAlloc(builder.allocator, "config/gdb_script", host.maxInt(usize));
+                    const base_gdb_script = try std.fs.cwd().readFileAlloc(builder.allocator, "config/gdb_script", common.maxInt(usize));
                     try gdb_script_buffer.appendSlice(base_gdb_script);
 
-                    try host.cwd().writeFile(gdb_script_path, gdb_script_buffer.items);
+                    try std.fs.cwd().writeFile(gdb_script_path, gdb_script_buffer.items);
                 }
 
-                fn qemuCommon(emulator_steps: *EmulatorSteps) !struct { config: Arguments, list: host.ArrayList([]const u8) } {
+                fn qemuCommon(emulator_steps: *EmulatorSteps) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
                     const builder = emulator_steps.builder;
                     const config_file = try readConfig(builder, emulator);
-                    var token_stream = host.json.TokenStream.init(config_file);
-                    const arguments = try host.json.parse(Arguments, &token_stream, .{ .allocator = builder.allocator });
+                    var token_stream = std.json.TokenStream.init(config_file);
+                    const arguments = try std.json.parse(Arguments, &token_stream, .{ .allocator = builder.allocator });
 
-                    var argument_list = host.ArrayList([]const u8).init(builder.allocator);
+                    var argument_list = std.ArrayList([]const u8).init(builder.allocator);
 
                     try argument_list.append(qemu_executable);
 
@@ -252,8 +256,8 @@ const EmulatorSteps = struct {
                         else => {},
                     }
 
-                    const image_config = try host.ImageConfig.get(builder.allocator, host.ImageConfig.default_path);
-                    const disk_path = try host.concat(builder.allocator, u8, &.{ cache_dir, image_config.image_name });
+                    const image_config = try common.ImageConfig.get(builder.allocator, common.ImageConfig.default_path);
+                    const disk_path = try common.concat(builder.allocator, u8, &.{ cache_dir, image_config.image_name });
                     try argument_list.appendSlice(&.{ "-drive", builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
 
                     if (!arguments.reboot) {
@@ -286,7 +290,7 @@ const EmulatorSteps = struct {
                             .kilobyte => 'K',
                             .megabyte => 'M',
                             .gigabyte => 'G',
-                            else => unreachable,
+                            else => @panic("Unit too big"),
                         }) });
                         try argument_list.append(memory_argument);
                     }
@@ -294,7 +298,7 @@ const EmulatorSteps = struct {
                     if (arguments.isVirtualizing()) {
                         try argument_list.appendSlice(&.{
                             "-accel",
-                            switch (host.os) {
+                            switch (common.os) {
                                 .windows => "whpx",
                                 .linux => "kvm",
                                 .macos => "hvf",
@@ -305,7 +309,7 @@ const EmulatorSteps = struct {
                         });
                     } else {
                         if (arguments.log) |log_configuration| {
-                            var log_what = host.ArrayList(u8).init(builder.allocator);
+                            var log_what = std.ArrayList(u8).init(builder.allocator);
 
                             if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
                             if (log_configuration.interrupts) try log_what.appendSlice("int,");
@@ -340,7 +344,7 @@ const EmulatorSteps = struct {
                 const Arguments = struct {
                     memory: ?struct {
                         amount: u64,
-                        unit: host.SizeUnit,
+                        unit: common.SizeUnit,
                     },
                     virtualize: ?bool,
                     vga: ?enum {
@@ -361,7 +365,7 @@ const EmulatorSteps = struct {
                     trace: ?[]const []const u8,
 
                     pub fn isVirtualizing(arguments: Arguments) bool {
-                        return (arguments.virtualize orelse false) and host.cpu.arch == configuration.architecture;
+                        return (arguments.virtualize orelse false) and common.cpu.arch == configuration.architecture;
                     }
                 };
             },
@@ -371,7 +375,7 @@ const EmulatorSteps = struct {
 
 fn readConfig(builder: *Builder, comptime emulator: Emulator) ![]const u8 {
     const config_file = switch (emulator) {
-        else => try host.cwd().readFileAlloc(builder.allocator, "config/" ++ @tagName(emulator) ++ ".json", host.maxInt(usize)),
+        else => try std.fs.cwd().readFileAlloc(builder.allocator, "config/" ++ @tagName(emulator) ++ ".json", common.maxInt(usize)),
     };
 
     return config_file;
@@ -386,7 +390,7 @@ const Error = error{
 };
 
 fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime suffix: []const u8) !BootloaderBuild {
-    var bootloader_executables = host.ArrayList(*LibExeObjStep).init(builder.allocator);
+    var bootloader_executables = std.ArrayList(*LibExeObjStep).init(builder.allocator);
 
     switch (configuration.bootloader) {
         .rise => {
@@ -408,7 +412,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             executable.addPackage(lib_package);
                             executable.addPackage(privileged_package);
                             executable.addPackage(bootloader_package);
-                            executable.setLinkerScriptPath(host.build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
+                            executable.setLinkerScriptPath(std.build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
                             executable.red_zone = false;
                             executable.link_gc_sections = true;
                             executable.want_lto = true;
@@ -440,18 +444,18 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                 else => @compileError("Architecture not supported"),
             }
         },
-        .limine => {
-            const executable = builder.addExecutable(.{
-                .name = "limine",
-                .root_source_file = FileSource.relative("src/bootloader/limine/limine.zig"),
-                .target = getTarget(.x86_64, .privileged),
-            });
-            executable.setOutputDir(cache_dir);
-            executable.addPackage(lib_package);
-            executable.addPackage(privileged_package);
-
-            try bootloader_executables.append(executable);
-        },
+        .limine => {},
+        //     const executable = builder.addExecutable(.{
+        //         .name = "loader" ++ suffix,
+        //         .root_source_file = FileSource.relative("src/bootloader/limine/limine.zig"),
+        //         .target = getTarget(.x86_64, .privileged),
+        //     });
+        //     executable.setOutputDir(cache_dir);
+        //     executable.addPackage(lib_package);
+        //     executable.addPackage(privileged_package);
+        //
+        //     try bootloader_executables.append(executable);
+        // },
     }
 
     const bootloader_build = .{
@@ -512,42 +516,52 @@ fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
         .root_source_file = FileSource.relative("src/disk_image_builder.zig"),
     });
     disk_image_builder.setOutputDir(cache_dir);
+    disk_image_builder.addPackage(bootloader_package);
+    disk_image_builder.addPackage(lib_package);
     builder.default_step.dependOn(&disk_image_builder.step);
+
+    disk_image_builder.addPackage(host_package);
 
     return disk_image_builder;
 }
 
-var lib_package = host.build.Pkg{
-    .name = "lib",
-    .source = host.build.FileSource.relative("src/lib.zig"),
-};
-
-var bootloader_package = host.build.Pkg{
+var bootloader_package = std.build.Pkg{
     .name = "bootloader",
-    .source = host.build.FileSource.relative("src/bootloader.zig"),
+    .source = std.build.FileSource.relative("src/bootloader.zig"),
 };
 
-var rise_package = host.build.Pkg{
-    .name = "rise",
-    .source = host.build.FileSource.relative("src/rise.zig"),
+var host_package = std.build.Pkg{
+    .name = "host",
+    .source = std.build.FileSource.relative("src/host.zig"),
 };
 
-var privileged_package = host.build.Pkg{
+var lib_package = std.build.Pkg{
+    .name = "lib",
+    .source = std.build.FileSource.relative("src/lib.zig"),
+};
+
+var privileged_package = std.build.Pkg{
     .name = "privileged",
-    .source = host.build.FileSource.relative("src/privileged.zig"),
+    .source = std.build.FileSource.relative("src/privileged.zig"),
 };
 
-var user_package = host.build.Pkg{
+var rise_package = std.build.Pkg{
+    .name = "rise",
+    .source = std.build.FileSource.relative("src/rise.zig"),
+};
+
+var user_package = std.build.Pkg{
     .name = "user",
-    .source = host.build.FileSource.relative("src/user.zig"),
+    .source = std.build.FileSource.relative("src/user.zig"),
 };
 
-fn getTarget(comptime asked_arch: Cpu.Arch, comptime execution_mode: host.TraditionalExecutionMode) CrossTarget {
+fn getTarget(comptime asked_arch: Cpu.Arch, comptime execution_mode: common.TraditionalExecutionMode) CrossTarget {
     var enabled_features = Cpu.Feature.Set.empty;
     var disabled_features = Cpu.Feature.Set.empty;
 
     if (execution_mode == .privileged) {
         assert(asked_arch == .x86_64 or asked_arch == .x86);
+
         // disable FPU
         const Feature = Target.x86.Feature;
         disabled_features.addFeature(@enumToInt(Feature.x87));

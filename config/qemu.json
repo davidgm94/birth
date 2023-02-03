@@ -12,7 +12,7 @@
     "log": {
         "file": null,
         "guest_errors": true,
-        "assembly": false,
+        "assembly": true,
         "interrupts": true
     },
     "trace": [

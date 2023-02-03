@@ -259,8 +259,21 @@ fn wrapSumBytes(bytes: []const u8) u8 {
     return result;
 }
 
+pub fn getEBDAAddress() u32 {
+    const expected_EBDA_base = 0x80000;
+    const expected_EBDA_top = 0xa0000;
+
+    const base = @as(u32, @intToPtr(*u16, 0x40e).*) << 4;
+
+    if (base < expected_EBDA_base or base > expected_EBDA_top) {
+        return expected_EBDA_base;
+    } else {
+        return base;
+    }
+}
+
 pub fn findRSDP() ?u32 {
-    const ebda_address = @intToPtr(*u16, 0x41e).*;
+    const ebda_address = getEBDAAddress();
     const main_bios_area_base_address = 0xe0000;
     const RSDP_PTR = "RSD PTR ".*;
 

@@ -1,6 +1,6 @@
 const FAT32 = @This();
 
-const host = @import("../../host.zig");
+const host = @import("host");
 
 const lib = @import("../../lib.zig");
 const kb = lib.kb;
@@ -479,7 +479,7 @@ pub const Cache = extern struct {
 
     pub fn read_file(cache: Cache, allocator: ?*lib.Allocator, file_path: []const u8) ![]u8 {
         const directory_entry_result = try cache.get_directory_entry(file_path, allocator, null);
-        const directory_entry =directory_entry_result.directory_entry; 
+        const directory_entry = directory_entry_result.directory_entry;
         const first_cluster = directory_entry.get_first_cluster();
         const file_size = directory_entry.file_size;
         const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
@@ -547,8 +547,8 @@ pub const Cache = extern struct {
         };
     };
 
-    pub fn mkdir(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !void {
-        const directory_entry = try cache.get_directory_entry(absolute_path, .{ .allocate = .directory }, copy_cache);
+    pub fn mkdir(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?Cache) !void {
+        const directory_entry = try cache.get_directory_entry(absolute_path, allocator, copy_cache);
         _ = directory_entry;
     }
 
@@ -750,7 +750,7 @@ pub const Cache = extern struct {
             size = long_name.len;
             extension_start = null;
         } else if (extension_start) |ext_start| {
-            const extension_start_index = @ptrToInt(ext_start) - @ptrToInt(&long_name[0]);
+            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
             const index = blk: {
                 const slice = long_name[0..extension_start_index];
 
@@ -781,9 +781,7 @@ pub const Cache = extern struct {
         var base_info = ShortNameInfo{};
         var extension_info = ShortNameInfo{};
 
-        while (long_name_index < size) : ({
-            long_name_index += 1;
-        }) {
+        while (long_name_index < size) : (long_name_index += 1) {
             const wchar = long_name[long_name_index];
             // TODO: chl
             // TODO: shortname_info
@@ -824,8 +822,31 @@ pub const Cache = extern struct {
         var extension_len: usize = 0;
         var extension: [4]u8 = undefined;
         if (extension_start) |ext_start| {
-            _ = ext_start;
-            @panic("wtf");
+            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
+            const extension_slice = long_name[extension_start_index..];
+            var extension_index: usize = 0;
+            for (extension_slice) |extension_u16, extension_pointer_index| {
+                extension_info = to_shortname_char(nls, extension_u16, &char_buffer) catch continue;
+
+                if (extension_len + extension_info.len > 3) {
+                    is_short_name = false;
+                    break;
+                }
+
+                for (char_buffer[0..extension_info.len]) |ch| {
+                    extension[extension_index] = ch;
+                    extension_index += 1;
+                    extension_len += 1;
+                }
+
+                if (extension_len >= 3) {
+                    if (extension_pointer_index + extension_start_index + 1 != long_name.len) {
+                        is_short_name = false;
+                    }
+
+                    break;
+                }
+            }
         }
 
         extension[extension_len] = 0;
@@ -859,7 +880,6 @@ pub const Cache = extern struct {
         var iterator = DirectoryEntryIterator(DirectoryEntry).init(cluster);
 
         while (try iterator.next(cache, allocator)) |entry| {
-            assert(!entry.attributes.has_long_name());
             if (lib.equal(u8, &entry.name, name)) {
                 return entry;
             }
@@ -887,9 +907,7 @@ pub const Cache = extern struct {
 
     pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry) !void {
         // TODO:
-        for (entry_setup.name) |ch| {
-            if (ch == '.') @panic("todo: unexpected dot in fat32 entry");
-        }
+        if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
 
         var long_name_array = [1]u16{0} ** (long_name_max_characters + 2);
         const size = try translate_to_unicode(entry_setup.name, &long_name_array);
@@ -1047,18 +1065,29 @@ pub const Cache = extern struct {
             .directory = true,
             .archive = false,
         };
+
+        const date = .{
+            .day = 0,
+            .month = 0,
+            .year = 0,
+        };
+        const time = .{
+            .seconds_2_factor = 0,
+            .minutes = 0,
+            .hours = 0,
+        };
         fat_directory_entries[0] = FAT32.DirectoryEntry{
             .name = dot_entry_name,
             .attributes = attributes,
             .case = .{},
-            .creation_time_tenth = if (copy_entry) |ce| ce.creation_time_tenth else @panic("wtf"),
-            .creation_time = if (copy_entry) |ce| ce.creation_time else @panic("wtf"),
-            .creation_date = if (copy_entry) |ce| ce.creation_date else @panic("wtf"),
+            .creation_time_tenth = if (copy_entry) |ce| ce.creation_time_tenth else 0,
+            .creation_time = if (copy_entry) |ce| ce.creation_time else time,
+            .creation_date = if (copy_entry) |ce| ce.creation_date else date,
             .first_cluster_high = @truncate(u16, cluster >> 16),
             .first_cluster_low = @truncate(u16, cluster),
-            .last_access_date = if (copy_entry) |ce| ce.last_access_date else @panic("wtf"),
-            .last_write_time = if (copy_entry) |ce| ce.last_write_time else @panic("wtf"),
-            .last_write_date = if (copy_entry) |ce| ce.last_write_date else @panic("wtf"),
+            .last_access_date = if (copy_entry) |ce| ce.last_access_date else date,
+            .last_write_time = if (copy_entry) |ce| ce.last_write_time else time,
+            .last_write_date = if (copy_entry) |ce| ce.last_write_date else date,
             .file_size = 0,
         };
         // Copy the values and only modify the necessary ones
@@ -1490,7 +1519,7 @@ test "Basic FAT32 image" {
 
             var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
-            var disk_image = try Disk.Image.fromZero(sector_count, sector_size);
+            var disk_image = try host.diskImageFromZero(sector_count, sector_size);
             defer host.cwd().deleteFile(original_image_path) catch @panic("wtf");
 
             const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
@@ -1529,7 +1558,7 @@ test "Basic FAT32 image" {
 
                 try partition.end(wrapped_allocator.unwrap_zig());
 
-                break :blk try Disk.Image.fromFile(original_image_path, sector_size, wrapped_allocator.unwrap_zig());
+                break :blk try host.diskImageFromFile(original_image_path, sector_size, wrapped_allocator.unwrap_zig());
             };
 
             const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
@@ -1552,6 +1581,6 @@ test "Basic FAT32 image" {
         },
         else => {
             //log.debug("Skipping for missing `parted` dependency...", .{}),
-        }
+        },
     }
 }

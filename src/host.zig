@@ -1,11 +1,11 @@
-const common = @import("common.zig");
-pub usingnamespace common;
+const lib = @import("lib");
+pub usingnamespace lib;
 
 comptime {
-    if (common.os == .freestanding) @compileError("Host file included in non-host target");
+    if (lib.os == .freestanding) @compileError("Host file included in non-host target");
 }
 
-const std = common.std;
+const std = @import("std");
 pub const ChildProcess = std.ChildProcess;
 
 pub const posix = std.os;
@@ -33,7 +33,7 @@ pub const ArrayListAligned = std.ArrayListAligned;
 pub const build = std.build;
 
 pub fn allocateZeroMemory(bytes: u64) ![]align(0x1000) u8 {
-    switch (common.os) {
+    switch (lib.os) {
         .windows => {
             const windows = std.os.windows;
             return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
@@ -50,7 +50,7 @@ pub fn allocateZeroMemory(bytes: u64) ![]align(0x1000) u8 {
 }
 
 pub const ExecutionError = error{failed};
-pub fn spawnProcess(arguments: []const []const u8, allocator: common.ZigAllocator) !void {
+pub fn spawnProcess(arguments: []const []const u8, allocator: lib.ZigAllocator) !void {
     var process = ChildProcess.init(arguments, allocator);
     const execution_result = try process.spawnAndWait();
 
@@ -69,24 +69,41 @@ pub fn spawnProcess(arguments: []const []const u8, allocator: common.ZigAllocato
     }
 }
 
-pub const ImageConfig = struct {
-    image_name: []const u8,
-    sector_count: u64,
-    sector_size: u16,
-    partition_table: common.PartitionTableType,
-    partition: PartitionConfig,
+pub fn diskImageFromZero(sector_count: usize, sector_size: u16) !lib.Disk.Image {
+    const host = @import("host");
+    const disk_bytes = try host.allocateZeroMemory(sector_count * sector_size);
+    var disk_image = lib.Disk.Image{
+        .disk = .{
+            .type = .memory,
+            .callbacks = .{
+                .read = lib.Disk.Image.read,
+                .write = lib.Disk.Image.write,
+            },
+            .disk_size = disk_bytes.len,
+            .sector_size = sector_size,
+        },
+        .buffer_ptr = disk_bytes.ptr,
+    };
 
-    pub const default_path = "config/image_config.json";
+    return disk_image;
+}
 
-    pub fn get(allocator: common.ZigAllocator, path: []const u8) !ImageConfig {
-        const image_config_file = cwd().readFileAlloc(allocator, path, common.maxInt(usize)) catch unreachable;
-        var json_stream = common.json.TokenStream.init(image_config_file);
-        return try common.json.parse(ImageConfig, &json_stream, .{ .allocator = allocator });
-    }
-};
+pub fn diskImageFromFile(file_path: []const u8, sector_size: u16, allocator: lib.ZigAllocator) !lib.Disk.Image {
+    const host = @import("host");
+    const disk_memory = try host.cwd().readFileAlloc(allocator, file_path, lib.maxInt(usize));
 
-pub const PartitionConfig = struct {
-    name: []const u8,
-    filesystem: common.FilesystemType,
-    first_lba: u64,
-};
+    var disk_image = lib.Disk.Image{
+        .disk = .{
+            .type = .memory,
+            .callbacks = .{
+                .read = lib.Disk.Image.read,
+                .write = lib.Disk.Image.write,
+            },
+            .disk_size = disk_memory.len,
+            .sector_size = sector_size,
+        },
+        .buffer_ptr = disk_memory.ptr,
+    };
+
+    return disk_image;
+}

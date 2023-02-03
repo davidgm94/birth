@@ -423,3 +423,25 @@ pub const TraditionalExecutionMode = enum {
 pub const Emulator = enum {
     qemu,
 };
+
+pub const ImageConfig = struct {
+    image_name: []const u8,
+    sector_count: u64,
+    sector_size: u16,
+    partition_table: PartitionTableType,
+    partition: PartitionConfig,
+
+    pub const default_path = "config/image_config.json";
+
+    pub fn get(allocator: ZigAllocator, path: []const u8) !ImageConfig {
+        const image_config_file = try std.fs.cwd().readFileAlloc(allocator, path, maxInt(usize));
+        var json_stream = std.json.TokenStream.init(image_config_file);
+        return try std.json.parse(ImageConfig, &json_stream, .{ .allocator = allocator });
+    }
+};
+
+pub const PartitionConfig = struct {
+    name: []const u8,
+    filesystem: FilesystemType,
+    first_lba: u64,
+};

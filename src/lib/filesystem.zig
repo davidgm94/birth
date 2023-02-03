@@ -1,4 +1,4 @@
-const common = @import("../lib.zig");
+const common = @import("lib");
 pub const FAT32 = @import("filesystem/fat32.zig");
 
 pub const Type = common.FilesystemType;
