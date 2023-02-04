@@ -624,7 +624,9 @@ pub fn main() anyerror!void {
             switch (bootloader_id) {
                 .limine => {
                     const LimineInstaller = @import("bootloader/limine/installer.zig");
+                    log.debug("Installing Limine HDD", .{});
                     try LimineInstaller.install(disk_image.get_buffer(), false, null);
+                    log.debug("Ended installing Limine HDD", .{});
                     const limine_installable_path = "src/bootloader/limine/installables";
                     const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
 
@@ -641,6 +643,13 @@ pub fn main() anyerror!void {
                         },
                         else => unreachable,
                     }
+
+                    // for (LimineInstaller.stage2) |b, i| {
+                    //     const byte = disk_image.get_buffer()[i];
+                    //     if (b != byte) {
+                    //         log.debug("Byte 0x{x} modified. Original: 0x{x}. Have: 0x{x}", .{ i, b, byte });
+                    //     }
+                    // }
                 },
                 .rise => switch (boot_protocol) {
                     .bios => {
