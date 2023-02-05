@@ -666,12 +666,12 @@ const LoopbackDevice = struct {
     name: []const u8,
     mount_dir: ?[]const u8 = null,
 
-    fn start(loopback_device: LoopbackDevice, allocator: lib.ZigAllocator, image_path: []const u8) !void {
+    fn start(loopback_device: *LoopbackDevice, allocator: lib.ZigAllocator, image_path: []const u8) !void {
         try host.spawnProcess(&.{ "./tools/loopback_start.sh", image_path, loopback_device.name }, allocator);
     }
 
-    fn end(loopback_device: LoopbackDevice, allocator: lib.ZigAllocator) !void {
-        assert(loopback_device.mount_dir == null);
+    fn end(loopback_device: *LoopbackDevice, allocator: lib.ZigAllocator) !void {
+        loopback_device.mount_dir = null;
         try host.spawnProcess(&.{ "./tools/loopback_end.sh", loopback_device.name }, allocator);
         try host.cwd().deleteFile(loopback_device.name);
     }
@@ -730,7 +730,6 @@ const MountedPartition = struct {
                 else => return err,
             }
         };
-        partition.loopback_device.mount_dir = null;
     }
 };
 
@@ -775,14 +774,6 @@ const DiskImage = extern struct {
 
     pub inline fn get_buffer(disk_image: DiskImage) []u8 {
         return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
-    }
-
-    pub fn get_file(file_path: []const u8) !File {
-        const handle = try lib.cwd().openFile(file_path, .{});
-        return File{
-            .handle = handle,
-            .size = try handle.getEndPos(),
-        };
     }
 
     pub fn read(disk: *Disk, sector_count: u64, sector_offset: u64, provided_buffer: ?[]const u8) Disk.ReadError!Disk.ReadResult {
@@ -990,95 +981,106 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     return cache;
 }
 
-test "Basic FAT32 image" {
-    lib.testing.log_level = .debug;
-
-    switch (lib.os) {
-        .linux => {
-            const original_image_path = "barebones.hdd";
-            const sector_count = 131072;
-            const sector_size = 0x200;
-            const partition_start_lba = 0x800;
-            const partition_name = "ESP";
-            const partition_filesystem = lib.Filesystem.Type.fat32;
-
-            // Using an arena allocator because it doesn't care about memory leaks
-            var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
-            defer arena_allocator.deinit();
-
-            var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
-
-            var disk_image = try DiskImage.fromZero(sector_count, sector_size);
-            defer host.cwd().deleteFile(original_image_path) catch @panic("wtf");
-
-            const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
-            const files = [_]struct { path: []const u8, content: []const u8 }{
-                .{ .path = "/foo", .content = "this is the foo file content" },
-                .{ .path = "/EFI/def", .content = "this is the def file content" },
-                .{ .path = "/EFI/BOOT/xyz", .content = "this is the xyz file content" },
-                .{ .path = "/EFI/opq", .content = "this is the opq file content" },
-            };
-
-            // 1. Test GPT creation
-            var original_disk_image = blk: {
-                const megabytes = @divExact(sector_count * sector_size, lib.mb);
-                try host.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(wrapped_allocator.unwrap_zig(), "seek={d}", .{megabytes}), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "of={s}", .{original_image_path}) }, wrapped_allocator.unwrap_zig());
-
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, wrapped_allocator.unwrap_zig());
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "{d}s", .{partition_start_lba}), "100%" }, wrapped_allocator.unwrap_zig());
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, wrapped_allocator.unwrap_zig());
-
-                var loopback_device = LoopbackDevice{ .name = "loopback_device" };
-                try loopback_device.start(wrapped_allocator.unwrap_zig(), original_image_path);
-
-                try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
-
-                const mount_dir = "image_mount";
-
-                var partition = try loopback_device.mount(wrapped_allocator.unwrap_zig(), mount_dir);
-
-                for (directories) |directory| {
-                    try partition.mkdir(wrapped_allocator.unwrap_zig(), directory);
-                }
-
-                for (files) |file| {
-                    try partition.copy_file(wrapped_allocator.unwrap_zig(), file.path, file.content);
-                }
-
-                try partition.end(wrapped_allocator.unwrap_zig());
-                try partition.loopback_device.end(wrapped_allocator.unwrap_zig());
-
-                break :blk try DiskImage.fromFile(original_image_path, sector_size, wrapped_allocator.unwrap_zig());
-            };
-
-            const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
-            const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache);
-
-            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
-            const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
-            const fat_partition_cache = try format(gpt_partition_cache.gpt.disk, .{
-                .first_lba = gpt_partition_cache.partition.first_lba,
-                .last_lba = gpt_partition_cache.partition.last_lba,
-            }, original_fat_cache.mbr);
-
-            for (directories) |directory| {
-                try fat_partition_cache.make_new_directory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
-            }
-
-            for (files) |file| {
-                try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
-            }
-
-            try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
-        },
-        else => {
-            //log.debug("Skipping for missing `parted` dependency...", .{}),
-        },
-    }
-}
+// test "Basic FAT32 image" {
+//     lib.testing.log_level = .debug;
+//
+//     switch (lib.os) {
+//         .linux => {
+//             const original_image_path = "barebones.hdd";
+//             const sector_count = 131072;
+//             const sector_size = 0x200;
+//             const partition_start_lba = 0x800;
+//             const partition_name = "ESP";
+//             const partition_filesystem = lib.Filesystem.Type.fat32;
+//
+//             // Using an arena allocator because it doesn't care about memory leaks
+//             var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
+//             defer arena_allocator.deinit();
+//
+//             var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
+//
+//             var disk_image = try DiskImage.fromZero(sector_count, sector_size);
+//             defer host.cwd().deleteFile(original_image_path) catch @panic("wtf");
+//
+//             const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
+//             const files = [_]struct { path: []const u8, content: []const u8 }{
+//                 .{ .path = "/foo", .content = "this is the foo file content" },
+//                 .{ .path = "/EFI/def", .content = "this is the def file content" },
+//                 .{ .path = "/EFI/BOOT/xyz", .content = "this is the xyz file content" },
+//                 .{ .path = "/EFI/opq", .content = "this is the opq file content" },
+//             };
+//
+//             // 1. Test GPT creation
+//             var original_disk_image = blk: {
+//                 const megabytes = @divExact(sector_count * sector_size, lib.mb);
+//                 try host.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(wrapped_allocator.unwrap_zig(), "seek={d}", .{megabytes}), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "of={s}", .{original_image_path}) }, wrapped_allocator.unwrap_zig());
+//
+//                 try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, wrapped_allocator.unwrap_zig());
+//                 try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "{d}s", .{partition_start_lba}), "100%" }, wrapped_allocator.unwrap_zig());
+//                 try host.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, wrapped_allocator.unwrap_zig());
+//
+//                 var loopback_device = LoopbackDevice{ .name = "loopback_device" };
+//                 try loopback_device.start(wrapped_allocator.unwrap_zig(), original_image_path);
+//
+//                 try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
+//
+//                 const mount_dir = "image_mount";
+//
+//                 var partition = try loopback_device.mount(wrapped_allocator.unwrap_zig(), mount_dir);
+//
+//                 for (directories) |directory| {
+//                     try partition.mkdir(wrapped_allocator.unwrap_zig(), directory);
+//                 }
+//
+//                 for (files) |file| {
+//                     try partition.copy_file(wrapped_allocator.unwrap_zig(), file.path, file.content);
+//                 }
+//
+//                 try partition.end(wrapped_allocator.unwrap_zig());
+//                 try partition.loopback_device.end(wrapped_allocator.unwrap_zig());
+//
+//                 break :blk try DiskImage.fromFile(original_image_path, sector_size, wrapped_allocator.unwrap_zig());
+//             };
+//
+//             const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
+//             const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache);
+//
+//             const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
+//             const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
+//             const fat_partition_cache = try format(gpt_partition_cache.gpt.disk, .{
+//                 .first_lba = gpt_partition_cache.partition.first_lba,
+//                 .last_lba = gpt_partition_cache.partition.last_lba,
+//             }, original_fat_cache.mbr);
+//
+//             for (directories) |directory| {
+//                 try fat_partition_cache.make_new_directory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+//             }
+//
+//             for (files) |file| {
+//                 try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+//             }
+//
+//             try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
+//             try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
+//         },
+//         else => {
+//             //log.debug("Skipping for missing `parted` dependency...", .{}),
+//         },
+//     }
+// }
 
 extern fn deploy(device_path: [*:0]const u8, limine_hdd_ptr: [*]const u8, limine_hdd_len: usize) callconv(.C) c_int;
+
+const limine_directories = [_][]const u8{"/EFI/BOOT"};
+const limine_files = [_]File{
+    .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
+    .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
+};
+
+const File = struct {
+    path: []const u8,
+    content: []const u8,
+};
 
 test "Limine barebones" {
     lib.testing.log_level = .debug;
@@ -1118,6 +1120,19 @@ test "Limine barebones" {
 
             try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
 
+            const mount_dir = "image_mount";
+
+            var partition = try loopback_device.mount(wrapped_allocator.unwrap_zig(), mount_dir);
+
+            for (limine_directories) |directory| {
+                try partition.mkdir(wrapped_allocator.unwrap_zig(), directory);
+            }
+
+            for (limine_files) |file| {
+                try partition.copy_file(wrapped_allocator.unwrap_zig(), file.path, file.content);
+            }
+
+            try partition.end(wrapped_allocator.unwrap_zig());
             try loopback_device.end(wrapped_allocator.unwrap_zig());
 
             var original_disk_image = try test_image.toDiskImage(wrapped_allocator.unwrap_zig());
@@ -1138,7 +1153,14 @@ test "Limine barebones" {
                 .first_lba = gpt_partition_cache.partition.first_lba,
                 .last_lba = gpt_partition_cache.partition.last_lba,
             }, original_fat_cache.mbr);
-            _ = fat_partition_cache;
+
+            for (limine_directories) |directory| {
+                try fat_partition_cache.make_new_directory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+            }
+
+            for (limine_files) |file| {
+                try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+            }
 
             var diff_count: u32 = 0;
             for (my_buffer) |mb, i| {
