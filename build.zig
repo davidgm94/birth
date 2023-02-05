@@ -40,7 +40,7 @@ pub fn build(builder: *Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
-    lib_package.dependencies = &.{ lib_package, host_package };
+    lib_package.dependencies = &.{lib_package};
     rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
     user_package.dependencies = &.{lib_package};
     privileged_package.dependencies = &.{ lib_package, privileged_package, bootloader_package };
@@ -112,6 +112,7 @@ pub fn build(builder: *Builder) !void {
 
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
         .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
+        .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig" },
     };
 
     for (native_tests) |native_test| {
@@ -123,6 +124,12 @@ pub fn build(builder: *Builder) !void {
         test_exe.setOutputDir("zig-cache");
         test_exe.addPackage(lib_package);
         test_exe.addPackage(host_package);
+        // TODO: do this properly
+        if (std.mem.eql(u8, native_test.name, disk_image_builder.name)) {
+            test_exe.addIncludePath("src/bootloader/limine/installables");
+            test_exe.addCSourceFile("src/bootloader/limine/installables/limine-deploy.c", &.{});
+            test_exe.linkLibC();
+        }
         const run_test_step = test_exe.run();
         test_step.dependOn(&run_test_step.step);
     }

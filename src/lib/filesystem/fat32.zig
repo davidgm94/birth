@@ -1,8 +1,7 @@
 const FAT32 = @This();
 
-const host = @import("host");
-
 const lib = @import("../../lib.zig");
+const log = lib.log;
 const kb = lib.kb;
 const mb = lib.mb;
 const gb = lib.gb;
@@ -295,136 +294,18 @@ pub const Entry = packed struct(u32) {
         allocated_and_eof,
     };
 };
-
-fn cdiv(a: u32, b: u32) u32 {
-    return (a + b - 1) / b;
+pub fn getMinCluster(comptime filesystem: lib.FilesystemType) comptime_int {
+    return switch (filesystem) {
+        .fat32 => 65525,
+        else => @compileError("Filesystem not supported"),
+    };
 }
 
-const min_cluster_32 = 65525;
-const max_cluster_32 = 268435446;
-
-pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !Cache {
-    if (disk.type != .memory) @panic("disk is not memory");
-    const fat_partition_mbr_lba = partition_range.first_lba;
-    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
-
-    const sectors_per_track = 32;
-    const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
-    const fat_count = FAT32.count;
-
-    var cluster_size: u8 = 1;
-    const max_cluster_size = 128;
-    var fat_data_sector_count: u32 = undefined;
-    var fat_length_32: u32 = undefined;
-    var cluster_count_32: u32 = undefined;
-
-    while (true) {
-        assert(cluster_size > 0);
-        fat_data_sector_count = total_sector_count_32 - lib.alignForwardGeneric(u32, FAT32.default_reserved_sector_count, cluster_size);
-        cluster_count_32 = (fat_data_sector_count * disk.sector_size + fat_count * 8) / (cluster_size * disk.sector_size + fat_count * 4);
-        fat_length_32 = lib.alignForwardGeneric(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
-        cluster_count_32 = (fat_data_sector_count - fat_count * fat_length_32) / cluster_size;
-        const max_cluster_size_32 = @min(fat_length_32 * disk.sector_size / 4, max_cluster_32);
-        if (cluster_count_32 > max_cluster_size_32) {
-            cluster_count_32 = 0;
-        }
-        if (cluster_count_32 != 0 and cluster_count_32 < min_cluster_32) {
-            cluster_count_32 = 0;
-        }
-
-        if (cluster_count_32 != 0) break;
-
-        cluster_size <<= 1;
-
-        const keep_going = cluster_size != 0 and cluster_size <= max_cluster_size;
-        if (!keep_going) break;
-        @panic("wtf");
-    }
-
-    var root_directory_entries: u64 = 0;
-    _ = root_directory_entries;
-
-    const reserved_sector_count = lib.alignForwardGeneric(u16, FAT32.default_reserved_sector_count, cluster_size);
-
-    fat_partition_mbr.* = MBR.Partition{
-        .bpb = .{
-            .dos3_31 = .{
-                .dos2_0 = .{
-                    .jmp_code = .{ 0xeb, 0x58, 0x90 },
-                    .oem_identifier = "mkfs.fat".*,
-                    .sector_size = disk.sector_size,
-                    .cluster_sector_count = cluster_size,
-                    .reserved_sector_count = reserved_sector_count,
-                    .fat_count = fat_count,
-                    .root_entry_count = 0,
-                    .total_sector_count_16 = 0,
-                    .media_descriptor = 0xf8,
-                    .fat_sector_count_16 = 0,
-                },
-                .physical_sectors_per_track = sectors_per_track,
-                .disk_head_count = 8,
-                .hidden_sector_count = @intCast(u32, partition_range.first_lba),
-                .total_sector_count_32 = total_sector_count_32,
-            },
-            .fat_sector_count_32 = fat_length_32,
-            .drive_description = 0,
-            .version = .{ 0, 0 },
-            .root_directory_cluster_offset = FAT32.starting_cluster,
-            .fs_info_sector = FAT32.default_fs_info_sector,
-            .backup_boot_record_sector = FAT32.default_backup_boot_record_sector,
-            .drive_number = 0x80,
-            .extended_boot_signature = 0x29,
-            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(u32, @intCast(u64, host.time.microTimestamp())),
-            .volume_label = "NO NAME    ".*,
-            .filesystem_type = "FAT32   ".*,
-        },
-        .code = [_]u8{
-            0xe, 0x1f, 0xbe, 0x77, 0x7c, 0xac, 0x22, 0xc0, 0x74, 0xb, 0x56, 0xb4, 0xe, 0xbb, 0x7, 0x0, 0xcd, 0x10, 0x5e, 0xeb, 0xf0, 0x32, 0xe4, 0xcd, 0x16, 0xcd, 0x19, 0xeb, 0xfe, 0x54, 0x68, 0x69, 0x73, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x64, 0x69, 0x73, 0x6b, 0x2e, 0x20, 0x20, 0x50, 0x6c, 0x65, 0x61, 0x73, 0x65, 0x20, 0x69, 0x6e, 0x73, 0x65, 0x72, 0x74, 0x20, 0x61, 0x20, 0x62, 0x6f, 0x6f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x20, 0x66, 0x6c, 0x6f, 0x70, 0x70, 0x79, 0x20, 0x61, 0x6e, 0x64, 0xd, 0xa, 0x70, 0x72, 0x65, 0x73, 0x73, 0x20, 0x61, 0x6e, 0x79, 0x20, 0x6b, 0x65, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x74, 0x72, 0x79, 0x20, 0x61, 0x67, 0x61, 0x69, 0x6e, 0x20, 0x2e, 0x2e, 0x2e, 0x20, 0xd, 0xa,
-        } ++ [1]u8{0} ** 227,
-        // This should be zero
-        .partitions = lib.zeroes([4]MBR.LegacyPartition),
+pub fn getMaxCluster(comptime filesystem: lib.FilesystemType) comptime_int {
+    return switch (filesystem) {
+        .fat32 => 268435446,
+        else => @compileError("Filesystem not supported"),
     };
-
-    try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
-
-    const backup_boot_record_sector = partition_range.first_lba + fat_partition_mbr.bpb.backup_boot_record_sector;
-    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector, null, .{});
-    backup_boot_record.* = fat_partition_mbr.*;
-    try disk.write_typed_sectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, false);
-
-    const fs_info_lba = partition_range.first_lba + fat_partition_mbr.bpb.fs_info_sector;
-    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba, null, .{});
-    fs_info.* = .{
-        .lead_signature = 0x41615252,
-        .signature = 0x61417272,
-        .free_cluster_count = cluster_count_32,
-        .last_allocated_cluster = 0,
-        .trail_signature = 0xaa550000,
-    };
-    try disk.write_typed_sectors(FAT32.FSInfo, fs_info, fs_info_lba, false);
-
-    const cache = Cache{
-        .disk = disk,
-        .partition_range = partition_range,
-        .mbr = fat_partition_mbr,
-        .fs_info = fs_info,
-    };
-
-    // TODO: write this properly
-
-    try cache.register_cluster(0, FAT32.Entry.reserved_and_should_not_be_used_eof, null);
-    try cache.register_cluster(1, FAT32.Entry.allocated_and_eof, null);
-    try cache.register_cluster(2, FAT32.Entry.reserved_and_should_not_be_used_eof, null);
-
-    cache.fs_info.last_allocated_cluster = 2;
-    cache.fs_info.free_cluster_count = cluster_count_32 - 1;
-
-    const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
-    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba, null, .{});
-    backup_fs_info.* = fs_info.*;
-    try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
-
-    return cache;
 }
 
 fn write_fat_entry_slow(disk: *Disk, fat_partition_mbr: *MBR.Partition, partition_lba_start: u64, fat_entry: FAT32.Entry, fat_entry_index: usize) !void {
@@ -496,6 +377,7 @@ pub const Cache = extern struct {
         const disk = gpt_partition_cache.gpt.disk;
 
         const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, allocator, .{});
+        log.debug("Cluster sector count: {}", .{partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count});
         assert(partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count == 1);
         const fs_info_sector = partition_range.first_lba + partition_mbr.bpb.fs_info_sector;
         const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, allocator, .{});
@@ -585,24 +467,24 @@ pub const Cache = extern struct {
         }
     }
 
-    pub fn make_new_directory(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache) !void {
+    pub fn make_new_directory(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, miliseconds: u64) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(absolute_path, allocator, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("wtf");
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, allocator);
         const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, allocator, copy_cache);
         const last_element = absolute_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry);
+        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, miliseconds);
     }
 
-    pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache) !void {
+    pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, milliseconds: u64) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.get_directory_entry(file_path, null, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, allocator);
         const content_cluster = try cache.allocate_new_file(file_content, allocator);
-        const last_element = file_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = last_element, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry);
+        const file_name = file_path[last_slash_index + 1 ..];
+        try cache.add_entry(.{ .name = file_name, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
     }
 
     fn allocate_new_file(cache: Cache, file_content: []const u8, maybe_allocator: ?*lib.Allocator) !u32 {
@@ -905,7 +787,8 @@ pub const Cache = extern struct {
         }
     };
 
-    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry) !void {
+    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry, miliseconds: u64) !void {
+        _ = miliseconds;
         // TODO:
         if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
 
@@ -917,8 +800,6 @@ pub const Cache = extern struct {
         var short_name_result: ShortNameResult = undefined;
         const can_get_away_with_short_name = try cache.create_shortname(&NLS.ascii.table, long_name, entry_setup.content_cluster, &short_name_result, maybe_allocator);
         // TODO: timestamp
-        const timestamp = host.time.milliTimestamp();
-        _ = timestamp;
         var entry = GenericEntry{
             .normal_entry = DirectoryEntry{
                 .name = short_name_result.name,
@@ -1111,7 +992,7 @@ pub const Cache = extern struct {
         return (@as(u64, cluster) - cache.get_root_cluster()) * cache.get_cluster_sector_count() + cache.get_data_lba();
     }
 
-    fn register_cluster(cache: Cache, cluster: u32, entry: Entry, allocator: ?*lib.Allocator) !void {
+    pub fn registerCluster(cache: Cache, cluster: u32, entry: Entry, allocator: ?*lib.Allocator) !void {
         const fat_lba = cache.get_fat_lba();
         const fat_entry_count = cache.mbr.bpb.dos3_31.dos2_0.fat_count;
         const fat_entry_sector_count = cache.mbr.bpb.fat_sector_count_32;
@@ -1143,7 +1024,7 @@ pub const Cache = extern struct {
         while (try fat_entry_iterator.next(cache, maybe_allocator)) |cluster| {
             const entry = &fat_entry_iterator.entries[cluster % Entry.per_sector];
             if (entry.is_free()) {
-                try cache.register_cluster(cluster, FAT32.Entry.allocated_and_eof, maybe_allocator);
+                try cache.registerCluster(cluster, FAT32.Entry.allocated_and_eof, maybe_allocator);
                 clusters[cluster_index] = cluster;
                 cluster_index += 1;
 
@@ -1345,78 +1226,6 @@ fn EntryResult(comptime EntryType: type) type {
 }
 
 // Sadly we have to wrap shell commands into scripts because of shell redirection usages
-const LoopbackDevice = struct {
-    name: []const u8,
-    mount_dir: ?[]const u8 = null,
-
-    fn start(loopback_device: LoopbackDevice, allocator: lib.ZigAllocator, image_path: []const u8) !void {
-        try host.spawnProcess(&.{ "./tools/loopback_start.sh", image_path, loopback_device.name }, allocator);
-    }
-
-    fn end(loopback_device: LoopbackDevice, allocator: lib.ZigAllocator) !void {
-        assert(loopback_device.mount_dir == null);
-        try host.spawnProcess(&.{ "./tools/loopback_end.sh", loopback_device.name }, allocator);
-        try host.cwd().deleteFile(loopback_device.name);
-    }
-
-    fn mount(loopback_device: *LoopbackDevice, allocator: lib.ZigAllocator, mount_dir: []const u8) !MountedPartition {
-        try host.cwd().makePath(mount_dir);
-        try host.spawnProcess(&.{ "./tools/loopback_mount.sh", loopback_device.name, mount_dir }, allocator);
-        loopback_device.mount_dir = mount_dir;
-
-        return MountedPartition{
-            .loopback_device = loopback_device.*,
-        };
-    }
-};
-
-const MountedPartition = struct {
-    loopback_device: LoopbackDevice,
-
-    fn mkdir(partition: MountedPartition, allocator: lib.ZigAllocator, dir: []const u8) !void {
-        try host.spawnProcess(&.{ "sudo", "mkdir", "-p", try partition.join_with_root(allocator, dir) }, allocator);
-    }
-
-    fn join_with_root(partition: MountedPartition, allocator: lib.ZigAllocator, path: []const u8) ![]const u8 {
-        const mount_dir = partition.get_mount_dir();
-        const slices_to_join: []const []const u8 = if (path[0] == '/') &.{ mount_dir, path } else &.{ mount_dir, "/", path };
-        const joint_path = try lib.concat(allocator, u8, slices_to_join);
-        return joint_path;
-    }
-
-    pub fn get_mount_dir(partition: MountedPartition) []const u8 {
-        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
-        return mount_dir;
-    }
-
-    fn copy_file(partition: MountedPartition, allocator: lib.ZigAllocator, file_path: []const u8, file_content: []const u8) !void {
-        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
-        const file_name = file_path[last_slash_index + 1 ..];
-        assert(file_name.len > 0);
-        try host.cwd().writeFile(file_name, file_content);
-        const dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        const destination_dir = try partition.join_with_root(allocator, dir);
-        const mkdir_process_args = &.{ "sudo", "mkdir", "-p", destination_dir };
-        try host.spawnProcess(mkdir_process_args, allocator);
-        const copy_process_args = &.{ "sudo", "cp", "-v", file_name, destination_dir };
-        try host.spawnProcess(copy_process_args, allocator);
-        try host.cwd().deleteFile(file_name);
-    }
-
-    fn end(partition: *MountedPartition, allocator: lib.ZigAllocator) !void {
-        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
-        host.sync();
-        try host.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
-        partition.loopback_device.mount_dir = null;
-        try partition.loopback_device.end(allocator);
-        host.spawnProcess(&.{ "sudo", "rm", "-rf", mount_dir }, allocator) catch |err| {
-            switch (err) {
-                host.ExecutionError.failed => {},
-                else => return err,
-            }
-        };
-    }
-};
 
 const FATEntryIterator = struct {
     entries: []FAT32.Entry = &.{},
@@ -1499,88 +1308,4 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
             return &iterator.cluster_entries[iterator.cluster_it];
         }
     };
-}
-
-test "Basic FAT32 image" {
-    lib.testing.log_level = .debug;
-
-    switch (lib.os) {
-        .linux => {
-            const original_image_path = "barebones.hdd";
-            const sector_count = 131072;
-            const sector_size = 0x200;
-            const partition_start_lba = 0x800;
-            const partition_name = "ESP";
-            const partition_filesystem = lib.Filesystem.Type.fat32;
-
-            // Using an arena allocator because it doesn't care about memory leaks
-            var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
-            defer arena_allocator.deinit();
-
-            var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
-
-            var disk_image = try host.diskImageFromZero(sector_count, sector_size);
-            defer host.cwd().deleteFile(original_image_path) catch @panic("wtf");
-
-            const directories = [_][]const u8{ "/EFI", "/EFI/BOOT", "/EFI/BOOT/FOO" };
-            const files = [_]struct { path: []const u8, content: []const u8 }{
-                .{ .path = "/foo", .content = "this is the foo file content" },
-                .{ .path = "/EFI/def", .content = "this is the def file content" },
-                .{ .path = "/EFI/BOOT/xyz", .content = "this is the xyz file content" },
-                .{ .path = "/EFI/opq", .content = "this is the opq file content" },
-            };
-
-            // 1. Test GPT creation
-            var original_disk_image = blk: {
-                const megabytes = @divExact(sector_count * sector_size, mb);
-                try host.spawnProcess(&.{ "dd", "if=/dev/zero", "bs=1M", "count=0", try lib.allocPrint(wrapped_allocator.unwrap_zig(), "seek={d}", .{megabytes}), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "of={s}", .{original_image_path}) }, wrapped_allocator.unwrap_zig());
-
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mklabel", "gpt" }, wrapped_allocator.unwrap_zig());
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "mkpart", partition_name, @tagName(partition_filesystem), try lib.allocPrint(wrapped_allocator.unwrap_zig(), "{d}s", .{partition_start_lba}), "100%" }, wrapped_allocator.unwrap_zig());
-                try host.spawnProcess(&.{ "parted", "-s", original_image_path, "set", "1", "esp", "on" }, wrapped_allocator.unwrap_zig());
-
-                var loopback_device = LoopbackDevice{ .name = "loopback_device" };
-                try loopback_device.start(wrapped_allocator.unwrap_zig(), original_image_path);
-
-                try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
-
-                const mount_dir = "image_mount";
-
-                var partition = try loopback_device.mount(wrapped_allocator.unwrap_zig(), mount_dir);
-
-                for (directories) |directory| {
-                    try partition.mkdir(wrapped_allocator.unwrap_zig(), directory);
-                }
-
-                for (files) |file| {
-                    try partition.copy_file(wrapped_allocator.unwrap_zig(), file.path, file.content);
-                }
-
-                try partition.end(wrapped_allocator.unwrap_zig());
-
-                break :blk try host.diskImageFromFile(original_image_path, sector_size, wrapped_allocator.unwrap_zig());
-            };
-
-            const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
-            const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache);
-
-            const gpt_cache = try GPT.create(&disk_image.disk, original_gpt_cache.gpt.header);
-            const gpt_partition_cache = try gpt_cache.addPartition(partition_filesystem, lib.unicode.utf8ToUtf16LeStringLiteral(partition_name), partition_start_lba, gpt_cache.header.last_usable_lba, original_gpt_cache.partition);
-            const fat_partition_cache = try gpt_partition_cache.format(partition_filesystem, original_fat_cache);
-
-            for (directories) |directory| {
-                try fat_partition_cache.make_new_directory(directory, null, original_fat_cache);
-            }
-
-            for (files) |file| {
-                try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache);
-            }
-
-            try lib.diff(original_disk_image.get_buffer(), disk_image.get_buffer());
-            try lib.testing.expectEqualSlices(u8, original_disk_image.get_buffer(), disk_image.get_buffer());
-        },
-        else => {
-            //log.debug("Skipping for missing `parted` dependency...", .{}),
-        },
-    }
 }
