@@ -573,13 +573,13 @@ pub fn main() anyerror!void {
                 } });
                 log.debug("Host relative path: {s}", .{host_relative_path});
                 const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
-                try fat_partition_cache.create_file(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
             }
 
             blk: {
                 const file_content = configuration_file;
                 const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
-                try fat_partition_cache.create_file(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewFile(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                 break :blk;
             }
 
@@ -592,15 +592,15 @@ pub fn main() anyerror!void {
                     const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
 
                     const limine_cfg = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.cfg", max_file_length);
-                    try fat_partition_cache.create_file("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                     const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
-                    try fat_partition_cache.create_file("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
 
                     switch (architecture) {
                         .x86_64 => {
-                            try fat_partition_cache.make_new_directory("/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.make_new_directory("/BOOT/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.create_file("/BOOT/EFI/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                         },
                         else => unreachable,
                     }
@@ -767,13 +767,18 @@ const DiskImage = extern struct {
     disk: Disk,
     buffer_ptr: [*]u8,
 
-    const File = struct {
-        handle: lib.File,
-        size: usize,
-    };
-
-    pub inline fn get_buffer(disk_image: DiskImage) []u8 {
-        return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
+    pub fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
+        const need_write = !(disk.type == .memory and !commit_memory_to_disk);
+        if (need_write) {
+            const disk_image = @fieldParentPtr(DiskImage, "disk", disk);
+            assert(disk_image.disk.disk_size > 0);
+            //assert(disk.disk.partition_count == 1);
+            assert(bytes.len > 0);
+            //assert(disk.disk.disk_size == disk.buffer.items.len);
+            const byte_offset = sector_offset * disk_image.disk.sector_size;
+            if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.write_error;
+            lib.copy(u8, disk_image.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
+        }
     }
 
     pub fn read(disk: *Disk, sector_count: u64, sector_offset: u64, provided_buffer: ?[]const u8) Disk.ReadError!Disk.ReadResult {
@@ -838,18 +843,13 @@ const DiskImage = extern struct {
         return disk_image;
     }
 
-    pub fn write(disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) Disk.WriteError!void {
-        const need_write = !(disk.type == .memory and !commit_memory_to_disk);
-        if (need_write) {
-            const disk_image = @fieldParentPtr(DiskImage, "disk", disk);
-            assert(disk_image.disk.disk_size > 0);
-            //assert(disk.disk.partition_count == 1);
-            assert(bytes.len > 0);
-            //assert(disk.disk.disk_size == disk.buffer.items.len);
-            const byte_offset = sector_offset * disk_image.disk.sector_size;
-            if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.write_error;
-            lib.copy(u8, disk_image.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
-        }
+    const File = struct {
+        handle: lib.File,
+        size: usize,
+    };
+
+    pub inline fn get_buffer(disk_image: DiskImage) []u8 {
+        return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
     }
 };
 
@@ -1079,10 +1079,10 @@ const File = struct {
 const limine_directories = [_][]const u8{
     "/EFI", "/EFI/BOOT",
 };
+
 const limine_files = [_]File{
-    // .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
-    // .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
-    .{ .path = "/limine.sys", .content = &[1]u8{0xff} ** 513 },
+    .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
+    .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
 };
 
 test "Limine barebones" {
@@ -1160,12 +1160,12 @@ test "Limine barebones" {
 
             for (limine_directories) |directory| {
                 log.debug("Creating directory: {s}", .{directory});
-                try fat_partition_cache.make_new_directory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewDirectory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
             }
 
             for (limine_files) |file| {
                 log.debug("Creating file: {s}", .{file.path});
-                try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewFile(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
             }
 
             var diff_count: u32 = 0;

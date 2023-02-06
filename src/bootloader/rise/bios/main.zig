@@ -62,11 +62,11 @@ export fn entryPoint() callconv(.C) noreturn {
 
     const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, allocator) catch @panic("can't load gpt cache");
     const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
-    const rise_files_file = fat_cache.read_file(allocator, "/files") catch @panic("cant load json from disk");
+    const rise_files_file = fat_cache.readFile(allocator, "/files") catch @panic("cant load json from disk");
     var file_parser = lib.FileParser.init(rise_files_file);
     while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
         if (file_count == files.len) @panic("max files");
-        const file_content = fat_cache.read_file(allocator, file_descriptor.guest) catch @panic("cant read file");
+        const file_content = fat_cache.readFile(allocator, file_descriptor.guest) catch @panic("cant read file");
         files[file_count] = .{
             .path = file_descriptor.guest,
             .content = file_content,
