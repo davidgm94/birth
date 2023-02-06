@@ -1,9 +1,9 @@
-const lib = @import("lib");
+const lib = @import("../../../../lib.zig");
 const assert = lib.assert;
 const SimpleR64 = lib.arch.x86_64.registers.SimpleR64;
 const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 
-const privileged = @import("privileged");
+const privileged = @import("../../../../privileged.zig");
 const x86_64 = privileged.arch.x86_64;
 const PhysicalAddress = x86_64.PhysicalAddress;
 const VirtualAddress = x86_64.VirtualAddress;

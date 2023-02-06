@@ -1,4 +1,4 @@
-const lib = @import("lib");
+const lib = @import("../../../../lib.zig");
 const alignForward = lib.alignForward;
 const alignForwardGeneric = lib.alignForwardGeneric;
 const alignBackward = lib.alignBackward;
@@ -12,7 +12,7 @@ const log = lib.log.scoped(.VAS);
 const zeroes = lib.zeroes;
 const Allocator = lib.Allocator;
 
-const privileged = @import("privileged");
+const privileged = @import("../../../../privileged.zig");
 const Heap = privileged.Heap;
 const panic = privileged.panic;
 

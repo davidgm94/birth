@@ -474,7 +474,7 @@ pub const Cache = extern struct {
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, allocator);
         const content_cluster = try cache.allocate_new_directory(containing_dir_cluster, allocator, copy_cache);
         const last_element = absolute_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, miliseconds);
+        try cache.addEntry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, miliseconds);
     }
 
     pub fn create_file(cache: Cache, file_path: []const u8, file_content: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, milliseconds: u64) !void {
@@ -484,7 +484,7 @@ pub const Cache = extern struct {
         const containing_dir_cluster = try cache.get_directory_entry_cluster(containing_dir, allocator);
         const content_cluster = try cache.allocate_new_file(file_content, allocator);
         const file_name = file_path[last_slash_index + 1 ..];
-        try cache.add_entry(.{ .name = file_name, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
+        try cache.addEntry(.{ .name = file_name, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
     }
 
     fn allocate_new_file(cache: Cache, file_content: []const u8, maybe_allocator: ?*lib.Allocator) !u32 {
@@ -787,11 +787,7 @@ pub const Cache = extern struct {
         }
     };
 
-    pub fn add_entry(cache: Cache, entry_setup: struct { name: []const u8, size: u32 = 0, content_cluster: u32, containing_cluster: u32, is_dir: bool }, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry, miliseconds: u64) !void {
-        _ = miliseconds;
-        // TODO:
-        if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
-
+    pub fn buildSlots(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry) !void {
         var long_name_array = [1]u16{0} ** (long_name_max_characters + 2);
         const size = try translate_to_unicode(entry_setup.name, &long_name_array);
         const long_name = long_name_array[0..size.len];
@@ -907,6 +903,23 @@ pub const Cache = extern struct {
         }
 
         @panic("wtf");
+    }
+
+    const EntrySetup = struct {
+        name: []const u8,
+        size: u32 = 0,
+        content_cluster: u32,
+        containing_cluster: u32,
+        is_dir: bool,
+    };
+
+    pub fn addEntry(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry, miliseconds: u64) !void {
+        _ = miliseconds;
+
+        // TODO:
+        if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
+
+        try cache.buildSlots(entry_setup, maybe_allocator, copy_entry);
     }
 
     pub fn shortname_checksum(name: []const u8) u8 {

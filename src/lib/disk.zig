@@ -1,4 +1,4 @@
-const lib = @import("lib");
+const lib = @import("../lib.zig");
 
 const FAT32 = lib.Filesystem.FAT32;
 const GPT = lib.PartitionTable.GPT;

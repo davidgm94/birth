@@ -1,6 +1,6 @@
 // This package provides of privileged data structures and routines to both kernel and bootloaders, for now
 
-const lib = @import("lib");
+const lib = @import("lib.zig");
 const assert = lib.assert;
 const maxInt = lib.maxInt;
 const Allocator = lib.Allocator;

@@ -1,5 +1,5 @@
 const host = @import("host.zig");
-const lib = @import("lib");
+const lib = @import("lib.zig");
 const bootloader = @import("bootloader");
 const LimineInstaller = @import("bootloader/limine/installer.zig");
 
@@ -527,7 +527,7 @@ pub fn main() anyerror!void {
     defer arena_allocator.deinit();
     var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
-    const arguments = try host.std.process.argsAlloc(wrapped_allocator.unwrap_zig());
+    const arguments = try @import("std").process.argsAlloc(wrapped_allocator.unwrap_zig());
     if (arguments.len != 4) {
         return Error.wrong_arguments;
     }
@@ -539,7 +539,7 @@ pub fn main() anyerror!void {
     const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader_id), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
 
     // TODO: use a format with hex support
-    const image_config = try host.ImageConfig.get(wrapped_allocator.unwrap_zig(), host.ImageConfig.default_path);
+    const image_config = try lib.ImageConfig.get(wrapped_allocator.unwrap_zig(), lib.ImageConfig.default_path);
     var disk_image = try DiskImage.fromZero(image_config.sector_count, image_config.sector_size);
     const disk = &disk_image.disk;
     const gpt_cache = try GPT.create(disk, null);
@@ -564,7 +564,7 @@ pub fn main() anyerror!void {
             var files_parser = lib.FileParser.init(configuration_file);
 
             while (try files_parser.next()) |file_descriptor| {
-                const host_relative_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
+                const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
                     .arch => switch (architecture) {
                         inline else => |arch| "_" ++ @tagName(arch),
                     },
@@ -614,7 +614,7 @@ pub fn main() anyerror!void {
                 },
                 .rise => switch (boot_protocol) {
                     .bios => {
-                        const loader_file_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix });
+                        const loader_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix });
                         log.debug("trying to load file: {s}", .{loader_file_path});
                         const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
                         const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
@@ -631,7 +631,7 @@ pub fn main() anyerror!void {
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
                         const dap_top = stack_top - stack_size;
-                        if (aligned_file_size > dap_top) host.std.debug.panic("File size: 0x{x} bytes", .{aligned_file_size});
+                        if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
                         log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
                         const dap = MBR.DAP{
                             .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
@@ -658,7 +658,7 @@ pub fn main() anyerror!void {
         else => @panic("Filesystem not supported"),
     }
 
-    const disk_image_path = try host.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", image_config.image_name });
+    const disk_image_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", image_config.image_name });
     try host.cwd().writeFile(disk_image_path, disk_image.get_buffer());
 }
 
@@ -1071,15 +1071,17 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
 
 extern fn deploy(device_path: [*:0]const u8, limine_hdd_ptr: [*]const u8, limine_hdd_len: usize) callconv(.C) c_int;
 
-const limine_directories = [_][]const u8{"/EFI/BOOT"};
-const limine_files = [_]File{
-    .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
-    .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
-};
-
 const File = struct {
     path: []const u8,
     content: []const u8,
+};
+
+const limine_directories = [_][]const u8{
+    "/EFI", "/EFI/BOOT",
+};
+const limine_files = [_]File{
+    // .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
+    .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
 };
 
 test "Limine barebones" {
@@ -1109,6 +1111,7 @@ test "Limine barebones" {
                 .path = test_path,
                 .description = image,
             };
+            test_image.delete() catch {};
 
             try test_image.createFAT(wrapped_allocator.unwrap_zig());
             if (deploy_limine and deploy(test_path, &LimineInstaller.hdd, LimineInstaller.hdd.len) != 0) {
@@ -1155,10 +1158,12 @@ test "Limine barebones" {
             }, original_fat_cache.mbr);
 
             for (limine_directories) |directory| {
+                log.debug("Creating directory: {s}", .{directory});
                 try fat_partition_cache.make_new_directory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
             }
 
             for (limine_files) |file| {
+                log.debug("Creating file: {s}", .{file.path});
                 try fat_partition_cache.create_file(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
             }
 
@@ -1176,6 +1181,7 @@ test "Limine barebones" {
                 log.err("Diff count: {}", .{diff_count});
             }
             try lib.testing.expectEqualSlices(u8, original_buffer, my_buffer);
+
             try test_image.delete();
         },
         else => {},

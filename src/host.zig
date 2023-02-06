@@ -1,5 +1,4 @@
-const lib = @import("lib");
-pub usingnamespace lib;
+const lib = @import("lib.zig");
 
 comptime {
     if (lib.os == .freestanding) @compileError("Host file included in non-host target");
@@ -68,3 +67,5 @@ pub fn spawnProcess(arguments: []const []const u8, allocator: lib.ZigAllocator) 
         .Stopped, .Unknown => unreachable,
     }
 }
+
+pub const panic = std.debug.panic;

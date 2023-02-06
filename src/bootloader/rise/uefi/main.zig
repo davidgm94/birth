@@ -1,11 +1,11 @@
-const lib = @import("lib");
+const lib = @import("../../../lib.zig");
 const assert = lib.assert;
 const config = lib.config;
 const Allocator = lib.Allocator;
 const ELF = lib.ELF(64);
 const log = lib.log.scoped(.UEFI);
 
-const bootloader = @import("bootloader");
+const bootloader = @import("../../../bootloader.zig");
 const UEFI = bootloader.UEFI;
 const BootloaderInformation = UEFI.BootloaderInformation;
 const BootServices = UEFI.BootServices;
@@ -24,7 +24,7 @@ const page_table_estimated_size = UEFI.page_table_estimated_size;
 const SimpleFilesystemProtocol = UEFI.SimpleFilesystemProtocol;
 const SystemTable = UEFI.SystemTable;
 
-const privileged = @import("privileged");
+const privileged = @import("../../../privileged.zig");
 pub const panic = privileged.zigPanic;
 const PhysicalAddress = privileged.arch.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;

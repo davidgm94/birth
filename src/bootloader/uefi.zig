@@ -1,4 +1,4 @@
-const lib = @import("lib");
+const lib = @import("../lib.zig");
 const alignForward = lib.alignForward;
 const assert = lib.assert;
 const CustomAllocator = lib.CustomAllocator;
@@ -20,15 +20,15 @@ pub const uefi_error = Status.err;
 
 const str16 = lib.std.unicode.utf8ToUtf16LeStringLiteral;
 
-const stopCPU = privileged.arch.stopCPU;
 pub const page_size = 0x1000;
 pub const page_shifter = lib.arch.page_shifter(page_size);
 
-const privileged = @import("privileged");
+const privileged = @import("../privileged.zig");
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const stopCPU = privileged.arch.stopCPU;
 pub const panic = privileged.panic;
 
 pub const MemoryMap = struct {

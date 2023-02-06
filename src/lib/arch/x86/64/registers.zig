@@ -1,4 +1,4 @@
-const lib = @import("lib");
+const lib = @import("../../../../lib.zig");
 const assert = lib.assert;
 
 pub const RFLAGS = packed struct(u64) {

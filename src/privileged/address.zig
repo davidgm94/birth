@@ -1,7 +1,7 @@
-const lib = @import("lib");
+const lib = @import("../lib.zig");
 const assert = lib.assert;
 const Arch = lib.Target.Cpu.Arch;
-const privileged = @import("privileged");
+const privileged = @import("../privileged.zig");
 const CoreLocality = privileged.CoreLocality;
 
 pub fn Interface(comptime Usize: type) type {

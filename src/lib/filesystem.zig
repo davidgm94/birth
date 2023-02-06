@@ -1,7 +1,7 @@
-const common = @import("lib");
+const lib = @import("../lib.zig");
 pub const FAT32 = @import("filesystem/fat32.zig");
 
-pub const Type = common.FilesystemType;
+pub const Type = lib.FilesystemType;
 
 pub const ReadError = error{
     unsupported,

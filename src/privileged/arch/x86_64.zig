@@ -1,8 +1,8 @@
-const lib = @import("lib");
+const lib = @import("../../lib.zig");
 const assert = lib.assert;
 const cpuid = lib.arch.x86_64.CPUID;
 
-const privileged = @import("privileged");
+const privileged = @import("../../privileged.zig");
 const AddressInterface = privileged.Address.Interface(u64);
 pub const PhysicalAddress = AddressInterface.PhysicalAddress;
 pub const VirtualAddress = AddressInterface.VirtualAddress;

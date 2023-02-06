@@ -1,10 +1,10 @@
 const GDT = @This();
 
-const lib = @import("lib");
+const lib = @import("../../../../lib.zig");
 const assert = lib.assert;
 const log = lib.log.scoped(.GDT);
 
-const privileged = @import("privileged");
+const privileged = @import("../../../../privileged.zig");
 const DescriptorTable = privileged.arch.x86_64.DescriptorTable;
 const TSS = privileged.arch.x86_64.TSS;
 
@@ -40,15 +40,15 @@ pub const Table = extern struct {
         if (flush_segment_registers) {
             // Flush segments
             asm volatile (
-                    \\xor %%rax, %%rax
-                    \\mov %[data_segment_selector], %%rax
-                    \\mov %%rax, %%ds
-                    \\mov %%rax, %%es
-                    \\mov %%rax, %%fs
-                    \\mov %%rax, %%gs
-                    :
-                    : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
-                    );
+                \\xor %%rax, %%rax
+                \\mov %[data_segment_selector], %%rax
+                \\mov %%rax, %%ds
+                \\mov %%rax, %%es
+                \\mov %%rax, %%fs
+                \\mov %%rax, %%gs
+                :
+                : [data_segment_selector] "i" (@as(u64, @offsetOf(GDT.Table, "data_64"))),
+            );
         }
     }
 

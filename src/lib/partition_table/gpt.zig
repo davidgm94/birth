@@ -1,6 +1,6 @@
 const GPT = @This();
 
-const lib = @import("lib");
+const lib = @import("../../lib.zig");
 const assert = lib.assert;
 const kb = lib.kb;
 const mb = lib.mb;

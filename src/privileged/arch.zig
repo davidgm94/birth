@@ -1,5 +1,5 @@
-const lib = @import("lib");
-const privileged = @import("privileged");
+const lib = @import("../lib.zig");
+const privileged = @import("../privileged.zig");
 
 pub const x86 = @import("arch/x86.zig");
 pub const x86_64 = @import("arch/x86_64.zig");

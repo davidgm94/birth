@@ -2,11 +2,11 @@ const std = @import("std");
 const common = @import("src/common.zig");
 
 // Build types
-const Builder = std.build.Builder;
-const FileSource = std.build.FileSource;
-const LibExeObjStep = std.build.LibExeObjStep;
-const RunStep = std.build.RunStep;
-const Step = std.build.Step;
+const Builder = std.Build.Builder;
+const FileSource = std.Build.FileSource;
+const LibExeObjStep = std.Build.LibExeObjStep;
+const RunStep = std.Build.RunStep;
+const Step = std.Build.Step;
 
 const assert = std.debug.assert;
 const Bootloader = common.Bootloader;
@@ -19,7 +19,6 @@ const Target = common.Target;
 
 const source_root_dir = "src";
 const cache_dir = "zig-cache/";
-// const kernel_path = cache_dir ++ kernel_name;
 
 const Configuration = struct {
     bootloader: Bootloader,
@@ -39,13 +38,6 @@ const entry_point_name = "entryPoint";
 pub fn build(builder: *Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
-
-    lib_package.dependencies = &.{lib_package};
-    rise_package.dependencies = &.{ lib_package, rise_package, privileged_package };
-    user_package.dependencies = &.{lib_package};
-    privileged_package.dependencies = &.{ lib_package, privileged_package, bootloader_package };
-    bootloader_package.dependencies = &.{ bootloader_package, lib_package, privileged_package };
-    host_package.dependencies = &.{ host_package, lib_package };
 
     const disk_image_builder = createDiskImageBuilder(builder);
 
@@ -111,7 +103,7 @@ pub fn build(builder: *Builder) !void {
     const test_step = builder.step("test", "Run unit tests");
 
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
-        .{ .name = lib_package.name, .zig_source_file = lib_package.source.path },
+        .{ .name = "lib", .zig_source_file = "src/lib.zig" },
         .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig" },
     };
 
@@ -122,8 +114,6 @@ pub fn build(builder: *Builder) !void {
             .kind = .test_exe,
         });
         test_exe.setOutputDir("zig-cache");
-        test_exe.addPackage(lib_package);
-        test_exe.addPackage(host_package);
         // TODO: do this properly
         if (std.mem.eql(u8, native_test.name, disk_image_builder.name)) {
             test_exe.addIncludePath("src/bootloader/limine/installables");
@@ -416,10 +406,8 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             });
                             executable.addAssemblyFile(bootloader_path ++ "assembly.S");
                             executable.setOutputDir(cache_dir);
-                            executable.addPackage(lib_package);
-                            executable.addPackage(privileged_package);
-                            executable.addPackage(bootloader_package);
-                            executable.setLinkerScriptPath(std.build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
+                            executable.setMainPkgPath("src");
+                            executable.setLinkerScriptPath(std.Build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
                             executable.red_zone = false;
                             executable.link_gc_sections = true;
                             executable.want_lto = true;
@@ -440,9 +428,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                                 .optimize = .ReleaseSafe,
                             });
                             executable.setOutputDir(cache_dir);
-                            executable.addPackage(lib_package);
-                            executable.addPackage(privileged_package);
-                            executable.addPackage(bootloader_package);
+                            executable.setMainPkgPath("src");
                             executable.strip = true;
                             try bootloader_executables.append(executable);
                         },
@@ -458,8 +444,6 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
         //         .target = getTarget(.x86_64, .privileged),
         //     });
         //     executable.setOutputDir(cache_dir);
-        //     executable.addPackage(lib_package);
-        //     executable.addPackage(privileged_package);
         //
         //     try bootloader_executables.append(executable);
         // },
@@ -493,11 +477,6 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*
     cpu_driver.omit_frame_pointer = false;
     cpu_driver.entry_symbol_name = entry_point_name;
 
-    cpu_driver.addPackage(lib_package);
-    cpu_driver.addPackage(bootloader_package);
-    cpu_driver.addPackage(rise_package);
-    cpu_driver.addPackage(privileged_package);
-
     cpu_driver.setMainPkgPath(source_root_dir);
     cpu_driver.setLinkerScriptPath(FileSource.relative(cpu_driver_path ++ "arch/" ++ switch (architecture) {
         .x86_64 => "x86/64/",
@@ -523,44 +502,10 @@ fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
         .root_source_file = FileSource.relative("src/disk_image_builder.zig"),
     });
     disk_image_builder.setOutputDir(cache_dir);
-    disk_image_builder.addPackage(bootloader_package);
-    disk_image_builder.addPackage(lib_package);
     builder.default_step.dependOn(&disk_image_builder.step);
-
-    disk_image_builder.addPackage(host_package);
 
     return disk_image_builder;
 }
-
-var bootloader_package = std.build.Pkg{
-    .name = "bootloader",
-    .source = std.build.FileSource.relative("src/bootloader.zig"),
-};
-
-var host_package = std.build.Pkg{
-    .name = "host",
-    .source = std.build.FileSource.relative("src/host.zig"),
-};
-
-var lib_package = std.build.Pkg{
-    .name = "lib",
-    .source = std.build.FileSource.relative("src/lib.zig"),
-};
-
-var privileged_package = std.build.Pkg{
-    .name = "privileged",
-    .source = std.build.FileSource.relative("src/privileged.zig"),
-};
-
-var rise_package = std.build.Pkg{
-    .name = "rise",
-    .source = std.build.FileSource.relative("src/rise.zig"),
-};
-
-var user_package = std.build.Pkg{
-    .name = "user",
-    .source = std.build.FileSource.relative("src/user.zig"),
-};
 
 fn getTarget(comptime asked_arch: Cpu.Arch, comptime execution_mode: common.TraditionalExecutionMode) CrossTarget {
     var enabled_features = Cpu.Feature.Set.empty;

@@ -1,6 +1,6 @@
-const lib = @import("lib");
+const lib = @import("../../../lib.zig");
 const log = lib.log;
-const privileged = @import("privileged");
+const privileged = @import("../../../privileged.zig");
 const ACPI = privileged.ACPI;
 const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
@@ -16,7 +16,7 @@ const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
 const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
 const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 
-const bootloader = @import("bootloader");
+const bootloader = @import("../../../bootloader.zig");
 const BIOS = bootloader.BIOS;
 
 extern const loader_start: u8;

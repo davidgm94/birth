@@ -1,11 +1,11 @@
 pub const BIOS = @import("bootloader/bios.zig");
 pub const UEFI = @import("bootloader/uefi.zig");
 
-const lib = @import("lib");
+const lib = @import("lib.zig");
 const Allocator = lib.Allocator;
 const Protocol = lib.Bootloader.Protocol;
 
-const privileged = @import("privileged");
+const privileged = @import("privileged.zig");
 const AddressInterface = privileged.Address.Interface;
 
 pub const Information = extern struct {
