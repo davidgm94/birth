@@ -1081,7 +1081,8 @@ const limine_directories = [_][]const u8{
 };
 const limine_files = [_]File{
     // .{ .path = "/limine.sys", .content = @embedFile("bootloader/limine/installables/limine.sys") },
-    .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
+    // .{ .path = "/limine.cfg", .content = @embedFile("bootloader/limine/installables/limine.cfg") },
+    .{ .path = "/limine.sys", .content = &[1]u8{0xff} ** 513 },
 };
 
 test "Limine barebones" {

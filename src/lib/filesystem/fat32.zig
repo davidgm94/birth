@@ -226,14 +226,18 @@ pub const LongNameEntry = extern struct {
 };
 
 pub const Entry = packed struct(u32) {
-    value: u28,
+    next_cluster: u28,
     reserved: u4 = 0,
 
     pub const Sector = [per_sector]FAT32.Entry;
     const per_sector = @divExact(0x200, @sizeOf(FAT32.Entry));
 
     pub fn is_free(entry: Entry) bool {
-        return entry.value == value_free;
+        return entry.next_cluster == value_free;
+    }
+
+    pub fn isAllocating(entry: Entry) bool {
+        return entry.next_cluster == value_allocated_and_eof or (entry.next_cluster >= value_allocated_start and entry.next_cluster < value_reserved_and_should_not_be_used_end);
     }
 
     pub fn is_eof(entry: Entry, max_valid_cluster_number: u32) bool {
@@ -241,10 +245,6 @@ pub const Entry = packed struct(u32) {
             .reserved_and_should_not_be_used_eof, .allocated_and_eof => true,
             .bad_cluster, .reserved_and_should_not_be_used, .allocated, .free => false,
         };
-    }
-
-    pub fn is_allocated_and_eof(entry: Entry) bool {
-        return entry.value == value_allocated_and_eof;
     }
 
     pub fn get_type(entry: Entry, max_valid_cluster_number: u32) Type {
@@ -259,7 +259,7 @@ pub const Entry = packed struct(u32) {
 
     fn get_entry(t: Type) Entry {
         return Entry{
-            .value = switch (t) {
+            .next_cluster = switch (t) {
                 .free => value_free,
                 .allocated => value_allocated_start,
                 .reserved_and_should_not_be_used => value_reserved_and_should_not_be_used_end,
@@ -1010,7 +1010,7 @@ pub const Cache = extern struct {
         const fat_entry_count = cache.mbr.bpb.dos3_31.dos2_0.fat_count;
         const fat_entry_sector_count = cache.mbr.bpb.fat_sector_count_32;
 
-        if (entry.is_allocated_and_eof()) {
+        if (entry.isAllocating()) {
             cache.fs_info.last_allocated_cluster = cluster;
             cache.fs_info.free_cluster_count -= 1;
         }
@@ -1037,11 +1037,14 @@ pub const Cache = extern struct {
         while (try fat_entry_iterator.next(cache, maybe_allocator)) |cluster| {
             const entry = &fat_entry_iterator.entries[cluster % Entry.per_sector];
             if (entry.is_free()) {
-                try cache.registerCluster(cluster, FAT32.Entry.allocated_and_eof, maybe_allocator);
+                const should_return = cluster_index == clusters.len - 1;
+                try cache.registerCluster(cluster, if (should_return) Entry.allocated_and_eof else Entry{
+                    .next_cluster = @intCast(u28, cluster + 1),
+                }, maybe_allocator);
                 clusters[cluster_index] = cluster;
                 cluster_index += 1;
 
-                if (cluster_index == clusters.len) return;
+                if (should_return) return;
             }
         }
 
