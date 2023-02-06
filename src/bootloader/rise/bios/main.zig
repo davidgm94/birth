@@ -92,7 +92,7 @@ export fn entryPoint() callconv(.C) noreturn {
     }
 
     for (files) |file| {
-        if (lib.equal(u8, file.path, "/CPUDRV")) {
+        if (lib.equal(u8, file.path, "/CPUDRIV")) {
             var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
 
             const program_headers = parser.getProgramHeaders();

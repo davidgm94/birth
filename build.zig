@@ -437,16 +437,19 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                 else => @compileError("Architecture not supported"),
             }
         },
-        .limine => {},
-        //     const executable = builder.addExecutable(.{
-        //         .name = "loader" ++ suffix,
-        //         .root_source_file = FileSource.relative("src/bootloader/limine/limine.zig"),
-        //         .target = getTarget(.x86_64, .privileged),
-        //     });
-        //     executable.setOutputDir(cache_dir);
-        //
-        //     try bootloader_executables.append(executable);
-        // },
+        .limine => {
+            // const bootloader_path = "src/bootloader/limine/";
+            // const executable = builder.addExecutable(.{
+            //     .name = "loader_limine_" ++ @tagName(configuration.architecture),
+            //     .root_source_file = FileSource.relative("src/bootloader/limine/limine.zig"),
+            //     .target = getTarget(configuration.architecture, .privileged),
+            // });
+            // executable.setOutputDir(cache_dir);
+            // executable.setMainPkgPath("src");
+            // executable.setLinkerScriptPath(std.Build.FileSource.relative(bootloader_path ++ "linker_script.ld"));
+            // executable.code_model = .kernel;
+            // try bootloader_executables.append(executable);
+        },
     }
 
     const bootloader_build = .{

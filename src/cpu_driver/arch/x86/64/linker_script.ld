@@ -1,5 +1,5 @@
 SECTIONS {
-  . = 0xFFFFFFFF80004000;
+  . = 0xFFFFFFFF80000000;
   kernel_start = .;
 
   . = ALIGN(4K);

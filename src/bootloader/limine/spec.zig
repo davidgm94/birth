@@ -1,6 +1,6 @@
 const ID = [4]u64;
 
-fn request_id(c: u64, d: u64) ID {
+fn requestID(c: u64, d: u64) ID {
     return .{ 0xc7b1dd30df4c8b88, 0x0a82e883a194f07b, c, d };
 }
 
@@ -36,7 +36,7 @@ pub const File = extern struct {
 
 pub const BootloaderInfo = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0xf55038d8e2a1202f, 0x279426fcf5f59740),
+        id: ID = requestID(0xf55038d8e2a1202f, 0x279426fcf5f59740),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -50,7 +50,7 @@ pub const BootloaderInfo = extern struct {
 
 pub const StackSize = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x224ef0460a8e8926, 0xe1cb0fc25f46ea3d),
+        id: ID = requestID(0x224ef0460a8e8926, 0xe1cb0fc25f46ea3d),
         revision: u64,
         response: ?*const Response = null,
         stack_size: u64,
@@ -63,7 +63,7 @@ pub const StackSize = extern struct {
 
 pub const HHDM = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x48dcf1cb8ad2b852, 0x63984e959a98244b),
+        id: ID = requestID(0x48dcf1cb8ad2b852, 0x63984e959a98244b),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -72,6 +72,20 @@ pub const HHDM = extern struct {
         revision: u64,
         offset: u64,
     };
+};
+
+pub const VideoMode = extern struct {
+    pitch: u64,
+    width: u64,
+    height: u64,
+    bpp: u16,
+    memory_model: u8,
+    red_mask_size: u8,
+    red_mask_shift: u8,
+    green_mask_size: u8,
+    green_mask_shift: u8,
+    blue_mask_size: u8,
+    blue_mask_shift: u8,
 };
 
 pub const Framebuffer = extern struct {
@@ -88,11 +102,11 @@ pub const Framebuffer = extern struct {
     blue_mask_size: u8,
     blue_mask_shift: u8,
     unused: [7]u8,
-    edid_size: u64,
-    edid: u64,
+    mode_count: u64,
+    modes: *[*]VideoMode,
 
     pub const Request = extern struct {
-        id: ID = request_id(0x9d5827dcd881dd75, 0xa3148604f6fab11b),
+        id: ID = requestID(0x9d5827dcd881dd75, 0xa3148604f6fab11b),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -124,7 +138,7 @@ pub const Terminal = extern struct {
     framebuffer: ?*Framebuffer,
 
     pub const Request = extern struct {
-        id: ID = request_id(0xc8ac59310c2b0844, 0xa68d0c7265d38878),
+        id: ID = requestID(0xc8ac59310c2b0844, 0xa68d0c7265d38878),
         revision: u64,
         response: ?*const Response = null,
         callback: ?*const Callback,
@@ -143,7 +157,7 @@ pub const Terminal = extern struct {
 
 pub const Paging5Level = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x94469551da9b3192, 0xebe5e86db7382888),
+        id: ID = requestID(0x94469551da9b3192, 0xebe5e86db7382888),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -156,10 +170,13 @@ pub const Paging5Level = extern struct {
 const SMPInfoGoToAddress = fn (*SMPInfo) callconv(.C) noreturn;
 
 pub const SMPInfoRequest = extern struct {
-    id: ID = request_id(0x95a67b819a1b857e, 0xa0b61b723b6a73e0),
+    id: ID = requestID(0x95a67b819a1b857e, 0xa0b61b723b6a73e0),
     revision: u64,
     response: ?*const SMPInfo.Response = null,
-    flags: u64,
+    flags: packed struct(u64) {
+        x2apic: bool,
+        reserved: u63 = 0,
+    },
 };
 
 pub const SMPInfo = switch (@import("builtin").cpu.arch) {
@@ -199,8 +216,6 @@ pub const SMPInfo = switch (@import("builtin").cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
-//define LIMINE_SMP_X2APIC (1 << 0)
-
 pub const MemoryMap = extern struct {
     pub const Entry = extern struct {
         address: u64,
@@ -220,7 +235,7 @@ pub const MemoryMap = extern struct {
     };
 
     pub const Request = extern struct {
-        id: ID = request_id(0x67cf3d9d378a806f, 0xe304acdfc50c3c62),
+        id: ID = requestID(0x67cf3d9d378a806f, 0xe304acdfc50c3c62),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -236,7 +251,7 @@ pub const EntryPoint = extern struct {
     pub const Function = fn () callconv(.C) noreturn;
 
     pub const Request = extern struct {
-        id: ID = request_id(0x13d86c035a1cd3e1, 0x2b0caa89d8f3026a),
+        id: ID = requestID(0x13d86c035a1cd3e1, 0x2b0caa89d8f3026a),
         revision: u64,
         response: ?*const Response = null,
         entry_point: *const Function,
@@ -249,7 +264,7 @@ pub const EntryPoint = extern struct {
 
 pub const KernelFile = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0xad97e90e83f1ed67, 0x31eb5d1c5ff23b69),
+        id: ID = requestID(0xad97e90e83f1ed67, 0x31eb5d1c5ff23b69),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -262,7 +277,7 @@ pub const KernelFile = extern struct {
 
 pub const Module = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x3e7e279702be32af, 0xca1c4f3bd1280cee),
+        id: ID = requestID(0x3e7e279702be32af, 0xca1c4f3bd1280cee),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -276,7 +291,7 @@ pub const Module = extern struct {
 
 pub const RSDP = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0xc5e77b6b397e7b43, 0x27637845accdcf3c),
+        id: ID = requestID(0xc5e77b6b397e7b43, 0x27637845accdcf3c),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -289,7 +304,7 @@ pub const RSDP = extern struct {
 
 pub const SMBIOS = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x9e9046f11e095391, 0xaa4a520fefbde5ee),
+        id: ID = requestID(0x9e9046f11e095391, 0xaa4a520fefbde5ee),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -303,7 +318,7 @@ pub const SMBIOS = extern struct {
 
 pub const EFISystemTable = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x5ceba5163eaaf6d6, 0x0a6981610cf65fcc),
+        id: ID = requestID(0x5ceba5163eaaf6d6, 0x0a6981610cf65fcc),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -316,7 +331,7 @@ pub const EFISystemTable = extern struct {
 
 pub const BootTime = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x502746e184c088aa, 0xfbc5ec83e6327893),
+        id: ID = requestID(0x502746e184c088aa, 0xfbc5ec83e6327893),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -329,7 +344,7 @@ pub const BootTime = extern struct {
 
 pub const KernelAddress = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0x71ba76863cc55f63, 0xb2644a48c516a487),
+        id: ID = requestID(0x71ba76863cc55f63, 0xb2644a48c516a487),
         revision: u64,
         response: ?*const Response = null,
     };
@@ -343,7 +358,7 @@ pub const KernelAddress = extern struct {
 
 pub const DTB = extern struct {
     pub const Request = extern struct {
-        id: ID = request_id(0xb40ddb48fb54bac7, 0x545081493f81ffb7),
+        id: ID = requestID(0xb40ddb48fb54bac7, 0x545081493f81ffb7),
         revision: u64,
         response: ?*const Response = null,
     };

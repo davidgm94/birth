@@ -3,6 +3,7 @@ const assert = lib.assert;
 const log = lib.log;
 
 const bootloader = @import("../bootloader.zig");
+const limine = bootloader.limine;
 
 const privileged = @import("../privileged.zig");
 const stopCPU = privileged.arch.stopCPU;
@@ -28,6 +29,35 @@ pub const std_options = struct {
 
     pub const log_level = lib.log.Level.debug;
 };
+
+export fn limineEntryPoint() noreturn {
+    const limine_log = log.scoped(.LIMINE);
+    limine_log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
+    const hhdm = limine_hhdm.response.?.offset;
+    assert(limine_stack_size.response != null);
+    const stack_size = limine_stack_size.stack_size;
+    const framebuffers = limine_framebuffer.response.?.framebuffers.?.*[0..limine_framebuffer.response.?.framebuffer_count];
+    limine_log.debug("Limine requests:\nHHDM: 0x{x}\nStack size: 0x{x}", .{ hhdm, stack_size });
+    limine_log.debug("Framebuffers:", .{});
+    for (framebuffers) |framebuffer| {
+        limine_log.debug("{}", .{framebuffer});
+    }
+    limine_log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
+    limine_log.debug("Memory map entry count: {}", .{limine_memory_map.response.?.entry_count});
+    limine_log.debug("Module count: {}", .{limine_modules.response.?.module_count});
+
+    stopCPU();
+}
+
+export var limine_information = limine.BootloaderInfo.Request{ .revision = 0 };
+export var limine_stack_size = limine.StackSize.Request{ .revision = 0, .stack_size = 0x4000 };
+export var limine_hhdm = limine.HHDM.Request{ .revision = 0 };
+export var limine_framebuffer = limine.Framebuffer.Request{ .revision = 0 };
+export var limine_smp = limine.SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
+export var limine_memory_map = limine.MemoryMap.Request{ .revision = 0 };
+export var limine_entry_point = limine.EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
+export var limine_kernel_file = limine.KernelFile.Request{ .revision = 0 };
+export var limine_modules = limine.Module.Request{ .revision = 0 };
 
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     if (bootloader_information.size != @sizeOf(bootloader.Information)) @panic("Bootloader information size doesn't match");
