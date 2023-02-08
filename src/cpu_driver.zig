@@ -60,7 +60,7 @@ export var limine_kernel_file = limine.KernelFile.Request{ .revision = 0 };
 export var limine_modules = limine.Module.Request{ .revision = 0 };
 
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    if (bootloader_information.size != @sizeOf(bootloader.Information)) @panic("Bootloader information size doesn't match");
+    if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
     log.debug("Starting...", .{});
     // var total_page_count: u32 = 0;
     // for (bootloader_information.page.counters) |page_counter| {

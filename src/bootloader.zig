@@ -20,10 +20,13 @@ pub const Information = extern struct {
     size: u32,
     extra_size_after_aligned_end: u32,
     entry_point: u64,
-    memory_map: MemoryMap,
-    // Page allocator
-    page: Pages,
+    page_allocator: Allocator = .{
+        .callbacks = .{
+            .allocate = pageAllocate,
+        },
+    },
     heap: Heap,
+    cpu_driver_mappings: CPUDriverMappings,
     offsets: Offsets,
     architecture: switch (lib.cpu.arch) {
         .x86, .x86_64 => extern struct {
@@ -32,27 +35,24 @@ pub const Information = extern struct {
         else => @compileError("Architecture not supported"),
     },
 
-    const Offsets = extern struct {
-        size_counters: Offset = .{},
+    pub const Offsets = extern struct {
+        page_counters: Offset = .{},
         memory_map: Offset = .{},
+        stack: Offset = .{},
     };
 
     const Offset = extern struct {
         offset: u32 = 0,
         size: u32 = 0,
+        base_element_size: u32 = 0,
+        len: u32 = 0,
     };
 
     // TODO:
     const PA = PhysicalAddress(.global);
     const PMR = PhysicalMemoryRegion(.global);
 
-    const Pages = extern struct {
-        allocator: Allocator = .{
-            .callbacks = .{
-                .allocate = pageAllocate,
-            },
-        },
-    };
+    const Pages = extern struct {};
 
     const Heap = extern struct {
         allocator: Allocator = .{
@@ -71,46 +71,97 @@ pub const Information = extern struct {
         };
     }
 
+    pub fn getMemoryMapEntries(information: *Information) []MemoryMapEntry {
+        return information.getRegionFromOffset("memory_map").access(MemoryMapEntry);
+    }
+
+    pub fn getPageCounters(information: *Information) []u32 {
+        return information.getRegionFromOffset("page_counters").access(u32);
+    }
+
     pub fn getStructAlignedSize() usize {
         return lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]);
     }
 
+    pub fn isSizeRight(information: *const Information) bool {
+        var size: usize = 0;
+        size += lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]);
+        var offset_size: usize = 0;
+
+        if (information.offsets.memory_map.base_element_size != @sizeOf(MemoryMapEntry)) return false;
+        if (information.offsets.memory_map.len * @sizeOf(MemoryMapEntry) != information.offsets.memory_map.size) return false;
+        inline for (lib.fields(Information.Offsets)) |field| {
+            const name = field.name;
+            const field_value = @field(information.offsets, name);
+            offset_size += field_value.size;
+        }
+
+        offset_size = lib.alignForward(offset_size, lib.arch.valid_page_sizes[0]);
+        size += offset_size;
+
+        lib.log.debug("Size: 0x{x}. Registered size: 0x{x}. Extra: 0x{x}. Registered extra: 0x{x}", .{ size, information.size, offset_size, information.extra_size_after_aligned_end });
+
+        return information.size == size and information.extra_size_after_aligned_end == offset_size;
+    }
+
+    inline fn allocateChunk(information: *Information, allocated_size: *usize, comptime offset_field: []const u8, size: u32, base_element_size: u32, len: u32) void {
+        if (allocated_size.* + size > information.extra_size_after_aligned_end) @panic("size exceeded");
+        const offset = allocated_size.* + getStructAlignedSize();
+
+        @field(information.offsets, offset_field).offset = offset;
+        @field(information.offsets, offset_field).size = size;
+        @field(information.offsets, offset_field).base_element_size = base_element_size;
+        @field(information.offsets, offset_field).len = len;
+
+        allocated_size.* = allocated_size.* + size;
+    }
+
     pub fn fromBIOS(rsdp_address: u64, memory_map_entry_count: usize, stack_size: usize) !*Information {
         var iterator = BIOS.E820Iterator{};
+
+        const memory_map_size = memory_map_entry_count * @sizeOf(MemoryMapEntry);
+        const page_counter_size = memory_map_entry_count * @sizeOf(u32);
+        const extra_size_after_aligned_end = stack_size + memory_map_size + page_counter_size;
+        const aligned_extra_size_after_aligned_end = lib.alignForward(stack_size + memory_map_size + page_counter_size, lib.arch.valid_page_sizes[0]);
         const aligned_struct_size = getStructAlignedSize();
-        const extra_size_after_aligned_end = memory_map_entry_count * @sizeOf(MemoryMapEntry) + memory_map_entry_count * @sizeOf(u32) + stack_size;
-        const size_to_allocate = aligned_struct_size + extra_size_after_aligned_end;
+        const size_to_allocate = aligned_struct_size + aligned_extra_size_after_aligned_end;
 
         while (iterator.next()) |entry| {
-            if (!entry.isLowMemory() and entry.region.size > size_to_allocate) {
-                const bootloader_information_region = entry.region.takeSlice(@sizeOf(Information));
+            if (!entry.descriptor.isLowMemory() and entry.descriptor.region.size > size_to_allocate) {
+                const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(Information));
                 const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*Information);
                 result.* = .{
                     .protocol = .bios,
                     .bootloader = .rise,
                     .size = size_to_allocate,
-                    .extra_size_after_aligned_end = extra_size_after_aligned_end,
+                    .extra_size_after_aligned_end = aligned_extra_size_after_aligned_end,
                     .entry_point = 0,
-                    .memory_map = .{},
-                    .page = .{},
                     .heap = .{},
+                    .cpu_driver_mappings = .{},
                     .offsets = .{},
                     .architecture = .{
                         .rsdp_address = rsdp_address,
                     },
                 };
 
-                @panic("TODO: BIOS");
+                var allocated_size: usize = 0;
+                result.allocateChunk(&allocated_size, "stack", stack_size, @sizeOf(u8), @divExact(stack_size, @sizeOf(u8)));
+                result.allocateChunk(&allocated_size, "memory_map", memory_map_size, @sizeOf(MemoryMapEntry), memory_map_entry_count);
+                result.allocateChunk(&allocated_size, "page_counters", page_counter_size, @sizeOf(u32), memory_map_entry_count);
 
-                // result.page.counters[iterator.index] = lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]) / lib.arch.valid_page_sizes[0];
-                // BIOS.fetchMemoryEntries(&result.memory_map);
-                //
-                // result.cpu_driver_mappings.stack.size = 0x4000;
-                // const stack_allocation = try result.page.allocator.allocateBytes(result.cpu_driver_mappings.stack.size, lib.arch.valid_page_sizes[0]);
-                // result.cpu_driver_mappings.stack.physical = PhysicalAddress(.local).new(stack_allocation.address);
-                // result.cpu_driver_mappings.stack.virtual = result.cpu_driver_mappings.stack.physical.toIdentityMappedVirtualAddress();
-                //
-                // return result;
+                if (allocated_size != extra_size_after_aligned_end) @panic("Offset allocation size must matched bootloader allocated size");
+
+                const page_counters = result.getPageCounters();
+                for (page_counters) |*page_counter| {
+                    page_counter.* = 0;
+                }
+
+                page_counters[entry.index] = size_to_allocate;
+
+                const memory_map_entries = result.getMemoryMapEntries();
+                BIOS.fetchMemoryEntries(memory_map_entries);
+
+                return result;
             }
         }
 
@@ -118,36 +169,30 @@ pub const Information = extern struct {
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        const bootloader_information = @fieldParentPtr(Information, "page", @fieldParentPtr(Pages, "allocator", allocator));
-        _ = bootloader_information;
+        const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
 
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
-        _ = four_kb_pages;
 
-        if (current_protocol) |protocol| {
-            _ = protocol;
-            @panic("TODO: pageAllocate");
-            // const entries = bootloader_information.memory_map.getNativeEntries(protocol);
-            // for (entries) |entry, entry_index| {
-            //     const busy_size = bootloader_information.page.counters[entry_index] * lib.arch.valid_page_sizes[0];
-            //     const size_left = entry.region.size - busy_size;
-            //     if (entry.isUsable() and size_left > size) {
-            //         if (entry.region.address.isAligned(alignment)) {
-            //             const result = Allocator.Allocate.Result{
-            //                 .address = entry.region.address.offset(busy_size).value(),
-            //                 .size = size,
-            //             };
-            //
-            //             bootloader_information.page.counters[entry_index] += four_kb_pages;
-            //
-            //             return result;
-            //         }
-            //     }
-            // }
-            //
-            // return Allocator.Allocate.Error.OutOfMemory;
+        const entries = bootloader_information.getMemoryMapEntries();
+        const page_counters = bootloader_information.getPageCounters();
+
+        for (entries) |entry, entry_index| {
+            const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
+            const size_left = entry.region.size - busy_size;
+            if (entry.type == .usable and size_left > size) {
+                if (entry.region.address.isAligned(alignment)) {
+                    const result = Allocator.Allocate.Result{
+                        .address = entry.region.address.offset(busy_size).value(),
+                        .size = size,
+                    };
+
+                    page_counters[entry_index] += four_kb_pages;
+
+                    return result;
+                }
+            }
         }
 
         return Allocator.Allocate.Error.OutOfMemory;
@@ -169,7 +214,7 @@ pub const Information = extern struct {
         const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
         for (bootloader_information.heap.regions) |*region| {
             if (region.size == 0) {
-                const allocated_region = try bootloader_information.page.allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
                 region.* = .{
                     .address = PA.new(allocated_region.address),
                     .size = allocated_region.size,
@@ -187,6 +232,18 @@ pub const Information = extern struct {
         _ = alignment;
         @panic("todo: heap allocate");
     }
+};
+
+pub const CPUDriverMappings = extern struct {
+    text: Mapping = .{},
+    data: Mapping = .{},
+    rodata: Mapping = .{},
+
+    const Mapping = extern struct {
+        physical: PhysicalAddress(.local) = PhysicalAddress(.local).invalid(),
+        virtual: VirtualAddress(.local) = .null,
+        size: u64 = 0,
+    };
 };
 
 const current_protocol: ?Protocol = switch (lib.cpu.arch) {
@@ -207,48 +264,6 @@ const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
-pub const MemoryMap = extern struct {
-    buffer: [size]u8 = [1]u8{0} ** size,
-    entry_count: u32 = 0,
-
-    pub const size = 48 * 128;
-
-    const BIOSMemoryMap = extern struct {
-        descriptors: [entry_count]BIOS.MemoryMapEntry = [1]BIOS.MemoryMapEntry{lib.zeroes(BIOS.MemoryMapEntry)} ** entry_count,
-    };
-    const UEFIMemoryMap = extern struct {
-        descriptors: [entry_count]UEFI.MemoryDescriptor = [1]UEFI.MemoryDescriptor{lib.zeroes(UEFI.MemoryDescriptor)} ** entry_count,
-        descriptor_size: u32 = @sizeOf(UEFI.MemoryDescriptor),
-        descriptor_version: u32 = 1,
-    };
-
-    const entry_count = 128;
-
-    pub fn getNativeEntries(memory_map: *MemoryMap, comptime protocol: Protocol) []const EntryType(protocol) {
-        return switch (protocol) {
-            .bios => @ptrCast([*]const BIOS.MemoryMapEntry, @alignCast(@alignOf(BIOS.MemoryMapEntry), &memory_map.buffer))[0..entry_count],
-            .uefi => @panic("todo: uefi native iterator"),
-        };
-    }
-
-    pub fn getEntry(memory_map: *MemoryMap, comptime protocol: Protocol, index: usize) *EntryType(protocol) {
-        return switch (protocol) {
-            .bios => &@ptrCast([*]BIOS.MemoryMapEntry, @alignCast(@alignOf(BIOS.MemoryMapEntry), &memory_map.buffer[index * @sizeOf(BIOS.MemoryMapEntry)]))[0],
-            .uefi => @panic("todo: uefi native iterator"),
-        };
-    }
-
-    fn EntryIterator(comptime protocol: Protocol) type {
-        const Entry = EntryType(protocol);
-        return struct {
-            entries: []const Entry,
-            index: usize = 0,
-
-            const Iterator = @This();
-        };
-    }
-};
-
 fn EntryType(comptime protocol: Protocol) type {
     return switch (protocol) {
         .bios => BIOS.MemoryMapEntry,
@@ -257,12 +272,13 @@ fn EntryType(comptime protocol: Protocol) type {
 }
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion(.local),
+    region: PhysicalMemoryRegion(.global),
     type: Type,
 
     const Type = enum(u64) {
         usable = 0,
         reserved = 1,
+        bad_memory = 2,
     };
 
     comptime {

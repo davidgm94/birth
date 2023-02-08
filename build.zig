@@ -27,7 +27,7 @@ const Configuration = struct {
 };
 
 const default_configuration = Configuration{
-    .bootloader = .limine,
+    .bootloader = .rise,
     .architecture = .x86_64,
     .boot_protocol = .bios,
 };
@@ -46,7 +46,7 @@ pub fn build(builder: *Builder) !void {
 
         inline for (common.supported_architectures) |architecture, architecture_index| {
             const cpu_driver = try createCPUDriver(builder, architecture, false);
-            //const cpu_driver_test = try createCPUDriver(builder, architecture, true);
+            // const cpu_driver_test = try createCPUDriver(builder, architecture, true);
             _ = cpu_driver;
             const bootloaders = common.architecture_bootloader_map[architecture_index];
             var bootloader_steps = std.ArrayList(BootloaderSteps).init(builder.allocator);
@@ -472,7 +472,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, co
     const target = getTarget(architecture, .privileged);
     const cpu_driver = if (is_test) builder.addTest(.{
         .name = exe_name,
-        .root_source_file = FileSource.relative("src/cpu_driver_tests.zig"),
+        .root_source_file = cpu_driver_file,
         .target = target,
         .kind = .test_exe,
     }) else builder.addExecutable(.{

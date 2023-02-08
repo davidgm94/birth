@@ -31,6 +31,10 @@ pub fn Interface(comptime Usize: type) type {
                     return VirtualAddress(core_locality).new(physical_address.value());
                 }
 
+                pub inline fn toHigherHalfVirtualAddress(physical_address: PA) VirtualAddress(core_locality) {
+                    return physical_address.toIdentityMappedVirtualAddress().offset(lib.config.cpu_driver_higher_half_address);
+                }
+
                 pub inline fn addOffset(physical_address: *PA, asked_offset: Usize) void {
                     physical_address.* = physical_address.offset(asked_offset);
                 }

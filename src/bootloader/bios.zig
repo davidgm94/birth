@@ -188,7 +188,7 @@ pub const E820Iterator = extern struct {
     registers: Registers = .{},
     index: u32 = 0,
 
-    pub fn next(iterator: *E820Iterator) ?MemoryMapEntry {
+    pub fn next(iterator: *E820Iterator) ?struct { descriptor: MemoryMapEntry, index: usize } {
         var memory_map_entry: MemoryMapEntry = undefined;
 
         iterator.registers.eax = 0xe820;
@@ -199,8 +199,9 @@ pub const E820Iterator = extern struct {
         int(0x15, &iterator.registers, &iterator.registers);
 
         if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
+            const entry_index = iterator.index;
             iterator.index += 1;
-            return memory_map_entry;
+            return .{ .index = entry_index, .descriptor = memory_map_entry };
         } else {
             return null;
         }
@@ -237,13 +238,20 @@ pub fn findSuitableEntry(size: u32) ?SuitableEntry {
     return null;
 }
 
-pub fn fetchMemoryEntries(memory_map: *bootloader.MemoryMap) void {
+pub fn fetchMemoryEntries(memory_map: []bootloader.MemoryMapEntry) void {
     var iterator = E820Iterator{};
     while (iterator.next()) |entry| {
-        memory_map.getEntry(.bios, iterator.index).* = entry;
+        memory_map[entry.index] = .{
+            .region = entry.descriptor.region,
+            .type = switch (entry.descriptor.type) {
+                .usable => if (entry.descriptor.isUsable()) .usable else .reserved,
+                .bad_memory => .bad_memory,
+                else => .reserved,
+            },
+        };
     }
 
-    memory_map.entry_count = iterator.index;
+    if (iterator.index != memory_map.len) @panic("Memory map entries don't match");
 }
 
 const FindRSDPResult = union(enum) {

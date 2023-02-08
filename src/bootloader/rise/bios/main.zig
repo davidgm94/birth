@@ -43,7 +43,7 @@ export fn entryPoint() callconv(.C) noreturn {
     log.debug("CPU count: {}", .{cpu_count});
 
     const bootloader_information = bootloader.Information.fromBIOS(rsdp_address, memory_map_entry_count, privileged.default_stack_size) catch @panic("Can't get bootloader information");
-    const page_allocator = &bootloader_information.page.allocator;
+    const page_allocator = &bootloader_information.page_allocator;
     const allocator = &bootloader_information.heap.allocator;
 
     var bios_disk = BIOS.Disk{
@@ -63,15 +63,25 @@ export fn entryPoint() callconv(.C) noreturn {
     const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
     const rise_files_file = fat_cache.readFile(allocator, "/files") catch @panic("cant load json from disk");
     var file_parser = lib.FileParser.init(rise_files_file);
-    while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
-        if (file_count == files.len) @panic("max files");
-        const file_content = fat_cache.readFile(allocator, file_descriptor.guest) catch @panic("cant read file");
-        files[file_count] = .{
-            .path = file_descriptor.guest,
-            .content = file_content,
-        };
-        file_count += 1;
-    }
+    const cpu_driver_name = blk: {
+        var maybe_cpu_driver_name: ?[]const u8 = null;
+        while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
+            if (file_count == files.len) @panic("max files");
+            if (file_descriptor.type == .cpu_driver) {
+                if (maybe_cpu_driver_name != null) @panic("Two cpu drivers");
+                maybe_cpu_driver_name = file_descriptor.guest;
+            }
+
+            const file_content = fat_cache.readFile(allocator, file_descriptor.guest) catch @panic("cant read file");
+            files[file_count] = .{
+                .path = file_descriptor.guest,
+                .content = file_content,
+            };
+            file_count += 1;
+        }
+
+        break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
+    };
 
     var kernel_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_kernel_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap kernel address space");
@@ -83,17 +93,26 @@ export fn entryPoint() callconv(.C) noreturn {
         break :blk result;
     };
 
-    const entries = bootloader_information.memory_map.getNativeEntries(.bios);
+    const entries = bootloader_information.getMemoryMapEntries();
     for (entries) |entry| {
         if (entry.type == .usable) {
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("mapping failed");
+            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("Mapping of memory map entry failed");
         }
     }
 
-    if (true) @panic("TODO: BIOS main");
+    const loader_physical_start = PhysicalAddress(.global).new(lib.alignBackward(@ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
+    const loader_size = lib.alignForwardGeneric(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
+    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch |err| {
+        log.debug("Error: {}", .{err});
+        @panic("Mapping of BIOS loader failed");
+    };
+
+    const loader_stack = PhysicalAddress(.global).new(0xf000);
+    const loader_stack_size = 0x1000;
+    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {
-        if (lib.equal(u8, file.path, "/CPUDRIV")) {
+        if (lib.equal(u8, file.path, cpu_driver_name)) {
             var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
 
             const program_headers = parser.getProgramHeaders();
@@ -144,11 +163,11 @@ export fn entryPoint() callconv(.C) noreturn {
                 }
             }
 
-            bootloader_information.cpu_driver_mappings.stack.virtual = bootloader_information.cpu_driver_mappings.text.virtual.negative_offset(bootloader_information.cpu_driver_mappings.stack.size);
-            log.debug("Text VA: 0x{x}. Stack VA: 0x{x}", .{ bootloader_information.cpu_driver_mappings.text.virtual.value(), bootloader_information.cpu_driver_mappings.stack.virtual.value() });
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information.cpu_driver_mappings.stack.physical, bootloader_information.cpu_driver_mappings.stack.virtual, bootloader_information.cpu_driver_mappings.stack.size, .{ .write = true, .execute = false }, page_allocator) catch {
-                @panic("Mapping failed");
-            };
+            // Map this struct
+
+            const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
+            const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
+            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping failed");
 
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
@@ -201,9 +220,8 @@ export fn entryPoint() callconv(.C) noreturn {
 
             if (bootloader_information.entry_point != 0) {
                 const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
-                const stack_offset = @offsetOf(bootloader.Information, "cpu_driver_mappings") + @offsetOf(bootloader.CPUDriverMappings, "stack");
-                log.debug("BI: 0x{x}. Entry point offset: 0x{x}. Stack offset: 0x{x}. Stack: {}", .{ @ptrToInt(bootloader_information), entry_point_offset, stack_offset, bootloader_information.cpu_driver_mappings.stack });
-                trampoline(@ptrToInt(bootloader_information), entry_point_offset, stack_offset);
+                const stack_offset = @offsetOf(bootloader.Information, "offsets") + @offsetOf(bootloader.Information.Offsets, "stack");
+                trampoline(bootloader_information_virtual_address.value(), entry_point_offset, stack_offset);
             }
         }
     }
@@ -232,15 +250,10 @@ comptime {
         \\pop %esi
         \\.byte 0x48
         \\add %edi, %esi
+        \\mov (%esi), %esp
+        \\add 0x4(%esi), %esp
         \\.byte 0x48
-        \\add $0x8, %esi
-        \\.byte 0x48
-        \\mov (%esi), %ecx
-        \\.byte 0x48
-        \\addl 0x8(%esi), %ecx
-        \\.byte 0x48
-        \\mov %ecx, %esp
-        \\.byte 0x48
+        \\add %esi, %esp
         \\xor %ebp, %ebp
         // jmp rax
         \\.byte 0xff
