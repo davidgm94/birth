@@ -29,6 +29,8 @@ fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
     return arch.io.writeBytes(bytes);
 }
 
+pub const default_stack_size = 0x4000;
+
 pub const ResourceOwner = enum(u2) {
     bootloader = 0,
     kernel = 1,

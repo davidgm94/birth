@@ -272,12 +272,17 @@ pub const FileParser = struct {
         host_base: []const u8,
         suffix_type: SuffixType,
         guest: []const u8,
+        type: FileType,
     };
 
     pub const SuffixType = enum {
         none,
         arch,
         full,
+    };
+
+    const FileType = enum {
+        cpu_driver,
     };
 
     pub fn next(parser: *FileParser) !?File {
@@ -290,6 +295,7 @@ pub const FileParser = struct {
                 const host_base_field = try parser.parse_field("host_base");
                 const suffix_type = common.stringToEnum(SuffixType, try parser.parse_field("suffix_type")) orelse return Error.err;
                 const guest_field = try parser.parse_field("guest");
+                const file_type = common.stringToEnum(FileType, try parser.parse_field("type")) orelse return Error.err;
                 try parser.expect_char('}');
                 parser.maybe_expect_char(',');
                 parser.skip_space();
@@ -299,6 +305,7 @@ pub const FileParser = struct {
                     .host_base = host_base_field,
                     .suffix_type = suffix_type,
                     .guest = guest_field,
+                    .type = file_type,
                 };
             } else {
                 @panic("WTF");

@@ -3,8 +3,8 @@ const common = @import("src/common.zig");
 
 // Build types
 const Builder = std.Build.Builder;
+const CompileStep = std.build.CompileStep;
 const FileSource = std.Build.FileSource;
-const LibExeObjStep = std.Build.LibExeObjStep;
 const RunStep = std.Build.RunStep;
 const Step = std.Build.Step;
 
@@ -45,7 +45,8 @@ pub fn build(builder: *Builder) !void {
         var architecture_steps = std.ArrayList(ArchitectureSteps).init(builder.allocator);
 
         inline for (common.supported_architectures) |architecture, architecture_index| {
-            const cpu_driver = try createCPUDriver(builder, architecture);
+            const cpu_driver = try createCPUDriver(builder, architecture, false);
+            //const cpu_driver_test = try createCPUDriver(builder, architecture, true);
             _ = cpu_driver;
             const bootloaders = common.architecture_bootloader_map[architecture_index];
             var bootloader_steps = std.ArrayList(BootloaderSteps).init(builder.allocator);
@@ -379,7 +380,7 @@ fn readConfig(builder: *Builder, comptime emulator: Emulator) ![]const u8 {
 }
 
 const BootloaderBuild = struct {
-    executables: []const *LibExeObjStep,
+    executables: []const *CompileStep,
 };
 
 const Error = error{
@@ -387,7 +388,7 @@ const Error = error{
 };
 
 fn createBootloader(builder: *Builder, comptime configuration: Configuration, comptime suffix: []const u8) !BootloaderBuild {
-    var bootloader_executables = std.ArrayList(*LibExeObjStep).init(builder.allocator);
+    var bootloader_executables = std.ArrayList(*CompileStep).init(builder.allocator);
 
     switch (configuration.bootloader) {
         .rise => {
@@ -463,15 +464,26 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
     return bootloader_build;
 }
 
-fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*LibExeObjStep {
+fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch, comptime is_test: bool) !*CompileStep {
     const cpu_driver_path = "src/cpu_driver/";
-    const cpu_driver = builder.addExecutable(.{
-        .name = "cpu_driver_" ++ @tagName(architecture),
-        .root_source_file = FileSource.relative(cpu_driver_path ++ "entry_point.zig"),
-        .target = getTarget(architecture, .privileged),
+    const cpu_driver_source_file = "src/cpu_driver.zig";
+    const exe_name = "cpu_driver_" ++ (if (is_test) "test_" else "") ++ @tagName(architecture);
+    const cpu_driver_file = FileSource.relative(cpu_driver_source_file);
+    const target = getTarget(architecture, .privileged);
+    const cpu_driver = if (is_test) builder.addTest(.{
+        .name = exe_name,
+        .root_source_file = FileSource.relative("src/cpu_driver_tests.zig"),
+        .target = target,
+        .kind = .test_exe,
+    }) else builder.addExecutable(.{
+        .name = exe_name,
+        .root_source_file = cpu_driver_file,
+        .target = target,
         .linkage = .static,
     });
     cpu_driver.setOutputDir(cache_dir);
+    cpu_driver.setMainPkgPath(source_root_dir);
+
     cpu_driver.force_pic = true;
     cpu_driver.disable_stack_probing = true;
     cpu_driver.stack_protector = false;
@@ -480,7 +492,8 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*
     cpu_driver.omit_frame_pointer = false;
     cpu_driver.entry_symbol_name = entry_point_name;
 
-    cpu_driver.setMainPkgPath(source_root_dir);
+    if (is_test) cpu_driver.setTestRunner(cpu_driver_source_file);
+
     cpu_driver.setLinkerScriptPath(FileSource.relative(cpu_driver_path ++ "arch/" ++ switch (architecture) {
         .x86_64 => "x86/64/",
         .x86 => "x86/32/",
@@ -499,7 +512,7 @@ fn createCPUDriver(builder: *Builder, comptime architecture: Target.Cpu.Arch) !*
     return cpu_driver;
 }
 
-fn createDiskImageBuilder(builder: *Builder) *LibExeObjStep {
+fn createDiskImageBuilder(builder: *Builder) *CompileStep {
     const disk_image_builder = builder.addExecutable(.{
         .name = "disk_image_builder",
         .root_source_file = FileSource.relative("src/disk_image_builder.zig"),

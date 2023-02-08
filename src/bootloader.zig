@@ -3,22 +3,28 @@ pub const UEFI = @import("bootloader/uefi.zig");
 pub const limine = @import("bootloader/limine/spec.zig");
 
 const lib = @import("lib.zig");
+const assert = lib.assert;
 const Allocator = lib.Allocator;
 const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged.zig");
-const AddressInterface = privileged.Address.Interface;
+const AddressInterface = privileged.Address.Interface(u64);
+const PhysicalAddress = AddressInterface.PhysicalAddress;
+const VirtualAddress = AddressInterface.VirtualAddress;
+const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
+const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
 
 pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
     bootloader: lib.Bootloader,
-    size: u32 = @sizeOf(Information),
+    size: u32,
+    extra_size_after_aligned_end: u32,
     entry_point: u64,
     memory_map: MemoryMap,
     // Page allocator
     page: Pages,
     heap: Heap,
-    cpu_driver_mappings: CPUDriverMappings,
+    offsets: Offsets,
     architecture: switch (lib.cpu.arch) {
         .x86, .x86_64 => extern struct {
             rsdp_address: u64,
@@ -26,10 +32,19 @@ pub const Information = extern struct {
         else => @compileError("Architecture not supported"),
     },
 
+    const Offsets = extern struct {
+        size_counters: Offset = .{},
+        memory_map: Offset = .{},
+    };
+
+    const Offset = extern struct {
+        offset: u32 = 0,
+        size: u32 = 0,
+    };
+
     // TODO:
-    const AI = AddressInterface(u64);
-    const PA = AI.PhysicalAddress(.global);
-    const PMR = AI.PhysicalMemoryRegion(.global);
+    const PA = PhysicalAddress(.global);
+    const PMR = PhysicalMemoryRegion(.global);
 
     const Pages = extern struct {
         allocator: Allocator = .{
@@ -37,7 +52,6 @@ pub const Information = extern struct {
                 .allocate = pageAllocate,
             },
         },
-        counters: [MemoryMap.entry_count]u32 = [1]u32{0} ** MemoryMap.entry_count,
     };
 
     const Heap = extern struct {
@@ -49,34 +63,54 @@ pub const Information = extern struct {
         regions: [6]PMR = lib.zeroes([6]PMR),
     };
 
-    pub fn fromBIOS(rsdp_address: u64) !*Information {
+    pub inline fn getRegionFromOffset(information: *Information, comptime offset_field: []const u8) VirtualMemoryRegion(.local) {
+        const offset = @field(information.offsets, offset_field);
+        return .{
+            .address = VirtualAddress(.local).new(@ptrToInt(information) + offset.offset),
+            .size = offset.size,
+        };
+    }
+
+    pub fn getStructAlignedSize() usize {
+        return lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]);
+    }
+
+    pub fn fromBIOS(rsdp_address: u64, memory_map_entry_count: usize, stack_size: usize) !*Information {
         var iterator = BIOS.E820Iterator{};
+        const aligned_struct_size = getStructAlignedSize();
+        const extra_size_after_aligned_end = memory_map_entry_count * @sizeOf(MemoryMapEntry) + memory_map_entry_count * @sizeOf(u32) + stack_size;
+        const size_to_allocate = aligned_struct_size + extra_size_after_aligned_end;
+
         while (iterator.next()) |entry| {
-            if (!entry.isLowMemory() and entry.region.size > @sizeOf(Information)) {
+            if (!entry.isLowMemory() and entry.region.size > size_to_allocate) {
                 const bootloader_information_region = entry.region.takeSlice(@sizeOf(Information));
                 const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*Information);
                 result.* = .{
                     .protocol = .bios,
                     .bootloader = .rise,
+                    .size = size_to_allocate,
+                    .extra_size_after_aligned_end = extra_size_after_aligned_end,
                     .entry_point = 0,
                     .memory_map = .{},
                     .page = .{},
                     .heap = .{},
-                    .cpu_driver_mappings = .{},
+                    .offsets = .{},
                     .architecture = .{
                         .rsdp_address = rsdp_address,
                     },
                 };
 
-                result.page.counters[iterator.index] = lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]) / lib.arch.valid_page_sizes[0];
-                BIOS.fetchMemoryEntries(&result.memory_map);
+                @panic("TODO: BIOS");
 
-                result.cpu_driver_mappings.stack.size = 0x4000;
-                const stack_allocation = try result.page.allocator.allocateBytes(result.cpu_driver_mappings.stack.size, lib.arch.valid_page_sizes[0]);
-                result.cpu_driver_mappings.stack.physical = AddressInterface(u64).PhysicalAddress(.local).new(stack_allocation.address);
-                result.cpu_driver_mappings.stack.virtual = result.cpu_driver_mappings.stack.physical.toIdentityMappedVirtualAddress();
-
-                return result;
+                // result.page.counters[iterator.index] = lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]) / lib.arch.valid_page_sizes[0];
+                // BIOS.fetchMemoryEntries(&result.memory_map);
+                //
+                // result.cpu_driver_mappings.stack.size = 0x4000;
+                // const stack_allocation = try result.page.allocator.allocateBytes(result.cpu_driver_mappings.stack.size, lib.arch.valid_page_sizes[0]);
+                // result.cpu_driver_mappings.stack.physical = PhysicalAddress(.local).new(stack_allocation.address);
+                // result.cpu_driver_mappings.stack.virtual = result.cpu_driver_mappings.stack.physical.toIdentityMappedVirtualAddress();
+                //
+                // return result;
             }
         }
 
@@ -85,31 +119,35 @@ pub const Information = extern struct {
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         const bootloader_information = @fieldParentPtr(Information, "page", @fieldParentPtr(Pages, "allocator", allocator));
+        _ = bootloader_information;
 
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
+        _ = four_kb_pages;
 
         if (current_protocol) |protocol| {
-            const entries = bootloader_information.memory_map.getNativeEntries(protocol);
-            for (entries) |entry, entry_index| {
-                const busy_size = bootloader_information.page.counters[entry_index] * lib.arch.valid_page_sizes[0];
-                const size_left = entry.region.size - busy_size;
-                if (entry.isUsable() and size_left > size) {
-                    if (entry.region.address.isAligned(alignment)) {
-                        const result = Allocator.Allocate.Result{
-                            .address = entry.region.address.offset(busy_size).value(),
-                            .size = size,
-                        };
-
-                        bootloader_information.page.counters[entry_index] += four_kb_pages;
-
-                        return result;
-                    }
-                }
-            }
-
-            return Allocator.Allocate.Error.OutOfMemory;
+            _ = protocol;
+            @panic("TODO: pageAllocate");
+            // const entries = bootloader_information.memory_map.getNativeEntries(protocol);
+            // for (entries) |entry, entry_index| {
+            //     const busy_size = bootloader_information.page.counters[entry_index] * lib.arch.valid_page_sizes[0];
+            //     const size_left = entry.region.size - busy_size;
+            //     if (entry.isUsable() and size_left > size) {
+            //         if (entry.region.address.isAligned(alignment)) {
+            //             const result = Allocator.Allocate.Result{
+            //                 .address = entry.region.address.offset(busy_size).value(),
+            //                 .size = size,
+            //             };
+            //
+            //             bootloader_information.page.counters[entry_index] += four_kb_pages;
+            //
+            //             return result;
+            //         }
+            //     }
+            // }
+            //
+            // return Allocator.Allocate.Error.OutOfMemory;
         }
 
         return Allocator.Allocate.Error.OutOfMemory;
@@ -169,23 +207,6 @@ const current_protocol: ?Protocol = switch (lib.cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
-pub const CPUDriverMappings = extern struct {
-    text: Mapping = .{},
-    data: Mapping = .{},
-    rodata: Mapping = .{},
-    stack: Mapping = .{},
-
-    const Mapping = extern struct {
-        const AI = AddressInterface(u64);
-        const PA = AI.PhysicalAddress(.local);
-        const VA = AI.VirtualAddress(.local);
-
-        physical: PA = PA.invalid(),
-        virtual: VA = .null,
-        size: u64 = 0,
-    };
-};
-
 pub const MemoryMap = extern struct {
     buffer: [size]u8 = [1]u8{0} ** size,
     entry_count: u32 = 0,
@@ -234,3 +255,17 @@ fn EntryType(comptime protocol: Protocol) type {
         .uefi => UEFI.MemoryDescriptor,
     };
 }
+
+pub const MemoryMapEntry = extern struct {
+    region: PhysicalMemoryRegion(.local),
+    type: Type,
+
+    const Type = enum(u64) {
+        usable = 0,
+        reserved = 1,
+    };
+
+    comptime {
+        assert(@sizeOf(MemoryMapEntry) == @sizeOf(u64) * 3);
+    }
+};

@@ -1,11 +1,11 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib.zig");
 const assert = lib.assert;
 const log = lib.log;
 
-const bootloader = @import("../bootloader.zig");
+const bootloader = @import("bootloader.zig");
 const limine = bootloader.limine;
 
-const privileged = @import("../privileged.zig");
+const privileged = @import("privileged.zig");
 const stopCPU = privileged.arch.stopCPU;
 
 const writer = privileged.E9Writer{ .context = {} };
@@ -62,11 +62,11 @@ export var limine_modules = limine.Module.Request{ .revision = 0 };
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     if (bootloader_information.size != @sizeOf(bootloader.Information)) @panic("Bootloader information size doesn't match");
     log.debug("Starting...", .{});
-    var total_page_count: u32 = 0;
-    for (bootloader_information.page.counters) |page_counter| {
-        total_page_count += page_counter;
-    }
-    log.debug("Total page count: {}. Total memory: 0x{x}", .{ total_page_count, total_page_count << lib.arch.page_shifter(0x1000) });
+    // var total_page_count: u32 = 0;
+    // for (bootloader_information.page.counters) |page_counter| {
+    //     total_page_count += page_counter;
+    // }
+    // log.debug("Total page count: {}. Total memory: 0x{x}", .{ total_page_count, total_page_count << lib.arch.page_shifter(0x1000) });
 
     todoEndEntryPoint();
 }

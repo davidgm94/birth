@@ -40,10 +40,9 @@ export fn entryPoint() callconv(.C) noreturn {
     const cpu_count = madt.getCPUCount();
 
     const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
-    _ = memory_map_entry_count;
     log.debug("CPU count: {}", .{cpu_count});
 
-    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address) catch @panic("Can't get bootloader information");
+    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address, memory_map_entry_count, privileged.default_stack_size) catch @panic("Can't get bootloader information");
     const page_allocator = &bootloader_information.page.allocator;
     const allocator = &bootloader_information.heap.allocator;
 
@@ -90,6 +89,8 @@ export fn entryPoint() callconv(.C) noreturn {
             VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("mapping failed");
         }
     }
+
+    if (true) @panic("TODO: BIOS main");
 
     for (files) |file| {
         if (lib.equal(u8, file.path, "/CPUDRIV")) {

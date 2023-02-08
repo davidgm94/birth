@@ -517,6 +517,23 @@ pub const BootDisk = extern struct {
     }
 };
 
+const LimineCFG = struct {
+    buffer: host.ArrayList(u8),
+
+    pub fn addField(limine_cfg: *LimineCFG, field_name: []const u8, field_value: []const u8) !void {
+        try limine_cfg.buffer.appendSlice(field_name);
+        try limine_cfg.buffer.append('=');
+        try limine_cfg.buffer.appendSlice(field_value);
+        try limine_cfg.buffer.append('\n');
+    }
+
+    pub fn addEntryName(limine_cfg: *LimineCFG, entry_name: []const u8) !void {
+        try limine_cfg.buffer.append(':');
+        try limine_cfg.buffer.appendSlice(entry_name);
+        try limine_cfg.buffer.append('\n');
+    }
+};
+
 const Error = error{
     wrong_arguments,
     not_implemented,
@@ -563,7 +580,13 @@ pub fn main() anyerror!void {
 
             var files_parser = lib.FileParser.init(configuration_file);
 
+            var cpu_driver_name: ?[]const u8 = null;
             while (try files_parser.next()) |file_descriptor| {
+                if (file_descriptor.type == .cpu_driver) {
+                    if (cpu_driver_name != null) @panic("More than one CPU driver");
+                    cpu_driver_name = file_descriptor.guest;
+                }
+
                 const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
                     .arch => switch (architecture) {
                         inline else => |arch| "_" ++ @tagName(arch),
@@ -591,7 +614,18 @@ pub fn main() anyerror!void {
                     const limine_installable_path = "src/bootloader/limine/installables";
                     const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
 
-                    const limine_cfg = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.cfg", max_file_length);
+                    const limine_cfg = blk: {
+                        var limine_cfg_generator = LimineCFG{
+                            .buffer = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig()),
+                        };
+                        try limine_cfg_generator.addField("TIMEOUT", "0");
+                        try limine_cfg_generator.addEntryName("Rise");
+                        try limine_cfg_generator.addField("PROTOCOL", "limine");
+                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", cpu_driver_name.? }));
+                        try limine_cfg_generator.addField("DEFAULT_ENTRY", "0");
+                        break :blk limine_cfg_generator.buffer.items;
+                    };
+
                     try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                     const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
                     try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
@@ -604,13 +638,6 @@ pub fn main() anyerror!void {
                         },
                         else => unreachable,
                     }
-
-                    // for (LimineInstaller.stage2) |b, i| {
-                    //     const byte = disk_image.get_buffer()[i];
-                    //     if (b != byte) {
-                    //         log.debug("Byte 0x{x} modified. Original: 0x{x}. Have: 0x{x}", .{ i, b, byte });
-                    //     }
-                    // }
                 },
                 .rise => switch (boot_protocol) {
                     .bios => {
