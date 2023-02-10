@@ -352,7 +352,6 @@ pub const Cache = extern struct {
         const disk = gpt_partition_cache.gpt.disk;
 
         const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, allocator, .{});
-        log.debug("Cluster sector count: {}", .{partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count});
         assert(partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count == 1);
         const fs_info_sector = partition_range.first_lba + partition_mbr.bpb.fs_info_sector;
         const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, allocator, .{});

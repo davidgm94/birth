@@ -343,7 +343,7 @@ pub const VBE = extern struct {
             assert(@sizeOf(Information) == 0x200);
         }
 
-        pub fn getVideoMode(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool, desired_width: u16, desired_height: u16) ?Mode {
+        pub fn getVideoMode(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool, desired_width: u16, desired_height: u16, edid_bpp: u8) ?Mode {
             const video_modes = vbe_info.video_modes.desegment([*]const u16);
             for (video_modes[0..lib.maxInt(usize)]) |video_mode_number| {
                 if (video_mode_number == 0xffff) break;
@@ -355,10 +355,11 @@ pub const VBE = extern struct {
 
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
-                if (isValidVideoMode(&mode)) {
-                    if (mode.resolution_x == desired_width and mode.resolution_y == desired_height) {
-                        return mode;
-                    }
+                if (isValidVideoMode(&mode) and mode.resolution_x == desired_width and mode.resolution_y == desired_height and mode.bpp == edid_bpp) {
+                    lib.log.debug("Video mode setting", .{});
+                    setVideoMode(video_mode_number) catch continue;
+                    lib.log.debug("Video mode set", .{});
+                    return mode;
                 }
             }
 
@@ -476,6 +477,7 @@ pub const VBE = extern struct {
     const Call = enum(u8) {
         get_controller_information = 0x00,
         get_mode_information = 0x01,
+        set_mode_information = 0x02,
         get_edid_information = 0x15,
     };
 
@@ -570,5 +572,11 @@ pub const VBE = extern struct {
         try VBEinterrupt(.get_edid_information, &registers);
 
         return edid_info;
+    }
+
+    pub fn setVideoMode(video_mode_number: u16) VBE.Error!void {
+        var registers = Registers{};
+        registers.ebx = @as(u32, video_mode_number) | (1 << 14);
+        try VBEinterrupt(.set_mode_information, &registers);
     }
 };

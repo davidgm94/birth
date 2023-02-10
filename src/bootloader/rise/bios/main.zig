@@ -36,6 +36,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
     const edid_info = try BIOS.VBE.getEDIDInfo();
     const edid_width = edid_info.getWidth();
     const edid_height = edid_info.getHeight();
+    const edid_bpp = 32;
     const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
     _ = preferred_resolution;
     try BIOS.VBE.getControllerInformation(&vbe_info);
@@ -48,7 +49,8 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
         return BIOS.VBE.Error.unsupported_version;
     }
 
-    log.debug("Mode: {?}", .{vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height)});
+    const edid_video_mode = vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
+    const framebuffer_region = PhysicalMemoryRegion(.global).new(PhysicalAddress(.global).new(edid_video_mode.framebuffer_address), edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y);
 
     const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
     const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
@@ -61,9 +63,10 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
 
     var extra_size: u32 = 0;
     const length_size_tuples = blk: {
-        var arr: [bootloader.Information.Slice.count]struct { length: u32, size: u32 } = undefined;
+        var arr = [1]struct { length: u32, size: u32 }{.{ .length = 0, .size = 0 }} ** bootloader.Information.Slice.count;
         arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = memory_map_entry_count;
         arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.external_bootloader_page_counters)].length = 0;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
 
@@ -79,18 +82,40 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
     const total_size = aligned_struct_size + aligned_extra_size;
 
     while (iterator.next()) |entry| {
-        if (entry.descriptor.isUsable() and entry.descriptor.region.size > total_size) {
+        if (entry.descriptor.isUsable() and entry.descriptor.region.size > total_size and !entry.descriptor.region.overlaps(framebuffer_region)) {
             const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(bootloader.Information));
             const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
 
             result.* = .{
                 .protocol = .bios,
                 .bootloader = .rise,
+                .version = .{ .major = 0, .minor = 1, .patch = 0 },
                 .struct_size = @sizeOf(bootloader.Information),
                 .extra_size = extra_size,
                 .total_size = total_size,
                 .entry_point = 0,
                 .heap = .{},
+                .framebuffer = .{
+                    .address = framebuffer_region.address.value(),
+                    .pitch = edid_video_mode.linear_bytes_per_scanline,
+                    .width = edid_video_mode.resolution_x,
+                    .height = edid_video_mode.resolution_y,
+                    .bpp = edid_video_mode.bpp,
+                    .red_mask = .{
+                        .shift = edid_video_mode.linear_red_mask_shift,
+                        .size = edid_video_mode.linear_red_mask_size,
+                    },
+                    .green_mask = .{
+                        .shift = edid_video_mode.linear_green_mask_shift,
+                        .size = edid_video_mode.linear_green_mask_size,
+                    },
+                    .blue_mask = .{
+                        .shift = edid_video_mode.linear_blue_mask_shift,
+                        .size = edid_video_mode.linear_blue_mask_size,
+                    },
+                    // TODO:
+                    .memory_model = 0,
+                },
                 .cpu_driver_mappings = .{},
                 .slices = .{},
                 .architecture = .{
@@ -203,6 +228,8 @@ export fn entryPoint() callconv(.C) noreturn {
         log.debug("Error: {}", .{err});
         @panic("Mapping of BIOS loader failed");
     };
+    const framebuffer_physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
+    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
 
     // Map more than necessary
     const loader_stack = PhysicalAddress(.global).new(0xe000);

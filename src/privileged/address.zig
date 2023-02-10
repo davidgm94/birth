@@ -125,6 +125,16 @@ pub fn Interface(comptime Usize: type) type {
                         .size = asked_size,
                     };
                 }
+
+                pub inline fn overlaps(physical_memory_region: PMR, other: PMR) bool {
+                    if (other.address.value() >= physical_memory_region.address.offset(physical_memory_region.size).value()) return false;
+                    if (other.address.offset(other.size).value() <= physical_memory_region.address.value()) return false;
+
+                    const region_inside = other.address.value() >= physical_memory_region.address.value() and other.address.offset(other.size).value() <= physical_memory_region.address.offset(physical_memory_region.size).value();
+                    const region_overlap_left = other.address.value() <= physical_memory_region.address.value() and other.address.offset(other.size).value() > physical_memory_region.address.value();
+                    const region_overlap_right = other.address.value() < physical_memory_region.address.offset(physical_memory_region.size).value() and other.address.offset(other.size).value() > physical_memory_region.address.offset(physical_memory_region.size).value();
+                    return region_inside or region_overlap_left or region_overlap_right;
+                }
             };
         }
 

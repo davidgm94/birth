@@ -14,12 +14,24 @@ const VirtualAddress = AddressInterface.VirtualAddress;
 const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
 const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
 
+pub const Version = extern struct {
+    patch: u8,
+    minor: u16,
+    major: u8,
+};
+
+pub const CompactDate = packed struct(u16) {
+    year: u7,
+    month: u5,
+    day: u4,
+};
+
 pub const Information = extern struct {
     entry_point: u64,
     extra_size: u32,
     struct_size: u32,
     total_size: u32,
-    reserved: u32 = 0,
+    version: Version,
     protocol: lib.Bootloader.Protocol,
     bootloader: lib.Bootloader,
     page_allocator: Allocator = .{
@@ -29,7 +41,7 @@ pub const Information = extern struct {
     },
     heap: Heap,
     cpu_driver_mappings: CPUDriverMappings,
-    framebuffer: Framebuffer = .{},
+    framebuffer: Framebuffer,
     cpu: CPU.Information = .{},
     architecture: switch (lib.cpu.arch) {
         .x86, .x86_64 => extern struct {
@@ -48,7 +60,8 @@ pub const Information = extern struct {
             cpu_driver_stack = 0,
             memory_map_entries = 1,
             page_counters = 2,
-            cpus = 3,
+            external_bootloader_page_counters = 3,
+            cpus = 4,
         };
 
         pub const count = lib.enumCount(Name);
@@ -58,6 +71,7 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.cpu_driver_stack)] = u8;
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
+            arr[@enumToInt(Slice.Name.external_bootloader_page_counters)] = u32;
             arr[@enumToInt(Slice.Name.cpus)] = CPU;
             break :blk arr;
         };
@@ -77,15 +91,15 @@ pub const Information = extern struct {
     };
 
     pub const Framebuffer = extern struct {
-        address: u64 = 0,
-        pitch: u32 = 0,
-        width: u32 = 0,
-        height: u32 = 0,
-        bpp: u16 = 0,
-        red_mask: ColorMask = .{},
-        green_mask: ColorMask = .{},
-        blue_mask: ColorMask = .{},
-        memory_model: u8 = 0,
+        address: u64,
+        pitch: u32,
+        width: u32,
+        height: u32,
+        bpp: u16,
+        red_mask: ColorMask,
+        green_mask: ColorMask,
+        blue_mask: ColorMask,
+        memory_model: u8,
         reserved: u8 = 0,
 
         pub const ColorMask = extern struct {

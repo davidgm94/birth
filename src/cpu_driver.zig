@@ -33,17 +33,91 @@ pub const std_options = struct {
 export fn limineEntryPoint() noreturn {
     const limine_log = log.scoped(.LIMINE);
     limine_log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
-    const hhdm = limine_hhdm.response.?.offset;
     assert(limine_stack_size.response != null);
-    const stack_size = limine_stack_size.stack_size;
-    limine_log.debug("Limine requests:\nHHDM: 0x{x}\nStack size: 0x{x}", .{ hhdm, stack_size });
     limine_log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
     const memory_map = limine_memory_map.response.?;
     limine_log.debug("Memory map entry count: {}", .{memory_map.entry_count});
-    for (memory_map.entries.?.*[0..memory_map.entry_count]) |entry| {
-        limine_log.debug("{}", .{entry});
+    const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
+    for (memory_map_entries) |entry| {
+        limine_log.debug("Entry: 0x{x}. 0x{x}. {s}", .{ entry.address, entry.size, @tagName(entry.type) });
     }
-    limine_log.debug("Module count: {}", .{limine_modules.response.?.module_count});
+
+    var merging_entries_left: usize = 0;
+    var total_merge_count: usize = 0;
+
+    var maybe_unmergeable_usable_region: ?usize = null;
+    for (memory_map_entries) |entry, entry_index| {
+        if (merging_entries_left > 0) {
+            merging_entries_left -= 1;
+            continue;
+        }
+
+        if (entry.type == .usable or entry.type == .bootloader_reclaimable) {
+            log.debug("Index: {}", .{entry_index});
+            if (entry_index + 1 < memory_map_entries.len) {
+                var index = entry_index;
+                while (index + 1 < memory_map_entries.len) : (index += 1) {
+                    const mergeable_entry = memory_map_entries[index];
+                    const is_mergeable = mergeable_entry.type == .usable or mergeable_entry.type == .bootloader_reclaimable;
+                    if (!is_mergeable) break;
+                }
+
+                const merge_count = index - entry_index - 1;
+                total_merge_count += merge_count;
+                if (merge_count > 0) {
+                    merging_entries_left = merge_count;
+
+                    const size_guess = @sizeOf(bootloader.Information) + 15 * lib.arch.valid_page_sizes[0];
+                    if (entry.type == .usable and entry.size > size_guess) {
+                        maybe_unmergeable_usable_region = entry_index;
+                    }
+                }
+                limine_log.debug("Merge count: {}", .{merge_count});
+            }
+        }
+    }
+
+    const unmergeable_usable_region = maybe_unmergeable_usable_region orelse @panic("TODO: Unable to find unmergeable_usable_region");
+    limine_log.debug("unmergeable_region: {}", .{unmergeable_usable_region});
+
+    limine_log.debug("Total merge count: {}", .{total_merge_count});
+
+    // Discard regions that are not useful to the CPU driver
+    var discarded_region_count: usize = 0;
+    for (memory_map_entries) |entry| {
+        discarded_region_count += @boolToInt(entry.type == .framebuffer or entry.type == .kernel_and_modules);
+    }
+
+    const actual_memory_map_entry_count = @intCast(u32, memory_map_entries.len - discarded_region_count - total_merge_count);
+    const stack_size = privileged.default_stack_size;
+
+    const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
+
+    limine_log.debug("Total discarded region count: {}", .{discarded_region_count});
+    limine_log.debug("Original entry count: {}. Actual region count: {}", .{ memory_map_entries.len, actual_memory_map_entry_count });
+
+    var extra_size: u32 = 0;
+    const length_size_tuples = blk: {
+        var arr = [1]struct { length: u32, size: u32 }{.{ .length = 0, .size = 0 }} ** bootloader.Information.Slice.count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = actual_memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = actual_memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.external_bootloader_page_counters)].length = actual_memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
+        arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
+
+        inline for (bootloader.Information.Slice.TypeMap) |T, index| {
+            const size = arr[index].length * @sizeOf(T);
+            extra_size += size;
+            arr[index].size = size;
+        }
+        break :blk arr;
+    };
+    _ = length_size_tuples;
+
+    const aligned_struct_size = bootloader.Information.getStructAlignedSizeOnCurrentArchitecture();
+    const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
+    const total_size = aligned_struct_size + aligned_extra_size;
+    limine_log.debug("Total size: 0x{x}", .{total_size});
 
     stopCPU();
 }
@@ -57,9 +131,14 @@ export var limine_memory_map = limine.MemoryMap.Request{ .revision = 0 };
 export var limine_entry_point = limine.EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
 export var limine_kernel_file = limine.KernelFile.Request{ .revision = 0 };
 export var limine_modules = limine.Module.Request{ .revision = 0 };
+export var limine_rsdp = limine.RSDP.Request{ .revision = 0 };
 
 export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
+    const framebuffer = @intToPtr([*]u32, bootloader_information.framebuffer.address)[0 .. bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height / @sizeOf(u32)];
+    for (framebuffer) |*pixel| {
+        pixel.* = 0xff_ff0000;
+    }
     log.debug("Starting...", .{});
     // var total_page_count: u32 = 0;
     // for (bootloader_information.page.counters) |page_counter| {
