@@ -1587,7 +1587,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) InstallerE
 
     if (do_gpt) {
         if (partition_number != null) {
-            @panic("todo");
+            @panic("todo: partition_number != null");
         } else {
             const partition_entry_count = gpt_header.partition_entry_count;
             if (partition_entry_count == 0) @panic("no partitions");
@@ -1619,7 +1619,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) InstallerE
             const new_partition_entry_count = new_partition_array_lba_size * partition_entry_per_lb_count;
 
             if (new_partition_entry_count <= max_partition_entry_used) {
-                @panic("todo");
+                @panic("todo: new_partition_entry_count <= max_partition_entry_used");
             }
 
             //print("New maximum count of partition entries: {}\n", .{new_partition_entry_count});

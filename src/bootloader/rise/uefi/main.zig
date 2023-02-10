@@ -89,7 +89,7 @@ pub const std_options = struct {
             .x86_64 => {
                 if (config.real_hardware) {
                     var buffer: [4096]u8 = undefined;
-                    const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\n", args) catch unreachable;
+                    const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\r\n", args) catch unreachable;
 
                     for (formatted_buffer) |c| {
                         const fake_c = [2]u16{ c, 0 };
@@ -218,6 +218,7 @@ pub fn main() noreturn {
     const out = system_table.con_out orelse @panic("con out");
     UEFI.result(@src(), out.reset(true));
     UEFI.result(@src(), out.clearScreen());
+    if (true) @panic("Hola Mariana este es mi sistema operativo\r\nComo puedes ver, no he iniciado ni Windows ni Linux :P\r\n");
     writer.writeByte('\n') catch unreachable;
 
     const revision_string = switch (system_table.firmware_revision) {

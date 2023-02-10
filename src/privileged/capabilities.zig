@@ -405,7 +405,7 @@ pub const Capability = extern struct {
 
         switch (a.type) {
             .domain, .id, .notify_ipi, .io, .irq_src, .irq_dest, .vnode_aarch64_l3_mapping, .vnode_aarch64_l2_mapping, .vnode_aarch64_l1_mapping, .vnode_aarch64_l0_mapping, .vnode_arm_l2_mapping, .vnode_arm_l1_mapping, .vnode_x86_32_ptable_mapping, .vnode_x86_32_pdir_mapping, .vnode_x86_32_pdpt_mapping, .vnode_vtd_context_table_mapping, .vnode_vtd_root_table_mapping, .vnode_x86_64_ept_ptable_mapping, .vnode_x86_64_ept_pdir_mapping, .vnode_x86_64_ept_pdpt_mapping, .vnode_x86_64_ept_pml4_mapping, .vnode_x86_64_ptable_mapping, .vnode_x86_64_pdir_mapping, .vnode_x86_64_pdpt_mapping, .vnode_x86_64_pml4_mapping, .vnode_x86_64_pml5_mapping, .device_frame_mapping, .end_point_ump_mapping, .frame_mapping, .fcnode => {
-                @panic("compare todo");
+                @panic("todo: compare");
             },
             else => {},
         }
@@ -870,7 +870,7 @@ pub const CTE = extern struct {
             return try MappingDatabase.insert(destiny);
         }
 
-        @panic("todo");
+        @panic("todo: copy_to_cte");
     }
     //errval_t caps_copy_to_cte(struct cte *dest_cte, struct cte *src_cte, bool mint,
     //uintptr_t param1, uintptr_t param2)
@@ -1142,7 +1142,7 @@ pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, 
             else => return true,
         }
     }
-    @panic("capabilities check arguments todo");
+    @panic("todo: capabilities check arguments");
 }
 
 pub const Address = u32;

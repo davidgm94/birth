@@ -266,10 +266,10 @@ const EmulatorSteps = struct {
                         try argument_list.append("-no-shutdown");
                     }
 
-                    if (arguments.vga) |vga| {
-                        try argument_list.append("-vga");
-                        try argument_list.append(@tagName(vga));
-                    }
+                    //if (arguments.vga) |vga| {
+                    //try argument_list.append("-vga");
+                    //try argument_list.append(@tagName(vga));
+                    //}
 
                     if (arguments.smp) |smp| {
                         try argument_list.append("-smp");
@@ -340,14 +340,23 @@ const EmulatorSteps = struct {
                 }
 
                 const Arguments = struct {
+                    const VGA = enum {
+                        std,
+                        cirrus,
+                        vmware,
+                        qxl,
+                        xenfb,
+                        tcx,
+                        cg3,
+                        virtio,
+                        none,
+                    };
                     memory: ?struct {
                         amount: u64,
                         unit: common.SizeUnit,
                     },
                     virtualize: ?bool,
-                    vga: ?enum {
-                        std,
-                    },
+                    vga: ?VGA,
                     smp: ?usize,
                     reboot: bool,
                     shutdown: bool,

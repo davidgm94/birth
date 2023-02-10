@@ -102,8 +102,10 @@ pub const Framebuffer = extern struct {
     blue_mask_size: u8,
     blue_mask_shift: u8,
     unused: [7]u8,
+    edid_size: u64,
+    edid: u64,
     mode_count: u64,
-    modes: *[*]VideoMode,
+    modes: [*]const *const VideoMode,
 
     pub const Request = extern struct {
         id: ID = requestID(0x9d5827dcd881dd75, 0xa3148604f6fab11b),

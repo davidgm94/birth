@@ -133,7 +133,7 @@ pub const Header = extern struct {
         }
 
         pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition) !void {
-            if (cache.disk.type != .memory) @panic("Wtf");
+            if (cache.disk.type != .memory) @panic("Disk is not memory");
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = cache.partition_entries[0..cache.header.partition_entry_count];
             const partition_entry_bytes = lib.sliceAsBytes(partition_entries);

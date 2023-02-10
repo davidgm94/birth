@@ -1,2 +1,3 @@
 b kernel_entry_point
+b *0x7c00
 c

@@ -135,9 +135,9 @@ pub const Framebuffer = struct {
                         if (j == 0) break;
                     }
                 } else if (@enumToInt(mode) <= 0xff) {
-                    @panic("todo");
+                    @panic("todo: mode <= 0xff");
                 } else if (mode == .xor) {
-                    @panic("todo");
+                    @panic("todo: mode xor");
                 } else if (mode == .opaque_mode) {
                     // todo: refactor
                     while (j > 0) : ({

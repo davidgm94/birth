@@ -29,20 +29,116 @@ var gdt = GDT.Table{
     .tss_descriptor = undefined,
 };
 
-export fn entryPoint() callconv(.C) noreturn {
-    BIOS.A20Enable() catch @panic("can't enable a20");
-    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
+pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Information {
+    var iterator = BIOS.E820Iterator{};
+
+    const edid_info = try BIOS.VBE.getEDIDInfo();
+    const edid_width = edid_info.getWidth();
+    const edid_height = edid_info.getHeight();
+    const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
+    _ = preferred_resolution;
+    const vbe_info = try BIOS.VBE.getControllerInformation();
+    if (!lib.equal(u8, &vbe_info.signature, "VESA")) {
+        return BIOS.VBE.Error.bad_signature;
+    }
+
+    if (vbe_info.version_major != 3 and vbe_info.version_minor != 0) {
+        return BIOS.VBE.Error.unsupported_version;
+    }
+
+    const framebuffer_video_mode_count = vbe_info.getVideoModes();
 
     const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
     const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
     const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
     const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
     const cpu_count = madt.getCPUCount();
-
     const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
-    log.debug("CPU count: {}", .{cpu_count});
 
-    const bootloader_information = bootloader.Information.fromBIOS(rsdp_address, memory_map_entry_count, privileged.default_stack_size) catch @panic("Can't get bootloader information");
+    const aligned_struct_size = bootloader.Information.getStructAlignedSizeOnCurrentArchitecture();
+
+    var extra_size: u32 = 0;
+    const length_size_tuples = blk: {
+        var arr: [bootloader.Information.Slice.count]struct { length: u32, size: u32 } = undefined;
+        arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = memory_map_entry_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
+        arr[@enumToInt(bootloader.Information.Slice.Name.framebuffer_video_modes)].length = framebuffer_video_mode_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
+
+        inline for (bootloader.Information.Slice.TypeMap) |T, index| {
+            const size = arr[index].length * @sizeOf(T);
+            extra_size += size;
+            arr[index].size = size;
+        }
+        break :blk arr;
+    };
+
+    const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
+    const total_size = aligned_struct_size + aligned_extra_size;
+
+    while (iterator.next()) |entry| {
+        if (entry.descriptor.isUsable() and entry.descriptor.region.size > total_size) {
+            const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(bootloader.Information));
+            const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
+
+            result.* = .{
+                .protocol = .bios,
+                .bootloader = .rise,
+                .struct_size = @sizeOf(bootloader.Information),
+                .extra_size = extra_size,
+                .total_size = total_size,
+                .entry_point = 0,
+                .heap = .{},
+                .cpu_driver_mappings = .{},
+                .slices = .{},
+                .architecture = .{
+                    .rsdp_address = rsdp_address,
+                },
+            };
+
+            var allocated_size: usize = 0;
+
+            inline for (result.slices) |*slice, index| {
+                const tuple = length_size_tuples[index];
+                const length = tuple.length;
+                const size = tuple.size;
+                slice.* = .{
+                    .offset = allocated_size + comptime bootloader.Information.getStructAlignedSizeOnCurrentArchitecture(),
+                    .len = length,
+                    .size = size,
+                };
+
+                if (allocated_size + size > result.extra_size) @panic("size exceeded");
+
+                allocated_size += size;
+            }
+
+            if (allocated_size != extra_size) @panic("Extra allocation size must match bootloader allocated extra size");
+
+            const page_counters = result.getSlice(.page_counters);
+            for (page_counters) |*page_counter| {
+                page_counter.* = 0;
+            }
+
+            page_counters[entry.index] = total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+
+            const memory_map_entries = result.getSlice(.memory_map_entries);
+            BIOS.fetchMemoryEntries(memory_map_entries);
+
+            return result;
+        }
+    }
+
+    return lib.Allocator.Allocate.Error.OutOfMemory;
+}
+
+export fn entryPoint() callconv(.C) noreturn {
+    BIOS.A20Enable() catch @panic("can't enable a20");
+    lib.log.debug("Loader start: 0x{x}. Loader end: 0x{x}", .{ @ptrToInt(&loader_start), @ptrToInt(&loader_end) });
+    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
+
+    const bootloader_information = initializeBootloaderInformation(privileged.default_stack_size) catch |err| privileged.panic("Can't get bootloader_information: {}", .{err});
     const page_allocator = &bootloader_information.page_allocator;
     const allocator = &bootloader_information.heap.allocator;
 
@@ -107,8 +203,9 @@ export fn entryPoint() callconv(.C) noreturn {
         @panic("Mapping of BIOS loader failed");
     };
 
-    const loader_stack = PhysicalAddress(.global).new(0xf000);
-    const loader_stack_size = 0x1000;
+    // Map more than necessary
+    const loader_stack = PhysicalAddress(.global).new(0xe000);
+    const loader_stack_size = 0x2000;
     VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {
@@ -167,7 +264,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping failed");
+            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping failed");
 
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
@@ -220,7 +317,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             if (bootloader_information.entry_point != 0) {
                 const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
-                const stack_offset = @offsetOf(bootloader.Information, "offsets") + @offsetOf(bootloader.Information.Offsets, "stack");
+                const stack_offset = @offsetOf(bootloader.Information, "slices") + (@as(u32, @enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)) * @sizeOf(bootloader.Information.Slice));
                 trampoline(bootloader_information_virtual_address.value(), entry_point_offset, stack_offset);
             }
         }
@@ -232,6 +329,11 @@ export fn entryPoint() callconv(.C) noreturn {
 // TODO: stop this weird stack manipulation and actually learn x86 calling convention
 pub extern fn trampoline(bootloader_information: u64, entry_point_offset: u64, stack_offset: u64) noreturn;
 comptime {
+    const offset_offset = @offsetOf(bootloader.Information.Slice, "offset");
+    const size_offset = @offsetOf(bootloader.Information.Slice, "size");
+    lib.assert(offset_offset == 0);
+    lib.assert(size_offset == offset_offset + @sizeOf(u32));
+
     asm (
         \\.global trampoline
         \\trampoline:
@@ -265,8 +367,10 @@ pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;
 
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        _ = scope;
         _ = level;
+        writer.writeByte('[') catch unreachable;
+        writer.writeAll(@tagName(scope)) catch unreachable;
+        writer.writeAll("] ") catch unreachable;
         lib.format(writer, format, args) catch unreachable;
         writer.writeByte('\n') catch unreachable;
     }

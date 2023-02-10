@@ -289,7 +289,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
 
     const is_valid = table_virtual_address.isValid();
     if (!is_valid) {
-        @panic("Wtf");
+        @panic("Virtual address is invalid");
         //log.debug("check pdp table valid: {}", .{is_valid});
     }
 

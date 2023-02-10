@@ -88,8 +88,6 @@ extern fn int(number: u8, out_regs: *Registers, in_regs: *const Registers) callc
 
 const DAP = lib.PartitionTable.MBR.DAP;
 
-extern fn hang() callconv(.C) noreturn;
-
 const Registers = extern struct {
     gs: u16 = 0,
     fs: u16 = 0,
@@ -164,12 +162,8 @@ pub const MemoryMapEntry = extern struct {
     type: Type,
     unused: u32 = 0,
 
-    pub inline fn isLowMemory(entry: MemoryMapEntry) bool {
-        return entry.region.address.value() < lib.mb;
-    }
-
     pub inline fn isUsable(entry: MemoryMapEntry) bool {
-        return entry.type == .usable and !entry.isLowMemory();
+        return entry.type == .usable and entry.region.address.value() >= lib.mb;
     }
 
     const Type = enum(u32) {
@@ -308,3 +302,278 @@ pub fn findRSDP() ?u32 {
 
     return null;
 }
+
+pub const RealModePointer = extern struct {
+    segment: u16,
+    offset: u16,
+
+    pub inline fn desegment(real_mode_pointer: RealModePointer, comptime Ptr: type) Ptr {
+        return @intToPtr(Ptr, (@as(u32, real_mode_pointer.segment) << 4) + real_mode_pointer.offset);
+    }
+};
+
+pub const VBE = extern struct {
+    const Information = extern struct {
+        signature: [4]u8,
+        version_minor: u8,
+        version_major: u8,
+        OEM_segment: u16,
+        OEM_offset: u16,
+        capabitilies: [4]u8,
+        video_modes_segment: u16,
+        video_modes_offset: u16,
+        video_memory_blocks: u16,
+        OEM_software_revision: u16,
+        OEM_vendor_segment: u16,
+        OEM_vendor_offset: u16,
+        OEM_product_name_segment: u16,
+        OEM_product_name_offset: u16,
+        OEM_product_revision_segment: u16,
+        OEM_product_revision_offset: u16,
+        reserved: [222]u8,
+        OEM_data: [256]u8,
+
+        pub const Capabilities = packed struct(u32) {
+            dac_switchable: bool,
+            controller_not_vga_compatible: bool,
+            ramdac_blank: bool,
+            hardware_stereoscopic_signaling: bool,
+            VESA_EVC_stereo_signaling: bool,
+            reserved: u27 = 0,
+        };
+
+        comptime {
+            assert(@sizeOf(Information) == 0x200);
+        }
+
+        pub fn getVideoModes(vbe_info: *const VBE.Information) u16 {
+            const video_modes = @intToPtr([*]const volatile u16, @as(u32, vbe_info.video_modes_segment) << 4 | vbe_info.video_modes_offset)[0..lib.maxInt(u16)];
+            var count: u16 = 0;
+            for (video_modes) |video_mode_number| {
+                if (video_mode_number == 0xffff) break;
+                var registers = Registers{};
+                var mode: VBE.Mode = undefined;
+
+                registers.ecx = video_mode_number;
+                registers.edi = @ptrToInt(&mode);
+
+                VBEinterrupt(.get_mode_information, &registers) catch continue;
+
+                lib.log.debug("{}x{}. addr: 0x{x}", .{ mode.resolution_x, mode.resolution_y, mode.framebuffer_address });
+                count += 1;
+            }
+            lib.log.debug("count: {}", .{count});
+
+            return count;
+        }
+    };
+
+    pub const Mode = extern struct {
+        mode_attributes: Attributes,
+        wina_attributes: u8,
+        winb_attributes: u8,
+        win_granularity: u16,
+        win_size: u16,
+        wina_segment: u16,
+        winb_segment: u16,
+        win_far_pointer: u32 align(2),
+        bytes_per_scanline: u16,
+
+        resolution_x: u16,
+        resolution_y: u16,
+        character_size_x: u8,
+        character_size_y: u8,
+        plane_count: u8,
+        bpp: u8,
+        bank_count: u8,
+        memory_model: MemoryModel,
+        bank_size: u8,
+        image_count: u8,
+        reserved: u8 = 0,
+
+        red_mask_size: u8,
+        red_mask_shift: u8,
+        green_mask_size: u8,
+        green_mask_shift: u8,
+        blue_mask_size: u8,
+        blue_mask_shift: u8,
+        reserved_mask_size: u8,
+        reserved_mask_shift: u8,
+        direct_color_info: u8,
+
+        framebuffer_address: u32 align(2),
+        reserved_arr: [6]u8,
+
+        linear_bytes_per_scanline: u16,
+        banked_image_count: u8,
+        linear_image_count: u8,
+        linear_red_mask_size: u8,
+        linear_red_mask_shift: u8,
+        linear_green_mask_size: u8,
+        linear_green_mask_shift: u8,
+        linear_blue_mask_size: u8,
+        linear_blue_mask_shift: u8,
+        linear_reserved_mask_size: u8,
+        linear_reserved_mask_shift: u8,
+        max_pixel_clock: u32 align(2),
+
+        reserved0: [189]u8,
+
+        comptime {
+            //@compileLog(@sizeOf(Mode));
+            assert(@sizeOf(Mode) == 0x100);
+        }
+
+        pub const MemoryModel = enum(u8) {
+            text_mode = 0x00,
+            cga_graphics = 0x01,
+            hercules_graphics = 0x02,
+            planar = 0x03,
+            packed_pixel = 0x04,
+            non_chain_4_256_color = 0x05,
+            direct_color = 0x06,
+            yuv = 0x07,
+            _,
+        };
+
+        pub const Attributes = packed struct(u16) {
+            mode_supported_by_hardware: bool,
+            reserved: u1 = 0,
+            TTY_output_function_supported_by_BIOS: bool,
+            color: bool,
+            graphics: bool,
+            vga_incompatible: bool,
+            vga_incompatible_window_mode: bool,
+            linear_framebuffer: bool,
+            double_scan_mode: bool,
+            interlaced_mode: bool,
+            hardware_triple_buffering: bool,
+            hardware_stereoscopic_display: bool,
+            dual_display_start_address: bool,
+            reserved0: u3 = 0,
+        };
+
+        pub const Number = packed struct(u16) {
+            number: u8,
+            is_VESA: bool,
+            reserved: u2 = 0,
+            refresh_rate_control_select: bool,
+            reserved0: u2 = 0,
+            linear_flat_frame_buffer_select: bool,
+            preserve_display_memory_select: bool,
+        };
+
+        pub fn defaultIsValid(mode: *const VBE.Mode) bool {
+            return mode.memory_model == .direct_color and mode.mode_attributes.linear_framebuffer;
+        }
+    };
+
+    const ReturnValue = enum(u8) {
+        successful = 0,
+        failure = 1,
+        not_supported_in_hardware = 2,
+        invalid_in_current_video_mode = 3,
+    };
+
+    const Call = enum(u8) {
+        get_controller_information = 0x00,
+        get_mode_information = 0x01,
+        get_edid_information = 0x15,
+    };
+
+    const interrupt_number = 0x10;
+    const vbe_code = 0x4f;
+
+    pub fn VBEinterrupt(call: Call, registers: *Registers) !void {
+        const source_ax = @as(u16, vbe_code << 8) | @enumToInt(call);
+        registers.eax = source_ax;
+        int(interrupt_number, registers, registers);
+
+        const ax = @truncate(u16, registers.eax);
+        const al = @truncate(u8, ax);
+        const is_supported = al == vbe_code;
+        if (!is_supported) return Error.not_supported;
+
+        const ah = @truncate(u8, ax >> 8);
+        if (ah > 3) @panic("Return value too high");
+        const return_value = @intToEnum(ReturnValue, ah);
+        return switch (return_value) {
+            .failure => Error.failure,
+            .not_supported_in_hardware => Error.not_supported_in_hardware,
+            .invalid_in_current_video_mode => Error.invalid_in_current_video_mode,
+            .successful => {},
+        };
+    }
+
+    pub fn getControllerInformation() VBE.Error!Information {
+        var registers = Registers{};
+        var vbe_info: VBE.Information = undefined;
+
+        registers.edi = @ptrToInt(&vbe_info);
+        try VBEinterrupt(.get_controller_information, &registers);
+
+        return vbe_info;
+    }
+
+    pub const Error = error{
+        bad_signature,
+        unsupported_version,
+        not_supported,
+        failure,
+        not_supported_in_hardware,
+        invalid_in_current_video_mode,
+    };
+
+    const EDID = extern struct {
+        padding: [8]u8,
+        manufacturer_id_be: u16 align(1),
+        edid_id_code: u16 align(1),
+        serial_number: u32 align(1),
+        man_week: u8,
+        man_year: u8,
+        edid_version: u8,
+        edid_revision: u8,
+        video_input_type: u8,
+        max_horizontal_size: u8,
+        max_vertical_size: u8,
+        gamma_factor: u8,
+        dpms_flags: u8,
+        chroma_info: [10]u8,
+        est_timings1: u8,
+        est_timings2: u8,
+        man_res_timing: u8,
+        std_timing_id: [8]u16 align(1),
+        det_timing_desc1: [18]u8,
+        det_timing_desc2: [18]u8,
+        det_timing_desc3: [18]u8,
+        det_timing_desc4: [18]u8,
+        unused: u8,
+        checksum: u8,
+
+        comptime {
+            assert(@sizeOf(EDID) == 0x80);
+        }
+
+        pub fn getWidth(edid: *const EDID) u32 {
+            return edid.det_timing_desc1[2] + (@as(u32, edid.det_timing_desc1[4] & 0xf0) << 4);
+        }
+
+        pub fn getHeight(edid: *const EDID) u32 {
+            return edid.det_timing_desc1[5] + (@as(u32, edid.det_timing_desc1[7] & 0xf0) << 4);
+        }
+    };
+
+    pub fn getEDIDInfo() VBE.Error!EDID {
+        var edid_info: EDID = undefined;
+
+        var registers = Registers{};
+        registers.ds = segment(@ptrToInt(&edid_info));
+        registers.es = registers.ds;
+        registers.edi = offset(@ptrToInt(&edid_info));
+        registers.ebx = 1;
+
+        try VBEinterrupt(.get_edid_information, &registers);
+
+        return edid_info;
+    }
+};

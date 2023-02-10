@@ -157,6 +157,10 @@ pub const FilesystemType = enum(u32) {
     pub const count = enumCount(@This());
 };
 
+pub fn enumValues(comptime E: type) void {
+    _ = E;
+}
+
 pub fn enumCount(comptime E: type) usize {
     return @typeInfo(E).Enum.fields.len;
 }
@@ -400,11 +404,11 @@ pub const architecture_bootloader_map = blk: {
     break :blk array;
 };
 
-pub const Bootloader = enum(u8) {
+pub const Bootloader = enum(u32) {
     rise,
     limine,
 
-    pub const Protocol = enum(u8) {
+    pub const Protocol = enum(u32) {
         bios,
         uefi,
     };

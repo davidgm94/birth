@@ -174,7 +174,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
 
                 return stable_buffer.first.?.data[0..count];
             } else {
-                @panic("Wtfffffffffffffff");
+                @panic("add_many failed");
                 //var iterator = stable_buffer.first;
                 //var last: ?*Bucket = null;
                 //while (iterator) |next| {

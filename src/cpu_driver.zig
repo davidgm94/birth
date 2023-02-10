@@ -41,6 +41,10 @@ export fn limineEntryPoint() noreturn {
     limine_log.debug("Framebuffers:", .{});
     for (framebuffers) |framebuffer| {
         limine_log.debug("{}", .{framebuffer});
+        const modes = framebuffer.modes[0..framebuffer.mode_count];
+        for (modes) |mode, mode_index| {
+            log.debug("Mode [{}] {}", .{ mode_index, mode });
+        }
     }
     limine_log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
     limine_log.debug("Memory map entry count: {}", .{limine_memory_map.response.?.entry_count});

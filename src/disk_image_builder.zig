@@ -15,7 +15,7 @@ const max_file_length = lib.maxInt(usize);
 
 const mbr_offset: u16 = 0xfe00;
 const stack_top: u16 = mbr_offset;
-const stack_size = 0x1000;
+const stack_size = 0x2000;
 
 pub const BootDisk = extern struct {
     bpb: MBR.BIOSParameterBlock.DOS7_1_79,
@@ -580,31 +580,32 @@ pub fn main() anyerror!void {
 
             var files_parser = lib.FileParser.init(configuration_file);
 
-            var cpu_driver_name: ?[]const u8 = null;
-            while (try files_parser.next()) |file_descriptor| {
-                if (file_descriptor.type == .cpu_driver) {
-                    if (cpu_driver_name != null) @panic("More than one CPU driver");
-                    cpu_driver_name = file_descriptor.guest;
+            const cpu_driver_name = blk: {
+                var maybe_cpu_driver_name: ?[]const u8 = null;
+                while (try files_parser.next()) |file_descriptor| {
+                    if (file_descriptor.type == .cpu_driver) {
+                        if (maybe_cpu_driver_name != null) @panic("More than one CPU driver");
+                        maybe_cpu_driver_name = file_descriptor.guest;
+                    }
+
+                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
+                        .arch => switch (architecture) {
+                            inline else => |arch| "_" ++ @tagName(arch),
+                        },
+                        .full => unreachable,
+                        .none => unreachable,
+                    } });
+                    log.debug("Host relative path: {s}", .{host_relative_path});
+                    const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
+                    try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                 }
 
-                const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
-                    .arch => switch (architecture) {
-                        inline else => |arch| "_" ++ @tagName(arch),
-                    },
-                    .full => unreachable,
-                    .none => unreachable,
-                } });
-                log.debug("Host relative path: {s}", .{host_relative_path});
-                const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
-                try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-            }
+                break :blk maybe_cpu_driver_name orelse unreachable;
+            };
 
-            blk: {
-                const file_content = configuration_file;
-                const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
-                try fat_partition_cache.makeNewFile(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                break :blk;
-            }
+            const file_content = configuration_file;
+            const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
+            try fat_partition_cache.makeNewFile(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
 
             switch (bootloader_id) {
                 .limine => {
@@ -621,7 +622,7 @@ pub fn main() anyerror!void {
                         try limine_cfg_generator.addField("TIMEOUT", "0");
                         try limine_cfg_generator.addEntryName("Rise");
                         try limine_cfg_generator.addField("PROTOCOL", "limine");
-                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", cpu_driver_name.? }));
+                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", cpu_driver_name }));
                         try limine_cfg_generator.addField("DEFAULT_ENTRY", "0");
                         break :blk limine_cfg_generator.buffer.items;
                     };
@@ -678,7 +679,12 @@ pub fn main() anyerror!void {
                         try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
                         try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
                     },
-                    .uefi => @panic("rise uefi"),
+                    .uefi => {
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/BOOTX64.efi", max_file_length);
+                        try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, 0);
+                        try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, 0);
+                        try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", loader_file, wrapped_allocator.unwrap(), null, 0);
+                    },
                 },
             }
         },

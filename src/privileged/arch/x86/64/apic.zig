@@ -163,7 +163,7 @@ pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress(.global)) void {
     init_timer(apic_base, true, false);
     set_divide(apic_base, .by_1);
 
-    @panic("TODO");
+    @panic("TODO: calibrate_timer_with_rtc");
 }
 
 pub var is_bsp = false;
