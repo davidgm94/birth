@@ -1,6 +1,6 @@
 .section .text
-.global int
-int:
+.global interrupt
+interrupt:
 movb 4(%esp), %al
 movb %al, (.interrupt_number)
 

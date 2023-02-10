@@ -58,7 +58,7 @@ pub const Disk = extern struct {
                 .ds = dap_segment,
             };
 
-            int(0x13, &registers, &registers);
+            interrupt(0x13, &registers, &registers);
             if (registers.eflags.flags.carry_flag) @panic("disk read failed");
             const provided_buffer_offset = lba_offset * disk.sector_size;
             const bytes_to_copy = sectors_to_read * disk.sector_size;
@@ -84,7 +84,7 @@ pub const Disk = extern struct {
     }
 };
 
-extern fn int(number: u8, out_regs: *Registers, in_regs: *const Registers) callconv(.C) void;
+extern fn interrupt(number: u8, out_regs: *Registers, in_regs: *const Registers) callconv(.C) void;
 
 const DAP = lib.PartitionTable.MBR.DAP;
 
@@ -190,7 +190,7 @@ pub const E820Iterator = extern struct {
         iterator.registers.edx = 0x534d4150;
         iterator.registers.edi = @ptrToInt(&memory_map_entry);
 
-        int(0x15, &iterator.registers, &iterator.registers);
+        interrupt(0x15, &iterator.registers, &iterator.registers);
 
         if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
             const entry_index = iterator.index;
@@ -304,8 +304,8 @@ pub fn findRSDP() ?u32 {
 }
 
 pub const RealModePointer = extern struct {
-    segment: u16,
     offset: u16,
+    segment: u16,
 
     pub inline fn desegment(real_mode_pointer: RealModePointer, comptime Ptr: type) Ptr {
         return @intToPtr(Ptr, (@as(u32, real_mode_pointer.segment) << 4) + real_mode_pointer.offset);
@@ -313,23 +313,18 @@ pub const RealModePointer = extern struct {
 };
 
 pub const VBE = extern struct {
-    const Information = extern struct {
+    pub const Information = extern struct {
         signature: [4]u8,
         version_minor: u8,
         version_major: u8,
-        OEM_segment: u16,
-        OEM_offset: u16,
+        OEM: RealModePointer,
         capabitilies: [4]u8,
-        video_modes_segment: u16,
-        video_modes_offset: u16,
+        video_modes: RealModePointer,
         video_memory_blocks: u16,
         OEM_software_revision: u16,
-        OEM_vendor_segment: u16,
-        OEM_vendor_offset: u16,
-        OEM_product_name_segment: u16,
-        OEM_product_name_offset: u16,
-        OEM_product_revision_segment: u16,
-        OEM_product_revision_offset: u16,
+        OEM_vendor: RealModePointer,
+        OEM_product_name: RealModePointer,
+        OEM_product_revision: RealModePointer,
         reserved: [222]u8,
         OEM_data: [256]u8,
 
@@ -346,10 +341,10 @@ pub const VBE = extern struct {
             assert(@sizeOf(Information) == 0x200);
         }
 
-        pub fn getVideoModes(vbe_info: *const VBE.Information) u16 {
-            const video_modes = @intToPtr([*]const volatile u16, @as(u32, vbe_info.video_modes_segment) << 4 | vbe_info.video_modes_offset)[0..lib.maxInt(u16)];
+        pub fn getVideoModes(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool) u16 {
+            const video_modes = vbe_info.video_modes.desegment([*]const u16);
             var count: u16 = 0;
-            for (video_modes) |video_mode_number| {
+            for (video_modes[0..lib.maxInt(usize)]) |video_mode_number| {
                 if (video_mode_number == 0xffff) break;
                 var registers = Registers{};
                 var mode: VBE.Mode = undefined;
@@ -359,10 +354,10 @@ pub const VBE = extern struct {
 
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
-                lib.log.debug("{}x{}. addr: 0x{x}", .{ mode.resolution_x, mode.resolution_y, mode.framebuffer_address });
-                count += 1;
+                if (isValidVideoMode(&mode)) {
+                    count += 1;
+                }
             }
-            lib.log.debug("count: {}", .{count});
 
             return count;
         }
@@ -487,7 +482,7 @@ pub const VBE = extern struct {
     pub fn VBEinterrupt(call: Call, registers: *Registers) !void {
         const source_ax = @as(u16, vbe_code << 8) | @enumToInt(call);
         registers.eax = source_ax;
-        int(interrupt_number, registers, registers);
+        interrupt(interrupt_number, registers, registers);
 
         const ax = @truncate(u16, registers.eax);
         const al = @truncate(u8, ax);
@@ -505,14 +500,11 @@ pub const VBE = extern struct {
         };
     }
 
-    pub fn getControllerInformation() VBE.Error!Information {
+    pub fn getControllerInformation(vbe_info: *VBE.Information) VBE.Error!void {
         var registers = Registers{};
-        var vbe_info: VBE.Information = undefined;
 
-        registers.edi = @ptrToInt(&vbe_info);
+        registers.edi = @ptrToInt(vbe_info);
         try VBEinterrupt(.get_controller_information, &registers);
-
-        return vbe_info;
     }
 
     pub const Error = error{

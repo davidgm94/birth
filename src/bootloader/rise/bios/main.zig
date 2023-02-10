@@ -31,13 +31,15 @@ var gdt = GDT.Table{
 
 pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Information {
     var iterator = BIOS.E820Iterator{};
+    var vbe_info: BIOS.VBE.Information = undefined;
 
     const edid_info = try BIOS.VBE.getEDIDInfo();
     const edid_width = edid_info.getWidth();
     const edid_height = edid_info.getHeight();
     const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
     _ = preferred_resolution;
-    const vbe_info = try BIOS.VBE.getControllerInformation();
+    try BIOS.VBE.getControllerInformation(&vbe_info);
+
     if (!lib.equal(u8, &vbe_info.signature, "VESA")) {
         return BIOS.VBE.Error.bad_signature;
     }
@@ -46,7 +48,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
         return BIOS.VBE.Error.unsupported_version;
     }
 
-    const framebuffer_video_mode_count = vbe_info.getVideoModes();
+    log.debug("Mode count: {}", .{vbe_info.getVideoModes(BIOS.VBE.Mode.defaultIsValid)});
 
     const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
     const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
@@ -63,7 +65,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
         arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = memory_map_entry_count;
         arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = memory_map_entry_count;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
-        arr[@enumToInt(bootloader.Information.Slice.Name.framebuffer_video_modes)].length = framebuffer_video_mode_count;
+        arr[@enumToInt(bootloader.Information.Slice.Name.framebuffer_video_modes)].length = 0;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
 
         inline for (bootloader.Information.Slice.TypeMap) |T, index| {
