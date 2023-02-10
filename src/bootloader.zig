@@ -49,7 +49,6 @@ pub const Information = extern struct {
             memory_map_entries = 1,
             page_counters = 2,
             cpus = 3,
-            framebuffer_video_modes = 4,
         };
 
         pub const count = lib.enumCount(Name);
@@ -60,7 +59,6 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
             arr[@enumToInt(Slice.Name.cpus)] = CPU;
-            arr[@enumToInt(Slice.Name.framebuffer_video_modes)] = Framebuffer.VideoMode;
             break :blk arr;
         };
     };
@@ -79,16 +77,16 @@ pub const Information = extern struct {
     };
 
     pub const Framebuffer = extern struct {
+        address: u64 = 0,
         pitch: u32 = 0,
         width: u32 = 0,
         height: u32 = 0,
         bpp: u16 = 0,
-        memory_model: u8 = 0,
-        reserved: u8 = 0,
         red_mask: ColorMask = .{},
         green_mask: ColorMask = .{},
         blue_mask: ColorMask = .{},
-        address: u64 = 0,
+        memory_model: u8 = 0,
+        reserved: u8 = 0,
 
         pub const ColorMask = extern struct {
             size: u8 = 0,

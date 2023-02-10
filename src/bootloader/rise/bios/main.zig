@@ -48,7 +48,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
         return BIOS.VBE.Error.unsupported_version;
     }
 
-    log.debug("Mode count: {}", .{vbe_info.getVideoModes(BIOS.VBE.Mode.defaultIsValid)});
+    log.debug("Mode: {?}", .{vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height)});
 
     const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
     const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
@@ -65,7 +65,6 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
         arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = memory_map_entry_count;
         arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = memory_map_entry_count;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
-        arr[@enumToInt(bootloader.Information.Slice.Name.framebuffer_video_modes)].length = 0;
         arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
 
         inline for (bootloader.Information.Slice.TypeMap) |T, index| {

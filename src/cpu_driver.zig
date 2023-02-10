@@ -36,18 +36,13 @@ export fn limineEntryPoint() noreturn {
     const hhdm = limine_hhdm.response.?.offset;
     assert(limine_stack_size.response != null);
     const stack_size = limine_stack_size.stack_size;
-    const framebuffers = limine_framebuffer.response.?.framebuffers.?.*[0..limine_framebuffer.response.?.framebuffer_count];
     limine_log.debug("Limine requests:\nHHDM: 0x{x}\nStack size: 0x{x}", .{ hhdm, stack_size });
-    limine_log.debug("Framebuffers:", .{});
-    for (framebuffers) |framebuffer| {
-        limine_log.debug("{}", .{framebuffer});
-        const modes = framebuffer.modes[0..framebuffer.mode_count];
-        for (modes) |mode, mode_index| {
-            log.debug("Mode [{}] {}", .{ mode_index, mode });
-        }
-    }
     limine_log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
-    limine_log.debug("Memory map entry count: {}", .{limine_memory_map.response.?.entry_count});
+    const memory_map = limine_memory_map.response.?;
+    limine_log.debug("Memory map entry count: {}", .{memory_map.entry_count});
+    for (memory_map.entries.?.*[0..memory_map.entry_count]) |entry| {
+        limine_log.debug("{}", .{entry});
+    }
     limine_log.debug("Module count: {}", .{limine_modules.response.?.module_count});
 
     stopCPU();

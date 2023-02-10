@@ -185,8 +185,9 @@ pub const E820Iterator = extern struct {
     pub fn next(iterator: *E820Iterator) ?struct { descriptor: MemoryMapEntry, index: usize } {
         var memory_map_entry: MemoryMapEntry = undefined;
 
+        comptime assert(@sizeOf(MemoryMapEntry) == 24);
         iterator.registers.eax = 0xe820;
-        iterator.registers.ecx = 24;
+        iterator.registers.ecx = @sizeOf(MemoryMapEntry);
         iterator.registers.edx = 0x534d4150;
         iterator.registers.edi = @ptrToInt(&memory_map_entry);
 
@@ -235,6 +236,7 @@ pub fn findSuitableEntry(size: u32) ?SuitableEntry {
 pub fn fetchMemoryEntries(memory_map: []bootloader.MemoryMapEntry) void {
     var iterator = E820Iterator{};
     while (iterator.next()) |entry| {
+        lib.log.debug("Entry: 0x{x}. Size: 0x{x}. Type: {s}", .{ entry.descriptor.region.address.value(), entry.descriptor.region.size, @tagName(entry.descriptor.type) });
         memory_map[entry.index] = .{
             .region = entry.descriptor.region,
             .type = switch (entry.descriptor.type) {
@@ -341,9 +343,8 @@ pub const VBE = extern struct {
             assert(@sizeOf(Information) == 0x200);
         }
 
-        pub fn getVideoModes(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool) u16 {
+        pub fn getVideoMode(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool, desired_width: u16, desired_height: u16) ?Mode {
             const video_modes = vbe_info.video_modes.desegment([*]const u16);
-            var count: u16 = 0;
             for (video_modes[0..lib.maxInt(usize)]) |video_mode_number| {
                 if (video_mode_number == 0xffff) break;
                 var registers = Registers{};
@@ -355,11 +356,13 @@ pub const VBE = extern struct {
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
                 if (isValidVideoMode(&mode)) {
-                    count += 1;
+                    if (mode.resolution_x == desired_width and mode.resolution_y == desired_height) {
+                        return mode;
+                    }
                 }
             }
 
-            return count;
+            return null;
         }
     };
 
@@ -546,12 +549,12 @@ pub const VBE = extern struct {
             assert(@sizeOf(EDID) == 0x80);
         }
 
-        pub fn getWidth(edid: *const EDID) u32 {
-            return edid.det_timing_desc1[2] + (@as(u32, edid.det_timing_desc1[4] & 0xf0) << 4);
+        pub fn getWidth(edid: *const EDID) u16 {
+            return edid.det_timing_desc1[2] + (@as(u16, edid.det_timing_desc1[4] & 0xf0) << 4);
         }
 
-        pub fn getHeight(edid: *const EDID) u32 {
-            return edid.det_timing_desc1[5] + (@as(u32, edid.det_timing_desc1[7] & 0xf0) << 4);
+        pub fn getHeight(edid: *const EDID) u16 {
+            return edid.det_timing_desc1[5] + (@as(u16, edid.det_timing_desc1[7] & 0xf0) << 4);
         }
     };
 
