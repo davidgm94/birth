@@ -271,8 +271,9 @@ export fn entryPoint() callconv(.C) noreturn {
                             },
                         }
 
-                        VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch {
-                            @panic("Mapping failed");
+                        VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch |err| {
+                            log.err("Mapping failed: {}", .{err});
+                            @panic("Mapping of section failed");
                         };
 
                         const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
@@ -293,7 +294,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping failed");
+            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
 
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);

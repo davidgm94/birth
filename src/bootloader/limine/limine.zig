@@ -637,7 +637,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
 
     const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
     const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-    VirtualAddressSpace.paging.bootstrap_map(&cpu_driver_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping failed");
+    VirtualAddressSpace.paging.bootstrap_map(&cpu_driver_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
 
     const stack_slice = bootloader_information.getSlice(.cpu_driver_stack);
     limineTrampoline(bootloader_information_virtual_address.access(*bootloader.Information), lib.config.cpu_driver_higher_half_address + @ptrToInt(stack_slice.ptr) + stack_slice.len, cpu_driver_address_space.arch.cr3, @import("root").entryPoint);
