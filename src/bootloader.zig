@@ -1,6 +1,6 @@
 pub const BIOS = @import("bootloader/bios.zig");
 pub const UEFI = @import("bootloader/uefi.zig");
-pub const limine = @import("bootloader/limine/spec.zig");
+pub const limine = @import("bootloader/limine/limine.zig");
 
 const lib = @import("lib.zig");
 const assert = lib.assert;
