@@ -220,7 +220,7 @@ pub const SMPInfo = switch (@import("builtin").cpu.arch) {
 
 pub const MemoryMap = extern struct {
     pub const Entry = extern struct {
-        region: privileged.arch.PhysicalMemoryRegion(.global),
+        region: PhysicalMemoryRegion(.global),
         type: Type,
 
         const Type = enum(u64) {
@@ -376,7 +376,24 @@ const log = lib.log.scoped(.LIMINE);
 const bootloader = @import("../../bootloader.zig");
 
 const privileged = @import("../../privileged.zig");
+const PhysicalAddress = privileged.arch.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;
+const VirtualAddress = privileged.arch.VirtualAddress;
+const VirtualAddressSpace = privileged.arch.VirtualAddressSpace;
 const stopCPU = privileged.arch.stopCPU;
+
+fn mapSection(cpu_driver_address_space: *VirtualAddressSpace, comptime section_name: []const u8, page_allocator: *lib.Allocator, flags: VirtualAddressSpace.Flags) !void {
+    const section_start_symbol = @extern(*u8, .{ .name = section_name ++ "_section_start" });
+    const section_end_symbol = @extern(*u8, .{ .name = section_name ++ "_section_end" });
+    const section_start = @ptrToInt(section_start_symbol);
+    const section_end = @ptrToInt(section_end_symbol);
+
+    const virtual_address = VirtualAddress(.local).new(section_start);
+    const physical_address = PhysicalAddress(.local).new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
+    const size = section_end - section_start;
+    log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) with flags {} for {} bytes", .{ section_name, physical_address.value(), virtual_address.value(), flags, size });
+    VirtualAddressSpace.paging.bootstrap_map(cpu_driver_address_space, .local, physical_address, virtual_address, size, flags, page_allocator) catch @panic("Mapping of memory map entry failed");
+}
 
 export var limine_information = BootloaderInfo.Request{ .revision = 0 };
 export var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = privileged.default_stack_size };
@@ -386,6 +403,7 @@ export var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = fal
 export var limine_memory_map = MemoryMap.Request{ .revision = 0 };
 export var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
 export var limine_kernel_file = KernelFile.Request{ .revision = 0 };
+export var limine_kernel_address = KernelAddress.Request{ .revision = 0 };
 export var limine_modules = Module.Request{ .revision = 0 };
 export var limine_rsdp = RSDP.Request{ .revision = 0 };
 export var limine_smbios = SMBIOS.Request{ .revision = 0 };
@@ -582,7 +600,56 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
         }
     }
 
-    if (true) @panic("todo: setup bootloader");
+    var cpu_driver_address_space = blk: {
+        const allocation_result = bootloader_information.page_allocator.allocateBytes(privileged.arch.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch |err| {
+            log.err("Error: {}", .{err});
+            @panic("Unable to get physical memory to bootstrap kernel address space");
+        };
+        const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
+            .address = PhysicalAddress(.local).new(allocation_result.address),
+            .size = allocation_result.size,
+        };
+        const result = VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
+        break :blk result;
+    };
+    const entries = bootloader_information.getMemoryMapEntries();
+    for (entries) |entry| {
+        if (entry.type == .usable) {
+            VirtualAddressSpace.paging.bootstrap_map(&cpu_driver_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, &bootloader_information.page_allocator) catch @panic("Mapping of memory map entry failed");
+        }
+    }
 
-    @import("root").entryPoint(bootloader_information);
+    // Trust the Limine bootloader to merely use the higher half offset
+    const framebuffer_physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address);
+    const framebuffer_virtual_address = VirtualAddress(.global).new(bootloader_information.framebuffer.address);
+    log.debug("Framebuffer: 0x{x}", .{framebuffer_physical_address.value()});
+    VirtualAddressSpace.paging.bootstrap_map(&cpu_driver_address_space, .global, framebuffer_physical_address, framebuffer_virtual_address, lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("can't map framebuffer");
+
+    const sections = &[_]struct { name: []const u8, flags: VirtualAddressSpace.Flags }{
+        .{ .name = "text", .flags = .{ .write = false, .execute = true } },
+        .{ .name = "rodata", .flags = .{ .write = false, .execute = false } },
+        .{ .name = "data", .flags = .{ .write = true, .execute = false } },
+    };
+
+    inline for (sections) |section| {
+        mapSection(&cpu_driver_address_space, section.name, &bootloader_information.page_allocator, section.flags) catch @panic("Can't map cpu driver section");
+    }
+
+    const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
+    const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
+    VirtualAddressSpace.paging.bootstrap_map(&cpu_driver_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping failed");
+
+    const stack_slice = bootloader_information.getSlice(.cpu_driver_stack);
+    limineTrampoline(bootloader_information_virtual_address.access(*bootloader.Information), lib.config.cpu_driver_higher_half_address + @ptrToInt(stack_slice.ptr) + stack_slice.len, cpu_driver_address_space.arch.cr3, @import("root").entryPoint);
+}
+
+extern fn limineTrampoline(bootloader_information: *bootloader.Information, stack_top: u64, cr3: privileged.arch.x86_64.registers.cr3, entryPoint: *const fn (*bootloader.Information) callconv(.C) noreturn) callconv(.C) noreturn;
+comptime {
+    asm (
+        \\.global limineTrampoline
+        \\limineTrampoline:
+        \\mov %rsi, %rsp
+        \\mov %rdx, %cr3
+        \\jmp *%rcx
+    );
 }

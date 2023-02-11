@@ -22,6 +22,10 @@ pub const registers = @import("x86/64/registers.zig");
 pub const Syscall = @import("x86/64/syscall.zig");
 pub const TSS = @import("x86/64/tss.zig");
 
+pub inline fn disableInterrupts() void {
+    asm volatile ("cli" ::: "memory");
+}
+
 pub inline fn stopCPU() noreturn {
     while (true) {
         asm volatile (

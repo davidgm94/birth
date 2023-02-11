@@ -12,6 +12,7 @@ pub fn Interface(comptime Usize: type) type {
                 const PA = @This();
 
                 pub inline fn new(address: Usize) PA {
+                    if (address >= lib.config.cpu_driver_higher_half_address) @panic("Trying to write a higher half virtual address value into a physical address");
                     return @intToEnum(PA, address);
                 }
 
@@ -80,7 +81,7 @@ pub fn Interface(comptime Usize: type) type {
                     return @intToEnum(VA, virtual_address.value() + asked_offset);
                 }
 
-                pub inline fn negative_offset(virtual_address: VA, asked_offset: Usize) VA {
+                pub inline fn negativeOffset(virtual_address: VA, asked_offset: Usize) VA {
                     return @intToEnum(VA, virtual_address.value() - asked_offset);
                 }
             };
@@ -103,6 +104,13 @@ pub fn Interface(comptime Usize: type) type {
                 pub inline fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VirtualMemoryRegion(core_locality) {
                     return .{
                         .address = physical_memory_region.address.toIdentityMappedVirtualAddress(),
+                        .size = physical_memory_region.size,
+                    };
+                }
+
+                pub inline fn toHigherHalfVirtualAddress(physical_memory_region: PMR) VirtualMemoryRegion(core_locality) {
+                    return .{
+                        .address = physical_memory_region.address.toHigherHalfVirtualAddress(),
                         .size = physical_memory_region.size,
                     };
                 }

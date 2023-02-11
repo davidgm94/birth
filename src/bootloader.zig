@@ -178,7 +178,7 @@ pub const Information = extern struct {
         const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
 
         for (entries) |entry, entry_index| {
-            if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] != 0) {
+            if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
                 const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
                 const size_left = entry.region.size - busy_size;
                 if (entry.type == .usable and size_left > size) {

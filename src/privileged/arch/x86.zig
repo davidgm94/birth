@@ -13,6 +13,10 @@ pub fn stopCPU() noreturn {
     }
 }
 
+pub inline fn disableInterrupts() void {
+    asm volatile ("cli" ::: "memory");
+}
+
 pub const paging = struct {
     pub const Specific = extern struct {
         foo: u32,

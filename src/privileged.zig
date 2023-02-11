@@ -150,11 +150,13 @@ pub const SpawnState = struct {
 const panic_logger = lib.log.scoped(.PANIC);
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    arch.disableInterrupts();
     panic_logger.err(format, arguments);
     arch.stopCPU();
 }
 
 pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    arch.disableInterrupts();
     panic("{s}", .{message});
 }
 

@@ -206,12 +206,12 @@ export fn entryPoint() callconv(.C) noreturn {
     };
 
     var kernel_address_space = blk: {
-        const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_kernel_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap kernel address space");
-        const kernel_address_space_physical_region = PhysicalMemoryRegion(.local){
+        const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
+        const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
             .address = PhysicalAddress(.local).new(allocation_result.address),
-            .size = VirtualAddressSpace.needed_physical_memory_for_bootstrapping_kernel_address_space,
+            .size = allocation_result.size,
         };
-        const result = VirtualAddressSpace.kernelBSP(kernel_address_space_physical_region);
+        const result = VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
         break :blk result;
     };
 
@@ -229,7 +229,8 @@ export fn entryPoint() callconv(.C) noreturn {
         @panic("Mapping of BIOS loader failed");
     };
     const framebuffer_physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
-    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
+    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
+    bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
     // Map more than necessary
     const loader_stack_size = 0x2000;

@@ -129,6 +129,9 @@ pub fn bootstrap_map(virtual_address_space: *x86_64.VirtualAddressSpace, comptim
     if (!isAlignedGeneric(u64, size, valid_page_sizes[0])) {
         return Error.unaligned_size;
     }
+    if (asked_physical_address.value() >= lib.config.cpu_driver_higher_half_address) {
+        return Error.invalid_physical;
+    }
 
     try map_function(vas_cr3, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
 }
@@ -411,7 +414,7 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
 
 const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
-pub const needed_physical_memory_for_bootstrapping_kernel_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
+pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
 pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
     const pml4_physical_region = allocation_region.takeSlice(@sizeOf(PML4Table));
@@ -599,6 +602,7 @@ fn get_address_type(comptime T: type) type {
 }
 
 fn pack_address(comptime T: type, physical_address: u64) get_address_type(T) {
+    assert(physical_address < lib.config.cpu_driver_higher_half_address);
     const address_offset = @bitOffsetOf(T, "address");
     return @intCast(get_address_type(T), physical_address >> address_offset);
 }
