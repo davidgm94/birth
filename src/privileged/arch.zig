@@ -20,7 +20,7 @@ pub var max_physical_address_bit: u6 = 40;
 
 pub const io = arch.io;
 
-const AddressInterface = privileged.Address.Interface(usize);
+const AddressInterface = privileged.Address.Interface(u64);
 pub const PhysicalAddress = AddressInterface.PhysicalAddress;
 pub const VirtualAddress = AddressInterface.VirtualAddress;
 pub const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;

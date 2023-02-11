@@ -36,6 +36,7 @@ pub const FormatOptions = fmt.FormatOptions;
 pub const bufPrint = fmt.bufPrint;
 pub const allocPrint = fmt.allocPrint;
 pub const comptimePrint = fmt.comptimePrint;
+pub const parseUnsigned = fmt.parseUnsigned;
 
 pub const json = std.json;
 
@@ -63,6 +64,7 @@ pub const alignBackwardGeneric = mem.alignBackwardGeneric;
 pub const isAligned = mem.isAligned;
 pub const isAlignedGeneric = mem.isAlignedGeneric;
 pub const reverse = mem.reverse;
+pub const tokenize = mem.tokenize;
 
 pub const random = std.rand;
 

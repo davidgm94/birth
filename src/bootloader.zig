@@ -5,7 +5,7 @@ pub const limine = @import("bootloader/limine/limine.zig");
 const lib = @import("lib.zig");
 const assert = lib.assert;
 const Allocator = lib.Allocator;
-const Protocol = lib.Bootloader.Protocol;
+pub const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged.zig");
 const AddressInterface = privileged.Address.Interface(u64);
@@ -22,8 +22,8 @@ pub const Version = extern struct {
 
 pub const CompactDate = packed struct(u16) {
     year: u7,
-    month: u5,
-    day: u4,
+    month: u4,
+    day: u5,
 };
 
 pub const Information = extern struct {
@@ -132,13 +132,17 @@ pub const Information = extern struct {
     pub fn getMemoryMapEntries(information: *Information) []MemoryMapEntry {
         return information.getSlice(.memory_map_entries);
     }
-    //
+
     pub fn getPageCounters(information: *Information) []u32 {
         return information.getSlice(.page_counters);
     }
 
-    pub fn getStructAlignedSizeOnCurrentArchitecture() usize {
-        return lib.alignForward(@sizeOf(Information), lib.arch.valid_page_sizes[0]);
+    pub fn getExternalBootloaderPageCounters(information: *Information) []u32 {
+        return information.getSlice(.external_bootloader_page_counters);
+    }
+
+    pub fn getStructAlignedSizeOnCurrentArchitecture() u32 {
+        return lib.alignForwardGeneric(u32, @sizeOf(Information), lib.arch.valid_page_sizes[0]);
     }
 
     pub fn isSizeRight(information: *const Information) bool {
@@ -171,20 +175,23 @@ pub const Information = extern struct {
 
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
+        const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
 
         for (entries) |entry, entry_index| {
-            const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
-            const size_left = entry.region.size - busy_size;
-            if (entry.type == .usable and size_left > size) {
-                if (entry.region.address.isAligned(alignment)) {
-                    const result = Allocator.Allocate.Result{
-                        .address = entry.region.address.offset(busy_size).value(),
-                        .size = size,
-                    };
+            if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] != 0) {
+                const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
+                const size_left = entry.region.size - busy_size;
+                if (entry.type == .usable and size_left > size) {
+                    if (entry.region.address.isAligned(alignment)) {
+                        const result = Allocator.Allocate.Result{
+                            .address = entry.region.address.offset(busy_size).value(),
+                            .size = size,
+                        };
 
-                    page_counters[entry_index] += four_kb_pages;
+                        page_counters[entry_index] += four_kb_pages;
 
-                    return result;
+                        return result;
+                    }
                 }
             }
         }

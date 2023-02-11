@@ -34,7 +34,7 @@ comptime {
     @export(limine.limineEntryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong });
 }
 
-export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
+pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
     const framebuffer = @intToPtr([*]u32, bootloader_information.framebuffer.address)[0 .. bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height / @sizeOf(u32)];
     for (framebuffer) |*pixel| {

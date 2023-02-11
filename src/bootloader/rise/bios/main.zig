@@ -232,8 +232,8 @@ export fn entryPoint() callconv(.C) noreturn {
     VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
 
     // Map more than necessary
-    const loader_stack = PhysicalAddress(.global).new(0xe000);
     const loader_stack_size = 0x2000;
+    const loader_stack = PhysicalAddress(.global).new(lib.maxInt(u16) + 1 - loader_stack_size);
     VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {

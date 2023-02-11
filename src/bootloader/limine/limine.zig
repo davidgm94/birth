@@ -116,7 +116,7 @@ pub const Framebuffer = extern struct {
     pub const Response = extern struct {
         revision: u64,
         framebuffer_count: u64,
-        framebuffers: ?*const [*]const Framebuffer,
+        framebuffers: *const [*]const Framebuffer,
     };
 };
 
@@ -378,70 +378,43 @@ const bootloader = @import("../../bootloader.zig");
 const privileged = @import("../../privileged.zig");
 const stopCPU = privileged.arch.stopCPU;
 
+export var limine_information = BootloaderInfo.Request{ .revision = 0 };
+export var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = privileged.default_stack_size };
+export var limine_hhdm = HHDM.Request{ .revision = 0 };
+export var limine_framebuffer = Framebuffer.Request{ .revision = 0 };
+export var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
+export var limine_memory_map = MemoryMap.Request{ .revision = 0 };
+export var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
+export var limine_kernel_file = KernelFile.Request{ .revision = 0 };
+export var limine_modules = Module.Request{ .revision = 0 };
+export var limine_rsdp = RSDP.Request{ .revision = 0 };
+export var limine_smbios = SMBIOS.Request{ .revision = 0 };
+export var limine_efi_system_table = EFISystemTable.Request{ .revision = 0 };
+
 pub fn limineEntryPoint() callconv(.C) noreturn {
     log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
+    const limine_protocol: bootloader.Protocol = blk: {
+        if (limine_efi_system_table.response != null) break :blk .uefi;
+        if (limine_smbios.response != null) break :blk .bios;
+
+        @panic("undefined protocol");
+    };
+
+    const framebuffer = &limine_framebuffer.response.?.framebuffers.*[0];
     assert(limine_stack_size.response != null);
     log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
     const memory_map = limine_memory_map.response.?;
     log.debug("Memory map entry count: {}", .{memory_map.entry_count});
     const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
-    for (memory_map_entries) |entry| {
-        log.debug("Entry: 0x{x}. 0x{x}. {s}", .{ entry.region.address, entry.region.size, @tagName(entry.type) });
-    }
-
-    var merging_entries_left: usize = 0;
-    var total_merge_count: usize = 0;
-
-    var maybe_unmergeable_usable_region: ?usize = null;
-    for (memory_map_entries) |entry, entry_index| {
-        if (merging_entries_left > 0) {
-            merging_entries_left -= 1;
-            continue;
-        }
-
-        if (entry.type == .usable or entry.type == .bootloader_reclaimable) {
-            log.debug("Index: {}", .{entry_index});
-            if (entry_index + 1 < memory_map_entries.len) {
-                var index = entry_index;
-                while (index + 1 < memory_map_entries.len) : (index += 1) {
-                    const mergeable_entry = memory_map_entries[index];
-                    const is_mergeable = mergeable_entry.type == .usable or mergeable_entry.type == .bootloader_reclaimable;
-                    if (!is_mergeable) break;
-                }
-
-                const merge_count = index - entry_index - 1;
-                total_merge_count += merge_count;
-                if (merge_count > 0) {
-                    merging_entries_left = merge_count;
-
-                    const size_guess = @sizeOf(bootloader.Information) + 15 * lib.arch.valid_page_sizes[0];
-                    if (entry.type == .usable and entry.region.size > size_guess) {
-                        maybe_unmergeable_usable_region = entry_index;
-                    }
-                }
-                log.debug("Merge count: {}", .{merge_count});
-            }
-        }
-    }
-
-    const unmergeable_usable_region = maybe_unmergeable_usable_region orelse @panic("TODO: Unable to find unmergeable_usable_region");
-    log.debug("unmergeable_region: {}", .{unmergeable_usable_region});
-
-    log.debug("Total merge count: {}", .{total_merge_count});
-
-    // Discard regions that are not useful to the CPU driver
     var discarded_region_count: usize = 0;
     for (memory_map_entries) |entry| {
+        log.debug("Entry: 0x{x}. 0x{x}. {s}", .{ entry.region.address.value(), entry.region.size, @tagName(entry.type) });
         discarded_region_count += @boolToInt(entry.type == .framebuffer or entry.type == .kernel_and_modules);
     }
 
-    const actual_memory_map_entry_count = @intCast(u32, memory_map_entries.len - discarded_region_count - total_merge_count);
     const stack_size = privileged.default_stack_size;
-
     const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
-
-    log.debug("Total discarded region count: {}", .{discarded_region_count});
-    log.debug("Original entry count: {}. Actual region count: {}", .{ memory_map_entries.len, actual_memory_map_entry_count });
+    const actual_memory_map_entry_count = @intCast(u32, memory_map_entries.len - discarded_region_count);
 
     var extra_size: u32 = 0;
     const length_size_tuples = blk: {
@@ -459,26 +432,157 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
         }
         break :blk arr;
     };
-    _ = length_size_tuples;
 
+    const struct_size = @sizeOf(bootloader.Information);
     const aligned_struct_size = bootloader.Information.getStructAlignedSizeOnCurrentArchitecture();
-    const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
+    const aligned_extra_size = lib.alignForwardGeneric(u32, extra_size, lib.arch.valid_page_sizes[0]);
     const total_size = aligned_struct_size + aligned_extra_size;
 
-    const bootloader_information = memory_map_entries[unmergeable_usable_region].region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
-    _ = bootloader_information;
-    log.debug("Total size: 0x{x}", .{total_size});
+    var entry_index: usize = 0;
+    const bootloader_information = blk: {
+        for (memory_map_entries) |entry, index| {
+            if (entry.type == .usable and entry.region.size > total_size) {
+                const bootloader_information_region = entry.region.takeSlice(total_size);
+                const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
+                bootloader_information.* = .{
+                    .struct_size = struct_size,
+                    .extra_size = extra_size,
+                    .total_size = total_size,
+                    .entry_point = @ptrToInt(&limineEntryPoint),
+                    .version = version: {
+                        const limine_version = limine_information.response.?.version[0..lib.length(limine_information.response.?.version)];
+                        var token_iterator = lib.tokenize(u8, limine_version, ".");
+                        const version_major_string = token_iterator.next() orelse @panic("Limine version major");
+                        const version_minor_string = token_iterator.next() orelse @panic("Limine version minor");
+                        const version_patch_string = token_iterator.next() orelse @panic("Limine version patch");
+                        if (token_iterator.next() != null) @panic("Unexpected token in Limine version");
 
-    stopCPU();
+                        const version_major = lib.parseUnsigned(u8, version_major_string, 10) catch @panic("Limine version major parsing");
+                        if (version_minor_string.len != 4 + 2 + 2) @panic("Unexpected version minor length");
+                        const version_minor_year_string = version_minor_string[0..4];
+                        const version_minor_month_string = version_minor_string[4..6];
+                        const version_minor_day_string = version_minor_string[6..8];
+                        const version_minor_year = @intCast(u7, (lib.parseUnsigned(u16, version_minor_year_string, 10) catch @panic("Limine version minor year parsing")) - 1970);
+                        const version_minor_month = lib.parseUnsigned(u4, version_minor_month_string, 10) catch @panic("Limine version minor month parsing");
+                        const version_minor_day = lib.parseUnsigned(u5, version_minor_day_string, 10) catch @panic("Limine version minor day parsing");
+                        const version_patch = lib.parseUnsigned(u8, version_patch_string, 10) catch @panic("Limine version patch parsing");
+
+                        const version_minor = bootloader.CompactDate{
+                            .year = version_minor_year,
+                            .month = version_minor_month,
+                            .day = version_minor_day,
+                        };
+
+                        break :version .{
+                            .major = version_major,
+                            .minor = @bitCast(u16, version_minor),
+                            .patch = version_patch,
+                        };
+                    },
+                    .protocol = limine_protocol,
+                    .bootloader = .limine,
+                    .heap = .{},
+                    .cpu_driver_mappings = .{},
+                    .framebuffer = .{
+                        .address = framebuffer.address,
+                        .pitch = @intCast(u32, framebuffer.pitch),
+                        .width = @intCast(u32, framebuffer.width),
+                        .height = @intCast(u32, framebuffer.height),
+                        .bpp = framebuffer.bpp,
+                        .red_mask = .{
+                            .shift = framebuffer.red_mask_shift,
+                            .size = framebuffer.red_mask_size,
+                        },
+                        .green_mask = .{
+                            .shift = framebuffer.green_mask_shift,
+                            .size = framebuffer.green_mask_size,
+                        },
+                        .blue_mask = .{
+                            .shift = framebuffer.blue_mask_shift,
+                            .size = framebuffer.blue_mask_size,
+                        },
+                        .memory_model = framebuffer.memory_model,
+                    },
+                    .architecture = switch (lib.cpu.arch) {
+                        .x86_64 => .{
+                            .rsdp_address = limine_rsdp.response.?.address,
+                        },
+                        else => @compileError("Architecture not supported"),
+                    },
+                    .slices = .{},
+                };
+                var allocated_size: u32 = 0;
+
+                inline for (bootloader_information.slices) |*slice, slice_index| {
+                    const tuple = length_size_tuples[slice_index];
+                    const length = tuple.length;
+                    const size = tuple.size;
+                    slice.* = .{
+                        .offset = allocated_size + comptime bootloader.Information.getStructAlignedSizeOnCurrentArchitecture(),
+                        .len = length,
+                        .size = size,
+                    };
+
+                    if (allocated_size + size > bootloader_information.extra_size) @panic("size exceeded");
+
+                    allocated_size += size;
+                }
+                if (allocated_size != extra_size) @panic("Extra allocation size must match bootloader allocated extra size");
+
+                entry_index = index;
+
+                break :blk bootloader_information;
+            }
+        }
+
+        @panic("Unable to get bootloader information");
+    };
+
+    const page_counters = bootloader_information.getSlice(.page_counters);
+    const external_bootloader_page_counters = bootloader_information.getSlice(.external_bootloader_page_counters);
+    for (page_counters) |*page_counter| {
+        page_counter.* = 0;
+    }
+    for (external_bootloader_page_counters) |*page_counter| {
+        page_counter.* = 0;
+    }
+
+    const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
+    var discarded: usize = 0;
+    for (memory_map_entries) |entry, index| {
+        const real_index = index - discarded;
+        if (entry.type == .framebuffer or entry.type == .kernel_and_modules) {
+            discarded += 1;
+            continue;
+        }
+
+        bootloader_memory_map_entries[real_index] = .{
+            .region = entry.region,
+            .type = switch (entry.type) {
+                // TODO: is this a good idea?
+                .usable, .bootloader_reclaimable => .usable,
+                .reserved => .reserved,
+                .acpi_reclaimable, .acpi_nvs, .bad_memory => @panic("implement these memory types"),
+                .framebuffer, .kernel_and_modules => unreachable,
+            },
+        };
+
+        const entry_page_count = @intCast(u32, entry.region.size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]));
+
+        switch (entry.type) {
+            .framebuffer, .kernel_and_modules => unreachable,
+            .bootloader_reclaimable => external_bootloader_page_counters[real_index] = entry_page_count,
+            .usable => {},
+            .reserved => page_counters[real_index] = entry_page_count,
+            else => @panic(@tagName(entry.type)),
+        }
+
+        if (entry_index == index) {
+            page_counters[real_index] = bootloader_information.total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+        }
+    }
+
+    if (true) @panic("todo: setup bootloader");
+
+    @import("root").entryPoint(bootloader_information);
 }
-
-export var limine_information = BootloaderInfo.Request{ .revision = 0 };
-export var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = 0x4000 };
-export var limine_hhdm = HHDM.Request{ .revision = 0 };
-export var limine_framebuffer = Framebuffer.Request{ .revision = 0 };
-export var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
-export var limine_memory_map = MemoryMap.Request{ .revision = 0 };
-export var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
-export var limine_kernel_file = KernelFile.Request{ .revision = 0 };
-export var limine_modules = Module.Request{ .revision = 0 };
-export var limine_rsdp = RSDP.Request{ .revision = 0 };
