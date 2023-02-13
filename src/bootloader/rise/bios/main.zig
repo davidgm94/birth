@@ -109,6 +109,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 .version = .{ .major = 0, .minor = 1, .patch = 0 },
                 .total_size = length_size_tuples.total_size,
                 .entry_point = 0,
+                .higher_half = lib.config.cpu_driver_higher_half_address,
                 .configuration = .{
                     .memory_map_diff = 0,
                 },
@@ -135,6 +136,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                     .memory_model = 0x06,
                 },
                 .cpu_driver_mappings = .{},
+                .virtual_address_space = .{ .arch = .{} },
                 .slices = length_size_tuples.createSlices(),
                 .architecture = .{
                     .rsdp_address = rsdp_address,
@@ -214,7 +216,7 @@ export fn entryPoint() callconv(.C) noreturn {
         break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
     };
 
-    var kernel_address_space = blk: {
+    bootloader_information.virtual_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
         const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
             .address = PhysicalAddress(.local).new(allocation_result.address),
@@ -227,24 +229,24 @@ export fn entryPoint() callconv(.C) noreturn {
     const entries = bootloader_information.getMemoryMapEntries();
     for (entries) |entry| {
         if (entry.type == .usable) {
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("Mapping of memory map entry failed");
+            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch @panic("Mapping of memory map entry failed");
         }
     }
 
     const loader_physical_start = PhysicalAddress(.global).new(lib.alignBackward(@ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
     const loader_size = lib.alignForwardGeneric(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
-    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch |err| {
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator) catch |err| {
         log.debug("Error: {}", .{err});
         @panic("Mapping of BIOS loader failed");
     };
     const framebuffer_physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
-    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
     bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
     // Map more than necessary
     const loader_stack_size = 0x2000;
     const loader_stack = PhysicalAddress(.global).new(lib.maxInt(u16) + 1 - loader_stack_size);
-    VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {
         if (lib.equal(u8, file.path, cpu_driver_name)) {
@@ -280,7 +282,7 @@ export fn entryPoint() callconv(.C) noreturn {
                             },
                         }
 
-                        VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch |err| {
+                        VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch |err| {
                             log.err("Mapping failed: {}", .{err});
                             @panic("Mapping of section failed");
                         };
@@ -303,7 +305,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.bootstrap_map(&kernel_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
+            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
 
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
@@ -325,7 +327,7 @@ export fn entryPoint() callconv(.C) noreturn {
                 );
             }
 
-            kernel_address_space.makeCurrent();
+            bootloader_information.virtual_address_space.makeCurrent();
 
             // Enable long mode
             {

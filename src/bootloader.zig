@@ -1,6 +1,7 @@
 pub const BIOS = @import("bootloader/bios.zig");
 pub const UEFI = @import("bootloader/uefi.zig");
 pub const limine = @import("bootloader/limine/limine.zig");
+pub const arch = @import("bootloader/arch.zig");
 
 const lib = @import("lib.zig");
 const assert = lib.assert;
@@ -13,6 +14,10 @@ const PhysicalAddress = AddressInterface.PhysicalAddress;
 const VirtualAddress = AddressInterface.VirtualAddress;
 const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
 const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
+pub const VirtualAddressSpace = privileged.Address.Interface(u64).VirtualAddressSpace(switch (lib.cpu.arch) {
+    .x86 => .x86_64,
+    else => lib.cpu.arch,
+});
 
 pub const Version = extern struct {
     patch: u8,
@@ -28,6 +33,7 @@ pub const CompactDate = packed struct(u16) {
 
 pub const Information = extern struct {
     entry_point: u64,
+    higher_half: u64,
     total_size: u32,
     version: Version,
     protocol: lib.Bootloader.Protocol,
@@ -38,7 +44,7 @@ pub const Information = extern struct {
         },
     },
     configuration: packed struct(u32) {
-        memory_map_diff: i8,
+        memory_map_diff: u8,
         reserved: u24 = 0,
     },
     reserved: u32 = 0,
@@ -46,6 +52,7 @@ pub const Information = extern struct {
     cpu_driver_mappings: CPUDriverMappings,
     framebuffer: Framebuffer,
     cpu: CPU.Information = .{},
+    virtual_address_space: VirtualAddressSpace,
     architecture: switch (lib.cpu.arch) {
         .x86, .x86_64 => extern struct {
             rsdp_address: u64,
@@ -133,16 +140,20 @@ pub const Information = extern struct {
         return memory_map_slice.dereference(offset_name, information);
     }
 
+    pub fn getMemoryMapEntryCount(information: *Information) usize {
+        return information.getSlice(.memory_map_entries).len - information.configuration.memory_map_diff;
+    }
+
     pub fn getMemoryMapEntries(information: *Information) []MemoryMapEntry {
-        return information.getSlice(.memory_map_entries);
+        return information.getSlice(.memory_map_entries)[0..information.getMemoryMapEntryCount()];
     }
 
     pub fn getPageCounters(information: *Information) []u32 {
-        return information.getSlice(.page_counters);
+        return information.getSlice(.page_counters)[0..information.getMemoryMapEntryCount()];
     }
 
     pub fn getExternalBootloaderPageCounters(information: *Information) []u32 {
-        return information.getSlice(.external_bootloader_page_counters);
+        return information.getSlice(.external_bootloader_page_counters)[0..information.getMemoryMapEntryCount()];
     }
 
     pub fn isSizeRight(information: *const Information) bool {
@@ -166,33 +177,22 @@ pub const Information = extern struct {
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        lib.log.debug("Asking to allocate {} bytes with alignment {}", .{ size, alignment });
         const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
 
-        lib.log.debug("Checks...", .{});
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
-        lib.log.debug("Checks done", .{});
 
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
         const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
-        lib.log.debug("Entries len: {}", .{entries.len});
 
         for (entries) |entry, entry_index| {
-            lib.log.debug("Ext len: {}", .{external_bootloader_page_counters.len});
-            if (external_bootloader_page_counters.len > 0) {
-                lib.log.debug("ext page counters : {}", .{external_bootloader_page_counters[entry_index]});
-            }
             if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
-                lib.log.debug("Entering condition 1", .{});
                 const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
                 const size_left = entry.region.size - busy_size;
                 if (entry.type == .usable and size_left > size) {
-                    lib.log.debug("Entering condition 2", .{});
                     if (entry.region.address.isAligned(alignment)) {
-                        lib.log.debug("Entering condition 3", .{});
                         const result = Allocator.Allocate.Result{
                             .address = entry.region.address.offset(busy_size).value(),
                             .size = size,
