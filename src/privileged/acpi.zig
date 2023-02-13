@@ -10,27 +10,26 @@ pub const RSDP = extern struct {
         revision: u8,
         RSDT_address: u32,
 
-        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) ?*const TableHeader {
-            switch (rsdp.revision) {
-                0 => {
-                    const rsdt = @intToPtr(*TableHeader, rsdp.RSDT_address);
-                    const entry_count = @divExact(rsdt.length - @sizeOf(TableHeader), @sizeOf(u32));
-                    // TODO: this code is badly written
-                    const entries = @intToPtr([*]const u32, rsdp.RSDT_address + @sizeOf(TableHeader))[0..entry_count];
-                    for (entries) |entry| {
-                        const table_header = @intToPtr(*const TableHeader, entry);
-                        if (table_signature == table_header.signature) {
-                            return table_header;
-                        }
-                    }
-
-                    return null;
-                },
-                2 => {
-                    @panic("todo: xsdt");
-                },
+        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) ?*const Header {
+            // TODO: checksum
+            const root_table_address = switch (rsdp.revision) {
+                0 => rsdp.RSDT_address,
+                2 => @fieldParentPtr(RSDP.Descriptor2, "descriptor1", rsdp).XSDT_address,
                 else => @panic("Unexpected value"),
+            };
+            const root_table_header = @intToPtr(*Header, lib.safeArchitectureCast(root_table_address));
+
+            const entry_count = @divExact(root_table_header.length - @sizeOf(Header), @sizeOf(u32));
+            // TODO: this code is badly written
+            const entries = @intToPtr([*]const u32, rsdp.RSDT_address + @sizeOf(Header))[0..entry_count];
+            for (entries) |entry| {
+                const table_header = @intToPtr(*const Header, entry);
+                if (table_signature == table_header.signature) {
+                    return table_header;
+                }
             }
+
+            return null;
         }
     };
 
@@ -51,7 +50,7 @@ const Signature = enum(u32) {
     WAET = @ptrCast(*align(1) const u32, "WAET").*,
 };
 
-pub const TableHeader = extern struct {
+pub const Header = extern struct {
     signature: Signature,
     length: u32,
     revision: u8,
@@ -68,7 +67,7 @@ pub const TableHeader = extern struct {
 };
 
 pub const MADT = extern struct {
-    header: TableHeader,
+    header: Header,
     LAPIC_address: u32,
     flags: MADTFlags,
 
@@ -108,14 +107,23 @@ pub const MADT = extern struct {
         type: Type,
         length: u8,
 
-        pub const Type = enum(u8) {
+        const Type = enum(u8) {
             LAPIC = 0,
-            IOAPIC = 1,
-            IOAPIC_ISO = 2,
-            IOAPIC_NMI_source = 3,
+            IO_APIC = 1,
+            ISO = 2,
+            NMI_source = 3,
             LAPIC_NMI = 4,
             LAPIC_address_override = 5,
+            IO_SAPIC = 6,
+            LSAPIC = 7,
+            platform_interrupt_sources = 8,
             x2APIC = 9,
+            x2APIC_NMI = 0xa,
+            GIC_CPU_interface = 0xb,
+            GIC_distributor = 0xc,
+            GIC_MSI_frame = 0xd,
+            GIC_redistributor = 0xe,
+            GIC_interrupt_translation_service = 0xf,
         };
     };
 
@@ -146,5 +154,64 @@ pub const MADT = extern struct {
             online_capable: bool,
             reserved: u30 = 0,
         };
+    };
+
+    const IO_APIC = extern struct {
+        record: Record,
+        IO_APIC_ID: u8,
+        reserved: u8,
+        IO_APIC_address: u32,
+        global_system_interrupt_base: u32,
+
+        comptime {
+            assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u32));
+        }
+    };
+
+    const InterruptSourceOverride = extern struct {
+        record: Record,
+        bus: u8,
+        source: u8,
+        global_system_interrupt: u32 align(2),
+        flags: u16 align(2),
+
+        comptime {
+            assert(@sizeOf(@This()) == @sizeOf(u64) + @sizeOf(u16));
+        }
+    };
+
+    const LAPIC_NMI = extern struct {
+        record: Record,
+        ACPI_processor_UID: u8,
+        flags: u16 align(1),
+        LAPIC_lint: u8,
+
+        comptime {
+            assert(@sizeOf(@This()) == @sizeOf(u32) + @sizeOf(u16));
+        }
+    };
+};
+
+const MCFG = extern struct {
+    header: Header,
+    reserved: u64,
+
+    fn getConfigurations(mcfg: *align(1) MCFG) []Configuration {
+        const entry_count = (mcfg.header.length - @sizeOf(MCFG)) / @sizeOf(Configuration);
+        const configuration_base = @ptrToInt(mcfg) + @sizeOf(MCFG);
+        return @intToPtr([*]Configuration, configuration_base)[0..entry_count];
+    }
+
+    comptime {
+        assert(@sizeOf(MCFG) == @sizeOf(Header) + @sizeOf(u64));
+        assert(@sizeOf(Configuration) == 0x10);
+    }
+
+    const Configuration = extern struct {
+        base_address: u64,
+        segment_group_number: u16,
+        start_bus: u8,
+        end_bus: u8,
+        reserved: u32,
     };
 };

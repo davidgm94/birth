@@ -28,8 +28,6 @@ pub const CompactDate = packed struct(u16) {
 
 pub const Information = extern struct {
     entry_point: u64,
-    extra_size: u32,
-    struct_size: u32,
     total_size: u32,
     version: Version,
     protocol: lib.Bootloader.Protocol,
@@ -39,6 +37,11 @@ pub const Information = extern struct {
             .allocate = pageAllocate,
         },
     },
+    configuration: packed struct(u32) {
+        memory_map_diff: i8,
+        reserved: u24 = 0,
+    },
+    reserved: u32 = 0,
     heap: Heap,
     cpu_driver_mappings: CPUDriverMappings,
     framebuffer: Framebuffer,
@@ -49,25 +52,36 @@ pub const Information = extern struct {
         },
         else => @compileError("Architecture not supported"),
     },
-    slices: [Slice.count]Slice,
+    slices: lib.EnumStruct(Slice.Name, Slice),
 
     pub const Slice = extern struct {
         offset: u32 = 0,
         size: u32 = 0,
         len: u32 = 0,
+        field_alignment: u32 = 1,
+        total_alignment: u32 = 1,
+        reserved: u32 = 0,
 
-        pub const Name = enum(u8) {
-            cpu_driver_stack = 0,
-            memory_map_entries = 1,
-            page_counters = 2,
-            external_bootloader_page_counters = 3,
-            cpus = 4,
+        pub const Name = enum {
+            bootloader_information, // The main struct
+            cpu_driver_stack,
+            file_contents,
+            file_names,
+            files,
+            memory_map_entries,
+            page_counters,
+            external_bootloader_page_counters,
+            cpus,
         };
 
         pub const count = lib.enumCount(Name);
 
         pub const TypeMap = blk: {
             var arr: [Slice.count]type = undefined;
+            arr[@enumToInt(Slice.Name.bootloader_information)] = Information;
+            arr[@enumToInt(Slice.Name.file_contents)] = u8;
+            arr[@enumToInt(Slice.Name.file_names)] = u8;
+            arr[@enumToInt(Slice.Name.files)] = File;
             arr[@enumToInt(Slice.Name.cpu_driver_stack)] = u8;
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
@@ -75,6 +89,10 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.cpus)] = CPU;
             break :blk arr;
         };
+
+        pub fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@enumToInt(slice_name)] {
+            return @intToPtr([*]Slice.TypeMap[@enumToInt(slice_name)], @ptrToInt(bootloader_information) + slice.offset)[0..slice.len];
+        }
     };
 
     // TODO:
@@ -90,28 +108,6 @@ pub const Information = extern struct {
         regions: [6]PMR = lib.zeroes([6]PMR),
     };
 
-    pub const Framebuffer = extern struct {
-        address: u64,
-        pitch: u32,
-        width: u32,
-        height: u32,
-        bpp: u16,
-        red_mask: ColorMask,
-        green_mask: ColorMask,
-        blue_mask: ColorMask,
-        memory_model: u8,
-        reserved: u8 = 0,
-
-        pub const ColorMask = extern struct {
-            size: u8 = 0,
-            shift: u8 = 0,
-        };
-
-        pub const VideoMode = extern struct {
-            foo: u32 = 0,
-        };
-    };
-
     pub const CPU = extern struct {
         foo: u64 = 0,
 
@@ -120,13 +116,21 @@ pub const Information = extern struct {
         };
     };
 
+    pub fn getFileContent(information: *Information, index: usize) []const u8 {
+        _ = index;
+        _ = information;
+        @panic("ajsdksa");
+    }
+
+    pub fn getFiles(information: *Information) []File {
+        const files_slice_struct = information.slices.fields.files;
+        const files = @intToPtr([*]File, @ptrToInt(information) + files_slice_struct.offset)[0..files_slice_struct.len];
+        return files;
+    }
+
     pub inline fn getSlice(information: *Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
-        const offset = information.slices[@enumToInt(offset_name)];
-        const region = VirtualMemoryRegion(.local){
-            .address = VirtualAddress(.local).new(@ptrToInt(information) + offset.offset),
-            .size = offset.size,
-        };
-        return region.access(Slice.TypeMap[@enumToInt(offset_name)]);
+        const memory_map_slice = information.slices.array.values[@enumToInt(offset_name)];
+        return memory_map_slice.dereference(offset_name, information);
     }
 
     pub fn getMemoryMapEntries(information: *Information) []MemoryMapEntry {
@@ -141,48 +145,54 @@ pub const Information = extern struct {
         return information.getSlice(.external_bootloader_page_counters);
     }
 
-    pub fn getStructAlignedSizeOnCurrentArchitecture() u32 {
-        return lib.alignForwardGeneric(u32, @sizeOf(Information), lib.arch.valid_page_sizes[0]);
-    }
-
     pub fn isSizeRight(information: *const Information) bool {
-        const struct_size = @sizeOf(Information);
-        const aligned_struct_size = comptime getStructAlignedSizeOnCurrentArchitecture();
-
-        var extra_size: u32 = 0;
-        inline for (Information.Slice.TypeMap) |T, index| {
-            const slice = information.slices[index];
-            const slice_size = @sizeOf(T) * slice.len;
-            if (slice_size != slice.size) return false;
-            extra_size += slice_size;
-        }
-
-        const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
-        const total_size = aligned_struct_size + aligned_extra_size;
-        if (struct_size != information.struct_size) return false;
-        if (extra_size != information.extra_size) return false;
-        if (total_size != information.total_size) return false;
-
-        return true;
+        _ = information;
+        // var extra_size: u32 = 0;
+        // inline for (Information.Slice.TypeMap) |T, index| {
+        //     const slice = information.slices[index];
+        //     const slice_size = @sizeOf(T) * slice.len;
+        //     if (slice_size != slice.size) return false;
+        //     extra_size += slice_size;
+        // }
+        //
+        // const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
+        // const total_size = aligned_struct_size + aligned_extra_size;
+        // if (struct_size != information.struct_size) return false;
+        // if (extra_size != information.extra_size) return false;
+        // if (total_size != information.total_size) return false;
+        //
+        // return true;
+        @panic("Todo: isSizeRight");
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        lib.log.debug("Asking to allocate {} bytes with alignment {}", .{ size, alignment });
         const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
 
+        lib.log.debug("Checks...", .{});
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
         const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
+        lib.log.debug("Checks done", .{});
 
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
         const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
+        lib.log.debug("Entries len: {}", .{entries.len});
 
         for (entries) |entry, entry_index| {
+            lib.log.debug("Ext len: {}", .{external_bootloader_page_counters.len});
+            if (external_bootloader_page_counters.len > 0) {
+                lib.log.debug("ext page counters : {}", .{external_bootloader_page_counters[entry_index]});
+            }
             if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
+                lib.log.debug("Entering condition 1", .{});
                 const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
                 const size_left = entry.region.size - busy_size;
                 if (entry.type == .usable and size_left > size) {
+                    lib.log.debug("Entering condition 2", .{});
                     if (entry.region.address.isAligned(alignment)) {
+                        lib.log.debug("Entering condition 3", .{});
                         const result = Allocator.Allocate.Result{
                             .address = entry.region.address.offset(busy_size).value(),
                             .size = size,
@@ -244,6 +254,8 @@ pub const CPUDriverMappings = extern struct {
         physical: PhysicalAddress(.local) = PhysicalAddress(.local).invalid(),
         virtual: VirtualAddress(.local) = .null,
         size: u64 = 0,
+        flags: privileged.arch.VirtualAddressSpace.Flags = .{},
+        reserved: u32 = 0,
     };
 };
 
@@ -259,5 +271,232 @@ pub const MemoryMapEntry = extern struct {
 
     comptime {
         assert(@sizeOf(MemoryMapEntry) == @sizeOf(u64) * 3);
+    }
+};
+
+pub const File = extern struct {
+    content_offset: u32,
+    content_size: u32,
+    path_offset: u32,
+    path_size: u32,
+    type: Type,
+    reserved: u32 = 0,
+
+    pub const Type = enum(u32) {
+        cpu_driver,
+    };
+
+    pub const Parser = struct {
+        text: []const u8,
+        index: u32 = 0,
+
+        pub fn init(text: []const u8) File.Parser {
+            return .{
+                .text = text,
+            };
+        }
+
+        const Error = error{
+            err,
+        };
+
+        pub const Unit = struct {
+            host_path: []const u8,
+            host_base: []const u8,
+            suffix_type: SuffixType,
+            guest: []const u8,
+            type: File.Type,
+        };
+
+        pub const SuffixType = enum {
+            none,
+            arch,
+            full,
+        };
+
+        pub fn next(parser: *File.Parser) !?Unit {
+            // Do this to avoid getting the editor crazy about it
+            const left_curly_brace = 0x7b;
+            const right_curly_brace = 0x7d;
+
+            while (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+                try parser.expectChar('.');
+                try parser.expectChar(left_curly_brace);
+
+                if (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+                    const host_path_field = try parser.parseField("host_path");
+                    const host_base_field = try parser.parseField("host_base");
+                    const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.err;
+                    const guest_field = try parser.parseField("guest");
+                    const file_type = lib.stringToEnum(File.Type, try parser.parseField("type")) orelse return Error.err;
+                    try parser.expectChar(right_curly_brace);
+                    parser.maybeExpectChar(',');
+                    parser.skipSpace();
+
+                    return .{
+                        .host_path = host_path_field,
+                        .host_base = host_base_field,
+                        .suffix_type = suffix_type,
+                        .guest = guest_field,
+                        .type = file_type,
+                    };
+                } else {
+                    @panic("WTF");
+                }
+            }
+
+            return null;
+        }
+
+        inline fn consume(parser: *File.Parser) void {
+            parser.index += 1;
+        }
+
+        fn parseField(parser: *File.Parser, field: []const u8) ![]const u8 {
+            try parser.expectChar('.');
+            try parser.expectString(field);
+            try parser.expectChar('=');
+            const field_value = try parser.expectQuotedString();
+            parser.maybeExpectChar(',');
+
+            return field_value;
+        }
+
+        fn skipSpace(parser: *File.Parser) void {
+            while (parser.index < parser.text.len) {
+                const char = parser.text[parser.index];
+                const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
+                if (!is_space) break;
+                parser.consume();
+            }
+        }
+
+        fn maybeExpectChar(parser: *File.Parser, char: u8) void {
+            parser.skipSpace();
+            if (parser.text[parser.index] == char) {
+                parser.consume();
+            }
+        }
+
+        fn expectChar(parser: *File.Parser, expected_char: u8) !void {
+            parser.skipSpace();
+            const char = parser.text[parser.index];
+            if (char != expected_char) {
+                return Error.err;
+            }
+
+            parser.consume();
+        }
+
+        fn expectString(parser: *File.Parser, string: []const u8) !void {
+            parser.skipSpace();
+            if (!lib.equal(u8, parser.text[parser.index..][0..string.len], string)) {
+                return Error.err;
+            }
+
+            for (string) |_, index| {
+                _ = index;
+                parser.consume();
+            }
+        }
+
+        fn expectQuotedString(parser: *File.Parser) ![]const u8 {
+            parser.skipSpace();
+            try parser.expectChar('"');
+            const start_index = parser.index;
+            while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
+                parser.consume();
+            }
+            const end_index = parser.index;
+            try parser.expectChar('"');
+
+            const string = parser.text[start_index..end_index];
+            return string;
+        }
+    };
+};
+
+pub const Framebuffer = extern struct {
+    address: u64,
+    pitch: u32,
+    width: u32,
+    height: u32,
+    bpp: u16,
+    red_mask: ColorMask,
+    green_mask: ColorMask,
+    blue_mask: ColorMask,
+    memory_model: u8,
+    reserved: u8 = 0,
+
+    pub const ColorMask = extern struct {
+        size: u8 = 0,
+        shift: u8 = 0,
+    };
+
+    pub const VideoMode = extern struct {
+        foo: u32 = 0,
+    };
+};
+
+pub const LengthSizeTuples = extern struct {
+    tuples: Tuples,
+    total_size: u32 = 0,
+
+    const Tuples = lib.EnumStruct(Information.Slice.Name, Tuple);
+
+    const count = Information.Slice.count;
+
+    pub const Tuple = extern struct {
+        length: u32,
+        alignment: u32,
+        size: u32 = 0,
+        reserved: u32 = 0,
+    };
+
+    pub fn new(fields: Tuples.Struct) LengthSizeTuples {
+        var tuples = LengthSizeTuples{
+            .tuples = .{
+                .fields = fields,
+            },
+        };
+
+        var total_size: u32 = 0;
+
+        inline for (Information.Slice.TypeMap) |T, index| {
+            const tuple = &tuples.tuples.array.values[index];
+            const size = tuple.length * @sizeOf(T);
+            tuple.alignment = if (tuple.alignment < @alignOf(T)) @alignOf(T) else tuple.alignment;
+            total_size = lib.alignForwardGeneric(u32, total_size, tuple.alignment);
+            total_size += lib.alignForwardGeneric(u32, size, tuple.alignment);
+            tuple.size = size;
+        }
+
+        tuples.total_size = total_size;
+
+        return tuples;
+    }
+
+    pub fn createSlices(tuples: LengthSizeTuples) lib.EnumStruct(Information.Slice.Name, Information.Slice) {
+        var slices = lib.zeroes(lib.EnumStruct(Information.Slice.Name, Information.Slice));
+        var allocated_size: u32 = 0;
+
+        for (slices.array.values) |*slice, index| {
+            const tuple = tuples.tuples.array.values[index];
+            const length = tuple.length;
+            const size = lib.alignForwardGeneric(u32, tuple.size, tuple.alignment);
+
+            slice.* = .{
+                .offset = allocated_size,
+                .len = length,
+                .size = size,
+            };
+
+            allocated_size = lib.alignForwardGeneric(u32, allocated_size, tuple.alignment);
+            allocated_size += size;
+        }
+
+        if (allocated_size != tuples.total_size) @panic("Extra allocation size must match bootloader allocated extra size");
+
+        return slices;
     }
 };

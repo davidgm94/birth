@@ -1,6 +1,6 @@
 const host = @import("host.zig");
 const lib = @import("lib.zig");
-const bootloader = @import("bootloader");
+const bootloader = @import("bootloader.zig");
 const LimineInstaller = @import("bootloader/limine/installer.zig");
 
 const assert = lib.assert;
@@ -578,7 +578,7 @@ pub fn main() anyerror!void {
                 .last_lba = gpt_partition_cache.partition.last_lba,
             }, null);
 
-            var files_parser = lib.FileParser.init(configuration_file);
+            var files_parser = bootloader.File.Parser.init(configuration_file);
 
             const cpu_driver_name = blk: {
                 var maybe_cpu_driver_name: ?[]const u8 = null;

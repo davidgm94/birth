@@ -48,6 +48,10 @@ pub fn Interface(comptime Usize: type) type {
                     const alignment_mask = alignment - 1;
                     return physical_address.value() & alignment_mask == 0;
                 }
+
+                pub inline fn toLocal(physical_address: PA) PhysicalAddress(.local) {
+                    return @intToEnum(PhysicalAddress(.local), physical_address.value());
+                }
             };
         }
 
@@ -83,6 +87,10 @@ pub fn Interface(comptime Usize: type) type {
 
                 pub inline fn negativeOffset(virtual_address: VA, asked_offset: Usize) VA {
                     return @intToEnum(VA, virtual_address.value() - asked_offset);
+                }
+
+                pub inline fn toLocal(virtual_address: VA) VirtualAddress(.local) {
+                    return @intToEnum(VirtualAddress(.local), virtual_address.value());
                 }
             };
         }
@@ -305,7 +313,7 @@ pub fn Interface(comptime Usize: type) type {
                     else => @compileError("error: paging"),
                 };
 
-                pub const needed_physical_memory_for_bootstrapping_kernel_address_space = paging.needed_physical_memory_for_bootstrapping_kernel_address_space;
+                pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space;
 
                 pub fn kernelBSP(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
                     return paging.initKernelBSP(physical_memory_region);
@@ -327,12 +335,13 @@ pub fn Interface(comptime Usize: type) type {
                     paging.makeCurrent(virtual_address_space);
                 }
 
-                pub const Flags = packed struct {
+                pub const Flags = packed struct(u32) {
                     write: bool = false,
                     cache_disable: bool = false,
                     global: bool = false,
                     execute: bool = false,
                     user: bool = false,
+                    reserved: u27 = 0,
 
                     pub inline fn empty() Flags {
                         return .{};

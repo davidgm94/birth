@@ -22,7 +22,7 @@ const BIOS = bootloader.BIOS;
 extern const loader_start: u8;
 extern const loader_end: u8;
 
-var files: [16]struct { path: []const u8, content: []const u8 } = undefined;
+var files: [16]File = undefined;
 var file_count: u8 = 0;
 
 var gdt = GDT.Table{
@@ -59,30 +59,47 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
     const cpu_count = madt.getCPUCount();
     const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
 
-    const aligned_struct_size = bootloader.Information.getStructAlignedSizeOnCurrentArchitecture();
-
-    var extra_size: u32 = 0;
-    const length_size_tuples = blk: {
-        var arr = [1]struct { length: u32, size: u32 }{.{ .length = 0, .size = 0 }} ** bootloader.Information.Slice.count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = memory_map_entry_count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = memory_map_entry_count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.external_bootloader_page_counters)].length = 0;
-        arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
-        arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
-
-        inline for (bootloader.Information.Slice.TypeMap) |T, index| {
-            const size = arr[index].length * @sizeOf(T);
-            extra_size += size;
-            arr[index].size = size;
-        }
-        break :blk arr;
-    };
-
-    const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
-    const total_size = aligned_struct_size + aligned_extra_size;
+    const length_size_tuples = bootloader.LengthSizeTuples.new(.{
+        .bootloader_information = .{
+            .length = 1,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .file_contents = .{
+            .length = 0,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .file_names = .{
+            .length = 0,
+            .alignment = 8,
+        },
+        .files = .{
+            .length = 0,
+            .alignment = @alignOf(File),
+        },
+        .cpu_driver_stack = .{
+            .length = stack_size,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .memory_map_entries = .{
+            .length = memory_map_entry_count,
+            .alignment = @alignOf(bootloader.MemoryMapEntry),
+        },
+        .page_counters = .{
+            .length = memory_map_entry_count,
+            .alignment = @alignOf(u32),
+        },
+        .external_bootloader_page_counters = .{
+            .length = memory_map_entry_count,
+            .alignment = @alignOf(u32),
+        },
+        .cpus = .{
+            .length = cpu_count,
+            .alignment = 8,
+        },
+    });
 
     while (iterator.next()) |entry| {
-        if (entry.descriptor.isUsable() and entry.descriptor.region.size > total_size and !entry.descriptor.region.overlaps(framebuffer_region)) {
+        if (entry.descriptor.isUsable() and entry.descriptor.region.size > length_size_tuples.total_size and !entry.descriptor.region.overlaps(framebuffer_region)) {
             const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(bootloader.Information));
             const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
 
@@ -90,10 +107,11 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 .protocol = .bios,
                 .bootloader = .rise,
                 .version = .{ .major = 0, .minor = 1, .patch = 0 },
-                .struct_size = @sizeOf(bootloader.Information),
-                .extra_size = extra_size,
-                .total_size = total_size,
+                .total_size = length_size_tuples.total_size,
                 .entry_point = 0,
+                .configuration = .{
+                    .memory_map_diff = 0,
+                },
                 .heap = .{},
                 .framebuffer = .{
                     .address = framebuffer_region.address.value(),
@@ -114,40 +132,24 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                         .size = edid_video_mode.linear_blue_mask_size,
                     },
                     // TODO:
-                    .memory_model = 0,
+                    .memory_model = 0x06,
                 },
                 .cpu_driver_mappings = .{},
-                .slices = .{},
+                .slices = length_size_tuples.createSlices(),
                 .architecture = .{
                     .rsdp_address = rsdp_address,
                 },
             };
 
-            var allocated_size: usize = 0;
-
-            inline for (result.slices) |*slice, index| {
-                const tuple = length_size_tuples[index];
-                const length = tuple.length;
-                const size = tuple.size;
-                slice.* = .{
-                    .offset = allocated_size + comptime bootloader.Information.getStructAlignedSizeOnCurrentArchitecture(),
-                    .len = length,
-                    .size = size,
-                };
-
-                if (allocated_size + size > result.extra_size) @panic("size exceeded");
-
-                allocated_size += size;
-            }
-
-            if (allocated_size != extra_size) @panic("Extra allocation size must match bootloader allocated extra size");
+            if (true) @panic("todo: giveOutAllocations");
+            //length_size_tuples.giveOutAllocations(&result.slices);
 
             const page_counters = result.getSlice(.page_counters);
             for (page_counters) |*page_counter| {
                 page_counter.* = 0;
             }
 
-            page_counters[entry.index] = total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+            page_counters[entry.index] = length_size_tuples.total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
             const memory_map_entries = result.getSlice(.memory_map_entries);
             BIOS.fetchMemoryEntries(memory_map_entries);
@@ -158,6 +160,12 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
 
     return lib.Allocator.Allocate.Error.OutOfMemory;
 }
+
+const File = struct {
+    path: []const u8,
+    content: []const u8,
+    type: bootloader.File.Type,
+};
 
 export fn entryPoint() callconv(.C) noreturn {
     BIOS.A20Enable() catch @panic("can't enable a20");
@@ -184,7 +192,7 @@ export fn entryPoint() callconv(.C) noreturn {
     const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, allocator) catch @panic("can't load gpt cache");
     const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
     const rise_files_file = fat_cache.readFile(allocator, "/files") catch @panic("cant load json from disk");
-    var file_parser = lib.FileParser.init(rise_files_file);
+    var file_parser = bootloader.File.Parser.init(rise_files_file);
     const cpu_driver_name = blk: {
         var maybe_cpu_driver_name: ?[]const u8 = null;
         while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
@@ -196,6 +204,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const file_content = fat_cache.readFile(allocator, file_descriptor.guest) catch @panic("cant read file");
             files[file_count] = .{
+                .type = file_descriptor.type,
                 .path = file_descriptor.guest,
                 .content = file_content,
             };

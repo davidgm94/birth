@@ -29,7 +29,7 @@ const Configuration = struct {
 const default_configuration = Configuration{
     .bootloader = .rise,
     .architecture = .x86_64,
-    .boot_protocol = .bios,
+    .boot_protocol = .uefi,
 };
 
 const default_emulator = .qemu;

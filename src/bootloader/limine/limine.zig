@@ -434,127 +434,124 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
     const actual_memory_map_entry_count = @intCast(u32, memory_map_entries.len - discarded_region_count);
 
-    var extra_size: u32 = 0;
-    const length_size_tuples = blk: {
-        var arr = [1]struct { length: u32, size: u32 }{.{ .length = 0, .size = 0 }} ** bootloader.Information.Slice.count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.memory_map_entries)].length = actual_memory_map_entry_count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.page_counters)].length = actual_memory_map_entry_count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.external_bootloader_page_counters)].length = actual_memory_map_entry_count;
-        arr[@enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)].length = stack_size;
-        arr[@enumToInt(bootloader.Information.Slice.Name.cpus)].length = cpu_count;
-
-        inline for (bootloader.Information.Slice.TypeMap) |T, index| {
-            const size = arr[index].length * @sizeOf(T);
-            extra_size += size;
-            arr[index].size = size;
-        }
-        break :blk arr;
-    };
-
-    const struct_size = @sizeOf(bootloader.Information);
-    const aligned_struct_size = bootloader.Information.getStructAlignedSizeOnCurrentArchitecture();
-    const aligned_extra_size = lib.alignForwardGeneric(u32, extra_size, lib.arch.valid_page_sizes[0]);
-    const total_size = aligned_struct_size + aligned_extra_size;
+    const length_size_tuples = bootloader.LengthSizeTuples.new(.{
+        .bootloader_information = .{
+            .length = 1,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .file_contents = .{
+            .length = 0,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .file_names = .{
+            .length = 0,
+            .alignment = 8,
+        },
+        .files = .{
+            .length = 0,
+            .alignment = @alignOf(bootloader.File),
+        },
+        .cpu_driver_stack = .{
+            .length = stack_size,
+            .alignment = lib.arch.valid_page_sizes[0],
+        },
+        .memory_map_entries = .{
+            .length = actual_memory_map_entry_count,
+            .alignment = @alignOf(bootloader.MemoryMapEntry),
+        },
+        .page_counters = .{
+            .length = actual_memory_map_entry_count,
+            .alignment = @alignOf(u32),
+        },
+        .external_bootloader_page_counters = .{
+            .length = actual_memory_map_entry_count,
+            .alignment = @alignOf(u32),
+        },
+        .cpus = .{
+            .length = cpu_count,
+            .alignment = 8,
+        },
+    });
 
     var entry_index: usize = 0;
-    const bootloader_information = blk: {
-        for (memory_map_entries) |entry, index| {
-            if (entry.type == .usable and entry.region.size > total_size) {
-                const bootloader_information_region = entry.region.takeSlice(total_size);
-                const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
-                bootloader_information.* = .{
-                    .struct_size = struct_size,
-                    .extra_size = extra_size,
-                    .total_size = total_size,
-                    .entry_point = @ptrToInt(&limineEntryPoint),
-                    .version = version: {
-                        const limine_version = limine_information.response.?.version[0..lib.length(limine_information.response.?.version)];
-                        var token_iterator = lib.tokenize(u8, limine_version, ".");
-                        const version_major_string = token_iterator.next() orelse @panic("Limine version major");
-                        const version_minor_string = token_iterator.next() orelse @panic("Limine version minor");
-                        const version_patch_string = token_iterator.next() orelse @panic("Limine version patch");
-                        if (token_iterator.next() != null) @panic("Unexpected token in Limine version");
+    const bootloader_information = for (memory_map_entries) |entry, index| {
+        if (entry.type == .usable and entry.region.size > length_size_tuples.total_size) {
+            const bootloader_information_region = entry.region.takeSlice(length_size_tuples.total_size);
+            const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
+            bootloader_information.* = .{
+                .total_size = length_size_tuples.total_size,
+                .entry_point = @ptrToInt(&limineEntryPoint),
+                .version = version: {
+                    const limine_version = limine_information.response.?.version[0..lib.length(limine_information.response.?.version)];
+                    var token_iterator = lib.tokenize(u8, limine_version, ".");
+                    const version_major_string = token_iterator.next() orelse @panic("Limine version major");
+                    const version_minor_string = token_iterator.next() orelse @panic("Limine version minor");
+                    const version_patch_string = token_iterator.next() orelse @panic("Limine version patch");
+                    if (token_iterator.next() != null) @panic("Unexpected token in Limine version");
 
-                        const version_major = lib.parseUnsigned(u8, version_major_string, 10) catch @panic("Limine version major parsing");
-                        if (version_minor_string.len != 4 + 2 + 2) @panic("Unexpected version minor length");
-                        const version_minor_year_string = version_minor_string[0..4];
-                        const version_minor_month_string = version_minor_string[4..6];
-                        const version_minor_day_string = version_minor_string[6..8];
-                        const version_minor_year = @intCast(u7, (lib.parseUnsigned(u16, version_minor_year_string, 10) catch @panic("Limine version minor year parsing")) - 1970);
-                        const version_minor_month = lib.parseUnsigned(u4, version_minor_month_string, 10) catch @panic("Limine version minor month parsing");
-                        const version_minor_day = lib.parseUnsigned(u5, version_minor_day_string, 10) catch @panic("Limine version minor day parsing");
-                        const version_patch = lib.parseUnsigned(u8, version_patch_string, 10) catch @panic("Limine version patch parsing");
+                    const version_major = lib.parseUnsigned(u8, version_major_string, 10) catch @panic("Limine version major parsing");
+                    if (version_minor_string.len != 4 + 2 + 2) @panic("Unexpected version minor length");
+                    const version_minor_year_string = version_minor_string[0..4];
+                    const version_minor_month_string = version_minor_string[4..6];
+                    const version_minor_day_string = version_minor_string[6..8];
+                    const version_minor_year = @intCast(u7, (lib.parseUnsigned(u16, version_minor_year_string, 10) catch @panic("Limine version minor year parsing")) - 1970);
+                    const version_minor_month = lib.parseUnsigned(u4, version_minor_month_string, 10) catch @panic("Limine version minor month parsing");
+                    const version_minor_day = lib.parseUnsigned(u5, version_minor_day_string, 10) catch @panic("Limine version minor day parsing");
+                    const version_patch = lib.parseUnsigned(u8, version_patch_string, 10) catch @panic("Limine version patch parsing");
 
-                        const version_minor = bootloader.CompactDate{
-                            .year = version_minor_year,
-                            .month = version_minor_month,
-                            .day = version_minor_day,
-                        };
-
-                        break :version .{
-                            .major = version_major,
-                            .minor = @bitCast(u16, version_minor),
-                            .patch = version_patch,
-                        };
-                    },
-                    .protocol = limine_protocol,
-                    .bootloader = .limine,
-                    .heap = .{},
-                    .cpu_driver_mappings = .{},
-                    .framebuffer = .{
-                        .address = framebuffer.address,
-                        .pitch = @intCast(u32, framebuffer.pitch),
-                        .width = @intCast(u32, framebuffer.width),
-                        .height = @intCast(u32, framebuffer.height),
-                        .bpp = framebuffer.bpp,
-                        .red_mask = .{
-                            .shift = framebuffer.red_mask_shift,
-                            .size = framebuffer.red_mask_size,
-                        },
-                        .green_mask = .{
-                            .shift = framebuffer.green_mask_shift,
-                            .size = framebuffer.green_mask_size,
-                        },
-                        .blue_mask = .{
-                            .shift = framebuffer.blue_mask_shift,
-                            .size = framebuffer.blue_mask_size,
-                        },
-                        .memory_model = framebuffer.memory_model,
-                    },
-                    .architecture = switch (lib.cpu.arch) {
-                        .x86_64 => .{
-                            .rsdp_address = limine_rsdp.response.?.address,
-                        },
-                        else => @compileError("Architecture not supported"),
-                    },
-                    .slices = .{},
-                };
-                var allocated_size: u32 = 0;
-
-                inline for (bootloader_information.slices) |*slice, slice_index| {
-                    const tuple = length_size_tuples[slice_index];
-                    const length = tuple.length;
-                    const size = tuple.size;
-                    slice.* = .{
-                        .offset = allocated_size + comptime bootloader.Information.getStructAlignedSizeOnCurrentArchitecture(),
-                        .len = length,
-                        .size = size,
+                    const version_minor = bootloader.CompactDate{
+                        .year = version_minor_year,
+                        .month = version_minor_month,
+                        .day = version_minor_day,
                     };
 
-                    if (allocated_size + size > bootloader_information.extra_size) @panic("size exceeded");
+                    break :version .{
+                        .major = version_major,
+                        .minor = @bitCast(u16, version_minor),
+                        .patch = version_patch,
+                    };
+                },
+                .protocol = limine_protocol,
+                .bootloader = .limine,
+                .configuration = .{
+                    .memory_map_diff = 0,
+                },
+                .heap = .{},
+                .cpu_driver_mappings = .{},
+                .framebuffer = .{
+                    .address = framebuffer.address,
+                    .pitch = @intCast(u32, framebuffer.pitch),
+                    .width = @intCast(u32, framebuffer.width),
+                    .height = @intCast(u32, framebuffer.height),
+                    .bpp = framebuffer.bpp,
+                    .red_mask = .{
+                        .shift = framebuffer.red_mask_shift,
+                        .size = framebuffer.red_mask_size,
+                    },
+                    .green_mask = .{
+                        .shift = framebuffer.green_mask_shift,
+                        .size = framebuffer.green_mask_size,
+                    },
+                    .blue_mask = .{
+                        .shift = framebuffer.blue_mask_shift,
+                        .size = framebuffer.blue_mask_size,
+                    },
+                    .memory_model = framebuffer.memory_model,
+                },
+                .architecture = switch (lib.cpu.arch) {
+                    .x86_64 => .{
+                        .rsdp_address = limine_rsdp.response.?.address,
+                    },
+                    else => @compileError("Architecture not supported"),
+                },
+                .slices = length_size_tuples.createSlices(),
+            };
 
-                    allocated_size += size;
-                }
-                if (allocated_size != extra_size) @panic("Extra allocation size must match bootloader allocated extra size");
+            entry_index = index;
 
-                entry_index = index;
-
-                break :blk bootloader_information;
-            }
+            break bootloader_information;
         }
-
-        @panic("Unable to get bootloader information");
-    };
+    } else @panic("Unable to get bootloader information");
 
     const page_counters = bootloader_information.getSlice(.page_counters);
     const external_bootloader_page_counters = bootloader_information.getSlice(.external_bootloader_page_counters);

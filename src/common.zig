@@ -70,6 +70,8 @@ pub const random = std.rand;
 
 pub const testing = std.testing;
 
+pub const sort = std.sort.sort;
+
 pub fn fieldSize(comptime T: type, field_name: []const u8) comptime_int {
     var foo: T = undefined;
     return @sizeOf(@TypeOf(@field(foo, field_name)));
@@ -123,9 +125,11 @@ pub const StackTrace = std_builtin.StackTrace;
 pub const SourceLocation = std_builtin.SourceLocation;
 
 // META PROGRAMMING
+pub const AutoEnumArray = std.enums.EnumArray;
 pub const fields = std.meta.fields;
 pub const IntType = std.meta.Int;
 pub const stringToEnum = std.meta.stringToEnum;
+pub const Tag = std.meta.Tag;
 
 const math = std.math;
 pub const maxInt = math.maxInt;
@@ -159,12 +163,12 @@ pub const FilesystemType = enum(u32) {
     pub const count = enumCount(@This());
 };
 
-pub fn enumValues(comptime E: type) void {
-    _ = E;
+pub fn enumValues(comptime E: type) []const Type.EnumField {
+    return @typeInfo(E).Enum.fields;
 }
 
 pub fn enumCount(comptime E: type) usize {
-    return @typeInfo(E).Enum.fields.len;
+    return enumValues(E).len;
 }
 
 // pub const CustomAllocator = extern struct {

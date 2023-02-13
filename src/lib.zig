@@ -17,6 +17,46 @@ pub const Syscall = @import("lib/syscall.zig");
 pub const Graphics = @import("lib/graphics.zig");
 pub const Window = @import("lib/window.zig");
 
+const extern_enum_array = @import("lib/extern_enum_array.zig");
+pub const EnumArray = extern_enum_array.EnumArray;
+
+pub fn EnumStruct(comptime Enum: type, comptime Value: type) type {
+    const EnumValues = common.enumValues(Enum);
+    const MyEnumStruct = @Type(.{
+        .Struct = .{
+            .layout = .Extern,
+            .fields = &blk: {
+                var arr = [1]common.Type.StructField{undefined} ** EnumValues.len;
+                inline for (EnumValues) |EnumValue| {
+                    arr[EnumValue.value] = .{
+                        .name = EnumValue.name,
+                        .type = Value,
+                        .default_value = null,
+                        .is_comptime = false,
+                        .alignment = @alignOf(Value),
+                    };
+                }
+                break :blk arr;
+            },
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+    const MyEnumArray = EnumArray(Enum, Value);
+    const Union = extern union {
+        fields: Struct,
+        array: Array,
+
+        pub const Struct = MyEnumStruct;
+        pub const Array = MyEnumArray;
+    };
+
+    common.assert(@sizeOf(Union.Struct) == @sizeOf(Union.Array));
+    common.assert(@sizeOf(Union.Array) == @sizeOf(Union));
+
+    return Union;
+}
+
 pub const DirectoryTokenizer = struct {
     string: []const u8,
     index: usize = 0,
@@ -251,136 +291,6 @@ pub const Allocator = extern struct {
             };
         }
     };
-};
-
-pub const FileParser = struct {
-    text: []const u8,
-    index: usize = 0,
-
-    pub fn init(text: []const u8) FileParser {
-        return .{
-            .text = text,
-        };
-    }
-
-    const Error = error{
-        err,
-    };
-
-    pub const File = struct {
-        host_path: []const u8,
-        host_base: []const u8,
-        suffix_type: SuffixType,
-        guest: []const u8,
-        type: FileType,
-    };
-
-    pub const SuffixType = enum {
-        none,
-        arch,
-        full,
-    };
-
-    const FileType = enum {
-        cpu_driver,
-    };
-
-    pub fn next(parser: *FileParser) !?File {
-        while (parser.index < parser.text.len and parser.text[parser.index] != '}') {
-            try parser.expect_char('.');
-            try parser.expect_char('{');
-
-            if (parser.index < parser.text.len and parser.text[parser.index] != '}') {
-                const host_path_field = try parser.parse_field("host_path");
-                const host_base_field = try parser.parse_field("host_base");
-                const suffix_type = common.stringToEnum(SuffixType, try parser.parse_field("suffix_type")) orelse return Error.err;
-                const guest_field = try parser.parse_field("guest");
-                const file_type = common.stringToEnum(FileType, try parser.parse_field("type")) orelse return Error.err;
-                try parser.expect_char('}');
-                parser.maybe_expect_char(',');
-                parser.skip_space();
-
-                return .{
-                    .host_path = host_path_field,
-                    .host_base = host_base_field,
-                    .suffix_type = suffix_type,
-                    .guest = guest_field,
-                    .type = file_type,
-                };
-            } else {
-                @panic("WTF");
-            }
-        }
-
-        return null;
-    }
-
-    inline fn consume(parser: *FileParser) void {
-        parser.index += 1;
-    }
-
-    fn parse_field(parser: *FileParser, field: []const u8) ![]const u8 {
-        try parser.expect_char('.');
-        try parser.expect_string(field);
-        try parser.expect_char('=');
-        const field_value = try parser.expect_quoted_string();
-        parser.maybe_expect_char(',');
-
-        return field_value;
-    }
-
-    pub fn skip_space(parser: *FileParser) void {
-        while (parser.index < parser.text.len) {
-            const char = parser.text[parser.index];
-            const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
-            if (!is_space) break;
-            parser.consume();
-        }
-    }
-
-    pub fn maybe_expect_char(parser: *FileParser, char: u8) void {
-        parser.skip_space();
-        if (parser.text[parser.index] == char) {
-            parser.consume();
-        }
-    }
-
-    pub fn expect_char(parser: *FileParser, expected_char: u8) !void {
-        parser.skip_space();
-        const char = parser.text[parser.index];
-        if (char != expected_char) {
-            common.log.debug("Expected character '{c}', got: '{c}', 0x{x}", .{ expected_char, char, char });
-            return Error.err;
-        }
-
-        parser.consume();
-    }
-
-    pub fn expect_string(parser: *FileParser, string: []const u8) !void {
-        parser.skip_space();
-        if (!common.equal(u8, parser.text[parser.index..][0..string.len], string)) {
-            return Error.err;
-        }
-
-        for (string) |_, index| {
-            _ = index;
-            parser.consume();
-        }
-    }
-
-    pub fn expect_quoted_string(parser: *FileParser) ![]const u8 {
-        parser.skip_space();
-        try parser.expect_char('"');
-        const start_index = parser.index;
-        while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
-            parser.consume();
-        }
-        const end_index = parser.index;
-        try parser.expect_char('"');
-
-        const string = parser.text[start_index..end_index];
-        return string;
-    }
 };
 
 pub fn ELF(comptime bits: comptime_int) type {
