@@ -3,7 +3,7 @@
         "amount": "4",
         "unit": "gigabyte"
     },
-    "virtualize": true,
+    "virtualize": false,
     "vga": "std",
     "smp": null,
     "reboot": false,

@@ -380,10 +380,23 @@ pub fn main() noreturn {
     }
     const real_memory_map_entry_count = @divExact(memory_map_size, memory_map_descriptor_size);
     log.debug("Real: {}. Mine: {}", .{ real_memory_map_entry_count, memory_map_entry_count });
-    const memory_map_entry_count_mismatch = @intCast(i8, @intCast(i16, real_memory_map_entry_count) - @intCast(i16, memory_map_entry_count));
-    _ = memory_map_entry_count_mismatch;
+    bootloader_information.configuration.memory_map_diff = @intCast(i8, @intCast(i16, real_memory_map_entry_count) - @intCast(i16, memory_map_entry_count));
     log.debug("exiting boot services...", .{});
     UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
+
+    memory_map.reset();
+
+    var entry_index: usize = 0;
+    const memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
+    while (memory_map.next()) |entry| {
+        if (entry.type == .ConventionalMemory) {
+            defer entry_index += 1;
+            memory_map_entries[entry_index] = .{
+                .region = PhysicalMemoryRegion(.global).new(PhysicalAddress(.global).new(entry.physical_start), entry.number_of_pages << UEFI.page_shifter),
+                .type = .usable,
+            };
+        }
+    }
 
     var kernel_address_space = blk: {
         log.debug("Big chunk", .{});
