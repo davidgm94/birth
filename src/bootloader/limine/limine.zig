@@ -638,5 +638,5 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
     VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
 
-    bootloader.arch.x86_64.trampoline.function(bootloader_information);
+    bootloader.arch.x86_64.trampoline(bootloader_information);
 }

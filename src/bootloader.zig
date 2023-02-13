@@ -53,13 +53,16 @@ pub const Information = extern struct {
     framebuffer: Framebuffer,
     cpu: CPU.Information = .{},
     virtual_address_space: VirtualAddressSpace,
-    architecture: switch (lib.cpu.arch) {
+    architecture: Architecture,
+    slices: lib.EnumStruct(Slice.Name, Slice),
+
+    pub const Architecture = switch (lib.cpu.arch) {
         .x86, .x86_64 => extern struct {
             rsdp_address: u64,
+            gdt: privileged.arch.x86_64.GDT.Table = .{},
         },
         else => @compileError("Architecture not supported"),
-    },
-    slices: lib.EnumStruct(Slice.Name, Slice),
+    };
 
     pub const Slice = extern struct {
         offset: u32 = 0,

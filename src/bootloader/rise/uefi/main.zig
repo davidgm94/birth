@@ -520,9 +520,8 @@ pub fn main() noreturn {
     // };
 
     {
-        const trampoline = bootloader.arch.x86_64.trampoline;
-        const trampoline_code_start = @ptrToInt(&trampoline.trampoline);
-        const trampoline_code_size = bootloader.arch.x86_64.trampoline.getSize();
+        const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.trampoline);
+        const trampoline_code_size = bootloader.arch.x86_64.trampolineGetSize();
         const code_physical_base_page = PhysicalAddress(.local).new(lib.alignBackward(trampoline_code_start, UEFI.page_size));
         const misalignment = trampoline_code_start - code_physical_base_page.value();
         const trampoline_size_to_map = lib.alignForward(misalignment + trampoline_code_size, UEFI.page_size);
@@ -570,5 +569,5 @@ pub fn main() noreturn {
     // log.debug("KF: {}. IF: {}.", .{ bootloader_information_ptr.kernel_file.len, bootloader_information_ptr.init_file.len });
     //
     // loadKernel(bootloader_information.toHigherHalfVirtualAddress().access(*BootloaderInformation), elf_parser.getEntryPoint(), bootloader_information.virtual_address_space, stack_top, gdt_descriptor);
-    bootloader.arch.x86_64.trampoline.function(bootloader_information);
+    bootloader.arch.x86_64.trampoline(bootloader_information);
 }

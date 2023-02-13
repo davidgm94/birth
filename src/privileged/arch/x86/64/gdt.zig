@@ -18,7 +18,7 @@ pub const Table = extern struct {
     user_data_64: Entry = 0x00cff2000000ffff, // 0x18
     user_code_64: Entry = 0x00affb000000ffff, // 0x20
     // We don't need a user data 64 selector because 32 bit is enough, most values are not relevant
-    tss_descriptor: TSS.Descriptor,
+    tss_descriptor: TSS.Descriptor = undefined,
     tss: TSS.Struct align(8) = .{},
 
     comptime {
