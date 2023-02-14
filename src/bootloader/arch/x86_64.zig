@@ -25,7 +25,7 @@ pub fn trampoline(bootloader_information_identity_mapped: *bootloader.Informatio
     _ = asm volatile (
         \\lgdt %[gdt_register]
         \\push %[code_segment]
-        \\movabs $trampoline_reload_cs, %[reload_cs]
+        \\lea trampoline_reload_cs(%rip), %[reload_cs]
         \\push %[reload_cs]
         \\lretq
         \\trampoline_reload_cs:

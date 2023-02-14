@@ -27,7 +27,7 @@ const Configuration = struct {
 };
 
 const default_configuration = Configuration{
-    .bootloader = .rise,
+    .bootloader = .limine,
     .architecture = .x86_64,
     .boot_protocol = .uefi,
 };
@@ -439,7 +439,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             });
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");
-                            executable.strip = false;
+                            executable.strip = true;
                             try bootloader_executables.append(executable);
                         },
                     }
