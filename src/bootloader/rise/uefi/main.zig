@@ -519,6 +519,7 @@ pub fn main() noreturn {
     //     break :blk gdt_physical_address.toHigherHalfVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
     // };
 
+    // Map the trampoline code (part of the UEFI executable)
     {
         const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.trampoline);
         const trampoline_code_size = bootloader.arch.x86_64.trampolineGetSize();
@@ -527,7 +528,16 @@ pub fn main() noreturn {
         const trampoline_size_to_map = lib.alignForward(misalignment + trampoline_code_size, UEFI.page_size);
         paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, code_physical_base_page, code_physical_base_page.toIdentityMappedVirtualAddress(), trampoline_size_to_map, .{ .write = false, .execute = true }, &bootloader_information.page_allocator) catch @panic("Unable to map kernel trampoline code");
     }
-    //
+
+    // Map the bootloader information
+    {
+        log.debug("mapping bootloader information...", .{});
+        const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
+        const virtual_address = physical_address.toHigherHalfVirtualAddress();
+        const size = lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]);
+        log.debug("mapping bootloader information...", .{});
+        paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map bootloader information");
+    }
     // var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(lib.alignForward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
     //
     // // map bootstrap pages
@@ -536,19 +546,19 @@ pub fn main() noreturn {
     //     paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
     // }
     //
-    // // Map all usable memory to avoid kernel delays later
-    // // TODO:
-    // // 1. Divide memory per CPU to avoid shared memory
-    // // 2. User manager
-    // var map_iterator = memory_manager.map.iterator();
-    // while (map_iterator.next(memory_manager.map)) |entry| {
-    //     if (entry.type == .ConventionalMemory) {
-    //         const physical_address = PhysicalAddress(.local).new(entry.physical_start);
-    //         const virtual_address = physical_address.toHigherHalfVirtualAddress();
-    //         const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
-    //         paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map page tables");
-    //     }
-    // }
+    // Map all usable memory to avoid kernel delays later
+    // TODO:
+    // 1. Divide memory per CPU to avoid shared memory
+    // 2. User manager
+    memory_map.reset();
+    while (memory_map.next()) |entry| {
+        if (entry.type == .ConventionalMemory) {
+            const physical_address = PhysicalAddress(.local).new(entry.physical_start);
+            const virtual_address = physical_address.toHigherHalfVirtualAddress();
+            const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
+            paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+        }
+    }
     //
     // var allocated_size: usize = 0;
     // for (memory_manager.size_counters.counters) |counter| {
