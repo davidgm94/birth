@@ -431,6 +431,7 @@ pub fn main() noreturn {
     var elf_parser = ELF.Parser.init(cpu_driver_executable) catch |err| privileged.panic("Failed to initialize ELF parser: {}", .{err});
 
     const program_headers = elf_parser.getProgramHeaders();
+    bootloader_information.entry_point = elf_parser.getEntryPoint();
 
     var segment_count: u32 = 0;
     for (program_headers) |*ph| {
@@ -531,11 +532,10 @@ pub fn main() noreturn {
 
     // Map the bootloader information
     {
-        log.debug("mapping bootloader information...", .{});
         const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
         const virtual_address = physical_address.toHigherHalfVirtualAddress();
         const size = lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]);
-        log.debug("mapping bootloader information...", .{});
+        log.debug("mapping bootloader information... 0x{x}-0x{x} for 0x{x} bytes", .{ physical_address.value(), virtual_address.value(), size });
         paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map bootloader information");
     }
     // var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(lib.alignForward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
@@ -554,9 +554,31 @@ pub fn main() noreturn {
     while (memory_map.next()) |entry| {
         if (entry.type == .ConventionalMemory) {
             const physical_address = PhysicalAddress(.local).new(entry.physical_start);
-            const virtual_address = physical_address.toHigherHalfVirtualAddress();
+            const virtual_address = physical_address.toIdentityMappedVirtualAddress();
             const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
             paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+        }
+        log.debug("entry: {s}. 0x{x}, pages: 0x{x}", .{ @tagName(entry.type), entry.physical_start, entry.number_of_pages });
+        if (entry.physical_start <= 0x00000000bfef1f98 and 0x00000000bfef1f98 < entry.physical_start + entry.number_of_pages * UEFI.page_size) {
+            log.debug("contained", .{});
+        }
+    }
+
+    // Hack to map UEFI stack
+    memory_map.reset();
+    const rsp = asm volatile (
+        \\mov %rsp, %[rsp]
+        : [rsp] "=r" (-> u64),
+    );
+    log.debug("stack: 0x{x}", .{rsp});
+    while (memory_map.next()) |entry| {
+        const region_size = entry.number_of_pages * UEFI.page_size;
+        if (entry.physical_start < rsp and rsp < entry.physical_start + region_size) {
+            const rsp_physical_address = PhysicalAddress(.local).new(entry.physical_start);
+            const rsp_virtual_address = rsp_physical_address.toIdentityMappedVirtualAddress();
+            log.debug("mapping 0x{x} - 0x{x}", .{ entry.physical_start, entry.physical_start + region_size });
+            paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, rsp_physical_address, rsp_virtual_address, region_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+            break;
         }
     }
     //

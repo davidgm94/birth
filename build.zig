@@ -439,7 +439,7 @@ fn createBootloader(builder: *Builder, comptime configuration: Configuration, co
                             });
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");
-                            executable.strip = true;
+                            executable.strip = false;
                             try bootloader_executables.append(executable);
                         },
                     }

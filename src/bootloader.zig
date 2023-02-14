@@ -138,9 +138,14 @@ pub const Information = extern struct {
         return files;
     }
 
-    pub inline fn getSlice(information: *Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
-        const memory_map_slice = information.slices.array.values[@enumToInt(offset_name)];
-        return memory_map_slice.dereference(offset_name, information);
+    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
+        const slice = information.slices.array.values[@enumToInt(offset_name)];
+        return slice.dereference(offset_name, information);
+    }
+
+    pub inline fn getStackTop(information: *const Information) u64 {
+        const stack_slice = information.getSlice(.cpu_driver_stack);
+        return @ptrToInt(stack_slice.ptr) + stack_slice.len;
     }
 
     pub fn getMemoryMapEntryCount(information: *Information) usize {
