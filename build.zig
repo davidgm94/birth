@@ -212,7 +212,6 @@ const EmulatorSteps = struct {
     fn getGDBScriptPath(builder: *Builder, configuration: Configuration) ![]const u8 {
         return try std.mem.concat(builder.allocator, u8, &.{ "zig-cache/gdb_script_", @tagName(configuration.bootloader), "_", @tagName(configuration.architecture), "_", @tagName(configuration.boot_protocol) });
     }
-    //const gdb_script_path = "zig-cache/" ++ "gdb_script_" ++ suffix;
 
     fn create(builder: *Builder, list: *std.ArrayList(EmulatorSteps), configuration: Configuration, emulator: Emulator) !*EmulatorSteps {
         const new_one = try list.addOne();
