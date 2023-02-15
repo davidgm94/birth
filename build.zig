@@ -27,7 +27,7 @@ const Configuration = struct {
 };
 
 const default_configuration = Configuration{
-    .bootloader = .rise,
+    .bootloader = .limine,
     .architecture = .x86_64,
     .boot_protocol = .uefi,
 };

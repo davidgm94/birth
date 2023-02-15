@@ -247,7 +247,7 @@ pub fn getPageTableVirtualAddress(physical_address: PhysicalAddress(.local)) Vir
     return switch (lib.cpu.arch) {
         .x86 => physical_address.toIdentityMappedVirtualAddress(),
         .x86_64 => switch (lib.os) {
-            .freestanding => physical_address.toHigherHalfVirtualAddress(),
+            .freestanding => physical_address.toIdentityMappedVirtualAddress(),
             .uefi => physical_address.toIdentityMappedVirtualAddress(),
             else => @compileError("OS not supported"),
         },
@@ -424,7 +424,7 @@ pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAdd
     const pml4_entries = switch (lib.cpu.arch) {
         .x86 => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
         .x86_64 => switch (lib.os) {
-            .freestanding => pml4_physical_region.toHigherHalfVirtualAddress().access(PML4TE),
+            .freestanding => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
             .uefi => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
             else => @compileError("OS not supported"),
         },

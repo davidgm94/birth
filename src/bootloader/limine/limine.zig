@@ -479,7 +479,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
             const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
             bootloader_information.* = .{
                 .total_size = length_size_tuples.total_size,
-                .entry_point = @ptrToInt(&limineEntryPoint),
+                .entry_point = @ptrToInt(&@import("root").entryPoint),
                 .higher_half = lib.config.cpu_driver_higher_half_address,
                 .version = version: {
                     const limine_version = limine_information.response.?.version[0..lib.length(limine_information.response.?.version)];
@@ -636,7 +636,22 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
 
     const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
     const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
+    log.debug("mapping 0x{x}-0x{x}", .{ bootloader_information_physical_address.value(), bootloader_information_virtual_address.value() });
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
+
+    // Hack: map Limine stack to jump properly
+    const rsp = asm volatile (
+        \\mov %rsp, %[result]
+        : [result] "=r" (-> u64),
+    );
+    for (memory_map_entries) |entry| {
+        if (entry.type == .bootloader_reclaimable) {
+            if (entry.region.address.toHigherHalfVirtualAddress().value() < rsp and entry.region.address.offset(entry.region.size).toHigherHalfVirtualAddress().value() > rsp) {
+                VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), entry.region.size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
+                break;
+            }
+        }
+    }
 
     bootloader.arch.x86_64.trampoline(bootloader_information);
 }

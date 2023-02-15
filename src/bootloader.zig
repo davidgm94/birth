@@ -194,9 +194,7 @@ pub const Information = extern struct {
         return true;
     }
 
-    var count: usize = 0;
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        count += 1;
         const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
 
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
@@ -206,15 +204,6 @@ pub const Information = extern struct {
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
         const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
-
-        if (external_bootloader_page_counters[0] != 0) {
-            if (count > 1) {
-                lib.log.debug("Address: 0x{x}", .{@ptrToInt(&external_bootloader_page_counters[0])});
-                @panic("WTFASDASD");
-            } else {
-                @panic("first");
-            }
-        }
 
         for (entries) |entry, entry_index| {
             if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
@@ -227,11 +216,10 @@ pub const Information = extern struct {
                             .size = size,
                         };
 
+                        lib.log.debug("Allocating 0x{x}, 0x{x}", .{ result.address, result.size });
+
                         page_counters[entry_index] += four_kb_pages;
 
-                        if (external_bootloader_page_counters[0] != 0) {
-                            @panic("realllyyyyyyyyYY");
-                        }
                         return result;
                     }
                 }
