@@ -468,6 +468,10 @@ pub const Framebuffer = extern struct {
     pub const VideoMode = extern struct {
         foo: u32 = 0,
     };
+
+    pub inline fn getSize(framebuffer: Framebuffer) u32 {
+        return framebuffer.pitch * framebuffer.height;
+    }
 };
 
 pub const LengthSizeTuples = extern struct {

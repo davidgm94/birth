@@ -581,25 +581,14 @@ pub fn main() noreturn {
             break;
         }
     }
-    //
-    // var allocated_size: usize = 0;
-    // for (memory_manager.size_counters.counters) |counter| {
-    //     allocated_size += counter;
-    // }
-    //
-    // log.debug("Allocated size: 0x{x}", .{allocated_size * lib.arch.valid_page_sizes[0]});
-    //
-    // const bootloader_information_ptr = bootloader_information.toIdentityMappedVirtualAddress().access(*BootloaderInformation);
-    // bootloader_information_ptr.* = .{
-    //     .kernel_segments = program_segments,
-    //     .memory_map = memory_manager.map.to_higher_half(),
-    //     .counters = memory_manager.size_counters.to_higher_half(),
-    //     .rsdp_physical_address = rsdp_physical_address,
-    //     .kernel_file = file_to_higher_half(kernel_file_content),
-    //     .init_file = file_to_higher_half(init_file_content),
-    // };
-    // log.debug("KF: {}. IF: {}.", .{ bootloader_information_ptr.kernel_file.len, bootloader_information_ptr.init_file.len });
-    //
-    // loadKernel(bootloader_information.toHigherHalfVirtualAddress().access(*BootloaderInformation), elf_parser.getEntryPoint(), bootloader_information.virtual_address_space, stack_top, gdt_descriptor);
+
+    // Map framebuffer
+    {
+        const physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
+        const virtual_address = physical_address.toIdentityMappedVirtualAddress();
+        const size = bootloader_information.framebuffer.getSize();
+        paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+    }
+
     bootloader.arch.x86_64.trampoline(bootloader_information);
 }
