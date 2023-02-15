@@ -242,7 +242,7 @@ export fn entryPoint() callconv(.C) noreturn {
         @panic("Mapping of BIOS loader failed");
     };
     const framebuffer_physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
-    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch @panic("can't map framebuffer");
     bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
     // Map more than necessary
