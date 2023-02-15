@@ -1,0 +1,8 @@
+{
+    "configuration": {
+        "architecture": "x86_64",
+        "bootloader": "rise",
+        "boot_protocol": "bios"
+    },
+    "emulator": "qemu"
+}
