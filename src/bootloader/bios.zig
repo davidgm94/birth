@@ -219,24 +219,9 @@ const SuitableEntry = extern struct {
     index: u32,
 };
 
-pub fn findSuitableEntry(size: u32) ?SuitableEntry {
-    var iterator = E820Iterator{};
-    while (iterator.next()) |entry| {
-        if (entry.isUsable() and entry.region.size > size) {
-            return .{
-                .region = entry.region,
-                .index = iterator.index,
-            };
-        }
-    }
-
-    return null;
-}
-
 pub fn fetchMemoryEntries(memory_map: []bootloader.MemoryMapEntry) void {
     var iterator = E820Iterator{};
     while (iterator.next()) |entry| {
-        lib.log.debug("Entry: 0x{x}. Size: 0x{x}. Type: {s}", .{ entry.descriptor.region.address.value(), entry.descriptor.region.size, @tagName(entry.descriptor.type) });
         memory_map[entry.index] = .{
             .region = entry.descriptor.region,
             .type = switch (entry.descriptor.type) {

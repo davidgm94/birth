@@ -27,9 +27,9 @@ const Configuration = struct {
 };
 
 const default_configuration = Configuration{
-    .bootloader = .limine,
+    .bootloader = .rise,
     .architecture = .x86_64,
-    .boot_protocol = .uefi,
+    .boot_protocol = .bios,
 };
 
 const default_emulator = .qemu;
@@ -67,6 +67,7 @@ pub fn build(builder: *Builder) !void {
                     _ = bootloader_build;
 
                     const disk_image_builder_run_step = disk_image_builder.run();
+                    disk_image_builder_run_step.condition = .always;
                     disk_image_builder_run_step.addArgs(&.{ @tagName(configuration.bootloader), @tagName(configuration.architecture), @tagName(configuration.boot_protocol) });
 
                     const emulators = comptime getEmulators(configuration);

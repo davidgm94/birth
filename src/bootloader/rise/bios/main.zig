@@ -143,15 +143,17 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 },
             };
 
-            if (true) @panic("todo: giveOutAllocations");
-            //length_size_tuples.giveOutAllocations(&result.slices);
-
             const page_counters = result.getSlice(.page_counters);
             for (page_counters) |*page_counter| {
                 page_counter.* = 0;
             }
 
-            page_counters[entry.index] = length_size_tuples.total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+            for (result.getSlice(.external_bootloader_page_counters)) |*ext_page_counter| {
+                ext_page_counter.* = 0;
+            }
+
+            const total_size = lib.alignForwardGeneric(u32, length_size_tuples.total_size, lib.arch.valid_page_sizes[0]) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+            page_counters[entry.index] = total_size;
 
             const memory_map_entries = result.getSlice(.memory_map_entries);
             BIOS.fetchMemoryEntries(memory_map_entries);
@@ -305,7 +307,10 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.total_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
+            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch |err| {
+                log.debug("Error: {}", .{err});
+                @panic("Mapping of bootloader information failed");
+            };
 
             comptime {
                 lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);

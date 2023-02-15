@@ -426,7 +426,6 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
     var discarded_region_count: usize = 0;
     for (memory_map_entries) |entry| {
-        log.debug("Entry: 0x{x}. 0x{x}. {s}", .{ entry.region.address.value(), entry.region.size, @tagName(entry.type) });
         discarded_region_count += @boolToInt(entry.type == .framebuffer or entry.type == .kernel_and_modules);
     }
 
@@ -579,7 +578,8 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
                 // TODO: is this a good idea?
                 .usable, .bootloader_reclaimable => .usable,
                 .reserved => .reserved,
-                .acpi_reclaimable, .acpi_nvs, .bad_memory => @panic("implement these memory types"),
+                .acpi_reclaimable, .acpi_nvs => .reserved,
+                .bad_memory => @panic("Bad memory"),
                 .framebuffer, .kernel_and_modules => unreachable,
             },
         };
@@ -590,7 +590,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
             .framebuffer, .kernel_and_modules => unreachable,
             .bootloader_reclaimable => external_bootloader_page_counters[real_index] = entry_page_count,
             .usable => {},
-            .reserved => page_counters[real_index] = entry_page_count,
+            .reserved, .acpi_nvs, .acpi_reclaimable => page_counters[real_index] = entry_page_count,
             else => @panic(@tagName(entry.type)),
         }
 

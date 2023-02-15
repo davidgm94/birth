@@ -68,9 +68,7 @@ pub const Information = extern struct {
         offset: u32 = 0,
         size: u32 = 0,
         len: u32 = 0,
-        field_alignment: u32 = 1,
-        total_alignment: u32 = 1,
-        reserved: u32 = 0,
+        alignment: u32 = 1,
 
         pub const Name = enum {
             bootloader_information, // The main struct
@@ -164,8 +162,20 @@ pub const Information = extern struct {
         return information.getSlice(.external_bootloader_page_counters)[0..information.getMemoryMapEntryCount()];
     }
 
+    // TODO: further checks
     pub fn isSizeRight(information: *const Information) bool {
-        _ = information;
+        const original_total_size = information.total_size;
+        var total_size: u32 = 0;
+        inline for (Information.Slice.TypeMap) |T, index| {
+            const slice = information.slices.array.values[index];
+            if (slice.len * @sizeOf(T) != slice.size) {
+                return false;
+            }
+            total_size = lib.alignForwardGeneric(u32, total_size, slice.alignment);
+            total_size += lib.alignForwardGeneric(u32, slice.size, slice.alignment);
+        }
+
+        if (total_size != original_total_size) return false;
         // var extra_size: u32 = 0;
         // inline for (Information.Slice.TypeMap) |T, index| {
         //     const slice = information.slices[index];
@@ -181,10 +191,12 @@ pub const Information = extern struct {
         // if (total_size != information.total_size) return false;
         //
         // return true;
-        @panic("Todo: isSizeRight");
+        return true;
     }
 
+    var count: usize = 0;
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        count += 1;
         const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
 
         if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
@@ -194,6 +206,15 @@ pub const Information = extern struct {
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
         const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
+
+        if (external_bootloader_page_counters[0] != 0) {
+            if (count > 1) {
+                lib.log.debug("Address: 0x{x}", .{@ptrToInt(&external_bootloader_page_counters[0])});
+                @panic("WTFASDASD");
+            } else {
+                @panic("first");
+            }
+        }
 
         for (entries) |entry, entry_index| {
             if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
@@ -208,6 +229,9 @@ pub const Information = extern struct {
 
                         page_counters[entry_index] += four_kb_pages;
 
+                        if (external_bootloader_page_counters[0] != 0) {
+                            @panic("realllyyyyyyyyYY");
+                        }
                         return result;
                     }
                 }
@@ -496,7 +520,8 @@ pub const LengthSizeTuples = extern struct {
             slice.* = .{
                 .offset = allocated_size,
                 .len = length,
-                .size = size,
+                .size = tuple.size,
+                .alignment = tuple.alignment,
             };
 
             allocated_size = lib.alignForwardGeneric(u32, allocated_size, tuple.alignment);
