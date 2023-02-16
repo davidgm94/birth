@@ -36,116 +36,12 @@ const CPU = privileged.arch.CPU;
 const GDT = privileged.arch.x86_64.GDT;
 const paging = privileged.arch.paging;
 
-pub fn file_to_higher_half(file: []const u8) []const u8 {
-    var result = file;
-    result.ptr = file.ptr + lib.config.kernel_higher_half_address;
-    return result;
-}
-
-extern const kernel_trampoline_start: *volatile u8;
-extern const kernel_trampoline_end: *volatile u8;
-
-// extern fn loadKernel(bootloader_information: *bootloader.Information, kernel_start_address: u64, cr3: privileged.arch.x86_64.registers.cr3, stack: u64, gdt_descriptor: *privileged.arch.x86_64.GDT.Descriptor) callconv(.SysV) noreturn;
-// comptime {
-//     asm (
-//         \\.intel_syntax noprefix
-//         \\.global loadKernel
-//         \\.global kernel_trampoline_start
-//         \\.global kernel_trampoline_end
-//         \\kernel_trampoline_start:
-//         \\loadKernel:
-//         \\mov cr3, rdx
-//         \\lgdt [r8]
-//         \\mov rsp, rcx
-//         \\mov rax, 0x10
-//         \\mov ds, rax
-//         \\mov es, rax
-//         \\mov fs, rax
-//         \\mov gs, rax
-//         \\mov ss, rax
-//         \\call set_cs
-//         \\xor rbp, rbp
-//         \\jmp rsi
-//         \\set_cs:
-//         \\pop rax
-//         \\push 0x08
-//         \\push rax
-//         \\retfq
-//         \\kernel_trampoline_end:
-//     );
-//
-//     assert(@offsetOf(GDT.Table, "code_64") == 0x08);
-//     assert(@offsetOf(GDT.Table, "data_64") == 0x10);
-// }
-
-pub const std_options = struct {
-    pub const log_level = lib.std.log.Level.debug;
-
-    pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-        const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
-        switch (lib.cpu.arch) {
-            .x86_64 => {
-                // var buffer: [4096]u8 = undefined;
-                // const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\r\n", args) catch unreachable;
-                //
-                // for (formatted_buffer) |c| {
-                //     const fake_c = [2]u16{ c, 0 };
-                //     _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
-                // }
-                writer.print(prefix ++ format ++ "\n", args) catch unreachable;
-            },
-            else => @compileError("Unsupported CPU architecture"),
-        }
-    }
+const Stage = enum {
+    boot_services,
+    after_boot_services,
 };
 
-fn flush_new_line() !void {
-    switch (lib.cpu.arch) {
-        .x86_64 => {
-            if (!config.real_hardware) {
-                try writer.writeByte('\n');
-            }
-        },
-        else => @compileError("arch not supported"),
-    }
-}
-
-const File = struct {
-    type: bootloader.File.Type,
-    path: []const u8,
-    uefi: UEFI.File,
-};
-
-var files: [16]File = undefined;
-var file_count: u32 = 0;
-
-const practical_memory_map_descriptor_size = 0x30;
-const memory_map_descriptor_count = 256;
-var memory_map_key: usize = 0;
-var memory_map_descriptor_size: usize = 0;
-var memory_map_descriptor_version: u32 = 0;
-var memory_map_size: usize = 0;
-var memory_map = MemoryMap{};
-
-pub const MemoryMap = struct {
-    buffer: [practical_memory_map_descriptor_size * memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
-    offset: usize = 0,
-
-    pub fn next(it: *MemoryMap) ?*MemoryDescriptor {
-        if (it.offset < memory_map_size) {
-            const descriptor = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[it.offset..].ptr));
-            it.offset += memory_map_descriptor_size;
-            return descriptor;
-        }
-
-        return null;
-    }
-
-    pub inline fn reset(it: *MemoryMap) void {
-        it.offset = 0;
-    }
-};
+var stage: Stage = .boot_services;
 
 pub fn main() noreturn {
     const system_table = UEFI.get_system_table();
@@ -345,7 +241,6 @@ pub fn main() noreturn {
     const file_content_buffer = @intToPtr([*]u8, @ptrToInt(bootloader_information) + file_contents_slice.offset)[0..file_contents_slice.size];
     const file_names_slice = bootloader_information.slices.fields.file_names;
     const file_name_buffer = @intToPtr([*]u8, @ptrToInt(bootloader_information) + file_names_slice.offset)[0..file_names_slice.size];
-    log.debug("alignment", .{});
     const files_slice = bootloader_information.getFiles();
     var name_offset: u32 = 0;
     var content_offset: u32 = 0;
@@ -370,6 +265,10 @@ pub fn main() noreturn {
     const expected_memory_map_descriptor_size = memory_map_descriptor_size;
     const expected_memory_map_descriptor_version = memory_map_descriptor_version;
     const expected_memory_map_size = memory_map_size;
+
+    log.debug("Getting memory map before exiting boot services...", .{});
+    stage = .after_boot_services;
+
     UEFI.result(@src(), boot_services.getMemoryMap(&memory_map_size, @ptrCast([*]MemoryDescriptor, &memory_map.buffer), &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version));
     if (expected_memory_map_size != memory_map_size) {
         log.debug("Old memory map size: {}. New memory map size: {}", .{ expected_memory_map_size, memory_map_size });
@@ -389,7 +288,7 @@ pub fn main() noreturn {
 
     bootloader_information.configuration.memory_map_diff = @intCast(u8, diff);
 
-    log.debug("exiting boot services...", .{});
+    log.debug("Exiting boot services...", .{});
     UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
 
     memory_map.reset();
@@ -504,25 +403,28 @@ pub fn main() noreturn {
         }
     }
 
-    // const gdt_descriptor = blk: {
-    //     const gdt_page_count = 1;
-    //     const gdt_physical_address = PhysicalAddress(.local).new(memory_manager.allocate(gdt_page_count) catch @panic("Unable to allocate memory for GDT"));
-    //     const gdt_descriptor_identity = gdt_physical_address.toIdentityMappedVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
-    //     gdt_descriptor_identity.* = gdt_physical_address.toIdentityMappedVirtualAddress().access(*GDT.Table).fill_with_kernel_memory_offset(lib.config.kernel_higher_half_address);
-    //     break :blk gdt_physical_address.toHigherHalfVirtualAddress().offset(@sizeOf(GDT.Table)).access(*GDT.Descriptor);
-    // };
-
-    // Map the trampoline code (part of the UEFI executable)
+    // Map the trampoline code (part of the UEFI executable).
+    // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
+    log.debug("Mapping trampoline code...", .{});
     {
         const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.trampoline);
-        const trampoline_code_size = bootloader.arch.x86_64.trampolineGetSize();
-        const code_physical_base_page = PhysicalAddress(.local).new(lib.alignBackward(trampoline_code_start, UEFI.page_size));
-        const misalignment = trampoline_code_start - code_physical_base_page.value();
-        const trampoline_size_to_map = lib.alignForward(misalignment + trampoline_code_size, UEFI.page_size);
-        paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, code_physical_base_page, code_physical_base_page.toIdentityMappedVirtualAddress(), trampoline_size_to_map, .{ .write = false, .execute = true }, &bootloader_information.page_allocator) catch @panic("Unable to map kernel trampoline code");
+
+        memory_map.reset();
+        while (memory_map.next()) |entry| {
+            const entry_size = entry.number_of_pages * UEFI.page_size;
+            if (entry.physical_start < trampoline_code_start and trampoline_code_start < entry.physical_start + entry_size) {
+                log.debug("Entry: 0x{x}-0x{x}", .{ entry.physical_start, entry.physical_start + entry.number_of_pages * UEFI.page_size });
+
+                const code_physical_region = PhysicalMemoryRegion(.local).new(PhysicalAddress(.local).new(entry.physical_start), entry_size);
+                const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
+                paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, &bootloader_information.page_allocator) catch @panic("Unable to map kernel trampoline code");
+                break;
+            }
+        }
     }
 
     // Map the bootloader information
+    log.debug("Mapping bootloader information...", .{});
     {
         const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
         const virtual_address = physical_address.toHigherHalfVirtualAddress();
@@ -530,18 +432,12 @@ pub fn main() noreturn {
         log.debug("mapping bootloader information... 0x{x}-0x{x} for 0x{x} bytes", .{ physical_address.value(), virtual_address.value(), size });
         paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map bootloader information");
     }
-    // var bootloader_information = PhysicalAddress(.local).new(memory_manager.allocate(lib.alignForward(@sizeOf(BootloaderInformation), UEFI.page_size) >> UEFI.page_shifter) catch @panic("Unable to allocate memory for bootloader information"));
-    //
-    // // map bootstrap pages
-    // {
-    //     const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootstrap_memory.ptr));
-    //     paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), bootstrap_memory.len, .{ .write = true, .execute = false }, &memory_manager.allocator) catch @panic("Unable to map bootstrap pages");
-    // }
-    //
+
     // Map all usable memory to avoid kernel delays later
     // TODO:
     // 1. Divide memory per CPU to avoid shared memory
     // 2. User manager
+    log.debug("Mapping usable memory...", .{});
     memory_map.reset();
     while (memory_map.next()) |entry| {
         if (entry.type == .ConventionalMemory) {
@@ -557,6 +453,7 @@ pub fn main() noreturn {
     }
 
     // Hack to map UEFI stack
+    log.debug("Mapping UEFI stack...", .{});
     memory_map.reset();
     const rsp = asm volatile (
         \\mov %rsp, %[rsp]
@@ -569,12 +466,14 @@ pub fn main() noreturn {
             const rsp_physical_address = PhysicalAddress(.local).new(entry.physical_start);
             const rsp_virtual_address = rsp_physical_address.toIdentityMappedVirtualAddress();
             log.debug("mapping 0x{x} - 0x{x}", .{ entry.physical_start, entry.physical_start + region_size });
+            assert(region_size > 0);
             paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, rsp_physical_address, rsp_virtual_address, region_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
             break;
         }
     }
 
     // Map framebuffer
+    log.debug("Mapping framebuffer...", .{});
     {
         const physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
         const virtual_address = physical_address.toIdentityMappedVirtualAddress();
@@ -582,5 +481,86 @@ pub fn main() noreturn {
         paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
     }
 
+    log.debug("Jumping to trampoline...", .{});
     bootloader.arch.x86_64.trampoline(bootloader_information);
 }
+
+pub fn file_to_higher_half(file: []const u8) []const u8 {
+    var result = file;
+    result.ptr = file.ptr + lib.config.kernel_higher_half_address;
+    return result;
+}
+
+extern const kernel_trampoline_start: *volatile u8;
+extern const kernel_trampoline_end: *volatile u8;
+
+pub const std_options = struct {
+    pub const log_level = lib.std.log.Level.debug;
+
+    pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+        const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
+        switch (lib.cpu.arch) {
+            .x86_64 => {
+                if (@enumToInt(stage) < @enumToInt(Stage.after_boot_services)) {
+                    var buffer: [4096]u8 = undefined;
+                    const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\r\n", args) catch unreachable;
+
+                    for (formatted_buffer) |c| {
+                        const fake_c = [2]u16{ c, 0 };
+                        _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
+                    }
+                }
+                writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+            },
+            else => @compileError("Unsupported CPU architecture"),
+        }
+    }
+};
+
+fn flush_new_line() !void {
+    switch (lib.cpu.arch) {
+        .x86_64 => {
+            if (!config.real_hardware) {
+                try writer.writeByte('\n');
+            }
+        },
+        else => @compileError("arch not supported"),
+    }
+}
+
+const File = struct {
+    type: bootloader.File.Type,
+    path: []const u8,
+    uefi: UEFI.File,
+};
+
+var files: [16]File = undefined;
+var file_count: u32 = 0;
+
+const practical_memory_map_descriptor_size = 0x30;
+const memory_map_descriptor_count = 256;
+var memory_map_key: usize = 0;
+var memory_map_descriptor_size: usize = 0;
+var memory_map_descriptor_version: u32 = 0;
+var memory_map_size: usize = 0;
+var memory_map = MemoryMap{};
+
+pub const MemoryMap = struct {
+    buffer: [practical_memory_map_descriptor_size * memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
+    offset: usize = 0,
+
+    pub fn next(it: *MemoryMap) ?*MemoryDescriptor {
+        if (it.offset < memory_map_size) {
+            const descriptor = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[it.offset..].ptr));
+            it.offset += memory_map_descriptor_size;
+            return descriptor;
+        }
+
+        return null;
+    }
+
+    pub inline fn reset(it: *MemoryMap) void {
+        it.offset = 0;
+    }
+};

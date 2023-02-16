@@ -1,13 +1,13 @@
 const lib = @import("../../lib.zig");
 const assert = lib.assert;
-const log = lib.log.scoped(.Trampoline);
 const bootloader = @import("../../bootloader.zig");
 const privileged = @import("../../privileged.zig");
 const GDT = privileged.arch.x86_64.GDT;
 
 pub fn trampoline(bootloader_information_identity_mapped: *bootloader.Information) noreturn {
     if (@ptrToInt(bootloader_information_identity_mapped) >= lib.config.cpu_driver_higher_half_address) {
-        @panic("Bootloader information should be an identity-mapped virtual address when calling the trampoline");
+        // Error
+        privileged.arch.stopCPU();
     }
 
     const bootloader_information_higher_half = @ptrToInt(bootloader_information_identity_mapped) + bootloader_information_identity_mapped.higher_half;
