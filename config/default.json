@@ -1,7 +1,7 @@
 {
     "configuration": {
         "architecture": "x86_64",
-        "bootloader": "rise",
+        "bootloader": "limine",
         "boot_protocol": "bios"
     },
     "emulator": "qemu"

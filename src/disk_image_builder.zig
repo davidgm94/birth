@@ -545,13 +545,14 @@ pub fn main() anyerror!void {
     var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
     const arguments = try @import("std").process.argsAlloc(wrapped_allocator.unwrap_zig());
-    if (arguments.len != 4) {
+    if (arguments.len != 5) {
         return Error.wrong_arguments;
     }
 
     const bootloader_id = lib.stringToEnum(lib.Bootloader, arguments[1]) orelse return Error.wrong_arguments;
     const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
     const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
+    const is_test = if (lib.equal(u8, arguments[4], "true")) true else if (lib.equal(u8, arguments[4], "false")) false else return Error.wrong_arguments;
 
     const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader_id), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
 
@@ -588,7 +589,11 @@ pub fn main() anyerror!void {
                         maybe_cpu_driver_name = file_descriptor.guest;
                     }
 
-                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.suffix_type) {
+                    log.debug("Is test: {}", .{is_test});
+                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (is_test) {
+                        true => "_test",
+                        false => "",
+                    }, switch (file_descriptor.suffix_type) {
                         .arch => switch (architecture) {
                             inline else => |arch| "_" ++ @tagName(arch),
                         },

@@ -114,29 +114,31 @@ pub const DirectoryTokenizer = struct {
     }
 
     test {
-        const TestCase = struct {
-            path: []const u8,
-            expected_result: []const []const u8,
-        };
+        if (common.os != .freestanding) {
+            const TestCase = struct {
+                path: []const u8,
+                expected_result: []const []const u8,
+            };
 
-        const test_cases = [_]TestCase{
-            .{ .path = "/EFI", .expected_result = &.{ "/", "EFI" } },
-            .{ .path = "/abc/def/a", .expected_result = &.{ "/", "abc", "def", "a" } },
-        };
+            const test_cases = [_]TestCase{
+                .{ .path = "/EFI", .expected_result = &.{ "/", "EFI" } },
+                .{ .path = "/abc/def/a", .expected_result = &.{ "/", "abc", "def", "a" } },
+            };
 
-        inline for (test_cases) |case| {
-            var dir_tokenizer = DirectoryTokenizer.init(case.path);
-            var results: [case.expected_result.len][]const u8 = undefined;
-            var result_count: usize = 0;
+            inline for (test_cases) |case| {
+                var dir_tokenizer = DirectoryTokenizer.init(case.path);
+                var results: [case.expected_result.len][]const u8 = undefined;
+                var result_count: usize = 0;
 
-            while (dir_tokenizer.next()) |dir| {
-                try common.testing.expect(result_count < results.len);
-                try common.testing.expectEqualStrings(case.expected_result[result_count], dir);
-                results[result_count] = dir;
-                result_count += 1;
+                while (dir_tokenizer.next()) |dir| {
+                    try common.testing.expect(result_count < results.len);
+                    try common.testing.expectEqualStrings(case.expected_result[result_count], dir);
+                    results[result_count] = dir;
+                    result_count += 1;
+                }
+
+                try common.testing.expectEqual(case.expected_result.len, result_count);
             }
-
-            try common.testing.expectEqual(case.expected_result.len, result_count);
         }
     }
 };

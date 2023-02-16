@@ -2,6 +2,7 @@ const compiler_builtin = @import("builtin");
 pub const cpu = compiler_builtin.cpu;
 pub const os = compiler_builtin.os.tag;
 pub const build_mode = compiler_builtin.mode;
+pub const is_test = compiler_builtin.is_test;
 
 pub const kb = 1024;
 pub const mb = kb * 1024;
