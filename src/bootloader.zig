@@ -78,7 +78,6 @@ pub const Information = extern struct {
             files,
             memory_map_entries,
             page_counters,
-            external_bootloader_page_counters,
             cpus,
         };
 
@@ -93,7 +92,6 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.cpu_driver_stack)] = u8;
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
-            arr[@enumToInt(Slice.Name.external_bootloader_page_counters)] = u32;
             arr[@enumToInt(Slice.Name.cpus)] = CPU;
             break :blk arr;
         };
@@ -158,16 +156,15 @@ pub const Information = extern struct {
         return information.getSlice(.page_counters)[0..information.getMemoryMapEntryCount()];
     }
 
-    pub fn getExternalBootloaderPageCounters(information: *Information) []u32 {
-        return information.getSlice(.external_bootloader_page_counters)[0..information.getMemoryMapEntryCount()];
-    }
-
     // TODO: further checks
     pub fn isSizeRight(information: *const Information) bool {
         const original_total_size = information.total_size;
         var total_size: u32 = 0;
         inline for (Information.Slice.TypeMap) |T, index| {
             const slice = information.slices.array.values[index];
+            if (slice.alignment < @alignOf(T)) {
+                return false;
+            }
             if (slice.len * @sizeOf(T) != slice.size) {
                 return false;
             }
@@ -176,21 +173,6 @@ pub const Information = extern struct {
         }
 
         if (total_size != original_total_size) return false;
-        // var extra_size: u32 = 0;
-        // inline for (Information.Slice.TypeMap) |T, index| {
-        //     const slice = information.slices[index];
-        //     const slice_size = @sizeOf(T) * slice.len;
-        //     if (slice_size != slice.size) return false;
-        //     extra_size += slice_size;
-        // }
-        //
-        // const aligned_extra_size = lib.alignForward(extra_size, lib.arch.valid_page_sizes[0]);
-        // const total_size = aligned_struct_size + aligned_extra_size;
-        // if (struct_size != information.struct_size) return false;
-        // if (extra_size != information.extra_size) return false;
-        // if (total_size != information.total_size) return false;
-        //
-        // return true;
         return true;
     }
 
@@ -203,25 +185,21 @@ pub const Information = extern struct {
 
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
-        const external_bootloader_page_counters = bootloader_information.getExternalBootloaderPageCounters();
 
         for (entries) |entry, entry_index| {
-            if (external_bootloader_page_counters.len == 0 or external_bootloader_page_counters[entry_index] == 0) {
-                const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
-                const size_left = entry.region.size - busy_size;
-                if (entry.type == .usable and size_left > size) {
-                    if (entry.region.address.isAligned(alignment)) {
-                        const result = Allocator.Allocate.Result{
-                            .address = entry.region.address.offset(busy_size).value(),
-                            .size = size,
-                        };
+            const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
+            const size_left = entry.region.size - busy_size;
+            if (entry.type == .usable and size_left > size) {
+                if (entry.region.address.isAligned(alignment)) {
+                    const result = Allocator.Allocate.Result{
+                        .address = entry.region.address.offset(busy_size).value(),
+                        .size = size,
+                    };
+                    lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.size });
 
-                        lib.log.debug("Allocating 0x{x}, 0x{x}", .{ result.address, result.size });
+                    page_counters[entry_index] += four_kb_pages;
 
-                        page_counters[entry_index] += four_kb_pages;
-
-                        return result;
-                    }
+                    return result;
                 }
             }
         }

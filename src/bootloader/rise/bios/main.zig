@@ -88,10 +88,6 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
             .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
-        .external_bootloader_page_counters = .{
-            .length = memory_map_entry_count,
-            .alignment = @alignOf(u32),
-        },
         .cpus = .{
             .length = cpu_count,
             .alignment = 8,
@@ -146,10 +142,6 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
             const page_counters = result.getSlice(.page_counters);
             for (page_counters) |*page_counter| {
                 page_counter.* = 0;
-            }
-
-            for (result.getSlice(.external_bootloader_page_counters)) |*ext_page_counter| {
-                ext_page_counter.* = 0;
             }
 
             const total_size = lib.alignForwardGeneric(u32, length_size_tuples.total_size, lib.arch.valid_page_sizes[0]) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);

@@ -302,10 +302,6 @@ pub fn main() noreturn {
             .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
-        .external_bootloader_page_counters = .{
-            .length = memory_map_entry_count,
-            .alignment = @alignOf(u32),
-        },
         .cpus = .{
             .length = cpu_count,
             .alignment = 8,
@@ -342,10 +338,6 @@ pub fn main() noreturn {
     };
 
     for (bootloader_information.getSlice(.page_counters)) |*page_counter| {
-        page_counter.* = 0;
-    }
-
-    for (bootloader_information.getSlice(.external_bootloader_page_counters)) |*page_counter| {
         page_counter.* = 0;
     }
 

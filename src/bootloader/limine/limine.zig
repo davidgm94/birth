@@ -391,8 +391,8 @@ fn mapSection(cpu_driver_address_space: *VirtualAddressSpace, comptime section_n
     const virtual_address = VirtualAddress(.local).new(section_start);
     const physical_address = PhysicalAddress(.local).new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
     const size = section_end - section_start;
-    log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) with flags {} for {} bytes", .{ section_name, physical_address.value(), virtual_address.value(), flags, size });
-    VirtualAddressSpace.paging.bootstrap_map(cpu_driver_address_space, .local, physical_address, virtual_address, size, flags, page_allocator) catch @panic("Mapping of memory map entry failed");
+    log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) for 0x{x} bytes", .{ section_name, physical_address.value(), virtual_address.value(), size });
+    VirtualAddressSpace.paging.bootstrap_map(cpu_driver_address_space, .local, physical_address, virtual_address, size, flags, page_allocator) catch |err| privileged.panic("Mapping of section failed: {}", .{err});
 }
 
 export var limine_information = BootloaderInfo.Request{ .revision = 0 };
@@ -424,14 +424,10 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const memory_map = limine_memory_map.response.?;
     log.debug("Memory map entry count: {}", .{memory_map.entry_count});
     const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
-    var discarded_region_count: usize = 0;
-    for (memory_map_entries) |entry| {
-        discarded_region_count += @boolToInt(entry.type == .framebuffer or entry.type == .kernel_and_modules);
-    }
 
     const stack_size = privileged.default_stack_size;
     const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
-    const actual_memory_map_entry_count = @intCast(u32, memory_map_entries.len - discarded_region_count);
+    const memory_map_entry_count = @intCast(u32, memory_map_entries.len);
 
     const length_size_tuples = bootloader.LengthSizeTuples.new(.{
         .bootloader_information = .{
@@ -444,7 +440,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
         },
         .file_names = .{
             .length = 0,
-            .alignment = 8,
+            .alignment = @alignOf(u64),
         },
         .files = .{
             .length = 0,
@@ -455,15 +451,11 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
             .alignment = lib.arch.valid_page_sizes[0],
         },
         .memory_map_entries = .{
-            .length = actual_memory_map_entry_count,
+            .length = memory_map_entry_count,
             .alignment = @alignOf(bootloader.MemoryMapEntry),
         },
         .page_counters = .{
-            .length = actual_memory_map_entry_count,
-            .alignment = @alignOf(u32),
-        },
-        .external_bootloader_page_counters = .{
-            .length = actual_memory_map_entry_count,
+            .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
         .cpus = .{
@@ -476,6 +468,8 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const bootloader_information = for (memory_map_entries) |entry, index| {
         if (entry.type == .usable and entry.region.size > length_size_tuples.total_size) {
             const bootloader_information_region = entry.region.takeSlice(length_size_tuples.total_size);
+            log.debug("Bootloader information region: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
+            log.debug("Bootloader information region slice: 0x{x}-0x{x}", .{ bootloader_information_region.address.value(), bootloader_information_region.address.offset(bootloader_information_region.size).value() });
             const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
             bootloader_information.* = .{
                 .total_size = length_size_tuples.total_size,
@@ -555,47 +549,30 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     } else @panic("Unable to get bootloader information");
 
     const page_counters = bootloader_information.getSlice(.page_counters);
-    const external_bootloader_page_counters = bootloader_information.getSlice(.external_bootloader_page_counters);
+
     for (page_counters) |*page_counter| {
         page_counter.* = 0;
     }
-    for (external_bootloader_page_counters) |*page_counter| {
-        page_counter.* = 0;
-    }
+
+    page_counters[entry_index] = lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
     const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
     var discarded: usize = 0;
+    _ = discarded;
     for (memory_map_entries) |entry, index| {
-        const real_index = index - discarded;
-        if (entry.type == .framebuffer or entry.type == .kernel_and_modules) {
-            discarded += 1;
-            continue;
-        }
-
-        bootloader_memory_map_entries[real_index] = .{
+        bootloader_memory_map_entries[index] = .{
             .region = entry.region,
             .type = switch (entry.type) {
-                // TODO: is this a good idea?
-                .usable, .bootloader_reclaimable => .usable,
-                .reserved => .reserved,
-                .acpi_reclaimable, .acpi_nvs => .reserved,
+                .usable => .usable,
+                .framebuffer, .kernel_and_modules, .bootloader_reclaimable, .reserved, .acpi_reclaimable, .acpi_nvs => .reserved,
                 .bad_memory => @panic("Bad memory"),
-                .framebuffer, .kernel_and_modules => unreachable,
             },
         };
 
         const entry_page_count = @intCast(u32, entry.region.size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]));
-
-        switch (entry.type) {
-            .framebuffer, .kernel_and_modules => unreachable,
-            .bootloader_reclaimable => external_bootloader_page_counters[real_index] = entry_page_count,
-            .usable => {},
-            .reserved, .acpi_nvs, .acpi_reclaimable => page_counters[real_index] = entry_page_count,
-            else => @panic(@tagName(entry.type)),
-        }
-
-        if (entry_index == index) {
-            page_counters[real_index] = bootloader_information.total_size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+        if (entry.type != .usable) {
+            // Reserved
+            page_counters[index] = entry_page_count;
         }
     }
 
@@ -611,10 +588,11 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
         const result = VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
         break :blk result;
     };
-    const entries = bootloader_information.getMemoryMapEntries();
-    for (entries) |entry| {
+
+    for (bootloader_information.getMemoryMapEntries()) |entry| {
         if (entry.type == .usable) {
-            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, &bootloader_information.page_allocator) catch @panic("Mapping of memory map entry failed");
+            log.debug("Usable memory map entry: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
+            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, &bootloader_information.page_allocator) catch |err| privileged.panic("Mapping of usable memory map entry failed: {}", .{err});
         }
     }
 

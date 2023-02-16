@@ -1,5 +1,8 @@
+#set can-use-hw-watchpoints 0
 b limineEntryPoint
 b entryPoint
+b privileged.arch.x86.64.paging.get_pd_table
 
-b *0x00000000be273c73
+watch * 0x45010
+
 c

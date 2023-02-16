@@ -2,7 +2,7 @@
     "configuration": {
         "architecture": "x86_64",
         "bootloader": "limine",
-        "boot_protocol": "bios"
+        "boot_protocol": "uefi"
     },
     "emulator": "qemu"
 }

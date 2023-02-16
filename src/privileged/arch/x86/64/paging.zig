@@ -319,7 +319,8 @@ fn get_page_entry(comptime Entry: type, physical_address: u64, flags: MemoryFlag
 }
 
 fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, physical_address: u64, flags: MemoryFlags) MapError!void {
-    const entry_pointer = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    const entry_index = indices[@enumToInt(PageIndex.PDP)];
+    const entry_pointer = &pdp_table[entry_index];
 
     if (entry_pointer.present) return MapError.already_present;
 
@@ -329,7 +330,8 @@ fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, ph
 }
 
 fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
+    const entry_index = indices[@enumToInt(PageIndex.PD)];
+    const entry_pointer = &pd_table[entry_index];
     const entry_value = entry_pointer.*;
 
     if (entry_value.present) return MapError.already_present;
@@ -340,7 +342,8 @@ fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, phys
 }
 
 fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_pointer = &p_table[indices[@enumToInt(PageIndex.PT)]];
+    const entry_index = indices[@enumToInt(PageIndex.PT)];
+    const entry_pointer = &p_table[entry_index];
 
     if (entry_pointer.present) return MapError.already_present;
 
@@ -350,7 +353,8 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
 }
 
 fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_allocator: *Allocator) *volatile PDTable {
-    const entry_pointer = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    const entry_index = indices[@enumToInt(PageIndex.PDP)];
+    const entry_pointer = &pdp_table[entry_index];
 
     const table_physical_address_value = physical_address_blk: {
         const entry_value = entry_pointer.*;
