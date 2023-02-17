@@ -14,7 +14,6 @@ const Allocator = lib.Allocator;
 
 const privileged = @import("../../../../privileged.zig");
 const Heap = privileged.Heap;
-const panic = privileged.panic;
 
 const valid_page_sizes = lib.arch.x86_64.valid_page_sizes;
 const reverse_valid_page_sizes = lib.arch.x86_64.reverse_valid_page_sizes;
@@ -32,10 +31,6 @@ const higher_half_entry_index = 512 / 2;
 
 pub const Specific = extern struct {
     cr3: cr3 = undefined,
-
-    pub fn format(specific: Specific, comptime _: []const u8, _: lib.InternalFormatOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try lib.internal_format(writer, "{}", .{specific.cr3});
-    }
 };
 
 const Indices = [enumCount(PageIndex)]u16;
@@ -45,6 +40,7 @@ const Indices = [enumCount(PageIndex)]u16;
 fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
     if (size == valid_page_sizes[0]) {
         try map_4k_page(vas_cr3, asked_physical_address, asked_virtual_address, flags, physical_allocator);
+        return;
     } else {
         const top_virtual_address = asked_virtual_address + size;
 
@@ -63,7 +59,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
                         try map_4k_page(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
                     }
 
-                    break;
+                    return;
                 } else {
                     const aligned_page_address = alignForwardGeneric(u64, asked_virtual_address, reverse_page_size);
                     const prologue_misalignment = aligned_page_address - asked_virtual_address;
@@ -90,15 +86,14 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
                             try map_function(vas_cr3, epilogue_physical_address, epilogue_virtual_address, epilogue_misalignment, flags, physical_allocator);
                         }
 
-                        break;
-                    } else {
-                        try map_generic(vas_cr3, asked_physical_address, asked_virtual_address, size, reverse_valid_page_sizes[reverse_page_index + 1], flags, physical_allocator);
-                        @panic("else taken");
+                        return;
                     }
                 }
             }
         }
     }
+
+    @panic("Some mapping did not go well");
 }
 
 const Error = error{
@@ -115,20 +110,26 @@ pub fn bootstrap_map(virtual_address_space: *x86_64.VirtualAddressSpace, comptim
     const flags = general_flags.toArchitectureSpecific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;
 
+    //log.debug("Mapping 0x{x}-0x{x} to 0x{x}-0x{x}", .{ asked_physical_address.value(), asked_physical_address.offset(size).value(), asked_virtual_address.value(), asked_virtual_address.offset(size).value() });
+
     // if (!asked_physical_address.isValid()) return Error.invalid_physical;
     // if (!asked_virtual_address.isValid()) return Error.invalid_virtual;
     if (size == 0) {
         return Error.invalid_size;
     }
+
     if (!isAlignedGeneric(u64, asked_physical_address.value(), valid_page_sizes[0])) {
         return Error.unaligned_physical;
     }
+
     if (!isAlignedGeneric(u64, asked_virtual_address.value(), valid_page_sizes[0])) {
         return Error.unaligned_virtual;
     }
+
     if (!isAlignedGeneric(u64, size, valid_page_sizes[0])) {
         return Error.unaligned_size;
     }
+
     if (asked_physical_address.value() >= lib.config.cpu_driver_higher_half_address) {
         return Error.invalid_physical;
     }
@@ -160,15 +161,15 @@ fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
 
     if (true) {
         if (!isAlignedGeneric(u64, asked_physical_address, asked_page_size)) {
-            //log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
-            @panic("Misalignment");
+            log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
+            @panic("Misaligned physical address in map_generic");
         }
         if (!isAlignedGeneric(u64, asked_virtual_address, asked_page_size)) {
-            @panic("wtf 2");
+            @panic("Misaligned virtual address in map_generic");
         }
         if (!isAlignedGeneric(u64, size, asked_page_size)) {
             //log.debug("Asked size: 0x{x}. Asked page size: 0x{x}", .{ size, asked_page_size });
-            @panic("wtf 3");
+            @panic("Misaligned size in map_generic");
         }
     } else {
         assert(isAligned(asked_physical_address, asked_page_size));
@@ -302,7 +303,9 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
 }
 
 const MapError = error{
-    already_present,
+    already_present_4kb,
+    already_present_2mb,
+    already_present_1gb,
 };
 
 fn get_page_entry(comptime Entry: type, physical_address: u64, flags: MemoryFlags) Entry {
@@ -322,7 +325,7 @@ fn page_tables_map_1_gb_page(pdp_table: *volatile PDPTable, indices: Indices, ph
     const entry_index = indices[@enumToInt(PageIndex.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
-    if (entry_pointer.present) return MapError.already_present;
+    if (entry_pointer.present) return MapError.already_present_1gb;
 
     assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[2]));
 
@@ -334,7 +337,7 @@ fn page_tables_map_2_mb_page(pd_table: *volatile PDTable, indices: Indices, phys
     const entry_pointer = &pd_table[entry_index];
     const entry_value = entry_pointer.*;
 
-    if (entry_value.present) return MapError.already_present;
+    if (entry_value.present) return MapError.already_present_2mb;
 
     assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[1]));
 
@@ -345,7 +348,10 @@ fn page_tables_map_4_kb_page(p_table: *volatile PTable, indices: Indices, physic
     const entry_index = indices[@enumToInt(PageIndex.PT)];
     const entry_pointer = &p_table[entry_index];
 
-    if (entry_pointer.present) return MapError.already_present;
+    if (entry_pointer.present) {
+        log.err("PTable address: 0x{x}, entry_index: {}, entry_pointer: 0x{x}", .{ @ptrToInt(p_table), entry_index, @ptrToInt(entry_pointer) });
+        return MapError.already_present_4kb;
+    }
 
     assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[0]));
 
@@ -455,7 +461,7 @@ pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAdd
     };
 }
 
-pub fn makeCurrent(virtual_address_space: *const VirtualAddressSpace) void {
+pub inline fn makeCurrent(virtual_address_space: *const VirtualAddressSpace) void {
     virtual_address_space.arch.cr3.write();
 }
 

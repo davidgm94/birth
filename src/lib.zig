@@ -13,6 +13,7 @@ pub const Message = @import("lib/message.zig");
 pub const Module = @import("lib/module.zig");
 pub const NLS = @import("lib/nls.zig");
 pub const PartitionTable = @import("lib/partition_table.zig");
+pub const PSF1 = @import("lib/psf1.zig");
 pub const Syscall = @import("lib/syscall.zig");
 pub const Graphics = @import("lib/graphics.zig");
 pub const Window = @import("lib/window.zig");

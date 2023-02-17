@@ -598,7 +598,7 @@ pub fn main() anyerror!void {
                             inline else => |arch| "_" ++ @tagName(arch),
                         },
                         .full => unreachable,
-                        .none => unreachable,
+                        .none => "",
                     } });
                     log.debug("Host relative path: {s}", .{host_relative_path});
                     const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);

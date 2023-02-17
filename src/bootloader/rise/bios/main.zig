@@ -95,7 +95,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
     });
 
     while (iterator.next()) |entry| {
-        if (entry.descriptor.isUsable() and entry.descriptor.region.size > length_size_tuples.total_size and !entry.descriptor.region.overlaps(framebuffer_region)) {
+        if (entry.descriptor.isUsable() and entry.descriptor.region.size > length_size_tuples.getAlignedTotalSize() and !entry.descriptor.region.overlaps(framebuffer_region)) {
             const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(bootloader.Information));
             const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
 
@@ -106,6 +106,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 .total_size = length_size_tuples.total_size,
                 .entry_point = 0,
                 .higher_half = lib.config.cpu_driver_higher_half_address,
+                .stage = .early,
                 .configuration = .{
                     .memory_map_diff = 0,
                 },
@@ -131,6 +132,8 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                     // TODO:
                     .memory_model = 0x06,
                 },
+                .draw_context = .{},
+                .font = undefined,
                 .cpu_driver_mappings = .{},
                 .virtual_address_space = .{ .arch = .{} },
                 .slices = length_size_tuples.createSlices(),
@@ -144,8 +147,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 page_counter.* = 0;
             }
 
-            const total_size = lib.alignForwardGeneric(u32, length_size_tuples.total_size, lib.arch.valid_page_sizes[0]) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
-            page_counters[entry.index] = total_size;
+            page_counters[entry.index] = result.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
             const memory_map_entries = result.getSlice(.memory_map_entries);
             BIOS.fetchMemoryEntries(memory_map_entries);
@@ -299,7 +301,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator) catch |err| {
+            VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator) catch |err| {
                 log.debug("Error: {}", .{err});
                 @panic("Mapping of bootloader information failed");
             };

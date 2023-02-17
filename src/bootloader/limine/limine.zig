@@ -466,8 +466,8 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
 
     var entry_index: usize = 0;
     const bootloader_information = for (memory_map_entries) |entry, index| {
-        if (entry.type == .usable and entry.region.size > length_size_tuples.total_size) {
-            const bootloader_information_region = entry.region.takeSlice(length_size_tuples.total_size);
+        if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
+            const bootloader_information_region = entry.region.takeSlice(length_size_tuples.getAlignedTotalSize());
             log.debug("Bootloader information region: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
             log.debug("Bootloader information region slice: 0x{x}-0x{x}", .{ bootloader_information_region.address.value(), bootloader_information_region.address.offset(bootloader_information_region.size).value() });
             const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
@@ -507,6 +507,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
                 },
                 .protocol = limine_protocol,
                 .bootloader = .limine,
+                .stage = .early,
                 .configuration = .{
                     .memory_map_diff = 0,
                 },
@@ -532,6 +533,8 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
                     },
                     .memory_model = framebuffer.memory_model,
                 },
+                .draw_context = .{},
+                .font = undefined,
                 .architecture = switch (lib.cpu.arch) {
                     .x86_64 => .{
                         .rsdp_address = limine_rsdp.response.?.address,
@@ -554,7 +557,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
         page_counter.* = 0;
     }
 
-    page_counters[entry_index] = lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+    page_counters[entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
     const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
     var discarded: usize = 0;
@@ -615,7 +618,7 @@ pub fn limineEntryPoint() callconv(.C) noreturn {
     const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
     const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
     log.debug("mapping 0x{x}-0x{x}", .{ bootloader_information_physical_address.value(), bootloader_information_virtual_address.value() });
-    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, lib.alignForwardGeneric(u32, bootloader_information.total_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
+    VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
 
     // Hack: map Limine stack to jump properly
     const rsp = asm volatile (

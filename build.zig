@@ -511,7 +511,7 @@ fn createBootloader(builder: *Builder, configuration: Configuration) !Bootloader
                                     .os_tag = .uefi,
                                     .abi = .msvc,
                                 },
-                                .optimize = .ReleaseSafe,
+                                .optimize = .Debug,
                             });
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");

@@ -38,6 +38,7 @@ pub const Information = extern struct {
     version: Version,
     protocol: lib.Bootloader.Protocol,
     bootloader: lib.Bootloader,
+    stage: Stage,
     page_allocator: Allocator = .{
         .callbacks = .{
             .allocate = pageAllocate,
@@ -47,10 +48,11 @@ pub const Information = extern struct {
         memory_map_diff: u8,
         reserved: u24 = 0,
     },
-    reserved: u32 = 0,
     heap: Heap,
     cpu_driver_mappings: CPUDriverMappings,
     framebuffer: Framebuffer,
+    draw_context: DrawContext,
+    font: Font,
     cpu: CPU.Information = .{},
     virtual_address_space: VirtualAddressSpace,
     architecture: Architecture,
@@ -122,10 +124,9 @@ pub const Information = extern struct {
         };
     };
 
-    pub fn getFileContent(information: *Information, index: usize) []const u8 {
-        _ = index;
-        _ = information;
-        @panic("ajsdksa");
+    pub fn getAlignedTotalSize(information: *Information) u32 {
+        assert(information.total_size > 0);
+        return lib.alignForwardGeneric(u32, information.total_size, lib.arch.valid_page_sizes[0]);
     }
 
     pub fn getFiles(information: *Information) []File {
@@ -189,13 +190,16 @@ pub const Information = extern struct {
         for (entries) |entry, entry_index| {
             const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
             const size_left = entry.region.size - busy_size;
-            if (entry.type == .usable and size_left > size) {
+            if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
                 if (entry.region.address.isAligned(alignment)) {
                     const result = Allocator.Allocate.Result{
                         .address = entry.region.address.offset(busy_size).value(),
                         .size = size,
                     };
-                    lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.size });
+
+                    lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address))[0..lib.safeArchitectureCast(result.size)]);
+
+                    //lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.address + result.size });
 
                     page_counters[entry_index] += four_kb_pages;
 
@@ -280,8 +284,13 @@ pub const File = extern struct {
     type: Type,
     reserved: u32 = 0,
 
+    pub fn getContent(file: File, bootloader_information: *Information) []const u8 {
+        return @intToPtr([*]const u8, @ptrToInt(bootloader_information) + file.content_offset)[0..file.content_size];
+    }
+
     pub const Type = enum(u32) {
         cpu_driver,
+        font,
     };
 
     pub const Parser = struct {
@@ -502,4 +511,116 @@ pub const LengthSizeTuples = extern struct {
 
         return slices;
     }
+
+    pub fn getAlignedTotalSize(tuples: LengthSizeTuples) u32 {
+        assert(tuples.total_size > 0);
+        return lib.alignForwardGeneric(u32, tuples.total_size, lib.arch.valid_page_sizes[0]);
+    }
+};
+
+pub const Font = extern struct {
+    file: PhysicalMemoryRegion(.local),
+    glyph_buffer_size: u32,
+    character_size: u8,
+    draw: *const fn (font: *const Font, framebuffer: *const Framebuffer, character: u8, color: u32, offset_x: u32, offset_y: u32) void,
+
+    pub fn fromPSF1(file: []const u8) !Font {
+        const header = @ptrCast(*const lib.PSF1.Header, file.ptr);
+        if (!lib.equal(u8, &header.magic, &lib.PSF1.Header.magic)) {
+            return lib.PSF1.Error.invalid_magic;
+        }
+
+        const glyph_buffer_size = @as(u32, header.character_size) * (lib.maxInt(u8) + 1) * (1 + @boolToInt(header.mode == 1));
+
+        return .{
+            .file = PhysicalMemoryRegion(.local).new(PhysicalAddress(.local).new(@ptrToInt(file.ptr)), file.len),
+            .glyph_buffer_size = glyph_buffer_size,
+            .character_size = header.character_size,
+            .draw = drawPSF1,
+        };
+    }
+
+    fn drawPSF1(font: *const Font, framebuffer: *const Framebuffer, character: u8, color: u32, offset_x: u32, offset_y: u32) void {
+        const bootloader_information = @fieldParentPtr(Information, "framebuffer", framebuffer);
+        const glyph_buffer_virtual_region = if (bootloader_information.stage == .trampoline) font.file.toHigherHalfVirtualAddress() else font.file.toIdentityMappedVirtualAddress();
+        const glyph_buffer = glyph_buffer_virtual_region.access(u8)[@sizeOf(lib.PSF1.Header)..][0..font.glyph_buffer_size];
+        const glyph_offset = @as(usize, character) * font.character_size;
+        const glyph = glyph_buffer[glyph_offset .. glyph_offset + font.character_size];
+
+        var glyph_index: usize = 0;
+        _ = glyph_index;
+
+        const pixels_per_scanline = @divExact(framebuffer.pitch, @divExact(framebuffer.bpp, @bitSizeOf(u8)));
+        const fb = @intToPtr([*]u32, framebuffer.address)[0 .. pixels_per_scanline * framebuffer.height];
+        var y = offset_y;
+
+        for (glyph) |byte| {
+            const base_index = y * pixels_per_scanline + offset_x;
+            if (byte & 1 << 7 != 0) fb[base_index + 0] = color;
+            if (byte & 1 << 6 != 0) fb[base_index + 1] = color;
+            if (byte & 1 << 5 != 0) fb[base_index + 2] = color;
+            if (byte & 1 << 4 != 0) fb[base_index + 3] = color;
+            if (byte & 1 << 3 != 0) fb[base_index + 4] = color;
+            if (byte & 1 << 2 != 0) fb[base_index + 5] = color;
+            if (byte & 1 << 1 != 0) fb[base_index + 6] = color;
+            if (byte & 1 << 0 != 0) fb[base_index + 7] = color;
+
+            y += 1;
+        }
+    }
+};
+
+pub const DrawContext = extern struct {
+    x: u32 = 0,
+    y: u32 = 0,
+    color: u32 = 0xff_ff_ff_ff,
+    reserved: u32 = 0,
+
+    pub const Error = error{};
+    pub const Writer = lib.Writer(*DrawContext, DrawContext.Error, DrawContext.write);
+
+    pub fn write(draw_context: *DrawContext, bytes: []const u8) DrawContext.Error!usize {
+        const bootloader_information = @fieldParentPtr(Information, "draw_context", draw_context);
+        const color = draw_context.color;
+        for (bytes) |byte| {
+            if (byte != '\n') {
+                bootloader_information.font.draw(&bootloader_information.font, &bootloader_information.framebuffer, byte, color, draw_context.x, draw_context.y);
+                if (draw_context.x + 8 < bootloader_information.framebuffer.width) {
+                    draw_context.x += @bitSizeOf(u8);
+                    continue;
+                }
+            }
+
+            if (draw_context.y < bootloader_information.framebuffer.width) {
+                draw_context.y += bootloader_information.font.character_size;
+                draw_context.x = 0;
+            } else {
+                asm volatile (
+                    \\cli
+                    \\hlt
+                );
+            }
+        }
+
+        return bytes.len;
+    }
+
+    pub inline fn clearScreen(draw_context: *DrawContext, color: u32) void {
+        const bootloader_information = @fieldParentPtr(Information, "draw_context", draw_context);
+        const pixels_per_scanline = @divExact(bootloader_information.framebuffer.pitch, @divExact(bootloader_information.framebuffer.bpp, @bitSizeOf(u8)));
+        const framebuffer_pixels = @intToPtr([*]u32, bootloader_information.framebuffer.address)[0 .. pixels_per_scanline * bootloader_information.framebuffer.height];
+        var y: u32 = 0;
+        while (y < bootloader_information.framebuffer.height) : (y += 1) {
+            const line = framebuffer_pixels[y * pixels_per_scanline .. y * pixels_per_scanline + pixels_per_scanline];
+            for (line) |*pixel| {
+                pixel.* = color;
+            }
+        }
+    }
+};
+
+pub const Stage = enum(u32) {
+    early = 0,
+    only_graphics = 1,
+    trampoline = 2,
 };

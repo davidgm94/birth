@@ -35,11 +35,8 @@ comptime {
 }
 
 pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
+    bootloader_information.draw_context.clearScreen(0xff005000);
     if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
-    const framebuffer = @intToPtr([*]u32, bootloader_information.framebuffer.address)[0 .. bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height / @sizeOf(u32)];
-    for (framebuffer) |*pixel| {
-        pixel.* = 0xff_ff0000;
-    }
     log.debug("Starting...", .{});
     log.debug("Is test: {}", .{lib.is_test});
     if (lib.is_test) {

@@ -30,7 +30,17 @@ const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const stopCPU = privileged.arch.stopCPU;
-pub const panic = privileged.panic;
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    privileged.arch.disableInterrupts();
+    lib.log.scoped(.PANIC).err(format, arguments);
+    privileged.arch.stopCPU();
+}
+
+pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    privileged.arch.disableInterrupts();
+    panic("{s}", .{message});
+}
 
 pub fn result(src: lib.SourceLocation, status: Status) void {
     UEFIError(status) catch |err| {
