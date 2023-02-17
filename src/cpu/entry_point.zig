@@ -8,6 +8,8 @@ const limine = bootloader.limine;
 const privileged = @import("privileged");
 const stopCPU = privileged.arch.stopCPU;
 
+const cpu = @import("cpu");
+
 const writer = privileged.E9Writer{ .context = {} };
 
 fn todoEndEntryPoint() noreturn {
@@ -36,7 +38,7 @@ comptime {
 
 pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     bootloader_information.draw_context.clearScreen(0xff005000);
-    if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
+    bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
     log.debug("Starting...", .{});
     log.debug("Is test: {}", .{lib.is_test});
     // var total_page_count: u32 = 0;

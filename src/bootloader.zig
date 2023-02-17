@@ -157,24 +157,29 @@ pub const Information = extern struct {
         return information.getSlice(.page_counters)[0..information.getMemoryMapEntryCount()];
     }
 
+    pub const IntegrityError = error{
+        bad_slice_alignment,
+        bad_slice_size,
+        bad_total_size,
+    };
     // TODO: further checks
-    pub fn isSizeRight(information: *const Information) bool {
+    pub fn checkIntegrity(information: *const Information) !void {
         const original_total_size = information.total_size;
         var total_size: u32 = 0;
         inline for (Information.Slice.TypeMap) |T, index| {
             const slice = information.slices.array.values[index];
             if (slice.alignment < @alignOf(T)) {
-                return false;
+                lib.log.err("Bad alignment of {}. Current: {}. Before: {}", .{ T, @alignOf(T), slice.alignment });
+                return IntegrityError.bad_slice_alignment;
             }
             if (slice.len * @sizeOf(T) != slice.size) {
-                return false;
+                return IntegrityError.bad_slice_size;
             }
             total_size = lib.alignForwardGeneric(u32, total_size, slice.alignment);
             total_size += lib.alignForwardGeneric(u32, slice.size, slice.alignment);
         }
 
-        if (total_size != original_total_size) return false;
-        return true;
+        if (total_size != original_total_size) return IntegrityError.bad_total_size;
     }
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
@@ -262,8 +267,8 @@ pub const CPUDriverMappings = extern struct {
 };
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion(.global),
-    type: Type,
+    region: PhysicalMemoryRegion(.global) align(8),
+    type: Type align(8),
 
     const Type = enum(u64) {
         usable = 0,
