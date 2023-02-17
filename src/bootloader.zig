@@ -3,12 +3,12 @@ pub const UEFI = @import("bootloader/uefi.zig");
 pub const limine = @import("bootloader/limine/limine.zig");
 pub const arch = @import("bootloader/arch.zig");
 
-const lib = @import("lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 const Allocator = lib.Allocator;
 pub const Protocol = lib.Bootloader.Protocol;
 
-const privileged = @import("privileged.zig");
+const privileged = @import("privileged");
 const AddressInterface = privileged.Address.Interface(u64);
 const PhysicalAddress = AddressInterface.PhysicalAddress;
 const VirtualAddress = AddressInterface.VirtualAddress;

@@ -1,6 +1,6 @@
 const MBR = @This();
 
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.MBR);
 const Disk = lib.Disk.Descriptor;

@@ -369,13 +369,13 @@ pub const DTB = extern struct {
     };
 };
 
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.LIMINE);
 
-const bootloader = @import("../../bootloader.zig");
+const bootloader = @import("bootloader");
 
-const privileged = @import("../../privileged.zig");
+const privileged = @import("privileged");
 const PhysicalAddress = privileged.arch.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;
 const VirtualAddress = privileged.arch.VirtualAddress;

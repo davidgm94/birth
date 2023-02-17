@@ -1,8 +1,8 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
-const bootloader = @import("../bootloader.zig");
+const bootloader = @import("bootloader");
 
-const privileged = @import("../privileged.zig");
+const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
 const x86_64 = privileged.arch.x86_64;
 const PhysicalAddress = x86_64.PhysicalAddress;

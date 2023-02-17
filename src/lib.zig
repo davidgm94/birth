@@ -10,7 +10,6 @@ pub const Disk = disk_file.Disk;
 pub const Filesystem = @import("lib/filesystem.zig");
 pub const List = @import("lib/list.zig");
 pub const Message = @import("lib/message.zig");
-pub const Module = @import("lib/module.zig");
 pub const NLS = @import("lib/nls.zig");
 pub const PartitionTable = @import("lib/partition_table.zig");
 pub const PSF1 = @import("lib/psf1.zig");

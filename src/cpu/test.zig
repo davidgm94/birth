@@ -1,6 +1,6 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib");
 const log = lib.log.scoped(.TEST);
-const privileged = @import("../privileged.zig");
+const privileged = @import("privileged");
 const writer = privileged.writer;
 
 test "Hello kernel" {

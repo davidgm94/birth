@@ -1,6 +1,6 @@
-const host = @import("host.zig");
-const lib = @import("lib.zig");
-const bootloader = @import("bootloader.zig");
+const host = @import("host");
+const lib = @import("lib");
+const bootloader = @import("bootloader");
 const LimineInstaller = @import("bootloader/limine/installer.zig");
 
 const assert = lib.assert;

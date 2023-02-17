@@ -1,4 +1,4 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib");
 
 pub const Header = extern struct {
     magic: [2]u8,

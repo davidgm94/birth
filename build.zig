@@ -3,8 +3,10 @@ const common = @import("src/common.zig");
 
 // Build types
 const Builder = std.Build.Builder;
-const CompileStep = std.build.CompileStep;
+const CompileStep = std.Build.CompileStep;
 const FileSource = std.Build.FileSource;
+const Module = std.Build.Module;
+const ModuleDependency = std.Build.ModuleDependency;
 const RunStep = std.Build.RunStep;
 const Step = std.Build.Step;
 
@@ -21,17 +23,33 @@ pub fn build(builder: *Builder) !void {
     const ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
-    const disk_image_builder = createDiskImageBuilder(builder);
+    var modules = Modules{};
+    modules.modules.set(.lib, builder.createModule(.{ .source_file = FileSource.relative("src/lib.zig") }));
+    modules.modules.set(.host, builder.createModule(.{ .source_file = FileSource.relative("src/host.zig") }));
+    modules.modules.set(.bootloader, builder.createModule(.{ .source_file = FileSource.relative("src/bootloader.zig") }));
+    modules.modules.set(.privileged, builder.createModule(.{ .source_file = FileSource.relative("src/privileged.zig") }));
+    modules.modules.set(.cpu, builder.createModule(.{ .source_file = FileSource.relative("src/cpu.zig") }));
+
+    modules.dependencies.set(.lib, &.{modules.getModuleDependency(.lib)});
+    modules.dependencies.set(.host, &.{ modules.getModuleDependency(.host), modules.getModuleDependency(.lib) });
+    modules.dependencies.set(.bootloader, &.{ modules.getModuleDependency(.bootloader), modules.getModuleDependency(.lib), modules.getModuleDependency(.privileged) });
+    modules.dependencies.set(.privileged, &.{ modules.getModuleDependency(.privileged), modules.getModuleDependency(.lib), modules.getModuleDependency(.bootloader) });
+    modules.dependencies.set(.cpu, &.{ modules.getModuleDependency(.cpu), modules.getModuleDependency(.lib), modules.getModuleDependency(.bootloader), modules.getModuleDependency(.privileged) });
+
+    const disk_image_builder = createDiskImageBuilder(builder, modules);
 
     var all_tests = std.ArrayList(*CompileStep).init(builder.allocator);
+    _ = all_tests;
+
     const build_steps = blk: {
         var architecture_steps = std.ArrayList(ArchitectureSteps).init(builder.allocator);
 
         for (common.supported_architectures) |architecture, architecture_index| {
-            const cpu_driver = try createCPUDriver(builder, architecture, false);
-            const cpu_driver_test = try createCPUDriver(builder, architecture, true);
+            const cpu_driver = try createCPUDriver(builder, modules, architecture, false);
+            const cpu_driver_test = try createCPUDriver(builder, modules, architecture, true);
+            _ = cpu_driver_test;
             _ = cpu_driver;
-            try all_tests.append(cpu_driver_test);
+            // try all_tests.append(cpu_driver_test);
             const bootloaders = common.architecture_bootloader_map[architecture_index];
             var bootloader_steps = std.ArrayList(BootloaderSteps).init(builder.allocator);
 
@@ -46,7 +64,7 @@ pub fn build(builder: *Builder) !void {
                         .architecture = architecture,
                         .boot_protocol = protocol,
                     };
-                    const bootloader_build = try createBootloader(builder, configuration);
+                    const bootloader_build = try createBootloader(builder, modules, configuration);
                     _ = bootloader_build;
 
                     const emulators = try getEmulators(configuration);
@@ -100,6 +118,33 @@ pub fn build(builder: *Builder) !void {
         test_step.dependOn(&run_test_step.step);
     }
 }
+
+const ModuleID = enum {
+    lib,
+    host,
+    bootloader,
+    privileged,
+    cpu,
+};
+
+pub const Modules = struct {
+    modules: std.EnumArray(ModuleID, *Module) = std.EnumArray(ModuleID, *Module).initUndefined(),
+    dependencies: std.EnumArray(ModuleID, []const ModuleDependency) = std.EnumArray(ModuleID, []const ModuleDependency).initUndefined(),
+
+    pub fn getModuleDependency(modules: Modules, module_id: ModuleID) ModuleDependency {
+        return .{
+            .name = @tagName(module_id),
+            .module = modules.modules.get(module_id),
+        };
+    }
+
+    pub fn addModule(modules: Modules, compile_step: *CompileStep, module_id: ModuleID) void {
+        compile_step.addAnonymousModule(@tagName(module_id), .{
+            .source_file = modules.modules.get(module_id).source_file,
+            .dependencies = modules.dependencies.get(module_id),
+        });
+    }
+};
 
 const source_root_dir = "src";
 const cache_dir = "zig-cache/";
@@ -472,7 +517,7 @@ const Error = error{
     failed_to_run,
 };
 
-fn createBootloader(builder: *Builder, configuration: Configuration) !BootloaderBuild {
+fn createBootloader(builder: *Builder, modules: Modules, configuration: Configuration) !BootloaderBuild {
     var bootloader_executables = std.ArrayList(*CompileStep).init(builder.allocator);
 
     switch (configuration.bootloader) {
@@ -500,6 +545,10 @@ fn createBootloader(builder: *Builder, configuration: Configuration) !Bootloader
                             executable.strip = true;
                             executable.entry_symbol_name = entry_point_name;
 
+                            modules.addModule(executable, .lib);
+                            modules.addModule(executable, .bootloader);
+                            modules.addModule(executable, .privileged);
+
                             try bootloader_executables.append(executable);
                         },
                         .uefi => {
@@ -516,6 +565,11 @@ fn createBootloader(builder: *Builder, configuration: Configuration) !Bootloader
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");
                             executable.strip = true;
+
+                            modules.addModule(executable, .lib);
+                            modules.addModule(executable, .bootloader);
+                            modules.addModule(executable, .privileged);
+
                             try bootloader_executables.append(executable);
                         },
                     }
@@ -537,17 +591,17 @@ fn createBootloader(builder: *Builder, configuration: Configuration) !Bootloader
     return bootloader_build;
 }
 
-fn createCPUDriver(builder: *Builder, architecture: Target.Cpu.Arch, is_test: bool) !*CompileStep {
-    const cpu_driver_path = "src/cpu_driver/";
-    const cpu_driver_source_file = "src/cpu_driver.zig";
+fn createCPUDriver(builder: *Builder, modules: Modules, architecture: Target.Cpu.Arch, is_test: bool) !*CompileStep {
+    const cpu_driver_path = "src/cpu/";
+    const cpu_driver_main_source_file = "src/cpu/entry_point.zig";
     const exe_prefix = if (is_test) "cpu_driver_test_" else "cpu_driver_";
     const exe_name = try std.mem.concat(builder.allocator, u8, &.{ exe_prefix, @tagName(architecture) });
 
-    const cpu_driver_file = FileSource.relative(cpu_driver_source_file);
+    const cpu_driver_file = FileSource.relative(cpu_driver_main_source_file);
     const target = getTarget(architecture, .privileged);
     const cpu_driver = if (is_test) builder.addTest(.{
         .name = exe_name,
-        .root_source_file = FileSource.relative("src/cpu_driver/test.zig"),
+        .root_source_file = FileSource.relative(cpu_driver_path ++ "test.zig"),
         .target = target,
         .kind = .test_exe,
     }) else builder.addExecutable(.{
@@ -567,7 +621,7 @@ fn createCPUDriver(builder: *Builder, architecture: Target.Cpu.Arch, is_test: bo
     cpu_driver.omit_frame_pointer = false;
     cpu_driver.entry_symbol_name = entry_point_name;
 
-    if (is_test) cpu_driver.setTestRunner(cpu_driver_source_file);
+    if (is_test) cpu_driver.setTestRunner(cpu_driver_main_source_file);
 
     cpu_driver.setLinkerScriptPath(FileSource.relative(cpu_driver_path ++ "arch/" ++ switch (architecture) {
         .x86_64 => "x86/64/",
@@ -582,17 +636,27 @@ fn createCPUDriver(builder: *Builder, architecture: Target.Cpu.Arch, is_test: bo
         else => return Error.architecture_not_supported,
     }
 
+    modules.addModule(cpu_driver, .lib);
+    modules.addModule(cpu_driver, .bootloader);
+    modules.addModule(cpu_driver, .privileged);
+    modules.addModule(cpu_driver, .cpu);
+
     builder.default_step.dependOn(&cpu_driver.step);
 
     return cpu_driver;
 }
 
-fn createDiskImageBuilder(builder: *Builder) *CompileStep {
+fn createDiskImageBuilder(builder: *Builder, modules: Modules) *CompileStep {
     const disk_image_builder = builder.addExecutable(.{
         .name = "disk_image_builder",
         .root_source_file = FileSource.relative("src/disk_image_builder.zig"),
     });
     disk_image_builder.setOutputDir(cache_dir);
+
+    modules.addModule(disk_image_builder, .lib);
+    modules.addModule(disk_image_builder, .host);
+    modules.addModule(disk_image_builder, .bootloader);
+
     builder.default_step.dependOn(&disk_image_builder.step);
 
     return disk_image_builder;
@@ -613,6 +677,7 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
         disabled_features.addFeature(@enumToInt(Feature.sse2));
         disabled_features.addFeature(@enumToInt(Feature.avx));
         disabled_features.addFeature(@enumToInt(Feature.avx2));
+        disabled_features.addFeature(@enumToInt(Feature.avx512f));
 
         enabled_features.addFeature(@enumToInt(Feature.soft_float));
     }

@@ -1,4 +1,4 @@
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 
 const Graphics = lib.Graphics;
 const DrawingArea = Graphics.DrawingArea;

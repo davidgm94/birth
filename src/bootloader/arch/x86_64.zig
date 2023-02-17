@@ -1,7 +1,7 @@
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
-const bootloader = @import("../../bootloader.zig");
-const privileged = @import("../../privileged.zig");
+const bootloader = @import("bootloader");
+const privileged = @import("privileged");
 const GDT = privileged.arch.x86_64.GDT;
 
 pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn {

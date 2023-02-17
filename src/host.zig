@@ -1,4 +1,4 @@
-const lib = @import("lib.zig");
+const lib = @import("lib");
 
 comptime {
     if (lib.os == .freestanding) @compileError("Host file included in non-host target");

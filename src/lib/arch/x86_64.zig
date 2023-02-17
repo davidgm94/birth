@@ -1,4 +1,4 @@
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const x86 = @import("x86/common.zig");
 pub usingnamespace x86;
 

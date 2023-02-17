@@ -1,4 +1,4 @@
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const NLS = lib.NLS;
 
 const charset_to_unicode: [256]u16 = [128]u16{

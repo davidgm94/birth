@@ -1,11 +1,11 @@
-const lib = @import("lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log;
 
-const bootloader = @import("bootloader.zig");
+const bootloader = @import("bootloader");
 const limine = bootloader.limine;
 
-const privileged = @import("privileged.zig");
+const privileged = @import("privileged");
 const stopCPU = privileged.arch.stopCPU;
 
 const writer = privileged.E9Writer{ .context = {} };

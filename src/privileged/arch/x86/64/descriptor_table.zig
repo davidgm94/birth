@@ -1,4 +1,4 @@
-const lib = @import("../../../../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 
 pub const Register = extern struct {

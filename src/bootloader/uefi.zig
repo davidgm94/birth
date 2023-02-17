@@ -1,4 +1,4 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib");
 const alignForward = lib.alignForward;
 const assert = lib.assert;
 const CustomAllocator = lib.CustomAllocator;
@@ -24,7 +24,7 @@ const str16 = lib.std.unicode.utf8ToUtf16LeStringLiteral;
 pub const page_size = 0x1000;
 pub const page_shifter = lib.arch.page_shifter(page_size);
 
-const privileged = @import("../privileged.zig");
+const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;

@@ -1,4 +1,4 @@
-const lib = @import("../lib.zig");
+const lib = @import("lib");
 // ENUM ARRAY
 pub fn IndexedArray(comptime I: type, comptime V: type, comptime Ext: fn (type) type) type {
     comptime ensureIndexer(I);

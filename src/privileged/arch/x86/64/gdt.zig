@@ -1,10 +1,10 @@
 const GDT = @This();
 
-const lib = @import("../../../../lib.zig");
+const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.GDT);
 
-const privileged = @import("../../../../privileged.zig");
+const privileged = @import("privileged");
 const DescriptorTable = privileged.arch.x86_64.DescriptorTable;
 const TSS = privileged.arch.x86_64.TSS;
 
