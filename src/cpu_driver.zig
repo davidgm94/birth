@@ -39,16 +39,6 @@ pub export fn entryPoint(bootloader_information: *bootloader.Information) callco
     if (!bootloader_information.isSizeRight()) @panic("Bootloader information size doesn't match");
     log.debug("Starting...", .{});
     log.debug("Is test: {}", .{lib.is_test});
-    if (lib.is_test) {
-        const test_functions = @import("builtin").test_functions;
-        var passed_test: usize = 0;
-        for (test_functions) |test_fn| {
-            test_fn.func() catch continue;
-            passed_test += 1;
-        }
-
-        log.debug("Passed tests: {}. Tests run: {}", .{ passed_test, test_functions.len });
-    }
     // var total_page_count: u32 = 0;
     // for (bootloader_information.page.counters) |page_counter| {
     //     total_page_count += page_counter;

@@ -248,3 +248,12 @@ pub const PartitionConfig = struct {
     filesystem: FilesystemType,
     first_lba: u64,
 };
+
+pub const QEMU = extern struct {
+    isa_debug_exit: ISADebugExit,
+
+    pub const ISADebugExit = extern struct {
+        io_base: u8 = 0xf4,
+        io_size: u8 = @sizeOf(u32),
+    };
+};
