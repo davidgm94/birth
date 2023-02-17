@@ -96,9 +96,9 @@ pub fn build(builder: *Builder) !void {
 
     const test_step = builder.step("test", "Run unit tests");
 
-    const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8 }{
-        .{ .name = "lib", .zig_source_file = "src/lib.zig" },
-        .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig" },
+    const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8, modules: []const ModuleID }{
+        .{ .name = "lib", .zig_source_file = "src/lib.zig", .modules = &.{.lib} },
+        .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig", .modules = &.{ .lib, .host } },
     };
 
     for (native_tests) |native_test| {
@@ -114,6 +114,11 @@ pub fn build(builder: *Builder) !void {
             test_exe.addCSourceFile("src/bootloader/limine/installables/limine-deploy.c", &.{});
             test_exe.linkLibC();
         }
+
+        for (native_test.modules) |module_id| {
+            modules.addModule(test_exe, module_id);
+        }
+
         const run_test_step = test_exe.run();
         test_step.dependOn(&run_test_step.step);
     }
