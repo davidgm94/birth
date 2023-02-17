@@ -46,8 +46,7 @@ pub fn build(builder: *Builder) !void {
 
         for (common.supported_architectures) |architecture, architecture_index| {
             const cpu_driver = try createCPUDriver(builder, modules, architecture, false);
-            const cpu_driver_test = try createCPUDriver(builder, modules, architecture, true);
-            _ = cpu_driver_test;
+            // const cpu_driver_test = try createCPUDriver(builder, modules, architecture, true);
             _ = cpu_driver;
             // try all_tests.append(cpu_driver_test);
             const bootloaders = common.architecture_bootloader_map[architecture_index];
