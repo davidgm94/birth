@@ -113,7 +113,8 @@ pub const DirectoryTokenizer = struct {
         return tokenizer.given_count == tokenizer.total_count;
     }
 
-    test {
+    test "directory tokenizer" {
+        common.log.err("ajskdjsa", .{});
         if (common.os != .freestanding) {
             const TestCase = struct {
                 path: []const u8,
@@ -160,6 +161,7 @@ pub inline fn maybePtrSub(comptime T: type, ptr: ?*T, element_offset: usize) ?*T
 }
 
 test {
+    common.log.err("asdjkasd");
     _ = DirectoryTokenizer;
     _ = Filesystem;
     _ = PartitionTable;

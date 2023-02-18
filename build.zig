@@ -93,11 +93,16 @@ pub fn build(builder: *Builder) !void {
     const default_step = try DefaultStep.create(builder);
     default_step.run.dependOn(builder.default_step);
     default_step.debug.dependOn(builder.default_step);
+    default_step.test_run.dependOn(builder.default_step);
+    default_step.test_debug.dependOn(builder.default_step);
 
     const test_step = builder.step("test", "Run unit tests");
 
+    const test_all_step = builder.step("test_all", "Run all unit tests");
+    _ = test_all_step;
+
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8, modules: []const ModuleID }{
-        .{ .name = "lib", .zig_source_file = "src/lib.zig", .modules = &.{.lib} },
+        .{ .name = "host_test", .zig_source_file = "src/host_test.zig", .modules = &.{ .lib, .host } },
         .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig", .modules = &.{ .lib, .host } },
     };
 
@@ -120,8 +125,10 @@ pub fn build(builder: *Builder) !void {
         }
 
         const run_test_step = test_exe.run();
+        run_test_step.condition = .always;
         test_step.dependOn(&run_test_step.step);
     }
+    test_step.dependOn(&default_step.test_run);
 }
 
 const ModuleID = enum {
@@ -168,6 +175,7 @@ const Configuration = struct {
 pub const DefaultStep = struct {
     configuration: Configuration,
     emulator: Emulator,
+
     fn create(builder: *Builder) !*EmulatorSteps {
         const step = try builder.allocator.create(EmulatorSteps);
         step.* = .{

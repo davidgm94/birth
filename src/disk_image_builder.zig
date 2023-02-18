@@ -590,9 +590,12 @@ pub fn main() anyerror!void {
                     }
 
                     log.debug("Is test: {}", .{is_test});
-                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (is_test) {
-                        true => "_test",
-                        false => "",
+                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.type) {
+                        .cpu_driver => switch (is_test) {
+                            true => "_test",
+                            false => "",
+                        },
+                        else => "",
                     }, switch (file_descriptor.suffix_type) {
                         .arch => switch (architecture) {
                             inline else => |arch| "_" ++ @tagName(arch),
