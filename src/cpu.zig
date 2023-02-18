@@ -7,3 +7,5 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     privileged.writer.writeByte('\n') catch unreachable;
     privileged.arch.stopCPU();
 }
+
+pub const test_runner = @import("cpu/test_runner.zig");

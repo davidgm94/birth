@@ -65,12 +65,12 @@ pub inline fn write(comptime T: type, port: u16, value: T) void {
     }
 }
 
-pub inline fn writeBytes(bytes: []const u8) usize {
+pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     const bytes_left = asm volatile (
         \\cld
         \\rep outsb
         : [ret] "={rcx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
+        : [dest] "{dx}" (port),
           [src] "{rsi}" (bytes.ptr),
           [len] "{rcx}" (bytes.len),
     );

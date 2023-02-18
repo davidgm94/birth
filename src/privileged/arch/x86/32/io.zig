@@ -1,9 +1,9 @@
-pub inline fn writeBytes(bytes: []const u8) usize {
+pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     const bytes_left = asm volatile (
         \\cld
         \\rep outsb
         : [ret] "={ecx}" (-> usize),
-        : [dest] "{dx}" (0xe9),
+        : [dest] "{dx}" (port),
           [src] "{esi}" (bytes.ptr),
           [len] "{ecx}" (bytes.len),
     );

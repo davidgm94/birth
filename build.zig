@@ -19,8 +19,10 @@ const Emulator = common.Emulator;
 const FilesystemType = common.FilesystemType;
 const Target = common.Target;
 
+var ci = false;
+
 pub fn build(builder: *Builder) !void {
-    const ci = builder.option(bool, "ci", "CI mode") orelse false;
+    ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
     var modules = Modules{};
@@ -97,6 +99,7 @@ pub fn build(builder: *Builder) !void {
     default_step.test_debug.dependOn(builder.default_step);
 
     const test_step = builder.step("test", "Run unit tests");
+    const test_debug_step = builder.step("test_debug", "Debug unit tests");
 
     const test_all_step = builder.step("test_all", "Run all unit tests");
     _ = test_all_step;
@@ -129,6 +132,7 @@ pub fn build(builder: *Builder) !void {
         test_step.dependOn(&run_test_step.step);
     }
     test_step.dependOn(&default_step.test_run);
+    test_debug_step.dependOn(&default_step.test_debug);
 }
 
 const ModuleID = enum {
@@ -191,6 +195,7 @@ pub const DefaultStep = struct {
         };
 
         step.debug.dependOn(&step.gdb_script);
+        step.test_debug.dependOn(&step.test_gdb_script);
 
         const run_step = builder.step("run", "Run the operating system through an emulator");
         const debug_step = builder.step("debug", "Debug the operating system through an emulator");
@@ -219,7 +224,7 @@ pub const DefaultStep = struct {
             }
 
             fn gdbScript(step: *Step) !void {
-                const default_step = @fieldParentPtr(EmulatorSteps, "gdb_script", step);
+                const default_step = @fieldParentPtr(EmulatorSteps, if (!is_test) "gdb_script" else "test_gdb_script", step);
                 const default = try readConfigFromFile(default_step.builder);
                 default_step.configuration = default.configuration;
                 default_step.emulator = default.emulator;
@@ -307,25 +312,40 @@ const EmulatorSteps = struct {
         return new_one;
     }
 
+    const RunError = error{
+        failure,
+    };
+
     pub fn Interface(comptime is_test: bool) type {
         return struct {
             fn run(step: *Step) !void {
                 const emulator_steps = @fieldParentPtr(EmulatorSteps, if (!is_test) "run" else "test_run", step);
                 try runDiskImageBuilder(emulator_steps.builder, emulator_steps.configuration);
-                const arguments = try qemuCommon(emulator_steps);
+                const is_debug = false;
+                const arguments = try qemuCommon(emulator_steps, is_debug);
                 for (arguments.list.items) |argument| {
                     std.log.debug("{s}", .{argument});
                 }
                 var process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
-                _ = try process.spawnAndWait();
+                switch (try process.spawnAndWait()) {
+                    .Exited => |exit_code| {
+                        const mask = common.maxInt(@TypeOf(exit_code)) - 1;
+                        const qemu_exit_code = @intToEnum(common.QEMU.ExitCode, (exit_code & mask) >> 1);
+                        if (qemu_exit_code != .success) {
+                            common.log.err("QEMU exit code: {s}", .{@tagName(qemu_exit_code)});
+                            return RunError.failure;
+                        }
+                    },
+                    else => return RunError.failure,
+                }
             }
 
             fn debug(step: *Step) !void {
                 const emulator_steps = @fieldParentPtr(EmulatorSteps, if (!is_test) "debug" else "test_debug", step);
                 try runDiskImageBuilder(emulator_steps.builder, emulator_steps.configuration);
                 const builder = emulator_steps.builder;
-
-                var arguments = try qemuCommon(emulator_steps);
+                const is_debug = true;
+                var arguments = try qemuCommon(emulator_steps, is_debug);
 
                 if (!arguments.config.isVirtualizing(emulator_steps.configuration)) {
                     try arguments.list.append("-S");
@@ -346,16 +366,18 @@ const EmulatorSteps = struct {
             }
 
             fn gdbScript(step: *Step) !void {
-                const emulator_steps = @fieldParentPtr(EmulatorSteps, "gdb_script", step);
+                const emulator_steps = @fieldParentPtr(EmulatorSteps, if (!is_test) "gdb_script" else "test_gdb_script", step);
                 const builder = emulator_steps.builder;
 
                 var gdb_script_buffer = std.ArrayList(u8).init(builder.allocator);
-                switch (emulator_steps.configuration.architecture) {
+                const architecture = emulator_steps.configuration.architecture;
+                common.log.debug("Architecture: {}", .{architecture});
+                switch (architecture) {
                     .x86_64 => try gdb_script_buffer.appendSlice("set disassembly-flavor intel\n"),
                     else => return Error.architecture_not_supported,
                 }
 
-                try gdb_script_buffer.appendSlice(try std.mem.concat(builder.allocator, u8, &.{ "symbol-file zig-cache/cpu_driver_", @tagName(emulator_steps.configuration.architecture), "\n" }));
+                try gdb_script_buffer.appendSlice(try std.mem.concat(builder.allocator, u8, &.{ "symbol-file zig-cache/cpu_driver_", if (is_test) "test_" else "", @tagName(emulator_steps.configuration.architecture), "\n" }));
                 try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
 
                 const base_gdb_script = try std.fs.cwd().readFileAlloc(builder.allocator, "config/gdb_script", common.maxInt(usize));
@@ -364,7 +386,7 @@ const EmulatorSteps = struct {
                 try std.fs.cwd().writeFile(try getGDBScriptPath(builder, emulator_steps.configuration), gdb_script_buffer.items);
             }
 
-            fn qemuCommon(emulator_steps: *EmulatorSteps) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
+            fn qemuCommon(emulator_steps: *EmulatorSteps, is_debug: bool) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
                 const builder = emulator_steps.builder;
                 const config_file = try readConfig(builder, emulator_steps.emulator);
                 var token_stream = std.json.TokenStream.init(config_file);
@@ -372,10 +394,11 @@ const EmulatorSteps = struct {
 
                 var argument_list = std.ArrayList([]const u8).init(builder.allocator);
 
-                // const qemu_executable =  ++ switch (configuration.architecture) {
-                //     else => @tagName(configuration.architecture),
-                // };
                 try argument_list.append(try std.mem.concat(builder.allocator, u8, &.{ "qemu-system-", @tagName(emulator_steps.configuration.architecture) }));
+
+                if (is_test and !is_debug) {
+                    try argument_list.appendSlice(&.{ "-device", builder.fmt("isa-debug-exit,iobase=0x{x:0>2},iosize=0x{x:0>2}", .{ common.QEMU.isa_debug_exit.io_base, common.QEMU.isa_debug_exit.io_size }) });
+                }
 
                 switch (emulator_steps.configuration.boot_protocol) {
                     .uefi => try argument_list.appendSlice(&.{ "-bios", "tools/OVMF_CODE-pure-efi.fd" }),

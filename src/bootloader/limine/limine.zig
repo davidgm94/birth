@@ -409,7 +409,9 @@ export var limine_rsdp = RSDP.Request{ .revision = 0 };
 export var limine_smbios = SMBIOS.Request{ .revision = 0 };
 export var limine_efi_system_table = EFISystemTable.Request{ .revision = 0 };
 
-pub fn limineEntryPoint() callconv(.C) noreturn {
+extern fn limineEntryPoint() callconv(.C) noreturn;
+
+pub fn entryPoint() callconv(.C) noreturn {
     log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
     const limine_protocol: bootloader.Protocol = blk: {
         if (limine_efi_system_table.response != null) break :blk .uefi;

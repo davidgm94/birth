@@ -250,10 +250,15 @@ pub const PartitionConfig = struct {
 };
 
 pub const QEMU = extern struct {
-    isa_debug_exit: ISADebugExit,
+    pub const isa_debug_exit = ISADebugExit{};
 
     pub const ISADebugExit = extern struct {
         io_base: u8 = 0xf4,
         io_size: u8 = @sizeOf(u32),
+    };
+
+    pub const ExitCode = enum(u32) {
+        success = 0x10,
+        failure = 0x11,
     };
 };

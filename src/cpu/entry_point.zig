@@ -33,14 +33,17 @@ pub const std_options = struct {
 };
 
 comptime {
-    @export(limine.limineEntryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong });
+    @export(limine.entryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong });
 }
 
 pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     bootloader_information.draw_context.clearScreen(0xff005000);
     bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
-    log.debug("Starting...", .{});
     log.debug("Is test: {}", .{lib.is_test});
+    if (lib.is_test) {
+        cpu.test_runner.runAllTests() catch @panic("Tests failed");
+    }
+    log.debug("Starting...", .{});
     // var total_page_count: u32 = 0;
     // for (bootloader_information.page.counters) |page_counter| {
     //     total_page_count += page_counter;

@@ -26,7 +26,7 @@ pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
 pub const writer = E9Writer{ .context = {} };
 
 fn writeToE9(_: void, bytes: []const u8) E9WriterError!usize {
-    return arch.io.writeBytes(bytes);
+    return arch.io.writeBytes(0xe9, bytes);
 }
 
 pub const default_stack_size = 0x4000;
