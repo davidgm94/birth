@@ -1,6 +1,6 @@
 const FAT32 = @This();
 
-const lib = @import("../../lib.zig");
+const lib = @import("lib");
 const log = lib.log;
 const kb = lib.kb;
 const mb = lib.mb;

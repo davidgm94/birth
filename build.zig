@@ -30,11 +30,11 @@ pub fn build(builder: *Builder) !void {
     modules.modules.set(.privileged, builder.createModule(.{ .source_file = FileSource.relative("src/privileged.zig") }));
     modules.modules.set(.cpu, builder.createModule(.{ .source_file = FileSource.relative("src/cpu.zig") }));
 
-    modules.dependencies.set(.lib, &.{modules.getModuleDependency(.lib)});
-    modules.dependencies.set(.host, &.{ modules.getModuleDependency(.host), modules.getModuleDependency(.lib) });
-    modules.dependencies.set(.bootloader, &.{ modules.getModuleDependency(.bootloader), modules.getModuleDependency(.lib), modules.getModuleDependency(.privileged) });
-    modules.dependencies.set(.privileged, &.{ modules.getModuleDependency(.privileged), modules.getModuleDependency(.lib), modules.getModuleDependency(.bootloader) });
-    modules.dependencies.set(.cpu, &.{ modules.getModuleDependency(.cpu), modules.getModuleDependency(.lib), modules.getModuleDependency(.bootloader), modules.getModuleDependency(.privileged) });
+    try modules.setDependencies(.lib, &.{});
+    try modules.setDependencies(.host, &.{.lib});
+    try modules.setDependencies(.bootloader, &.{ .lib, .privileged });
+    try modules.setDependencies(.privileged, &.{ .lib, .bootloader });
+    try modules.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader });
 
     const disk_image_builder = createDiskImageBuilder(builder, modules);
 
@@ -46,7 +46,8 @@ pub fn build(builder: *Builder) !void {
 
         for (common.supported_architectures) |architecture, architecture_index| {
             const cpu_driver = try createCPUDriver(builder, modules, architecture, false);
-            // const cpu_driver_test = try createCPUDriver(builder, modules, architecture, true);
+            const cpu_driver_test = try createCPUDriver(builder, modules, architecture, true);
+            _ = cpu_driver_test;
             _ = cpu_driver;
             // try all_tests.append(cpu_driver_test);
             const bootloaders = common.architecture_bootloader_map[architecture_index];
@@ -135,18 +136,18 @@ pub const Modules = struct {
     modules: std.EnumArray(ModuleID, *Module) = std.EnumArray(ModuleID, *Module).initUndefined(),
     dependencies: std.EnumArray(ModuleID, []const ModuleDependency) = std.EnumArray(ModuleID, []const ModuleDependency).initUndefined(),
 
-    pub fn getModuleDependency(modules: Modules, module_id: ModuleID) ModuleDependency {
-        return .{
-            .name = @tagName(module_id),
-            .module = modules.modules.get(module_id),
-        };
+    pub fn addModule(modules: Modules, compile_step: *CompileStep, module_id: ModuleID) void {
+        compile_step.addModule(@tagName(module_id), modules.modules.get(module_id));
     }
 
-    pub fn addModule(modules: Modules, compile_step: *CompileStep, module_id: ModuleID) void {
-        compile_step.addAnonymousModule(@tagName(module_id), .{
-            .source_file = modules.modules.get(module_id).source_file,
-            .dependencies = modules.dependencies.get(module_id),
-        });
+    pub fn setDependencies(modules: Modules, module_id: ModuleID, dependencies: []const ModuleID) !void {
+        const module = modules.modules.get(module_id);
+        try module.dependencies.put(@tagName(module_id), module);
+
+        for (dependencies) |dependency_id| {
+            const dependency_module = modules.modules.get(dependency_id);
+            try module.dependencies.put(@tagName(dependency_id), dependency_module);
+        }
     }
 };
 
