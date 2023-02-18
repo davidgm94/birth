@@ -164,12 +164,14 @@ pub const FilesystemType = enum(u32) {
     pub const count = enumCount(@This());
 };
 
-pub fn enumValues(comptime E: type) []const Type.EnumField {
+pub fn enumFields(comptime E: type) []const Type.EnumField {
     return @typeInfo(E).Enum.fields;
 }
 
+pub const enumValues = std.enums.values;
+
 pub fn enumCount(comptime E: type) usize {
-    return enumValues(E).len;
+    return enumFields(E).len;
 }
 
 pub const PartitionTableType = enum {

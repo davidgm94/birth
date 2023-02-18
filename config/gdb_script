@@ -1,8 +1,5 @@
 #set can-use-hw-watchpoints 0
 b limineEntryPoint
-b entryPoint
-b privileged.arch.x86.64.paging.get_pd_table
-
-watch * 0x45010
+b bootloader.arch.x86_64.trampoline
 
 c

@@ -4,6 +4,8 @@ const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const GDT = privileged.arch.x86_64.GDT;
 
+const code_segment_selector = @offsetOf(GDT.Table, "code_64");
+const data_segment_selector = @offsetOf(GDT.Table, "data_64");
 pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn {
     if (@ptrToInt(bootloader_information_arg) >= lib.config.cpu_driver_higher_half_address) {
         // Error
@@ -19,14 +21,7 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
     bootloader_information_arg.virtual_address_space.makeCurrent();
 
     const bootloader_information = @intToPtr(*bootloader.Information, @ptrToInt(bootloader_information_arg) + lib.config.cpu_driver_higher_half_address);
-
-    var trampoline_writer = bootloader.DrawContext.Writer{
-        .context = &bootloader_information.draw_context,
-    };
-
     bootloader_information.stage = .trampoline;
-
-    trampoline_writer.writeAll("Got past the CR3 flush\n") catch unreachable;
 
     const stack_top = bootloader_information.getStackTop();
     const entry_point = bootloader_information.entry_point;
@@ -35,7 +30,6 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
         .address = @ptrToInt(&bootloader_information.architecture.gdt),
     };
 
-    trampoline_writer.writeAll("About to load GDT and reload segments\n") catch unreachable;
     _ = asm volatile (
         \\lgdt %[gdt_register]
         \\push %[code_segment]
@@ -45,10 +39,8 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
         \\trampoline_reload_cs:
         : [reload_cs] "=r" (-> u64),
         : [gdt_register] "*p" (&gdt),
-          [code_segment] "i" (@offsetOf(GDT.Table, "code_64")),
+          [code_segment] "i" (code_segment_selector),
     );
-
-    trampoline_writer.writeAll("Reloaded code segment\n") catch unreachable;
 
     asm volatile (
         \\mov %[data_segment], %ds
@@ -57,10 +49,8 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
         \\mov %[data_segment], %gs
         \\mov %[data_segment], %ss
         :
-        : [data_segment] "r" (@offsetOf(GDT.Table, "data_64")),
+        : [data_segment] "r" (data_segment_selector),
     );
-
-    trampoline_writer.writeAll("Reloaded data segments. Jumping to entry point\n") catch unreachable;
 
     asm volatile (
         \\jmp *%[entry_point]

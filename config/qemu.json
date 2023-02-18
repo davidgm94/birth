@@ -6,8 +6,6 @@
     "virtualize": false,
     "vga": "std",
     "smp": null,
-    "reboot": false,
-    "shutdown": false,
     "debugcon": "stdio",
     "log": {
         "file": null,

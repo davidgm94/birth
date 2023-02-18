@@ -21,13 +21,13 @@ const extern_enum_array = @import("lib/extern_enum_array.zig");
 pub const EnumArray = extern_enum_array.EnumArray;
 
 pub fn EnumStruct(comptime Enum: type, comptime Value: type) type {
-    const EnumValues = common.enumValues(Enum);
+    const EnumFields = common.enumFields(Enum);
     const MyEnumStruct = @Type(.{
         .Struct = .{
             .layout = .Extern,
             .fields = &blk: {
-                var arr = [1]common.Type.StructField{undefined} ** EnumValues.len;
-                inline for (EnumValues) |EnumValue| {
+                var arr = [1]common.Type.StructField{undefined} ** EnumFields.len;
+                inline for (EnumFields) |EnumValue| {
                     arr[EnumValue.value] = .{
                         .name = EnumValue.name,
                         .type = Value,

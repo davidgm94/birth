@@ -25,18 +25,7 @@ pub fn build(builder: *Builder) !void {
     ci = builder.option(bool, "ci", "CI mode") orelse false;
     _ = ci;
 
-    var modules = Modules{};
-    modules.modules.set(.lib, builder.createModule(.{ .source_file = FileSource.relative("src/lib.zig") }));
-    modules.modules.set(.host, builder.createModule(.{ .source_file = FileSource.relative("src/host.zig") }));
-    modules.modules.set(.bootloader, builder.createModule(.{ .source_file = FileSource.relative("src/bootloader.zig") }));
-    modules.modules.set(.privileged, builder.createModule(.{ .source_file = FileSource.relative("src/privileged.zig") }));
-    modules.modules.set(.cpu, builder.createModule(.{ .source_file = FileSource.relative("src/cpu.zig") }));
-
-    try modules.setDependencies(.lib, &.{});
-    try modules.setDependencies(.host, &.{.lib});
-    try modules.setDependencies(.bootloader, &.{ .lib, .privileged });
-    try modules.setDependencies(.privileged, &.{ .lib, .bootloader });
-    try modules.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader });
+    var modules = try Modules.new(builder);
 
     const disk_image_builder = createDiskImageBuilder(builder, modules);
 
@@ -147,11 +136,26 @@ pub const Modules = struct {
     modules: std.EnumArray(ModuleID, *Module) = std.EnumArray(ModuleID, *Module).initUndefined(),
     dependencies: std.EnumArray(ModuleID, []const ModuleDependency) = std.EnumArray(ModuleID, []const ModuleDependency).initUndefined(),
 
-    pub fn addModule(modules: Modules, compile_step: *CompileStep, module_id: ModuleID) void {
+    fn new(builder: *Builder) !Modules {
+        var modules = Modules{};
+        inline for (comptime common.enumValues(ModuleID)) |module_id| {
+            modules.modules.set(module_id, builder.createModule(.{ .source_file = FileSource.relative("src/" ++ @tagName(module_id) ++ ".zig") }));
+        }
+
+        try modules.setDependencies(.lib, &.{});
+        try modules.setDependencies(.host, &.{.lib});
+        try modules.setDependencies(.bootloader, &.{ .lib, .privileged });
+        try modules.setDependencies(.privileged, &.{ .lib, .bootloader });
+        try modules.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader });
+
+        return modules;
+    }
+
+    fn addModule(modules: Modules, compile_step: *CompileStep, module_id: ModuleID) void {
         compile_step.addModule(@tagName(module_id), modules.modules.get(module_id));
     }
 
-    pub fn setDependencies(modules: Modules, module_id: ModuleID, dependencies: []const ModuleID) !void {
+    fn setDependencies(modules: Modules, module_id: ModuleID, dependencies: []const ModuleID) !void {
         const module = modules.modules.get(module_id);
         try module.dependencies.put(@tagName(module_id), module);
 
@@ -329,6 +333,7 @@ const EmulatorSteps = struct {
                 var process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
                 switch (try process.spawnAndWait()) {
                     .Exited => |exit_code| {
+                        if (exit_code & 1 == 0) return RunError.failure;
                         const mask = common.maxInt(@TypeOf(exit_code)) - 1;
                         const qemu_exit_code = @intToEnum(common.QEMU.ExitCode, (exit_code & mask) >> 1);
                         if (qemu_exit_code != .success) {
@@ -353,16 +358,16 @@ const EmulatorSteps = struct {
 
                 try arguments.list.append("-s");
 
-                var qemu_process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
-                _ = try qemu_process.spawn();
-
                 const debugger_process_arguments = switch (common.os) {
-                    .linux => .{ "gf2", "-x", try getGDBScriptPath(builder, emulator_steps.configuration) },
+                    .linux => .{ "kitty", "gdb", "-x", try getGDBScriptPath(builder, emulator_steps.configuration) },
                     else => return Error.not_implemented,
                 };
 
                 var debugger_process = std.ChildProcess.init(&debugger_process_arguments, builder.allocator);
-                _ = try debugger_process.spawnAndWait();
+                _ = try debugger_process.spawn();
+
+                var qemu_process = std.ChildProcess.init(arguments.list.items, emulator_steps.builder.allocator);
+                _ = try qemu_process.spawnAndWait();
             }
 
             fn gdbScript(step: *Step) !void {
@@ -409,11 +414,9 @@ const EmulatorSteps = struct {
                 const disk_path = try common.concat(builder.allocator, u8, &.{ cache_dir, image_config.image_name });
                 try argument_list.appendSlice(&.{ "-drive", builder.fmt("file={s},index=0,media=disk,format=raw", .{disk_path}) });
 
-                if (!arguments.reboot) {
-                    try argument_list.append("-no-reboot");
-                }
+                try argument_list.append("-no-reboot");
 
-                if (!arguments.shutdown) {
+                if (!is_test) {
                     try argument_list.append("-no-shutdown");
                 }
 
@@ -520,8 +523,6 @@ const EmulatorSteps = struct {
         virtualize: ?bool,
         vga: ?VGA,
         smp: ?usize,
-        reboot: bool,
-        shutdown: bool,
         debugcon: ?enum {
             stdio,
         },
