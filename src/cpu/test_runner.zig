@@ -28,9 +28,5 @@ pub fn runAllTests() RunAllTestResult!void {
         log.info("Run {} tests. Failed {}.", .{ test_count, failed_test_count });
     }
 
-    comptime assert(@sizeOf(QEMU.ExitCode) == @sizeOf(u32));
-    privileged.arch.io.write(u32, QEMU.isa_debug_exit.io_base, @enumToInt(switch (success) {
-        true => QEMU.ExitCode.success,
-        false => QEMU.ExitCode.failure,
-    }));
+    privileged.exitFromQEMU(success);
 }

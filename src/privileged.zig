@@ -152,7 +152,11 @@ const panic_logger = lib.log.scoped(.PANIC);
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     arch.disableInterrupts();
     panic_logger.err(format, arguments);
-    arch.stopCPU();
+    if (lib.is_test) {
+        exitFromQEMU(false);
+    } else {
+        arch.stopCPU();
+    }
 }
 
 pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
@@ -191,4 +195,14 @@ pub fn dumpStackTrace(start_address: usize, frame_pointer: usize) void {
     //
     //     log.debug("============= STACK TRACE =============", .{});
     // }
+}
+
+pub fn exitFromQEMU(success: bool) noreturn {
+    comptime assert(@sizeOf(lib.QEMU.ExitCode) == @sizeOf(u32));
+    arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(switch (success) {
+        true => lib.QEMU.ExitCode.success,
+        false => lib.QEMU.ExitCode.failure,
+    }));
+
+    arch.stopCPU();
 }
