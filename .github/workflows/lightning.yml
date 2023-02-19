@@ -25,5 +25,5 @@ jobs:
           version: master
 
       - run: zig env
-      - run: zig build test -Dci --verbose
+      - run: zig build test_all -Dci --verbose
 

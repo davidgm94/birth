@@ -50,24 +50,6 @@ pub fn build(b_arg: *Build) !void {
     const test_debug_step = b.step("test_debug", "Debug unit tests");
     const test_all_step = b.step("test_all", "Run all unit tests");
 
-    for (common.supported_architectures) |architecture, architecture_index| {
-        try prepareArchitectureCompilation(architecture_index, false, test_all_step);
-        if (architecture == common.cpu.arch) {
-            if (canVirtualizeWithQEMU(architecture)) {
-                try prepareArchitectureCompilation(architecture_index, true, test_all_step);
-            }
-        }
-    }
-
-    const default_step = try DefaultStep.create();
-    default_step.run.dependOn(b.default_step);
-    default_step.debug.dependOn(b.default_step);
-    default_step.test_run.dependOn(b.default_step);
-    default_step.test_debug.dependOn(b.default_step);
-
-    test_step.dependOn(&default_step.test_run);
-    test_debug_step.dependOn(&default_step.test_debug);
-
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8, modules: []const ModuleID }{
         .{ .name = "host_test", .zig_source_file = "src/host_test.zig", .modules = &.{ .lib, .host } },
         .{ .name = disk_image_builder.name, .zig_source_file = "src/disk_image_builder.zig", .modules = &.{ .lib, .host } },
@@ -95,6 +77,24 @@ pub fn build(b_arg: *Build) !void {
         run_test_step.condition = .always;
         test_step.dependOn(&run_test_step.step);
     }
+
+    for (common.supported_architectures) |architecture, architecture_index| {
+        try prepareArchitectureCompilation(architecture_index, false, test_all_step);
+        if (architecture == common.cpu.arch) {
+            if (canVirtualizeWithQEMU(architecture)) {
+                try prepareArchitectureCompilation(architecture_index, true, test_all_step);
+            }
+        }
+    }
+
+    const default_step = try DefaultStep.create();
+    default_step.run.dependOn(b.default_step);
+    default_step.debug.dependOn(b.default_step);
+    default_step.test_run.dependOn(b.default_step);
+    default_step.test_debug.dependOn(b.default_step);
+
+    test_step.dependOn(&default_step.test_run);
+    test_debug_step.dependOn(&default_step.test_debug);
 }
 
 fn prepareArchitectureCompilation(architecture_index: usize, override_virtualize: bool, test_step: *Step) !void {
