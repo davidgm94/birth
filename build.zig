@@ -43,16 +43,23 @@ var default_configuration: Configuration = undefined;
 pub fn build(b_arg: *Build) !void {
     b = b_arg;
     ci = b.option(bool, "ci", "CI mode") orelse false;
+    const default_cfg_override = b.option([]const u8, "default", "Default configuration JSON file") orelse "config/default.json";
     modules = try Modules.new();
 
-    default_configuration = Configuration{
-        .architecture = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .x86_64 } }).getCpuArch(),
-        .bootloader = .rise,
-        .boot_protocol = .bios,
-        .execution_environment = .qemu,
-        .optimize_mode = b.standardOptimizeOption(.{}),
-        .execution_type = .emulated,
-        .executable_kind = .normal_exe,
+    default_configuration = blk: {
+        const default_json_file = try std.fs.cwd().readFileAlloc(b.allocator, default_cfg_override, common.maxInt(usize));
+        var token_stream = std.json.TokenStream.init(default_json_file);
+        const cfg = try std.json.parse(Configuration, &token_stream, .{ .allocator = b.allocator });
+
+        break :blk Configuration{
+            .architecture = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = cfg.architecture } }).getCpuArch(),
+            .bootloader = cfg.bootloader,
+            .boot_protocol = cfg.boot_protocol,
+            .execution_environment = cfg.execution_environment,
+            .optimize_mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = cfg.optimize_mode }),
+            .execution_type = cfg.execution_type,
+            .executable_kind = .normal_exe,
+        };
     };
 
     build_steps = try b.allocator.create(BuildSteps);

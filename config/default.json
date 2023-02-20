@@ -1,9 +1,9 @@
 {
-    "configuration": {
-        "architecture": "x86_64",
-        "bootloader": "rise",
-        "boot_protocol": "bios"
-    },
-    "emulator": "qemu",
-    "optimize_mode": "Debug"
+    "architecture": "x86_64",
+    "bootloader": "rise",
+    "boot_protocol": "bios",
+    "execution_environment": "qemu",
+    "optimize_mode": "Debug",
+    "execution_type": "emulated",
+    "executable_kind": "normal_exe"
 }
