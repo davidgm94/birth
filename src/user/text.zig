@@ -20,7 +20,7 @@ pub const Font = struct {
 
         var x: i32 = 0;
 
-        for (text) |character, index| {
+        for (text, 0..) |character, index| {
             const hmetrics = font.stbtt_font.get_codepoint_h_metrics(character);
             const codepoint_bitmap_box = font.stbtt_font.get_codepoint_bitmap_box(character, scale, scale);
 

@@ -174,7 +174,7 @@ pub fn EnumIndexer(comptime E: type) type {
         pub const Key = E;
         pub const count = fields_len;
         pub fn indexOf(e: E) usize {
-            for (keys) |k, i| {
+            for (keys, 0..) |k, i| {
                 if (k == e) return i;
             }
             unreachable;
@@ -211,7 +211,7 @@ fn ascByValue(ctx: void, comptime a: EnumField, comptime b: EnumField) bool {
 pub fn valuesFromFields(comptime E: type, comptime fields: []const EnumField) []const E {
     comptime {
         var result: [fields.len]E = undefined;
-        for (fields) |f, i| {
+        for (fields, 0..) |f, i| {
             result[i] = @field(E, f.name);
         }
         return &result;

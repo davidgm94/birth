@@ -279,7 +279,7 @@ pub const Partition = extern struct {
         if (partition.last_lba != other.last_lba) {
             log.debug("Last LBA mismatch: 0x{x}, 0x{x}", .{ partition.last_lba, other.last_lba });
         }
-        for (partition.partition_name) |partition_char, char_index| {
+        for (partition.partition_name, 0..) |partition_char, char_index| {
             const other_char = other.partition_name[char_index];
             if (partition_char != other_char) {
                 log.debug("Char is different: {u}(0x{x}), {u}(0x{x})", .{ partition_char, partition_char, other_char, other_char });

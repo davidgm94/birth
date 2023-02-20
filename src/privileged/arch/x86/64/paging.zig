@@ -44,7 +44,7 @@ fn map_function(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address
     } else {
         const top_virtual_address = asked_virtual_address + size;
 
-        inline for (reverse_valid_page_sizes) |reverse_page_size, reverse_page_index| {
+        inline for (reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_page_index| {
             if (size >= reverse_page_size) {
                 const is_smallest_page_size = reverse_page_index == reverse_valid_page_sizes.len - 1;
 
@@ -446,7 +446,7 @@ pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAdd
     }
 
     //log.debug("PML4 entries", .{});
-    for (pml4_entries[half_entry_count..]) |*entry, i| {
+    for (pml4_entries[half_entry_count..], 0..) |*entry, i| {
         entry.* = PML4TE{
             .present = true,
             .read_write = true,

@@ -255,7 +255,7 @@ pub fn main() noreturn {
     var name_offset: u32 = 0;
     var content_offset: u32 = 0;
 
-    for (files[0..file_count]) |file, file_index| {
+    for (files[0..file_count], 0..) |file, file_index| {
         const file_content = file.uefi.read(file_content_buffer[content_offset .. content_offset + file.uefi.size]);
         _ = file_content;
         const file_name = file.path;

@@ -158,7 +158,7 @@ pub const Partition = extern struct {
             @panic("wtF");
         }
 
-        for (mbr.partitions) |this_partition, partition_i| {
+        for (mbr.partitions, 0..) |this_partition, partition_i| {
             const other_partition = other.partitions[partition_i];
 
             if (this_partition.boot_indicator != other_partition.boot_indicator) log.debug("Mismatch: {}, .{}", .{ this_partition.boot_indicator, other_partition.boot_indicator });
@@ -330,7 +330,7 @@ pub const Partition = extern struct {
         }
 
         try lib.format(writer, "\n\nPartitions:\n", .{});
-        for (mbr.partitions) |partition, partition_index| {
+        for (mbr.partitions, 0..) |partition, partition_index| {
             if (partition.size_in_lba != 0) {
                 try lib.format(writer, "[{}]\n", .{partition_index});
                 try lib.format(writer, "\tBoot indicator: 0x{x}\n", .{partition.boot_indicator});

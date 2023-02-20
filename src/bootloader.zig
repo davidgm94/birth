@@ -166,7 +166,7 @@ pub const Information = extern struct {
     pub fn checkIntegrity(information: *const Information) !void {
         const original_total_size = information.total_size;
         var total_size: u32 = 0;
-        inline for (Information.Slice.TypeMap) |T, index| {
+        inline for (Information.Slice.TypeMap, 0..) |T, index| {
             const slice = information.slices.array.values[index];
             if (slice.alignment < @alignOf(T)) {
                 lib.log.err("Bad alignment of {}. Current: {}. Before: {}", .{ T, @alignOf(T), slice.alignment });
@@ -192,7 +192,7 @@ pub const Information = extern struct {
         const entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
 
-        for (entries) |entry, entry_index| {
+        for (entries, 0..) |entry, entry_index| {
             const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
             const size_left = entry.region.size - busy_size;
             if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
@@ -218,7 +218,7 @@ pub const Information = extern struct {
 
     pub fn heapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         const bootloader_information = @fieldParentPtr(Information, "heap", @fieldParentPtr(Heap, "allocator", allocator));
-        for (bootloader_information.heap.regions) |*region| {
+        for (&bootloader_information.heap.regions) |*region| {
             if (region.size > size) {
                 const result = .{
                     .address = region.address.value(),
@@ -230,7 +230,7 @@ pub const Information = extern struct {
             }
         }
         const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
-        for (bootloader_information.heap.regions) |*region| {
+        for (&bootloader_information.heap.regions) |*region| {
             if (region.size == 0) {
                 const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
                 region.* = .{
@@ -406,7 +406,7 @@ pub const File = extern struct {
                 return Error.err;
             }
 
-            for (string) |_, index| {
+            for (string, 0..) |_, index| {
                 _ = index;
                 parser.consume();
             }
@@ -478,7 +478,7 @@ pub const LengthSizeTuples = extern struct {
 
         var total_size: u32 = 0;
 
-        inline for (Information.Slice.TypeMap) |T, index| {
+        inline for (Information.Slice.TypeMap, 0..) |T, index| {
             const tuple = &tuples.tuples.array.values[index];
             const size = tuple.length * @sizeOf(T);
             tuple.alignment = if (tuple.alignment < @alignOf(T)) @alignOf(T) else tuple.alignment;
@@ -496,7 +496,7 @@ pub const LengthSizeTuples = extern struct {
         var slices = lib.zeroes(lib.EnumStruct(Information.Slice.Name, Information.Slice));
         var allocated_size: u32 = 0;
 
-        for (slices.array.values) |*slice, index| {
+        for (&slices.array.values, 0..) |*slice, index| {
             const tuple = tuples.tuples.array.values[index];
             const length = tuple.length;
             const size = lib.alignForwardGeneric(u32, tuple.size, tuple.alignment);

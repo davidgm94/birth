@@ -467,7 +467,7 @@ pub fn entryPoint() callconv(.C) noreturn {
     });
 
     var entry_index: usize = 0;
-    const bootloader_information = for (memory_map_entries) |entry, index| {
+    const bootloader_information = for (memory_map_entries, 0..) |entry, index| {
         if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
             const bootloader_information_region = entry.region.takeSlice(length_size_tuples.getAlignedTotalSize());
             log.debug("Bootloader information region: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
@@ -564,7 +564,7 @@ pub fn entryPoint() callconv(.C) noreturn {
     const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
     var discarded: usize = 0;
     _ = discarded;
-    for (memory_map_entries) |entry, index| {
+    for (memory_map_entries, 0..) |entry, index| {
         bootloader_memory_map_entries[index] = .{
             .region = entry.region,
             .type = switch (entry.type) {

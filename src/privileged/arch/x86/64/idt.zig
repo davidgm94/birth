@@ -295,7 +295,7 @@ pub const handlers = [IDT.entry_count]Handler{
 };
 
 pub fn setup() void {
-    for (idt) |*entry, i| {
+    for (idt, 0..) |*entry, i| {
         entry.* = IDT.Descriptor.new(&handlers, i);
     }
 

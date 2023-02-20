@@ -32,7 +32,7 @@ pub fn main() anyerror!void {
 
     const configuration = blk: {
         var cfg: Configuration = undefined;
-        inline for (lib.fields(Configuration)) |configuration_field, index| {
+        inline for (lib.fields(Configuration), 0..) |configuration_field, index| {
             @field(cfg, configuration_field.name) = lib.stringToEnum(configuration_field.type, arguments[index]) orelse {
                 log.err("Index: {} Arg: {s}", .{ index, arguments[index] });
                 return Error.wrong_arguments;
@@ -1210,7 +1210,7 @@ test "Limine barebones" {
             }
 
             var diff_count: u32 = 0;
-            for (my_buffer) |mb, i| {
+            for (my_buffer, 0..) |mb, i| {
                 const ob = original_buffer[i];
                 const diff = ob != mb;
                 if (diff) {

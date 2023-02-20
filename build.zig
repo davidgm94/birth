@@ -118,7 +118,7 @@ pub fn build(b_arg: *Build) !void {
     }
 
     for (common.enumValues(OptimizeMode)) |optimize_mode| {
-        for (common.supported_architectures) |architecture, architecture_index| {
+        for (common.supported_architectures, 0..) |architecture, architecture_index| {
             try prepareArchitectureCompilation(architecture_index, .emulated, optimize_mode, disk_image_builder);
             if (architecture == common.cpu.arch) {
                 if (canVirtualizeWithQEMU(architecture)) {
@@ -486,7 +486,6 @@ const RunSteps = struct {
         for (step.dependencies.items) |dependency| {
             common.log.debug("Dep: {s}", .{dependency.name});
         }
-        // try runDiskImageBuilder(run_steps.configuration);
         const is_debug = false;
         const arguments = try qemuCommon(run_steps, .{ .is_debug = is_debug, .is_test = is_test });
         for (arguments.list.items) |argument| {
@@ -525,7 +524,7 @@ const RunSteps = struct {
             true => @fieldParentPtr(RunSteps, "test_debug", step),
             false => @fieldParentPtr(RunSteps, "debug", step),
         };
-        // try runDiskImageBuilder(run_steps.configuration);
+
         const is_debug = true;
         var arguments = try qemuCommon(run_steps, .{ .is_debug = is_debug, .is_test = is_test });
 
@@ -562,7 +561,10 @@ const RunSteps = struct {
             else => return Error.architecture_not_supported,
         }
 
-        try gdb_script_buffer.appendSlice(try std.mem.concat(b.allocator, u8, &.{ "symbol-file zig-cache/cpu_driver_", try Suffix.cpu_driver.fromConfiguration(b.allocator, run_steps.configuration, null), "\n" }));
+        var test_configuration = run_steps.configuration;
+        test_configuration.executable_kind = .test_exe;
+
+        try gdb_script_buffer.appendSlice(try std.mem.concat(b.allocator, u8, &.{ "symbol-file zig-cache/cpu_driver_", try Suffix.cpu_driver.fromConfiguration(b.allocator, if (is_test) test_configuration else run_steps.configuration, null), "\n" }));
         try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
 
         const base_gdb_script = try std.fs.cwd().readFileAlloc(b.allocator, "config/gdb_script", common.maxInt(usize));
@@ -594,8 +596,11 @@ const RunSteps = struct {
             else => {},
         }
 
+        var test_configuration = run_steps.configuration;
+        test_configuration.executable_kind = .test_exe;
+
         const image_config = try common.ImageConfig.get(b.allocator, common.ImageConfig.default_path);
-        const disk_image_path = try std.mem.concat(b.allocator, u8, &.{ "zig-cache/", image_config.image_name, try Suffix.image.fromConfiguration(b.allocator, run_steps.configuration, "_"), ".hdd" });
+        const disk_image_path = try std.mem.concat(b.allocator, u8, &.{ "zig-cache/", image_config.image_name, try Suffix.image.fromConfiguration(b.allocator, if (options.is_test) test_configuration else run_steps.configuration, "_"), ".hdd" });
         try argument_list.appendSlice(&.{ "-drive", b.fmt("file={s},index=0,media=disk,format=raw", .{disk_image_path}) });
 
         try argument_list.append("-no-reboot");
@@ -676,18 +681,6 @@ const RunSteps = struct {
 
         return .{ .config = arguments, .list = argument_list };
     }
-
-    fn runDiskImageBuilder(step: *Step) !void {
-        _ = step;
-    }
-    // fn runDiskImageBuilder(configuration: Configuration) !void {
-    //     var process = std.ChildProcess.init(&.{ "zig-cache/disk_image_builder", @tagName(configuration.bootloader), @tagName(configuration.architecture), @tagName(configuration.boot_protocol), if (is_test) "true" else "false" }, b.allocator);
-    //     const termination = try process.spawnAndWait();
-    //     switch (termination) {
-    //         .Exited => |exited| if (exited != 0) return Error.failed_to_run,
-    //         else => return Error.failed_to_run,
-    //     }
-    // }
 
     const Arguments = struct {
         const VGA = enum {

@@ -379,7 +379,7 @@ pub const Cache = extern struct {
         while (cluster_lba < top_cluster_lba) : (cluster_lba += 1) {
             const fat_directory_entries = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_lba);
 
-            for (fat_directory_entries) |*entry, entry_index| {
+            for (fat_directory_entries, 0..) |*entry, entry_index| {
                 if (entry.is_free()) {
                     const free_entries_in_sector = fat_directory_entries.len - entry_index;
                     assert(entry_count <= free_entries_in_sector);
@@ -450,7 +450,7 @@ pub const Cache = extern struct {
         };
         try cache.allocateClusters(clusters, allocator);
 
-        for (clusters) |cluster, cluster_index| {
+        for (clusters, 0..) |cluster, cluster_index| {
             const cluster_byte_offset = cluster_byte_count * cluster_index;
             const slice_start = cluster_byte_offset;
             const slice_end = cluster_byte_offset + cluster_byte_count;
@@ -587,7 +587,7 @@ pub const Cache = extern struct {
             const index = blk: {
                 const slice = long_name[0..extension_start_index];
 
-                for (slice) |wchar, index| {
+                for (slice, 0..) |wchar, index| {
                     if (!isSkipCharacter(wchar)) break :blk index;
                 }
 
@@ -658,7 +658,7 @@ pub const Cache = extern struct {
             const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
             const extension_slice = long_name[extension_start_index..];
             var extension_index: usize = 0;
-            for (extension_slice) |extension_u16, extension_pointer_index| {
+            for (extension_slice, 0..) |extension_u16, extension_pointer_index| {
                 extension_info = toShortNameCharacter(nls, extension_u16, &char_buffer) catch continue;
 
                 if (extension_len + extension_info.len > 3) {
@@ -1079,7 +1079,7 @@ pub const Cache = extern struct {
                                 const long_name_u16 = long_name_entry.getCharacters();
                                 var arr: [long_name_u16.len]u8 = [1]u8{0} ** long_name_u16.len;
                                 const long_name_u8 = blk: {
-                                    for (long_name_u16) |u16_ch, index| {
+                                    for (long_name_u16, 0..) |u16_ch, index| {
                                         if (u16_ch == 0) {
                                             break :blk arr[0..index];
                                         } else if (u16_ch <= lib.maxInt(u8)) {

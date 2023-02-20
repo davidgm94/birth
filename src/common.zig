@@ -85,7 +85,7 @@ const DiffError = error{
 pub fn diff(file1: []const u8, file2: []const u8) !void {
     assert(file1.len == file2.len);
     var different_bytes: u64 = 0;
-    for (file1) |byte1, index| {
+    for (file1, 0..) |byte1, index| {
         const byte2 = file2[index];
         const is_different_byte = byte1 != byte2;
         different_bytes += @boolToInt(is_different_byte);
@@ -182,7 +182,7 @@ pub const PartitionTableType = enum {
 pub const supported_architectures = [_]Cpu.Arch{.x86_64};
 
 pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
-    inline for (supported_architectures) |architecture, index| {
+    inline for (supported_architectures, 0..) |architecture, index| {
         if (arch == architecture) return index;
     }
 

@@ -1008,7 +1008,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
         .l1cnode => {
             assert(object_size >= Size.l2cnode);
             assert(object_size % Size.l2cnode == 0);
-            for (ctes) |*cte, i| {
+            for (ctes, 0..) |*cte, i| {
                 cte.capability = .{
                     .object = .{
                         .l1cnode = .{
@@ -1023,7 +1023,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
             }
         },
         .l2cnode => {
-            for (ctes) |*cte, i| {
+            for (ctes, 0..) |*cte, i| {
                 cte.capability = .{
                     .object = .{
                         .l2cnode = .{
@@ -1038,7 +1038,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
         },
         .dispatcher => {
             comptime assert(Size.dispatcher >= @sizeOf(CoreDirectorData));
-            for (ctes) |*cte, i| {
+            for (ctes, 0..) |*cte, i| {
                 cte.capability = .{
                     .object = .{
                         .dispatcher = .{
@@ -1051,7 +1051,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
             }
         },
         .frame => {
-            for (ctes) |*cte, i| {
+            for (ctes, 0..) |*cte, i| {
                 cte.capability = .{
                     .object = .{
                         .frame = .{
@@ -1089,7 +1089,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
             };
         },
         .ram => {
-            for (ctes) |*cte, i| {
+            for (ctes, 0..) |*cte, i| {
                 cte.capability = .{
                     .object = .{
                         .frame = .{

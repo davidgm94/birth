@@ -215,7 +215,7 @@ pub const Drive = struct {
             const command_headers = command_list_alloc_result.virtual_address.access([*]volatile HBACommandHeader)[0..32];
             const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
             zero(command_table_address.virtual_address.access([*]u8)[0..arch.page_size]);
-            for (command_headers) |*header, i| {
+            for (command_headers, 0..) |*header, i| {
                 header.prdt_length = 8; // TODO: figure out how to get the value
                 const address = command_table_address.physical_address.value + (i << 8);
                 header.command_table_base_address_low = @truncate(u32, address);

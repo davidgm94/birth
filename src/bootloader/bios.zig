@@ -268,7 +268,7 @@ pub fn findRSDP() ?u32 {
 
     const pointers = [2]u32{ ebda_address, main_bios_area_base_address };
     const limits = [2]u32{ ebda_address + @intCast(u32, @enumToInt(lib.SizeUnit.kilobyte)), @intCast(u32, @enumToInt(lib.SizeUnit.megabyte)) };
-    for (pointers) |pointer, index| {
+    for (pointers, 0..) |pointer, index| {
         var ptr = pointer;
         const limit = limits[index];
 
