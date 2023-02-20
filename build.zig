@@ -110,10 +110,7 @@ pub fn build(b_arg: *Build) !void {
             const run_test_step = test_exe.run();
             run_test_step.condition = .always;
             build_steps.test_all.dependOn(&run_test_step.step);
-
-            if (optimize_mode == default_configuration.optimize_mode) {
-                build_steps.test_step.dependOn(&run_test_step.step);
-            }
+            build_steps.build_all_tests.dependOn(&test_exe.step);
         }
     }
 
@@ -127,21 +124,16 @@ pub fn build(b_arg: *Build) !void {
             }
         }
     }
-
-    // const default_step = try DefaultStep.create(default_configuration.optimize_mode);
-    // default_step.run.dependOn(b.default_step);
-    // default_step.debug.dependOn(b.default_step);
-    // default_step.test_run.dependOn(b.default_step);
-    // default_step.test_debug.dependOn(b.default_step);
-
-    // test_step.dependOn(&default_step.test_run);
-    // test_debug_step.dependOn(&default_step.test_debug);
 }
 
 fn prepareArchitectureCompilation(architecture_index: usize, execution_type: ExecutionType, optimize_mode: OptimizeMode, disk_image_builder: *CompileStep) !void {
     const architecture = common.supported_architectures[architecture_index];
+
     const cpu_driver = try createCPUDriver(architecture, optimize_mode, .normal_exe);
+    build_steps.build_all.dependOn(&cpu_driver.step);
     const cpu_driver_test = try createCPUDriver(architecture, optimize_mode, .test_exe);
+    build_steps.build_all_tests.dependOn(&cpu_driver_test.step);
+
     const bootloaders = common.architecture_bootloader_map[architecture_index];
     for (bootloaders) |bootloader_struct| {
         const bootloader = bootloader_struct.id;
@@ -216,6 +208,8 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                 if (default_configuration.architecture == architecture and default_configuration.optimize_mode == optimize_mode and default_configuration.bootloader == bootloader and default_configuration.boot_protocol == protocol) {
                     b.default_step.dependOn(&bootloader_compile_step.step);
                 }
+
+                build_steps.build_all.dependOn(&bootloader_compile_step.step);
             }
 
             const execution_environments: []const ExecutionEnvironment = switch (bootloader) {
@@ -246,24 +240,14 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                     .disk_image_builder = disk_image_builder,
                 });
 
+                build_steps.test_all.dependOn(&run_steps.test_run);
+
                 if (std.meta.eql(configuration, default_configuration)) {
                     build_steps.run.dependOn(&run_steps.run);
                     build_steps.debug.dependOn(&run_steps.debug);
                     build_steps.test_step.dependOn(&run_steps.test_run);
                     build_steps.test_debug.dependOn(&run_steps.test_debug);
                 }
-
-                // if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                //     run_steps.run.dependOn(&bootloader_compile_step.step);
-                //     run_steps.debug.dependOn(&bootloader_compile_step.step);
-                //     run_steps.test_run.dependOn(&bootloader_compile_step.step);
-                //     run_steps.test_debug.dependOn(&bootloader_compile_step.step);
-                // }
-                //
-                // run_steps.run.dependOn(&cpu_driver.step);
-                // run_steps.debug.dependOn(&cpu_driver.step);
-                // run_steps.test_run.dependOn(&cpu_driver_test.step);
-                // run_steps.test_debug.dependOn(&cpu_driver_test.step);
             }
         }
     }
@@ -325,78 +309,6 @@ pub const Modules = struct {
 const source_root_dir = "src";
 const cache_dir = "zig-cache/";
 const entry_point_name = "entryPoint";
-
-// const Configuration = struct {
-//     bootloader: Bootloader,
-//     architecture: Cpu.Arch,
-//     boot_protocol: Bootloader.Protocol,
-//
-//     // pub fn getSuffix(configuration: Configuration) ![]const u8 {
-//     //     return try std.mem.concat(b.allocator, u8, &.{ "_", @tagName(configuration.bootloader), "_", @tagName(configuration.architecture), "_", @tagName(configuration.boot_protocol) });
-//     // }
-// };
-
-// pub const DefaultStep = struct {
-//     fn create(default_optimize_mode: OptimizeMode) !*RunSteps {
-//         const step = try b.allocator.create(RunSteps);
-//         step.* = .{
-//             .run = Step.init(.custom, "_run_", b.allocator, Interface(false).run),
-//             .debug = Step.init(.custom, "_debug_", b.allocator, Interface(false).debug),
-//             .gdb_script = Step.init(.custom, "_gdb_script_", b.allocator, Interface(false).gdbScript),
-//             .test_run = Step.init(.custom, "_test_run_", b.allocator, Interface(true).run),
-//             .test_debug = Step.init(.custom, "_test_debug_", b.allocator, Interface(true).debug),
-//             .test_gdb_script = Step.init(.custom, "_test_gdb_script_", b.allocator, Interface(true).gdbScript),
-//             .configuration = undefined,
-//             .emulator = undefined,
-//             .override_virtualize = false,
-//             .optimize_mode = default_optimize_mode,
-//         };
-//
-//         step.debug.dependOn(&step.gdb_script);
-//         step.test_debug.dependOn(&step.test_gdb_script);
-//
-//         const run_step = b.step("run", "Run the operating system through an emulator");
-//         const debug_step = b.step("debug", "Debug the operating system through an emulator");
-//         run_step.dependOn(&step.run);
-//         debug_step.dependOn(&step.debug);
-//
-//         return step;
-//     }
-//
-//     pub fn Interface(comptime is_test: bool) type {
-//         return struct {
-//             fn run(step: *Step) !void {
-//                 const default_step = @fieldParentPtr(RunSteps, if (!is_test) "run" else "test_run", step);
-//                 const default = try readConfigFromFile();
-//                 default_step.configuration = default.configuration;
-//                 default_step.emulator = default.emulator;
-//                 try RunSteps.Interface(is_test).run(step);
-//             }
-//
-//             fn debug(step: *Step) !void {
-//                 const default_step = @fieldParentPtr(RunSteps, if (!is_test) "debug" else "test_debug", step);
-//                 const default = try readConfigFromFile();
-//                 default_step.configuration = default.configuration;
-//                 default_step.emulator = default.emulator;
-//                 try RunSteps.Interface(is_test).debug(step);
-//             }
-//
-//             fn gdbScript(step: *Step) !void {
-//                 const default_step = @fieldParentPtr(RunSteps, if (!is_test) "gdb_script" else "test_gdb_script", step);
-//                 const default = try readConfigFromFile();
-//                 default_step.configuration = default.configuration;
-//                 default_step.emulator = default.emulator;
-//                 try RunSteps.Interface(is_test).gdbScript(step);
-//             }
-//
-//             fn readConfigFromFile() !DefaultStep {
-//                 const config_file = try std.fs.cwd().readFileAlloc(b.allocator, "config/default.json", std.math.maxInt(usize));
-//                 var token_stream = std.json.TokenStream.init(config_file);
-//                 return try std.json.parse(DefaultStep, &token_stream, .{ .allocator = b.allocator });
-//             }
-//         };
-//     }
-// };
 
 const RunSteps = struct {
     configuration: Configuration,

@@ -166,7 +166,8 @@ pub fn main() anyerror!void {
                         try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
                     },
                     .uefi => {
-                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/BOOTX64.efi", max_file_length);
+                        const loader_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", try lib.Suffix.bootloader.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "bootloader_"), ".efi" });
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
                         try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, 0);
                         try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, 0);
                         try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", loader_file, wrapped_allocator.unwrap(), null, 0);
