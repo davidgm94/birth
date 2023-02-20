@@ -1,7 +1,7 @@
 {
     "sector_count": 131072,
     "sector_size": 512,
-    "image_name": "rise.hdd",
+    "image_name": "rise",
     "partition_table": "gpt",
     "partition": {
         "name": "ESP",

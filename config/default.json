@@ -4,5 +4,6 @@
         "bootloader": "rise",
         "boot_protocol": "bios"
     },
-    "emulator": "qemu"
+    "emulator": "qemu",
+    "optimize_mode": "Debug"
 }

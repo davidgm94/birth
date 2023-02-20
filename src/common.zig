@@ -225,7 +225,7 @@ pub const TraditionalExecutionMode = enum {
     user,
 };
 
-pub const Emulator = enum {
+pub const ExecutionEnvironment = enum {
     qemu,
 };
 
@@ -263,4 +263,73 @@ pub const QEMU = extern struct {
         success = 0x10,
         failure = 0x11,
     };
+};
+
+pub const OptimizeMode = std.builtin.OptimizeMode;
+
+pub const Configuration = struct {
+    architecture: Cpu.Arch,
+    bootloader: Bootloader,
+    boot_protocol: Bootloader.Protocol,
+    execution_environment: ExecutionEnvironment,
+    optimize_mode: OptimizeMode,
+    execution_type: ExecutionType,
+    executable_kind: ExecutableKind,
+};
+
+pub const ExecutableKind = enum {
+    normal_exe,
+    test_exe,
+};
+
+pub const ExecutionType = enum {
+    emulated,
+    accelerated,
+};
+
+pub const Suffix = enum {
+    bootloader,
+    cpu_driver,
+    image,
+    complete,
+
+    pub fn fromConfiguration(suffix: Suffix, allocator: ZigAllocator, configuration: Configuration, prefix: ?[]const u8) ![]const u8 {
+        const cpu_driver_suffix = [_][]const u8{
+            @tagName(configuration.optimize_mode),
+            "_",
+            @tagName(configuration.architecture),
+            "_",
+            @tagName(configuration.executable_kind),
+        };
+
+        const bootloader_suffix = [_][]const u8{
+            @tagName(configuration.architecture),
+            "_",
+            @tagName(configuration.bootloader),
+            "_",
+            @tagName(configuration.boot_protocol),
+        };
+
+        const image_suffix = [_][]const u8{
+            @tagName(configuration.optimize_mode),
+            "_",
+        } ++ bootloader_suffix ++ [_][]const u8{
+            "_",
+            @tagName(configuration.executable_kind),
+        };
+
+        const complete_suffix = image_suffix ++ [_][]const u8{
+            "_",
+            @tagName(configuration.execution_type),
+            "_",
+            @tagName(configuration.execution_environment),
+        };
+
+        return try std.mem.concat(allocator, u8, &switch (suffix) {
+            .cpu_driver => if (prefix) |pf| [1][]const u8{pf} ++ cpu_driver_suffix else cpu_driver_suffix,
+            .bootloader => if (prefix) |pf| [1][]const u8{pf} ++ bootloader_suffix else bootloader_suffix,
+            .image => if (prefix) |pf| [1][]const u8{pf} ++ image_suffix else image_suffix,
+            .complete => if (prefix) |pf| [1][]const u8{pf} ++ complete_suffix else complete_suffix,
+        });
+    }
 };

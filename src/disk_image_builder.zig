@@ -17,6 +17,170 @@ const mbr_offset: u16 = 0xfe00;
 const stack_top: u16 = mbr_offset;
 const stack_size = 0x2000;
 
+const Configuration = lib.Configuration;
+
+pub fn main() anyerror!void {
+    var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
+    defer arena_allocator.deinit();
+    var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
+
+    const arguments = (try host.allocateArguments(wrapped_allocator.unwrap_zig()))[1..];
+    if (arguments.len != lib.fields(Configuration).len) {
+        log.err("Arguments len: {}. Field count: {}", .{ arguments.len, lib.fields(Configuration).len });
+        return Error.wrong_arguments;
+    }
+
+    const configuration = blk: {
+        var cfg: Configuration = undefined;
+        inline for (lib.fields(Configuration)) |configuration_field, index| {
+            @field(cfg, configuration_field.name) = lib.stringToEnum(configuration_field.type, arguments[index]) orelse {
+                log.err("Index: {} Arg: {s}", .{ index, arguments[index] });
+                return Error.wrong_arguments;
+            };
+        }
+
+        break :blk cfg;
+    };
+
+    //const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader_id), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
+
+    // TODO: use a format with hex support
+    const image_config = try lib.ImageConfig.get(wrapped_allocator.unwrap_zig(), lib.ImageConfig.default_path);
+    var disk_image = try DiskImage.fromZero(image_config.sector_count, image_config.sector_size);
+    const disk = &disk_image.disk;
+    const gpt_cache = try GPT.create(disk, null);
+    var partition_name_buffer: [256]u16 = undefined;
+    const partition_name = blk: {
+        const partition_index = try lib.unicode.utf8ToUtf16Le(&partition_name_buffer, image_config.partition.name);
+        break :blk partition_name_buffer[0..partition_index];
+    };
+
+    const config_file_name = "files";
+    const configuration_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "config/" ++ config_file_name, max_file_length);
+
+    switch (image_config.partition.filesystem) {
+        .fat32 => {
+            const filesystem = .fat32;
+            const gpt_partition_cache = try gpt_cache.addPartition(filesystem, partition_name, image_config.partition.first_lba, gpt_cache.header.last_usable_lba, null);
+            const fat_partition_cache = try format(gpt_cache.disk, .{
+                .first_lba = gpt_partition_cache.partition.first_lba,
+                .last_lba = gpt_partition_cache.partition.last_lba,
+            }, null);
+
+            var files_parser = bootloader.File.Parser.init(configuration_file);
+
+            const cpu_driver_name = blk: {
+                var maybe_cpu_driver_name: ?[]const u8 = null;
+                while (try files_parser.next()) |file_descriptor| {
+                    if (file_descriptor.type == .cpu_driver) {
+                        if (maybe_cpu_driver_name != null) @panic("More than one CPU driver");
+                        maybe_cpu_driver_name = file_descriptor.guest;
+                    }
+
+                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.type) {
+                        .cpu_driver => try lib.Suffix.cpu_driver.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "_"),
+                        else => "",
+                    } });
+                    log.debug("Host relative path: {s}", .{host_relative_path});
+                    const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
+                    try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                }
+
+                break :blk maybe_cpu_driver_name orelse unreachable;
+            };
+
+            const file_content = configuration_file;
+            const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
+            try fat_partition_cache.makeNewFile(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+
+            switch (configuration.bootloader) {
+                .limine => {
+                    log.debug("Installing Limine HDD", .{});
+                    try LimineInstaller.install(disk_image.get_buffer(), false, null);
+                    log.debug("Ended installing Limine HDD", .{});
+                    const limine_installable_path = "src/bootloader/limine/installables";
+                    const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
+
+                    const limine_cfg = blk: {
+                        var limine_cfg_generator = LimineCFG{
+                            .buffer = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig()),
+                        };
+                        try limine_cfg_generator.addField("TIMEOUT", "0");
+                        try limine_cfg_generator.addEntryName("Rise");
+                        try limine_cfg_generator.addField("PROTOCOL", "limine");
+                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", cpu_driver_name }));
+                        try limine_cfg_generator.addField("DEFAULT_ENTRY", "0");
+                        break :blk limine_cfg_generator.buffer.items;
+                    };
+
+                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
+                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+
+                    switch (configuration.architecture) {
+                        .x86_64 => {
+                            try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                        },
+                        else => unreachable,
+                    }
+                },
+                .rise => switch (configuration.boot_protocol) {
+                    .bios => {
+                        const loader_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", try lib.Suffix.bootloader.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "bootloader_") });
+                        log.debug("trying to load file: {s}", .{loader_file_path});
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
+                        const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
+                        assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
+                        try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
+
+                        // Build our own assembler
+                        const boot_disk_mbr_lba = 0;
+                        const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
+                        const dap_offset = @offsetOf(BootDisk, "dap");
+                        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
+                        assert(dap_offset == 0x1ae);
+                        const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
+                        const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
+                        if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
+                        const dap_top = stack_top - stack_size;
+                        if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
+                        log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
+                        const dap = MBR.DAP{
+                            .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
+                            .offset = @intCast(u16, dap_top - aligned_file_size),
+                            .segment = 0x0,
+                            .lba = partition_first_usable_lba,
+                        };
+
+                        if (dap_top - dap.offset < aligned_file_size) {
+                            @panic("unable to fit file read from disk");
+                        }
+
+                        if (dap.offset - 0x600 < aligned_file_size) {
+                            @panic("unable to fit loaded executable in memory");
+                        }
+
+                        try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
+                        try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
+                    },
+                    .uefi => {
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/BOOTX64.efi", max_file_length);
+                        try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, 0);
+                        try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, 0);
+                        try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", loader_file, wrapped_allocator.unwrap(), null, 0);
+                    },
+                },
+            }
+        },
+        else => @panic("Filesystem not supported"),
+    }
+
+    const disk_image_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", image_config.image_name, try lib.Suffix.image.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "_"), ".hdd" });
+    try host.cwd().writeFile(disk_image_path, disk_image.get_buffer());
+}
+
 pub const BootDisk = extern struct {
     bpb: MBR.BIOSParameterBlock.DOS7_1_79,
     code: [code_byte_count]u8,
@@ -538,170 +702,6 @@ const Error = error{
     wrong_arguments,
     not_implemented,
 };
-
-pub fn main() anyerror!void {
-    var arena_allocator = host.ArenaAllocator.init(host.page_allocator);
-    defer arena_allocator.deinit();
-    var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
-
-    const arguments = try @import("std").process.argsAlloc(wrapped_allocator.unwrap_zig());
-    if (arguments.len != 5) {
-        return Error.wrong_arguments;
-    }
-
-    const bootloader_id = lib.stringToEnum(lib.Bootloader, arguments[1]) orelse return Error.wrong_arguments;
-    const architecture = lib.stringToEnum(lib.Target.Cpu.Arch, arguments[2]) orelse return Error.wrong_arguments;
-    const boot_protocol = lib.stringToEnum(lib.Bootloader.Protocol, arguments[3]) orelse return Error.wrong_arguments;
-    const is_test = if (lib.equal(u8, arguments[4], "true")) true else if (lib.equal(u8, arguments[4], "false")) false else return Error.wrong_arguments;
-
-    const suffix = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "_", @tagName(bootloader_id), "_", @tagName(architecture), "_", @tagName(boot_protocol) });
-
-    // TODO: use a format with hex support
-    const image_config = try lib.ImageConfig.get(wrapped_allocator.unwrap_zig(), lib.ImageConfig.default_path);
-    var disk_image = try DiskImage.fromZero(image_config.sector_count, image_config.sector_size);
-    const disk = &disk_image.disk;
-    const gpt_cache = try GPT.create(disk, null);
-    var partition_name_buffer: [256]u16 = undefined;
-    const partition_name = blk: {
-        const partition_index = try lib.unicode.utf8ToUtf16Le(&partition_name_buffer, image_config.partition.name);
-        break :blk partition_name_buffer[0..partition_index];
-    };
-
-    const config_file_name = "files";
-    const configuration_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "config/" ++ config_file_name, max_file_length);
-
-    switch (image_config.partition.filesystem) {
-        .fat32 => {
-            const filesystem = .fat32;
-            const gpt_partition_cache = try gpt_cache.addPartition(filesystem, partition_name, image_config.partition.first_lba, gpt_cache.header.last_usable_lba, null);
-            const fat_partition_cache = try format(gpt_cache.disk, .{
-                .first_lba = gpt_partition_cache.partition.first_lba,
-                .last_lba = gpt_partition_cache.partition.last_lba,
-            }, null);
-
-            var files_parser = bootloader.File.Parser.init(configuration_file);
-
-            const cpu_driver_name = blk: {
-                var maybe_cpu_driver_name: ?[]const u8 = null;
-                while (try files_parser.next()) |file_descriptor| {
-                    if (file_descriptor.type == .cpu_driver) {
-                        if (maybe_cpu_driver_name != null) @panic("More than one CPU driver");
-                        maybe_cpu_driver_name = file_descriptor.guest;
-                    }
-
-                    log.debug("Is test: {}", .{is_test});
-                    const host_relative_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ file_descriptor.host_path, "/", file_descriptor.host_base, switch (file_descriptor.type) {
-                        .cpu_driver => switch (is_test) {
-                            true => "_test",
-                            false => "",
-                        },
-                        else => "",
-                    }, switch (file_descriptor.suffix_type) {
-                        .arch => switch (architecture) {
-                            inline else => |arch| "_" ++ @tagName(arch),
-                        },
-                        .full => unreachable,
-                        .none => "",
-                    } });
-                    log.debug("Host relative path: {s}", .{host_relative_path});
-                    const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
-                    try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                }
-
-                break :blk maybe_cpu_driver_name orelse unreachable;
-            };
-
-            const file_content = configuration_file;
-            const guest_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "/", config_file_name });
-            try fat_partition_cache.makeNewFile(guest_file_path, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-
-            switch (bootloader_id) {
-                .limine => {
-                    log.debug("Installing Limine HDD", .{});
-                    try LimineInstaller.install(disk_image.get_buffer(), false, null);
-                    log.debug("Ended installing Limine HDD", .{});
-                    const limine_installable_path = "src/bootloader/limine/installables";
-                    const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
-
-                    const limine_cfg = blk: {
-                        var limine_cfg_generator = LimineCFG{
-                            .buffer = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig()),
-                        };
-                        try limine_cfg_generator.addField("TIMEOUT", "0");
-                        try limine_cfg_generator.addEntryName("Rise");
-                        try limine_cfg_generator.addField("PROTOCOL", "limine");
-                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", cpu_driver_name }));
-                        try limine_cfg_generator.addField("DEFAULT_ENTRY", "0");
-                        break :blk limine_cfg_generator.buffer.items;
-                    };
-
-                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
-                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-
-                    switch (architecture) {
-                        .x86_64 => {
-                            try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                        },
-                        else => unreachable,
-                    }
-                },
-                .rise => switch (boot_protocol) {
-                    .bios => {
-                        const loader_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", "loader", suffix });
-                        log.debug("trying to load file: {s}", .{loader_file_path});
-                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
-                        const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
-                        assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
-                        try disk.write_slice(u8, loader_file, partition_first_usable_lba, true);
-
-                        // Build our own assembler
-                        const boot_disk_mbr_lba = 0;
-                        const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
-                        const dap_offset = @offsetOf(BootDisk, "dap");
-                        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-                        assert(dap_offset == 0x1ae);
-                        const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
-                        const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
-                        if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
-                        const dap_top = stack_top - stack_size;
-                        if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
-                        log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
-                        const dap = MBR.DAP{
-                            .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
-                            .offset = @intCast(u16, dap_top - aligned_file_size),
-                            .segment = 0x0,
-                            .lba = partition_first_usable_lba,
-                        };
-
-                        if (dap_top - dap.offset < aligned_file_size) {
-                            @panic("unable to fit file read from disk");
-                        }
-
-                        if (dap.offset - 0x600 < aligned_file_size) {
-                            @panic("unable to fit loaded executable in memory");
-                        }
-
-                        try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
-                        try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
-                    },
-                    .uefi => {
-                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "zig-cache/BOOTX64.efi", max_file_length);
-                        try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, 0);
-                        try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, 0);
-                        try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", loader_file, wrapped_allocator.unwrap(), null, 0);
-                    },
-                },
-            }
-        },
-        else => @panic("Filesystem not supported"),
-    }
-
-    const disk_image_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", image_config.image_name });
-    try host.cwd().writeFile(disk_image_path, disk_image.get_buffer());
-}
 
 const LoopbackDevice = struct {
     name: []const u8,

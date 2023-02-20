@@ -69,3 +69,5 @@ pub fn spawnProcess(arguments: []const []const u8, allocator: lib.ZigAllocator) 
 }
 
 pub const panic = std.debug.panic;
+
+pub const allocateArguments = std.process.argsAlloc;
