@@ -460,7 +460,7 @@ pub fn entryPoint() callconv(.C) noreturn {
             .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
-        .cpus = .{
+        .smps = .{
             .length = cpu_count,
             .alignment = 8,
         },
@@ -515,6 +515,10 @@ pub fn entryPoint() callconv(.C) noreturn {
                 },
                 .heap = .{},
                 .cpu_driver_mappings = .{},
+                .smp = .{
+                    .cpu_count = cpu_count,
+                    .bsp_lapic_id = limine_smp.response.?.bsp_lapic_id,
+                },
                 .framebuffer = .{
                     .address = framebuffer.address,
                     .pitch = @intCast(u32, framebuffer.pitch),

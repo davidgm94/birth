@@ -29,24 +29,34 @@ var gdt = GDT.Table{
     .tss_descriptor = undefined,
 };
 
-pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Information {
+const File = struct {
+    path: []const u8,
+    content: []const u8,
+    type: bootloader.File.Type,
+};
+
+export fn entryPoint() callconv(.C) noreturn {
+    BIOS.A20Enable() catch @panic("can't enable a20");
+    lib.log.debug("Loader start: 0x{x}. Loader end: 0x{x}", .{ @ptrToInt(&loader_start), @ptrToInt(&loader_end) });
+    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
+
     var iterator = BIOS.E820Iterator{};
     var vbe_info: BIOS.VBE.Information = undefined;
 
-    const edid_info = try BIOS.VBE.getEDIDInfo();
+    const edid_info = BIOS.VBE.getEDIDInfo() catch @panic("No EDID");
     const edid_width = edid_info.getWidth();
     const edid_height = edid_info.getHeight();
     const edid_bpp = 32;
     const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
     _ = preferred_resolution;
-    try BIOS.VBE.getControllerInformation(&vbe_info);
+    BIOS.VBE.getControllerInformation(&vbe_info) catch @panic("No VBE information");
 
     if (!lib.equal(u8, &vbe_info.signature, "VESA")) {
-        return BIOS.VBE.Error.bad_signature;
+        @panic("VESA signature");
     }
 
     if (vbe_info.version_major != 3 and vbe_info.version_minor != 0) {
-        return BIOS.VBE.Error.unsupported_version;
+        @panic("VESA version");
     }
 
     const edid_video_mode = vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
@@ -57,6 +67,8 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
     const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
     const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
     const cpu_count = madt.getCPUCount();
+
+    const bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*;
     const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
 
     const length_size_tuples = bootloader.LengthSizeTuples.new(.{
@@ -77,7 +89,7 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
             .alignment = @alignOf(File),
         },
         .cpu_driver_stack = .{
-            .length = stack_size,
+            .length = privileged.default_stack_size,
             .alignment = lib.arch.valid_page_sizes[0],
         },
         .memory_map_entries = .{
@@ -88,13 +100,13 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
             .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
-        .cpus = .{
+        .smps = .{
             .length = cpu_count,
             .alignment = 8,
         },
     });
 
-    while (iterator.next()) |entry| {
+    const bootloader_information = while (iterator.next()) |entry| {
         if (entry.descriptor.isUsable() and entry.descriptor.region.size > length_size_tuples.getAlignedTotalSize() and !entry.descriptor.region.overlaps(framebuffer_region)) {
             const bootloader_information_region = entry.descriptor.region.takeSlice(@sizeOf(bootloader.Information));
             const result = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
@@ -135,6 +147,10 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
                 .draw_context = .{},
                 .font = undefined,
                 .cpu_driver_mappings = .{},
+                .smp = .{
+                    .cpu_count = cpu_count,
+                    .bsp_lapic_id = bsp_lapic_id,
+                },
                 .virtual_address_space = .{ .arch = .{} },
                 .slices = length_size_tuples.createSlices(),
                 .architecture = .{
@@ -151,28 +167,15 @@ pub fn initializeBootloaderInformation(stack_size: usize) !*bootloader.Informati
 
             const memory_map_entries = result.getSlice(.memory_map_entries);
             BIOS.fetchMemoryEntries(memory_map_entries);
+            for (memory_map_entries) |mm_entry| {
+                log.debug("Entry: 0x{x}, 0x{x}, type: {s}", .{ mm_entry.region.address.value(), mm_entry.region.size, @tagName(mm_entry.type) });
+            }
 
-            return result;
+            break result;
         }
-    }
-
-    return lib.Allocator.Allocate.Error.OutOfMemory;
-}
-
-const File = struct {
-    path: []const u8,
-    content: []const u8,
-    type: bootloader.File.Type,
-};
-
-export fn entryPoint() callconv(.C) noreturn {
-    BIOS.A20Enable() catch @panic("can't enable a20");
-    lib.log.debug("Loader start: 0x{x}. Loader end: 0x{x}", .{ @ptrToInt(&loader_start), @ptrToInt(&loader_end) });
-    writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
-
-    const bootloader_information = initializeBootloaderInformation(privileged.default_stack_size) catch |err| privileged.panic("Can't get bootloader_information: {}", .{err});
-    const page_allocator = &bootloader_information.page_allocator;
-    const allocator = &bootloader_information.heap.allocator;
+    } else {
+        @panic("No memory map");
+    };
 
     var bios_disk = BIOS.Disk{
         .disk = .{
@@ -186,6 +189,9 @@ export fn entryPoint() callconv(.C) noreturn {
             .type = .bios,
         },
     };
+
+    const allocator = &bootloader_information.heap.allocator;
+    const page_allocator = &bootloader_information.page_allocator;
 
     const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, allocator) catch @panic("can't load gpt cache");
     const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
@@ -211,6 +217,8 @@ export fn entryPoint() callconv(.C) noreturn {
 
         break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
     };
+
+    bootloader_information.initializeSMP(madt);
 
     bootloader_information.virtual_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
@@ -241,7 +249,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
     // Map more than necessary
     const loader_stack_size = 0x2000;
-    const loader_stack = PhysicalAddress(.global).new(lib.maxInt(u16) + 1 - loader_stack_size);
+    const loader_stack = PhysicalAddress(.global).new(BIOS.stack_top - loader_stack_size);
     VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {

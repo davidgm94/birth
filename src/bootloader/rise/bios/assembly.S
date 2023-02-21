@@ -1,4 +1,29 @@
-.section .text
+.section .realmode
+.code16
+.align 0x1000
+.global smp_trampoline
+smp_trampoline:
+cli
+cld
+
+mov %cs, %ebx
+shl $0x4, %ebx
+
+lidtl %cs:(invalid_idt - smp_trampoline)
+hlt
+invalid_idt:
+.quad 0
+.quad 0
+
+.align 16
+smp_trampoline_arg_start:
+.quad 0
+smp_trampoline_arg_end:
+.global smp_trampoline_arg_start
+.global smp_trampoline_arg_end
+
+.code32
+.align 0x10
 .global interrupt
 interrupt:
 movb 4(%esp), %al

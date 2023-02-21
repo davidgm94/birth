@@ -6,9 +6,10 @@ PHDRS {
 }
 
 SECTIONS {
-    . = 0x600;
+    . = 0x1000;
     loader_start = .;
     .text . : {
+        *(.realmode*)
         *(.text*)
     }:text
     . = ALIGN(0x10);

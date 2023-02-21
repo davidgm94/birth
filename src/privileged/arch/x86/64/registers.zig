@@ -291,7 +291,7 @@ pub const IA32_APIC_BASE = packed struct(u64) {
         MSR.write(value);
     }
 
-    pub fn get_address(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
+    pub fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
         return PhysicalAddress(.global).new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
     }
 };

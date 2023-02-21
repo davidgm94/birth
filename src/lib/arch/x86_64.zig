@@ -12,3 +12,16 @@ pub const default_page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
 
 pub const registers = @import("x86/64/registers.zig");
+
+pub inline fn readTimestamp() u64 {
+    var edx: u32 = undefined;
+    var eax: u32 = undefined;
+
+    asm volatile (
+        \\rdtsc
+        : [eax] "={eax}" (eax),
+          [edx] "={edx}" (edx),
+    );
+
+    return @as(u64, edx) << 32 | eax;
+}

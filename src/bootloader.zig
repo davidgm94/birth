@@ -9,6 +9,7 @@ const Allocator = lib.Allocator;
 pub const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged");
+const ACPI = privileged.ACPI;
 const AddressInterface = privileged.Address.Interface(u64);
 const PhysicalAddress = AddressInterface.PhysicalAddress;
 const VirtualAddress = AddressInterface.VirtualAddress;
@@ -53,7 +54,7 @@ pub const Information = extern struct {
     framebuffer: Framebuffer,
     draw_context: DrawContext,
     font: Font,
-    cpu: CPU.Information = .{},
+    smp: SMP.Information,
     virtual_address_space: VirtualAddressSpace,
     architecture: Architecture,
     slices: lib.EnumStruct(Slice.Name, Slice),
@@ -80,7 +81,7 @@ pub const Information = extern struct {
             files,
             memory_map_entries,
             page_counters,
-            cpus,
+            smps,
         };
 
         pub const count = lib.enumCount(Name);
@@ -94,7 +95,7 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.cpu_driver_stack)] = u8;
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
-            arr[@enumToInt(Slice.Name.cpus)] = CPU;
+            arr[@enumToInt(Slice.Name.smps)] = SMP;
             break :blk arr;
         };
 
@@ -116,13 +117,102 @@ pub const Information = extern struct {
         regions: [6]PMR = lib.zeroes([6]PMR),
     };
 
-    pub const CPU = extern struct {
-        foo: u64 = 0,
+    pub const SMP = extern struct {
+        acpi_id: u32,
+        lapic_id: u32,
+        entry_point: u64,
+        argument: u64,
 
         pub const Information = extern struct {
-            foo: u64 = 0,
+            cpu_count: u32,
+            bsp_lapic_id: u32,
+        };
+
+        pub const Trampoline = struct {
+            pub const Argument = extern struct {
+                foo: u32,
+                foo2: u32,
+            };
         };
     };
+
+    pub fn initializeSMP(bootloader_information: *Information, madt: *const ACPI.MADT) void {
+        if (lib.cpu.arch == .x86) {
+            const smp_records = bootloader_information.getSlice(.smps);
+
+            var iterator = madt.getIterator();
+            var smp_index: usize = 0;
+
+            lib.log.debug("BSP Apic: 0x{x}", .{bootloader_information.smp.bsp_lapic_id});
+            if (bootloader_information.smp.cpu_count > 1) {
+                const smp_trampoline = @ptrToInt(&arch.x86_64.smp_trampoline);
+                // Sanity checks
+                if (!lib.isAligned(smp_trampoline, lib.arch.valid_page_sizes[0])) @panic("SMP trampoline must be 0x1000-aligned");
+                const trampoline_argument_start = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_start" }));
+                if (!lib.isAligned(trampoline_argument_start, @alignOf(SMP.Trampoline.Argument))) @panic("SMP trampoline argument alignment must match");
+                const trampoline_argument_end = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_end" }));
+                const trampoline_argument_size = trampoline_argument_end - trampoline_argument_start;
+                if (trampoline_argument_size != @sizeOf(SMP.Trampoline.Argument)) @panic("SMP trampoline argument size must match");
+
+                //const lapicRead = privileged.arch.x86_64.APIC.read;
+                const lapicWrite = privileged.arch.x86_64.APIC.write;
+
+                while (iterator.next()) |entry| {
+                    switch (entry.type) {
+                        .LAPIC => {
+                            const lapic_entry = @fieldParentPtr(ACPI.MADT.LAPIC, "record", entry);
+                            const lapic_id = @as(u32, lapic_entry.APIC_ID);
+                            smp_records[smp_index] = .{
+                                .acpi_id = lapic_entry.ACPI_processor_UID,
+                                .lapic_id = lapic_id,
+                                .entry_point = 0,
+                                .argument = 0,
+                            };
+
+                            if (lapic_entry.APIC_ID == bootloader_information.smp.bsp_lapic_id) {
+                                smp_index += 1;
+                                continue;
+                            }
+                            lib.log.debug("SMP trampoline: 0x{x}. Lapic ID: {}. Flag 0: {}. Flag 1: {}", .{ smp_trampoline, lapic_id, lapic_entry.flags.enabled, lapic_entry.flags.online_capable });
+
+                            lapicWrite(.icr_high, lapic_id << 24);
+                            lapicWrite(.icr_low, 0x4500);
+
+                            arch.x86_64.delay(10_000_000);
+
+                            const icr_low = (smp_trampoline >> 12) | 0x4600;
+                            lib.log.debug("ICR low: 0x{x}", .{icr_low});
+                            lapicWrite(.icr_high, lapic_id << 24);
+                            lapicWrite(.icr_low, icr_low);
+
+                            for (0..100) |_| {
+                                arch.x86_64.delay(10_000_000);
+                            }
+
+                            // pub const LAPIC = extern struct {
+                            //     record: Record,
+                            //     ACPI_processor_UID: u8,
+                            //     APIC_ID: u8,
+                            //     flags: Flags,
+                            //
+                            //     const Flags = packed struct(u32) {
+                            //         enabled: bool,
+                            //         online_capable: bool,
+                            //         reserved: u30 = 0,
+                            //     };
+                            // };
+                        },
+                        .x2APIC => @panic("x2APIC"),
+                        else => {},
+                    }
+                }
+
+                @panic("SMP enabled");
+            } else {
+                @panic("SMP disabled");
+            }
+        }
+    }
 
     pub fn getAlignedTotalSize(information: *Information) u32 {
         assert(information.total_size > 0);

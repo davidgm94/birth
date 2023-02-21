@@ -20,6 +20,12 @@ inline fn offset(value: u32) u16 {
     return @truncate(u16, value & 0xf >> 0);
 }
 
+pub const stack_top: u16 = mbr_offset;
+pub const mbr_offset: u16 = 0xfe00;
+pub const stack_size: u16 = 0x2000;
+
+pub const loader_start = 0x1000;
+
 pub const Disk = extern struct {
     disk: lib.Disk,
 
@@ -84,7 +90,7 @@ pub const Disk = extern struct {
     }
 };
 
-extern fn interrupt(number: u8, out_regs: *Registers, in_regs: *const Registers) callconv(.C) void;
+extern fn interrupt(number: u8, out_regs: *Registers, in_regs: *const Registers) linksection(".realmode") callconv(.C) void;
 
 const DAP = lib.PartitionTable.MBR.DAP;
 

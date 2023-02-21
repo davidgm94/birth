@@ -5,7 +5,7 @@ const cpuid = lib.arch.x86_64.cpuid;
 const maxInt = lib.maxInt;
 
 const privileged = @import("privileged");
-const VirtualAddress = privileged.VirtualAddress;
+const VirtualAddress = privileged.arch.VirtualAddress;
 
 const arch = privileged.arch;
 const x86_64 = privileged.arch.x86_64;
@@ -47,7 +47,7 @@ const LVTTimer = packed struct(u32) {
     };
 
     fn write(timer: LVTTimer, apic_base: VirtualAddress(.global)) void {
-        apic_write(@This(), timer, Register.lvt_timer, apic_base);
+        lapicWriteOffset(@This(), timer, Register.lvt_timer, apic_base);
     }
 };
 
@@ -68,22 +68,32 @@ const DivideConfigurationRegister = packed struct(u32) {
     };
 
     fn read(apic_base: VirtualAddress(.global)) DivideConfigurationRegister {
-        return apic_read(@This(), Register.timer_div, apic_base);
+        return lapicReadOffset(@This(), Register.timer_div, apic_base);
     }
 
     fn write(dcr: DivideConfigurationRegister, apic_base: VirtualAddress(.global)) void {
-        apic_write(@This(), dcr, Register.timer_div, apic_base);
+        lapicWriteOffset(@This(), dcr, Register.timer_div, apic_base);
     }
 
     //fn write(
 };
 
-fn apic_read(comptime T: type, register_offset: Register, apic_base: VirtualAddress(.global)) T {
+inline fn lapicReadOffset(comptime T: type, register_offset: Register, apic_base: VirtualAddress(.global)) T {
     return apic_base.offset(@enumToInt(register_offset)).access(*volatile T).*;
 }
 
-fn apic_write(comptime T: type, register: T, register_offset: Register, apic_base: VirtualAddress(.global)) void {
+inline fn lapicWriteOffset(comptime T: type, register: T, register_offset: Register, apic_base: VirtualAddress(.global)) void {
     apic_base.offset(@enumToInt(register_offset)).access(*volatile T).* = register;
+}
+
+pub inline fn read(register: Register) u32 {
+    const apic_address = IA32_APIC_BASE.read().getAddress().toIdentityMappedVirtualAddress();
+    return lapicReadOffset(u32, register, apic_address);
+}
+
+pub inline fn write(register: Register, value: u32) void {
+    const apic_address = IA32_APIC_BASE.read().getAddress().toIdentityMappedVirtualAddress();
+    return lapicWriteOffset(u32, value, register, apic_address);
 }
 
 const Register = enum(u32) {
@@ -171,11 +181,11 @@ pub var is_bsp = false;
 pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
     if (is_bsp) {
         //calibrate_timer_with_rtc(apic_base);
-        const timer_calibration_start = read_timestamp();
+        const timer_calibration_start = lib.arch.x86_64.readTimestamp();
         var times_i: u64 = 0;
         const times = 8;
 
-        apic_write(u32, lib.maxInt(u32), Register.timer_initcnt, apic_base);
+        lapicWriteOffset(u32, lib.maxInt(u32), Register.timer_initcnt, apic_base);
 
         while (times_i < times) : (times_i += 1) {
             io.write(u8, io.Ports.PIT_command, 0x30);
@@ -188,24 +198,11 @@ pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
             }
         }
 
-        const ticks_per_ms = (maxInt(u32) - apic_read(u32, .timer_current_count, apic_base)) >> 4;
-        const timer_calibration_end = read_timestamp();
+        const ticks_per_ms = (maxInt(u32) - lapicReadOffset(u32, .timer_current_count, apic_base)) >> 4;
+        const timer_calibration_end = lib.arch.x86_64.readTimestamp();
         const timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
         log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
     } else {
         @panic("todo calibrate_timer");
     }
-}
-
-pub inline fn read_timestamp() u64 {
-    var rdx: u64 = undefined;
-    var rax: u64 = undefined;
-
-    asm volatile (
-        \\rdtsc
-        : [rax] "={rax}" (rax),
-          [rdx] "={rdx}" (rdx),
-    );
-
-    return rdx << 32 | rax;
 }

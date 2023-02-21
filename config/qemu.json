@@ -5,7 +5,7 @@
     },
     "virtualize": false,
     "vga": "std",
-    "smp": null,
+    "smp": 2,
     "debugcon": "stdio",
     "log": {
         "file": null,
@@ -19,6 +19,13 @@
         "ide",
         "ata",
         "ahci",
-        "sata"
+        "sata",
+        "apic_report_irq_delivered",
+        "apic_reset_irq_delivered",
+        "apic_get_irq_delivered",
+        "apic_local_deliver",
+        "apic_deliver_irq",
+        "apic_mem_readl",
+        "apic_mem_writel"
     ]
 }

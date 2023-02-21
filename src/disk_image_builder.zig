@@ -13,10 +13,6 @@ const FAT32 = lib.Filesystem.FAT32;
 
 const max_file_length = lib.maxInt(usize);
 
-const mbr_offset: u16 = 0xfe00;
-const stack_top: u16 = mbr_offset;
-const stack_size = 0x2000;
-
 const Configuration = lib.Configuration;
 
 pub fn main() anyerror!void {
@@ -144,7 +140,7 @@ pub fn main() anyerror!void {
                         const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
-                        const dap_top = stack_top - stack_size;
+                        const dap_top = bootloader.BIOS.stack_top - bootloader.BIOS.stack_size;
                         if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
                         log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
                         const dap = MBR.DAP{
@@ -158,7 +154,7 @@ pub fn main() anyerror!void {
                             @panic("unable to fit file read from disk");
                         }
 
-                        if (dap.offset - 0x600 < aligned_file_size) {
+                        if (dap.offset - bootloader.BIOS.loader_start < aligned_file_size) {
                             @panic("unable to fit loaded executable in memory");
                         }
 
@@ -325,7 +321,7 @@ pub const BootDisk = extern struct {
     const mov_ds_si = [_]u8{ 0x8e, 0xde };
     const mov_es_si = [_]u8{ 0x8e, 0xc6 };
     const mov_ss_si = [_]u8{ 0x8e, 0xd6 };
-    const mov_sp_stack_top = [_]u8{0xbc} ++ lib.asBytes(&stack_top).*;
+    const mov_sp_stack_top = [_]u8{0xbc} ++ lib.asBytes(&bootloader.BIOS.stack_top).*;
     const mov_bx_0xaa55 = [_]u8{ 0xbb, 0xaa, 0x55 };
     const cmp_bx_0xaa55 = [_]u8{ 0x81, 0xfb, 0x55, 0xaa };
 
@@ -382,7 +378,7 @@ pub const BootDisk = extern struct {
         mbr.gdt_32 = GDT32{
             .register = .{
                 .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) - 1,
-                .pointer = mbr_offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
+                .pointer = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
             },
         };
         log.debug("GDT: {}", .{mbr.gdt_32});
@@ -401,7 +397,7 @@ pub const BootDisk = extern struct {
         assembler.add_instruction(&mov_sp_stack_top);
         assembler.add_instruction(&cld);
         assembler.add_instruction(&mov_si(0x7c00));
-        assembler.add_instruction(&mov_di(mbr_offset));
+        assembler.add_instruction(&mov_di(bootloader.BIOS.mbr_offset));
         assembler.add_instruction(&mov_cx(0x200));
         assembler.add_instruction(&rep_movsb);
         try assembler.far_jmp_16(0x0, .reload_cs_16);
@@ -515,7 +511,7 @@ pub const BootDisk = extern struct {
 
         pub inline fn add_instruction(assembler: *Assembler, instruction_bytes: []const u8) void {
             assert(assembler.code_index + instruction_bytes.len <= assembler.boot_disk.code.len);
-            lib.print("[0x{x:0>4}] ", .{mbr_offset + @offsetOf(BootDisk, "code") + assembler.code_index});
+            lib.print("[0x{x:0>4}] ", .{bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + assembler.code_index});
             for (instruction_bytes) |byte| {
                 lib.print("{x:0>2} ", .{byte});
             }
@@ -531,7 +527,7 @@ pub const BootDisk = extern struct {
 
         pub fn far_jmp_16(assembler: *Assembler, segment: u16, label: Label) !void {
             const segment_bytes = lib.asBytes(&segment);
-            const offset_bytes = lib.asBytes(&mbr_offset);
+            const offset_bytes = lib.asBytes(&bootloader.BIOS.mbr_offset);
             const instruction_bytes = [_]u8{ 0xea, offset_bytes[0], offset_bytes[1], segment_bytes[0], segment_bytes[1] };
             try assembler.patches.append(.{
                 .label = label,
@@ -613,7 +609,7 @@ pub const BootDisk = extern struct {
                             switch (patch_descriptor.label_type) {
                                 .absolute => {
                                     assert(patch_descriptor.label_size == @sizeOf(u16));
-                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = mbr_offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
+                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
                                 },
                                 .relative => {
                                     assert(patch_descriptor.label_size == @sizeOf(u8));
@@ -627,7 +623,7 @@ pub const BootDisk = extern struct {
                                 },
                             }
 
-                            const instruction_start = mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                            const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
                             lib.print("[0x{x:0>4}] ", .{instruction_start});
                             const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
                             for (instruction_bytes) |byte| {
@@ -645,7 +641,7 @@ pub const BootDisk = extern struct {
                         switch (patch_descriptor.label_type) {
                             .absolute => {
                                 assert(patch_descriptor.label_size == @sizeOf(u16));
-                                const ptr = mbr_offset + @as(u16, switch (patch_descriptor.label) {
+                                const ptr = bootloader.BIOS.mbr_offset + @as(u16, switch (patch_descriptor.label) {
                                     .dap => dap_offset,
                                     .gdt => @offsetOf(BootDisk, "gdt_32"),
                                     .dap_pointer => dap_offset + @offsetOf(MBR.DAP, "offset"),
@@ -658,7 +654,7 @@ pub const BootDisk = extern struct {
                         }
 
                         log.debug("Patched instruction:", .{});
-                        const instruction_start = mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                        const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
                         lib.print("[0x{x:0>4}] ", .{instruction_start});
                         const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
                         for (instruction_bytes) |byte| {
