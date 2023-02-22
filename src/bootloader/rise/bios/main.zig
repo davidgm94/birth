@@ -308,7 +308,6 @@ export fn entryPoint() callconv(.C) noreturn {
             }
 
             // Map this struct
-
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
             VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator) catch |err| {
@@ -318,49 +317,11 @@ export fn entryPoint() callconv(.C) noreturn {
 
             bootloader_information.entry_point = parser.getEntryPoint();
 
-            // Enable PAE
-            {
-                var cr4 = asm volatile (
-                    \\mov %%cr4, %[cr4]
-                    : [cr4] "=r" (-> u32),
-                );
-                cr4 |= (1 << 5);
-                asm volatile (
-                    \\mov %[cr4], %%cr4 
-                    :
-                    : [cr4] "r" (cr4),
-                );
-            }
-
-            bootloader_information.virtual_address_space.makeCurrent();
-
-            // Enable long mode
-            {
-                var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
-                efer.LME = true;
-                efer.NXE = true;
-                efer.SCE = true;
-                efer.write();
-            }
-
-            // Enable paging
-            {
-                var cr0 = asm volatile (
-                    \\mov %%cr0, %[cr0]
-                    : [cr0] "=r" (-> u32),
-                );
-                cr0 |= (1 << 31);
-                asm volatile (
-                    \\mov %[cr0], %%cr0 
-                    :
-                    : [cr0] "r" (cr0),
-                );
-            }
-
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
+            lib.log.debug("bootloader_information: 0x{x}", .{@ptrToInt(bootloader_information)});
 
             if (bootloader_information.entry_point != 0) {
-                trampoline(bootloader_information);
+                bootloader.arch.x86_64.trampoline(bootloader_information);
             }
         }
     }
@@ -369,48 +330,10 @@ export fn entryPoint() callconv(.C) noreturn {
 }
 
 // TODO: stop this weird stack manipulation and actually learn x86 calling convention
-pub extern fn trampoline(bootloader_information: *bootloader.Information) callconv(.C) noreturn;
-export fn trampolineWrapper() callconv(.Naked) noreturn {
-    comptime {
-        const offset_offset = @offsetOf(bootloader.Information.Slice, "offset");
-        const size_offset = @offsetOf(bootloader.Information.Slice, "size");
-        lib.assert(offset_offset == 0);
-        lib.assert(size_offset == offset_offset + @sizeOf(u32));
-        lib.assert(@offsetOf(GDT.Table, "code_64") == 0x28);
-    }
-
-    asm volatile (
-        \\.global trampoline
-        \\trampoline:
-        \\cli
-        \\hlt
-        \\push %eax
-        \\jmp $0x28, $bits64
-        \\bits64:
-        // When working with registers here without REX.W 0x48 prefix, we are actually working with 64-bit ones
-        \\pop %eax 
-        // RDI: bootloader_information
-        \\pop %edi 
-        \\pop %eax
-        // RAX: entry_point
-        \\.byte 0x48
-        \\mov (%edi, %eax, 1), %eax
-        // RSI: stack mapping offset
-        \\pop %esi
-        \\.byte 0x48
-        \\add %edi, %esi
-        \\mov (%esi), %esp
-        \\add 0x4(%esi), %esp
-        \\.byte 0x48
-        \\add %esi, %esp
-        \\xor %ebp, %ebp
-        // jmp rax
-        \\.byte 0xff
-        \\.byte 0xe0
-    );
-
-    unreachable;
-}
+// export fn trampoline() callconv(.Naked) noreturn {
+//
+//     unreachable;
+// }
 
 pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;
