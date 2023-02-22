@@ -88,6 +88,7 @@ pub fn build(b_arg: *Build) !void {
 
         break :blk exe;
     };
+    build_steps.build_all.dependOn(&disk_image_builder.step);
 
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8, modules: []const ModuleID }{
         .{ .name = "host_test", .zig_source_file = "src/host_test.zig", .modules = &.{ .lib, .host } },
@@ -529,6 +530,10 @@ const RunSteps = struct {
             try argument_list.append("-no-shutdown");
         }
 
+        if (ci) {
+            try argument_list.appendSlice(&.{ "-display", "none" });
+        }
+
         //if (arguments.vga) |vga| {
         //try argument_list.append("-vga");
         //try argument_list.append(@tagName(vga));
@@ -574,7 +579,7 @@ const RunSteps = struct {
 
                 if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
                 if (log_configuration.interrupts) try log_what.appendSlice("int,");
-                if (log_configuration.assembly) try log_what.appendSlice("in_asm,");
+                if (!ci and log_configuration.assembly) try log_what.appendSlice("in_asm,");
 
                 if (log_what.items.len > 0) {
                     // Delete the last comma

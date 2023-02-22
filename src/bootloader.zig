@@ -245,9 +245,13 @@ pub const Information = extern struct {
         return slice.dereference(offset_name, information);
     }
 
-    pub inline fn getStackTop(information: *const Information) u64 {
+    pub inline fn getStackTop(information: *const Information) usize {
         const stack_slice = information.getSlice(.cpu_driver_stack);
         return @ptrToInt(stack_slice.ptr) + stack_slice.len;
+    }
+
+    pub fn getStackSliceOffset() comptime_int {
+        return @offsetOf(Information, "slices") + (@as(comptime_int, @enumToInt(Slice.Name.cpu_driver_stack)) * @sizeOf(Slice));
     }
 
     pub fn getMemoryMapEntryCount(information: *Information) usize {
