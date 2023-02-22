@@ -218,7 +218,7 @@ export fn entryPoint() callconv(.C) noreturn {
         break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
     };
 
-    bootloader_information.initializeSMP(madt);
+    //bootloader_information.initializeSMP(madt);
 
     bootloader_information.virtual_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
