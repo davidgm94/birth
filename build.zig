@@ -529,6 +529,10 @@ const RunSteps = struct {
             try argument_list.append("-no-shutdown");
         }
 
+        if (ci) {
+            try argument_list.appendSlice(&.{ "-display", "none" });
+        }
+
         //if (arguments.vga) |vga| {
         //try argument_list.append("-vga");
         //try argument_list.append(@tagName(vga));
