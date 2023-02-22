@@ -248,8 +248,10 @@ export fn entryPoint() callconv(.C) noreturn {
     bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
     // Map more than necessary
+    //
+    // Dirty trick
     const loader_stack_size = 0x2000;
-    const loader_stack = PhysicalAddress(.global).new(BIOS.stack_top - loader_stack_size);
+    const loader_stack = PhysicalAddress(.global).new(lib.alignForwardGeneric(u32, BIOS.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
     VirtualAddressSpace.paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
     for (files) |file| {
