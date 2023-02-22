@@ -203,7 +203,7 @@ pub fn main() noreturn {
             .length = memory_map_entry_count,
             .alignment = @alignOf(u32),
         },
-        .cpus = .{
+        .smps = .{
             .length = cpu_count,
             .alignment = 8,
         },
@@ -232,6 +232,10 @@ pub fn main() noreturn {
         .configuration = .{ .memory_map_diff = 0 },
         .heap = .{},
         .cpu_driver_mappings = .{},
+        .smp = .{
+            .cpu_count = cpu_count,
+            .bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*,
+        },
         .framebuffer = framebuffer,
         .draw_context = .{},
         .font = undefined,
