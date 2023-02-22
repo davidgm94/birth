@@ -314,10 +314,6 @@ export fn entryPoint() callconv(.C) noreturn {
                 @panic("Mapping of bootloader information failed");
             };
 
-            comptime {
-                lib.assert(@offsetOf(GDT.Table, "code_64") == 0x08);
-            }
-
             bootloader_information.entry_point = parser.getEntryPoint();
 
             // Enable PAE
@@ -359,14 +355,10 @@ export fn entryPoint() callconv(.C) noreturn {
                 );
             }
 
-            gdt.setup(0, false);
-
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
             if (bootloader_information.entry_point != 0) {
-                const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
-                const stack_offset = @offsetOf(bootloader.Information, "slices") + (@as(u32, @enumToInt(bootloader.Information.Slice.Name.cpu_driver_stack)) * @sizeOf(bootloader.Information.Slice));
-                trampoline(bootloader_information_virtual_address.value(), entry_point_offset, stack_offset);
+                trampoline(bootloader_information);
             }
         }
     }
@@ -375,18 +367,23 @@ export fn entryPoint() callconv(.C) noreturn {
 }
 
 // TODO: stop this weird stack manipulation and actually learn x86 calling convention
-pub extern fn trampoline(bootloader_information: u64, entry_point_offset: u64, stack_offset: u64) noreturn;
-comptime {
-    const offset_offset = @offsetOf(bootloader.Information.Slice, "offset");
-    const size_offset = @offsetOf(bootloader.Information.Slice, "size");
-    lib.assert(offset_offset == 0);
-    lib.assert(size_offset == offset_offset + @sizeOf(u32));
+pub extern fn trampoline(bootloader_information: *bootloader.Information) callconv(.C) noreturn;
+export fn trampolineWrapper() callconv(.Naked) noreturn {
+    comptime {
+        const offset_offset = @offsetOf(bootloader.Information.Slice, "offset");
+        const size_offset = @offsetOf(bootloader.Information.Slice, "size");
+        lib.assert(offset_offset == 0);
+        lib.assert(size_offset == offset_offset + @sizeOf(u32));
+        lib.assert(@offsetOf(GDT.Table, "code_64") == 0x28);
+    }
 
-    asm (
+    asm volatile (
         \\.global trampoline
         \\trampoline:
+        \\cli
+        \\hlt
         \\push %eax
-        \\jmp $0x8, $bits64
+        \\jmp $0x28, $bits64
         \\bits64:
         // When working with registers here without REX.W 0x48 prefix, we are actually working with 64-bit ones
         \\pop %eax 
@@ -409,6 +406,8 @@ comptime {
         \\.byte 0xff
         \\.byte 0xe0
     );
+
+    unreachable;
 }
 
 pub const std_options = struct {

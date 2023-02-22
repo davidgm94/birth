@@ -2,6 +2,10 @@
 .code16
 .align 0x1000
 .global smp_trampoline
+.global smp_trampoline_arg_start
+.global smp_trampoline_arg_end
+.global far_jump_segment
+.global gdt32_ds
 smp_trampoline:
 cli
 cld
@@ -10,17 +14,84 @@ mov %cs, %ebx
 shl $0x4, %ebx
 
 lidtl %cs:(invalid_idt - smp_trampoline)
-hlt
+lgdtl %cs:(arg_gdt_address - smp_trampoline)
+leal (protected_mode - smp_trampoline)(%ebx), %eax
+movl %eax, %cs:(far_jump_offset - smp_trampoline)
+movl $0x11, %eax
+movl %eax, %cr0
+xorl %eax, %eax
+mov %cs:(gdt32_ds - smp_trampoline), %ax
+ljmpl *%cs:(far_jump - smp_trampoline)
+
+far_jump:
+far_jump_offset: .double 0
+// This is supposed to contain 
+far_jump_segment: .double 0
+gdt32_ds:
+.word 0
+
+.code32
+protected_mode:
+movw %ax, %ds
+movw %ax, %es
+movw %ax, %fs
+movw %ax, %gs
+movw %ax, %ss
+xorl %eax, %eax
+lldtw %ax
+xorl %eax, %eax
+movl %eax, %cr4
+
+// TODO: Change
+// always no x2apic
+lea (temporal_stack_top - smp_trampoline)(%ebx), %esp
+
+
+.align 16
+
+temporal_stack:
+.fill 128, 0
+temporal_stack_top:
+
 invalid_idt:
 .quad 0
 .quad 0
 
-.align 16
+.align 8
 smp_trampoline_arg_start:
-.quad 0
+arg_hhdm:
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+arg_cr3:
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+arg_booted:
+.byte 0
+arg_options:
+.byte 0
+arg_gdt_start:
+arg_gdt_limit:
+.byte 0
+.byte 0
+arg_gdt_address:
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
+.byte 0
 smp_trampoline_arg_end:
-.global smp_trampoline_arg_start
-.global smp_trampoline_arg_end
+
 
 .code32
 .align 0x10
@@ -135,4 +206,3 @@ ret
 .real_mode_idt: 
     .word 0x3ff
     .long 0
-

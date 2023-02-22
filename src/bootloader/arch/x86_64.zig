@@ -26,10 +26,7 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
 
         const stack_top = bootloader_information.getStackTop();
         const entry_point = bootloader_information.entry_point;
-        const gdt = GDT.Descriptor{
-            .limit = GDT.Table.get_size() - 1,
-            .address = @ptrToInt(&bootloader_information.architecture.gdt),
-        };
+        const gdt = bootloader_information.architecture.gdt.getDescriptor();
 
         _ = asm volatile (
             \\lgdt %[gdt_register]

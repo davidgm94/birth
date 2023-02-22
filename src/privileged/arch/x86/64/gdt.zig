@@ -13,23 +13,27 @@ pub const Descriptor = DescriptorTable.Register;
 // This is the most basic x86_64 GDT
 pub const Table = extern struct {
     null_entry: Entry = 0, // 0x00
-    code_64: Entry = 0x00af9b000000ffff, // 0x08
-    data_64: Entry = 0x00af93000000ffff, // 0x10
-    user_data_64: Entry = 0x00cff2000000ffff, // 0x18
-    user_code_64: Entry = 0x00affb000000ffff, // 0x20
+    code_16: Entry = 0x00_0f9a_00_0000ffff, // 0x08
+    data_16: Entry = 0x00_0f92_00_0000ffff, // 0x10
+    code_32: Entry = 0x00_cf9a_00_0000ffff, // 0x18
+    data_32: Entry = 0x00_cf92_00_0000ffff, // 0x20
+    code_64: Entry = 0x00af9b000000ffff, // 0x28
+    data_64: Entry = 0x00af93000000ffff, // 0x30
+    user_data_64: Entry = 0x00cff2000000ffff, // 0x38
+    user_code_64: Entry = 0x00affb000000ffff, // 0x40
     // We don't need a user data 64 selector because 32 bit is enough, most values are not relevant
     tss_descriptor: TSS.Descriptor = undefined,
     tss: TSS.Struct align(8) = .{},
 
     comptime {
-        const entry_count = 5;
+        const entry_count = 9;
         const target_size = entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor) + @sizeOf(TSS.Struct);
 
         assert(@sizeOf(Table) == target_size);
-        assert(@offsetOf(Table, "code_64") == 0x08);
-        assert(@offsetOf(Table, "data_64") == 0x10);
-        assert(@offsetOf(Table, "user_data_64") == 0x18);
-        assert(@offsetOf(Table, "user_code_64") == 0x20);
+        assert(@offsetOf(Table, "code_64") == 0x28);
+        assert(@offsetOf(Table, "data_64") == 0x30);
+        assert(@offsetOf(Table, "user_data_64") == 0x38);
+        assert(@offsetOf(Table, "user_code_64") == 0x40);
         assert(@offsetOf(Table, "tss_descriptor") == entry_count * @sizeOf(Entry));
     }
 
@@ -52,19 +56,11 @@ pub const Table = extern struct {
         }
     }
 
-    pub fn fill_with_kernel_memory_offset(gdt: *Table, offset: u64) DescriptorTable.Register {
-        gdt.* = Table{
-            .tss_descriptor = undefined, // Leave it undefined until later
+    pub fn getDescriptor(gdt: *const GDT.Table) GDT.Descriptor {
+        return .{
+            .limit = @offsetOf(GDT.Table, "tss"),
+            .address = @ptrToInt(gdt),
         };
-
-        return DescriptorTable.Register{
-            .limit = get_size() - 1,
-            .address = @ptrToInt(gdt) + offset,
-        };
-    }
-
-    pub fn get_size() u16 {
-        return @offsetOf(GDT.Table, "tss");
     }
 
     pub inline fn load(descriptor: DescriptorTable.Register) void {

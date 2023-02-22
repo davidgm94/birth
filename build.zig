@@ -177,6 +177,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                             executable.want_lto = true;
                             executable.strip = true;
                             executable.entry_symbol_name = entry_point_name;
+                            executable.code_model = .small;
 
                             modules.addModule(executable, .lib);
                             modules.addModule(executable, .bootloader);

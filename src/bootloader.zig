@@ -129,9 +129,21 @@ pub const Information = extern struct {
         };
 
         pub const Trampoline = struct {
+            comptime {
+                assert(lib.cpu.arch == .x86 or lib.cpu.arch == .x86_64);
+            }
             pub const Argument = extern struct {
-                foo: u32,
-                foo2: u32,
+                hhdm: u64 align(8),
+                cr3: u32,
+                booted: bool,
+                options: packed struct(u8) {
+                    reserved: u8 = 0,
+                },
+                gdt_descriptor: privileged.arch.x86_64.GDT.Descriptor,
+
+                comptime {
+                    assert(@sizeOf(Argument) == 24);
+                }
             };
         };
     };
@@ -144,6 +156,7 @@ pub const Information = extern struct {
             var smp_index: usize = 0;
 
             lib.log.debug("BSP Apic: 0x{x}", .{bootloader_information.smp.bsp_lapic_id});
+            lib.log.debug("bootloader information: 0x{x}", .{@ptrToInt(bootloader_information)});
             if (bootloader_information.smp.cpu_count > 1) {
                 const smp_trampoline = @ptrToInt(&arch.x86_64.smp_trampoline);
                 // Sanity checks
@@ -152,7 +165,9 @@ pub const Information = extern struct {
                 if (!lib.isAligned(trampoline_argument_start, @alignOf(SMP.Trampoline.Argument))) @panic("SMP trampoline argument alignment must match");
                 const trampoline_argument_end = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_end" }));
                 const trampoline_argument_size = trampoline_argument_end - trampoline_argument_start;
-                if (trampoline_argument_size != @sizeOf(SMP.Trampoline.Argument)) @panic("SMP trampoline argument size must match");
+                if (trampoline_argument_size != @sizeOf(SMP.Trampoline.Argument)) {
+                    @panic("SMP trampoline argument size must match");
+                }
 
                 //const lapicRead = privileged.arch.x86_64.APIC.read;
                 const lapicWrite = privileged.arch.x86_64.APIC.write;
