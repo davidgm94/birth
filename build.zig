@@ -578,7 +578,7 @@ const RunSteps = struct {
 
                 if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
                 if (log_configuration.interrupts) try log_what.appendSlice("int,");
-                if (log_configuration.assembly) try log_what.appendSlice("in_asm,");
+                if (!ci and log_configuration.assembly) try log_what.appendSlice("in_asm,");
 
                 if (log_what.items.len > 0) {
                     // Delete the last comma
