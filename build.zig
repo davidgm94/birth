@@ -88,6 +88,7 @@ pub fn build(b_arg: *Build) !void {
 
         break :blk exe;
     };
+    build_steps.build_all.dependOn(&disk_image_builder.step);
 
     const native_tests = [_]struct { name: []const u8, zig_source_file: []const u8, modules: []const ModuleID }{
         .{ .name = "host_test", .zig_source_file = "src/host_test.zig", .modules = &.{ .lib, .host } },
