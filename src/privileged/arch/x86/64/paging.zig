@@ -215,7 +215,7 @@ fn map_generic(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
 }
 
 fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
-    const indices = compute_indices(virtual_address);
+    const indices = computeIndices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
@@ -224,7 +224,7 @@ fn map_1gb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags
 }
 
 fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
-    const indices = compute_indices(virtual_address);
+    const indices = computeIndices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
@@ -234,7 +234,7 @@ fn map_2mb_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags
 }
 
 fn map_4k_page(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) MapError!void {
-    const indices = compute_indices(virtual_address);
+    const indices = computeIndices(virtual_address);
 
     const pml4_table = get_pml4_table(vas_cr3);
     const pdp_table = get_pdp_table(pml4_table, indices, physical_allocator);
@@ -273,7 +273,7 @@ fn get_pdp_table(pml4_table: *volatile PML4Table, indices: Indices, physical_all
         const entry_value = entry_pointer.*;
         //log.debug("PML4 entry: {}", .{entry_value});
         if (entry_value.present) {
-            break :physical_address_blk unpack_address(entry_value);
+            break :physical_address_blk unpackAddress(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
             const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
@@ -369,7 +369,7 @@ fn get_pd_table(pdp_table: *volatile PDPTable, indices: Indices, physical_alloca
             if (entry_value.page_size) {
                 @panic("todo pd table page size");
             }
-            break :physical_address_blk unpack_address(entry_value);
+            break :physical_address_blk unpackAddress(entry_value);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
             const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
@@ -400,7 +400,7 @@ fn get_p_table(pd_table: *volatile PDTable, indices: Indices, physical_allocator
             if (entry_value.page_size) {
                 @panic("todo ptable page size");
             }
-            break :physical_address_blk unpack_address(entry_value);
+            break :physical_address_blk unpackAddress(entry_value);
         } else {
             const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
 
@@ -529,7 +529,7 @@ pub fn map_kernel_address_space_higher_half(new_cr3: cr3, kernel_cr3: cr3) void 
     copy(PML4TE, pml4[0x100..], kernel_cr3.getAddress().toHigherHalfVirtualAddress().access(*PML4Table)[0x100..]);
 }
 
-fn compute_indices(virtual_address: u64) Indices {
+fn computeIndices(virtual_address: u64) Indices {
     var indices: Indices = undefined;
     var va = virtual_address;
     va = va >> 12;
@@ -600,7 +600,7 @@ const PageIndex = enum(u3) {
     PT = 3,
 };
 
-fn unpack_address(entry: anytype) u64 {
+inline fn unpackAddress(entry: anytype) u64 {
     const T = @TypeOf(entry);
     const address_offset = @bitOffsetOf(T, "address");
     return @as(u64, entry.address) << address_offset;
@@ -756,3 +756,70 @@ const PML4Table = [512]PML4TE;
 const PDPTable = [512]PDPTE;
 const PDTable = [512]PDTE;
 const PTable = [512]PTE;
+
+pub const TranslateError = error{
+    pml4_entry_not_present,
+    pml4_entry_address_null,
+    pdp_entry_not_present,
+    pdp_entry_address_null,
+    pd_entry_not_present,
+    pd_entry_address_null,
+    pt_entry_not_present,
+    pt_entry_address_null,
+};
+
+pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress(.local)) TranslateError!PhysicalAddress(.local) {
+    const indices = computeIndices(virtual_address.value());
+
+    const vas_cr3 = virtual_address_space.arch.cr3;
+    log.debug("CR3: {}", .{vas_cr3});
+
+    const pml4_physical_address = vas_cr3.getAddress();
+    log.debug("PML4: 0x{x}", .{pml4_physical_address.value()});
+
+    const pml4_table = pml4_physical_address.toIdentityMappedVirtualAddress().access(*PML4Table);
+    const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
+    if (!pml4_entry.present) {
+        return TranslateError.pml4_entry_not_present;
+    }
+
+    const pml4_entry_address = PhysicalAddress(.local).new(unpackAddress(pml4_entry));
+    if (pml4_entry_address.value() == 0) {
+        return TranslateError.pml4_entry_address_null;
+    }
+
+    const pdp_table = pml4_entry_address.toIdentityMappedVirtualAddress().access(*PDPTable);
+    const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    if (!pdp_entry.present) {
+        return TranslateError.pdp_entry_not_present;
+    }
+
+    const pdp_entry_address = PhysicalAddress(.local).new(unpackAddress(pdp_entry));
+    if (pdp_entry_address.value() == 0) {
+        return TranslateError.pdp_entry_address_null;
+    }
+
+    const pd_table = pdp_entry_address.toIdentityMappedVirtualAddress().access(*PDTable);
+    const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
+    if (!pd_entry.present) {
+        return TranslateError.pd_entry_not_present;
+    }
+
+    const pd_entry_address = PhysicalAddress(.local).new(unpackAddress(pd_entry));
+    if (pd_entry_address.value() == 0) {
+        return TranslateError.pd_entry_address_null;
+    }
+
+    const pt_table = pd_entry_address.toIdentityMappedVirtualAddress().access(*PTable);
+    const pt_entry = pt_table[indices[@enumToInt(PageIndex.PT)]];
+    if (!pt_entry.present) {
+        return TranslateError.pd_entry_not_present;
+    }
+
+    const pt_entry_address = PhysicalAddress(.local).new(unpackAddress(pt_entry));
+    if (pt_entry_address.value() == 0) {
+        return TranslateError.pd_entry_address_null;
+    }
+
+    return pt_entry_address;
+}

@@ -9,6 +9,7 @@ SECTIONS {
     . = 0x1000;
     loader_start = .;
     .text . : {
+        *(.smp_trampoline*)
         *(.realmode*)
         *(.text*)
     }:text

@@ -15,13 +15,6 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
         privileged.arch.stopCPU();
     }
 
-    // Enable long mode and certain important bits
-    var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
-    efer.LME = true;
-    efer.NXE = true;
-    efer.SCE = true;
-    efer.write();
-
     bootloader_information_arg.virtual_address_space.makeCurrent();
 
     if (lib.cpu.arch == .x86) {

@@ -128,10 +128,13 @@ pub const Information = extern struct {
             bsp_lapic_id: u32,
         };
 
-        pub const Trampoline = struct {
+        pub const Trampoline = extern struct {
+            address: u32,
+
             comptime {
                 assert(lib.cpu.arch == .x86 or lib.cpu.arch == .x86_64);
             }
+
             pub const Argument = extern struct {
                 hhdm: u64 align(8),
                 cr3: u32,
@@ -139,15 +142,16 @@ pub const Information = extern struct {
                 options: packed struct(u8) {
                     reserved: u8 = 0,
                 },
-                gdt_descriptor: privileged.arch.x86_64.GDT.Descriptor,
+                reserved: u16 = 0,
 
                 comptime {
-                    assert(@sizeOf(Argument) == 24);
+                    assert(@sizeOf(Argument) == 16);
                 }
             };
         };
     };
 
+    const lapicWrite = privileged.arch.x86_64.APIC.write;
     pub fn initializeSMP(bootloader_information: *Information, madt: *const ACPI.MADT) void {
         if (lib.cpu.arch == .x86) {
             const smp_records = bootloader_information.getSlice(.smps);
@@ -155,13 +159,12 @@ pub const Information = extern struct {
             var iterator = madt.getIterator();
             var smp_index: usize = 0;
 
-            lib.log.debug("BSP Apic: 0x{x}", .{bootloader_information.smp.bsp_lapic_id});
-            lib.log.debug("bootloader information: 0x{x}", .{@ptrToInt(bootloader_information)});
             if (bootloader_information.smp.cpu_count > 1) {
                 const smp_trampoline = @ptrToInt(&arch.x86_64.smp_trampoline);
                 // Sanity checks
                 if (!lib.isAligned(smp_trampoline, lib.arch.valid_page_sizes[0])) @panic("SMP trampoline must be 0x1000-aligned");
-                const trampoline_argument_start = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_start" }));
+                const trampoline_argument = @extern(*SMP.Trampoline.Argument, .{ .name = "smp_trampoline_arg_start" });
+                const trampoline_argument_start = @ptrToInt(trampoline_argument);
                 if (!lib.isAligned(trampoline_argument_start, @alignOf(SMP.Trampoline.Argument))) @panic("SMP trampoline argument alignment must match");
                 const trampoline_argument_end = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_end" }));
                 const trampoline_argument_size = trampoline_argument_end - trampoline_argument_start;
@@ -169,8 +172,22 @@ pub const Information = extern struct {
                     @panic("SMP trampoline argument size must match");
                 }
 
-                //const lapicRead = privileged.arch.x86_64.APIC.read;
-                const lapicWrite = privileged.arch.x86_64.APIC.write;
+                if (@bitCast(u64, bootloader_information.virtual_address_space.arch.cr3) > lib.maxInt(u32)) {
+                    @panic("CR3 overflow");
+                }
+
+                trampoline_argument.* = .{
+                    .hhdm = bootloader_information.higher_half,
+                    .cr3 = @intCast(u32, @bitCast(u64, bootloader_information.virtual_address_space.arch.cr3)),
+                    .booted = false,
+                    .options = .{},
+                };
+
+                // const virtual_address = VirtualAddress(.local).new(0x1000);
+                // const result = privileged.arch.x86_64.paging.translateAddress(&bootloader_information.virtual_address_space, virtual_address);
+                // _ = result;
+
+                @extern(*privileged.arch.x86_64.GDT.Descriptor, .{ .name = "smp_gdt_descriptor" }).address = @ptrToInt(@extern(*u8, .{ .name = "smp_gdt" }));
 
                 while (iterator.next()) |entry| {
                     switch (entry.type) {
@@ -188,6 +205,7 @@ pub const Information = extern struct {
                                 smp_index += 1;
                                 continue;
                             }
+
                             lib.log.debug("SMP trampoline: 0x{x}. Lapic ID: {}. Flag 0: {}. Flag 1: {}", .{ smp_trampoline, lapic_id, lapic_entry.flags.enabled, lapic_entry.flags.online_capable });
 
                             lapicWrite(.icr_high, lapic_id << 24);
@@ -201,8 +219,13 @@ pub const Information = extern struct {
                             lapicWrite(.icr_low, icr_low);
 
                             for (0..100) |_| {
+                                if (@cmpxchgStrong(bool, &trampoline_argument.booted, true, false, .SeqCst, .SeqCst) == null) {
+                                    lib.log.debug("Booted core #{}", .{lapic_id});
+                                    break;
+                                }
+
                                 arch.x86_64.delay(10_000_000);
-                            }
+                            } else @panic("SMP not booted");
 
                             // pub const LAPIC = extern struct {
                             //     record: Record,
@@ -222,7 +245,7 @@ pub const Information = extern struct {
                     }
                 }
 
-                @panic("SMP enabled");
+                //@panic("SMP enabled");
             } else {
                 @panic("SMP disabled");
             }

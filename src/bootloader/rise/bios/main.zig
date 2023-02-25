@@ -25,10 +25,6 @@ extern const loader_end: u8;
 var files: [16]File = undefined;
 var file_count: u8 = 0;
 
-var gdt = GDT.Table{
-    .tss_descriptor = undefined,
-};
-
 const File = struct {
     path: []const u8,
     content: []const u8,
@@ -218,8 +214,6 @@ export fn entryPoint() callconv(.C) noreturn {
         break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
     };
 
-    //bootloader_information.initializeSMP(madt);
-
     bootloader_information.virtual_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
         const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
@@ -315,11 +309,20 @@ export fn entryPoint() callconv(.C) noreturn {
                 @panic("Mapping of bootloader information failed");
             };
 
+            // Enable long mode and certain important bits
+            var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
+            efer.LME = true;
+            efer.NXE = true;
+            efer.SCE = true;
+            efer.write();
+
+            bootloader_information.initializeSMP(madt);
+
             bootloader_information.entry_point = parser.getEntryPoint();
 
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
-            lib.log.debug("bootloader_information: 0x{x}", .{@ptrToInt(bootloader_information)});
 
+            lib.log.debug("bootloader_information: 0x{x}", .{@ptrToInt(bootloader_information)});
             if (bootloader_information.entry_point != 0) {
                 bootloader.arch.x86_64.trampoline(bootloader_information);
             }
@@ -328,12 +331,6 @@ export fn entryPoint() callconv(.C) noreturn {
 
     @panic("loader not found");
 }
-
-// TODO: stop this weird stack manipulation and actually learn x86 calling convention
-// export fn trampoline() callconv(.Naked) noreturn {
-//
-//     unreachable;
-// }
 
 pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;

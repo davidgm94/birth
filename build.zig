@@ -169,7 +169,8 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                                 .target = getTarget(.x86, .privileged),
                                 .optimize = .ReleaseSmall,
                             });
-                            executable.addAssemblyFile(bootloader_path ++ "assembly.S");
+                            executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
+                            executable.addAssemblyFile(bootloader_path ++ "unreal_mode.S");
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");
                             executable.setLinkerScriptPath(FileSource.relative(bootloader_path ++ "linker_script.ld"));

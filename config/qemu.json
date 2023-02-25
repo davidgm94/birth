@@ -5,12 +5,12 @@
     },
     "virtualize": false,
     "vga": "std",
-    "smp": 2,
+    "smp": 5,
     "debugcon": "stdio",
     "log": {
         "file": null,
         "guest_errors": true,
-        "assembly": true,
+        "assembly": false,
         "interrupts": true
     },
     "trace": [
