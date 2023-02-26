@@ -147,7 +147,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
         const bootloader = bootloader_struct.id;
         for (bootloader_struct.protocols) |protocol| {
             const rise_loader_path = "src/bootloader/rise/";
-            const name = try Suffix.bootloader.fromConfiguration(b.allocator, .{
+            const bootloader_name = try Suffix.bootloader.fromConfiguration(b.allocator, .{
                 .architecture = architecture,
                 .bootloader = bootloader,
                 .boot_protocol = protocol,
@@ -157,6 +157,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                 .execution_type = undefined,
                 .executable_kind = undefined,
             }, "bootloader_");
+
             const maybe_bootloader_compile_step: ?*CompileStep = switch (bootloader) {
                 .rise => switch (architecture) {
                     .x86_64 => switch (protocol) {
@@ -164,7 +165,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                             const bootloader_path = rise_loader_path ++ "bios/";
                             //try configuration.getSuffix()
                             const executable = b.addExecutable(.{
-                                .name = name,
+                                .name = bootloader_name,
                                 .root_source_file = FileSource.relative(bootloader_path ++ "main.zig"),
                                 .target = getTarget(.x86, .privileged),
                                 .optimize = .ReleaseSmall,
@@ -189,7 +190,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                         },
                         .uefi => blk: {
                             const executable = b.addExecutable(.{
-                                .name = name,
+                                .name = bootloader_name,
                                 .root_source_file = FileSource.relative(rise_loader_path ++ "uefi/main.zig"),
                                 .target = .{
                                     .cpu_arch = .x86_64,
@@ -244,12 +245,42 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                     .executable_kind = .normal_exe,
                 };
 
-                const run_steps = try RunSteps.create(configuration, .{
-                    .cpu_driver = cpu_driver,
-                    .cpu_driver_test = cpu_driver_test,
-                    .bootloader_step = maybe_bootloader_compile_step,
-                    .disk_image_builder = disk_image_builder,
-                });
+                const run_steps = try b.allocator.create(RunSteps);
+                const suffix = try Suffix.complete.fromConfiguration(b.allocator, configuration, null);
+                var test_configuration = configuration;
+                test_configuration.executable_kind = .test_exe;
+                const test_suffix = try Suffix.complete.fromConfiguration(b.allocator, test_configuration, null);
+
+                run_steps.* = .{
+                    .configuration = configuration,
+                    .run = Step.init(.custom, "_run_", b.allocator, RunSteps.run),
+                    .debug = Step.init(.custom, "_debug_", b.allocator, RunSteps.debug),
+                    .gdb_script = Step.init(.custom, "_gdb_script_", b.allocator, RunSteps.gdbScript),
+                    .disk_image_builder = disk_image_builder.run(),
+                    .test_run = Step.init(.custom, "_test_run_", b.allocator, RunSteps.run),
+                    .test_debug = Step.init(.custom, "_test_debug_", b.allocator, RunSteps.debug),
+                    .test_gdb_script = Step.init(.custom, "_test_gdb_script_", b.allocator, RunSteps.gdbScript),
+                    .test_disk_image_builder = disk_image_builder.run(),
+                };
+
+                const normal_setup = .{ .cpu_driver = cpu_driver, .bootloader_step = maybe_bootloader_compile_step, .disk_image_builder = disk_image_builder, .disk_image_builder_run = run_steps.disk_image_builder };
+                const test_setup = .{ .cpu_driver = cpu_driver_test, .bootloader_step = maybe_bootloader_compile_step, .disk_image_builder = disk_image_builder, .disk_image_builder_run = run_steps.test_disk_image_builder };
+                try run_steps.createStep("run", normal_setup, suffix);
+                try run_steps.createStep("debug", normal_setup, suffix);
+
+                inline for (common.fields(Configuration)) |field| {
+                    run_steps.disk_image_builder.addArg(@tagName(@field(configuration, field.name)));
+                }
+
+                try run_steps.createStep("test_run", test_setup, test_suffix);
+                try run_steps.createStep("test_debug", test_setup, test_suffix);
+
+                inline for (common.fields(Configuration)) |field| {
+                    run_steps.test_disk_image_builder.addArg(@tagName(@field(test_configuration, field.name)));
+                }
+
+                run_steps.debug.dependOn(&run_steps.gdb_script);
+                run_steps.test_debug.dependOn(&run_steps.test_gdb_script);
 
                 build_steps.test_all.dependOn(&run_steps.test_run);
 
@@ -338,59 +369,18 @@ const RunSteps = struct {
 
     const RunStepsSetup = struct {
         cpu_driver: *CompileStep,
-        cpu_driver_test: *CompileStep,
         bootloader_step: ?*CompileStep,
         disk_image_builder: *CompileStep,
+        disk_image_builder_run: *RunStep,
     };
 
-    fn create(configuration: Configuration, setup: RunStepsSetup) !*RunSteps {
-        const run_steps = try b.allocator.create(RunSteps);
-        const suffix = try Suffix.complete.fromConfiguration(b.allocator, configuration, null);
-        var test_configuration = configuration;
-        test_configuration.executable_kind = .test_exe;
-        const test_suffix = try Suffix.complete.fromConfiguration(b.allocator, test_configuration, null);
-
-        run_steps.* = .{
-            .configuration = configuration,
-            .run = Step.init(.custom, "_run_", b.allocator, run),
-            .debug = Step.init(.custom, "_debug_", b.allocator, debug),
-            .gdb_script = Step.init(.custom, "_gdb_script_", b.allocator, gdbScript),
-            .disk_image_builder = setup.disk_image_builder.run(),
-            .test_run = Step.init(.custom, "_test_run_", b.allocator, run),
-            .test_debug = Step.init(.custom, "_test_debug_", b.allocator, debug),
-            .test_gdb_script = Step.init(.custom, "_test_gdb_script_", b.allocator, gdbScript),
-            .test_disk_image_builder = setup.disk_image_builder.run(),
-        };
-
-        try run_steps.createStep("run", setup, suffix);
-        try run_steps.createStep("debug", setup, suffix);
-
-        inline for (common.fields(Configuration)) |field| {
-            run_steps.disk_image_builder.addArg(@tagName(@field(configuration, field.name)));
-        }
-
-        try run_steps.createStep("test_run", setup, test_suffix);
-        try run_steps.createStep("test_debug", setup, test_suffix);
-
-        inline for (common.fields(Configuration)) |field| {
-            run_steps.test_disk_image_builder.addArg(@tagName(@field(test_configuration, field.name)));
-        }
-
-        run_steps.debug.dependOn(&run_steps.gdb_script);
-        run_steps.test_debug.dependOn(&run_steps.test_gdb_script);
-
-        return run_steps;
-    }
-
     fn createStep(run_steps: *RunSteps, comptime step: []const u8, setup: RunStepsSetup, suffix: []const u8) !void {
-        const is_test = std.mem.containsAtLeast(u8, step, 1, "test");
         if (setup.bootloader_step) |bs| {
             @field(run_steps, step).dependOn(&bs.step);
         }
-        const cpu_driver = if (is_test) setup.cpu_driver_test else setup.cpu_driver;
-        @field(run_steps, step).dependOn(&cpu_driver.step);
+        @field(run_steps, step).dependOn(&setup.cpu_driver.step);
         @field(run_steps, step).dependOn(&setup.disk_image_builder.step);
-        @field(run_steps, step).dependOn(if (is_test) &run_steps.test_disk_image_builder.step else &run_steps.disk_image_builder.step);
+        @field(run_steps, step).dependOn(&setup.disk_image_builder_run.step);
         const final_step = b.step(try std.mem.concat(b.allocator, u8, &.{ step, "_", suffix }), "Run the operating system through an emulator");
         final_step.dependOn(&@field(run_steps, step));
     }
@@ -452,7 +442,7 @@ const RunSteps = struct {
         const is_debug = true;
         var arguments = try qemuCommon(run_steps, .{ .is_debug = is_debug, .is_test = is_test });
 
-        if (!arguments.config.isVirtualizing(run_steps.configuration.execution_type)) {
+        if (!(run_steps.configuration.execution_type == .accelerated or (arguments.config.virtualize orelse false))) {
             try arguments.list.append("-S");
         }
 
@@ -503,7 +493,7 @@ const RunSteps = struct {
     };
 
     fn qemuCommon(run_steps: *RunSteps, options: QEMUOptions) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
-        const config_file = try readConfig(run_steps.configuration.execution_environment);
+        const config_file = try std.fs.cwd().readFileAlloc(b.allocator, try std.mem.concat(b.allocator, u8, &.{"config/" ++ @tagName(run_steps.configuration.execution_environment) ++ ".json"}), common.maxInt(usize));
         var token_stream = std.json.TokenStream.init(config_file);
         const arguments = try std.json.parse(Arguments, &token_stream, .{ .allocator = b.allocator });
 
@@ -563,8 +553,7 @@ const RunSteps = struct {
             }) });
             try argument_list.append(memory_argument);
         }
-
-        if (virtualizeWithQEMU(arguments, run_steps.configuration, run_steps.configuration.execution_type)) {
+        if (canVirtualizeWithQEMU(run_steps.configuration.architecture) and (run_steps.configuration.execution_type == .accelerated or (arguments.virtualize orelse false))) {
             try argument_list.appendSlice(&.{
                 "-accel",
                 switch (common.os) {
@@ -638,17 +627,8 @@ const RunSteps = struct {
             interrupts: bool,
         },
         trace: ?[]const []const u8,
-
-        pub fn isVirtualizing(arguments: Arguments, execution_type_override: ExecutionType) bool {
-            if (execution_type_override == .accelerated) return true;
-            return arguments.virtualize orelse false;
-        }
     };
 };
-
-fn readConfig(execution_environment: ExecutionEnvironment) ![]const u8 {
-    return try std.fs.cwd().readFileAlloc(b.allocator, try std.mem.concat(b.allocator, u8, &.{"config/" ++ @tagName(execution_environment) ++ ".json"}), common.maxInt(usize));
-}
 
 const Error = error{
     not_implemented,
@@ -757,8 +737,4 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
     };
 
     return target;
-}
-
-fn virtualizeWithQEMU(arguments: RunSteps.Arguments, configuration: Configuration, execution_type_override: ExecutionType) bool {
-    return canVirtualizeWithQEMU(configuration.architecture) and (execution_type_override == .accelerated or (arguments.virtualize orelse false));
 }
