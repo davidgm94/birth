@@ -98,7 +98,7 @@ export fn entryPoint() callconv(.C) noreturn {
         },
         .smps = .{
             .length = cpu_count,
-            .alignment = 8,
+            .alignment = lib.max(8, @alignOf(bootloader.Information.SMP.Information)),
         },
     });
 
@@ -308,13 +308,6 @@ export fn entryPoint() callconv(.C) noreturn {
                 log.debug("Error: {}", .{err});
                 @panic("Mapping of bootloader information failed");
             };
-
-            // Enable long mode and certain important bits
-            var efer = privileged.arch.x86_64.registers.IA32_EFER.read();
-            efer.LME = true;
-            efer.NXE = true;
-            efer.SCE = true;
-            efer.write();
 
             bootloader_information.initializeSMP(madt);
 

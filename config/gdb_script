@@ -1,7 +1,7 @@
 #set can-use-hw-watchpoints 0
-b limineEntryPoint
-b bootloader.arch.x86_64.trampoline
-
+# b limineEntryPoint
+#b *0x400cd
+#
 b *0x1000
-b *0x40000
+# b *0x40000
 c

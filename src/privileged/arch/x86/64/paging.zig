@@ -30,7 +30,7 @@ const VirtualAddressSpace = x86_64.VirtualAddressSpace;
 const higher_half_entry_index = 512 / 2;
 
 pub const Specific = extern struct {
-    cr3: cr3 = undefined,
+    cr3: cr3 align(@sizeOf(u64)) = undefined,
 };
 
 const Indices = [enumCount(PageIndex)]u16;
@@ -822,4 +822,59 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
     }
 
     return pt_entry_address;
+}
+
+pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, comptime core_locality: privileged.CoreLocality, virtual_address: VirtualAddress(core_locality), flags: VirtualAddressSpace.Flags) !void {
+    const indices = computeIndices(virtual_address.value());
+
+    const vas_cr3 = virtual_address_space.arch.cr3;
+    log.debug("CR3: {}", .{vas_cr3});
+
+    const pml4_physical_address = vas_cr3.getAddress();
+    log.debug("PML4: 0x{x}", .{pml4_physical_address.value()});
+
+    const pml4_table = pml4_physical_address.toIdentityMappedVirtualAddress().access(*PML4Table);
+    const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
+    if (!pml4_entry.present) {
+        return TranslateError.pml4_entry_not_present;
+    }
+
+    const pml4_entry_address = PhysicalAddress(.local).new(unpackAddress(pml4_entry));
+    if (pml4_entry_address.value() == 0) {
+        return TranslateError.pml4_entry_address_null;
+    }
+
+    const pdp_table = pml4_entry_address.toIdentityMappedVirtualAddress().access(*PDPTable);
+    const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    if (!pdp_entry.present) {
+        return TranslateError.pdp_entry_not_present;
+    }
+
+    const pdp_entry_address = PhysicalAddress(.local).new(unpackAddress(pdp_entry));
+    if (pdp_entry_address.value() == 0) {
+        return TranslateError.pdp_entry_address_null;
+    }
+
+    const pd_table = pdp_entry_address.toIdentityMappedVirtualAddress().access(*PDTable);
+    const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
+    if (!pd_entry.present) {
+        return TranslateError.pd_entry_not_present;
+    }
+
+    const pd_entry_address = PhysicalAddress(.local).new(unpackAddress(pd_entry));
+    if (pd_entry_address.value() == 0) {
+        return TranslateError.pd_entry_address_null;
+    }
+
+    const pt_table = pd_entry_address.toIdentityMappedVirtualAddress().access(*PTable);
+    const pt_entry = &pt_table[indices[@enumToInt(PageIndex.PT)]];
+    if (!pt_entry.present) {
+        return TranslateError.pd_entry_not_present;
+    }
+
+    pt_entry.read_write = flags.write;
+    pt_entry.user = flags.user;
+    pt_entry.page_level_cache_disable = flags.cache_disable;
+    pt_entry.global = flags.global;
+    pt_entry.execute_disable = !flags.execute;
 }

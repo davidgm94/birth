@@ -4,8 +4,9 @@
 .global smp_trampoline
 .global smp_trampoline_arg_start
 .global smp_trampoline_arg_end
-.global smp_gdt
 .global smp_gdt_descriptor
+.global smp_core_booted
+.global smp_trampoline_end
 
 .code16
 smp_trampoline:
@@ -96,14 +97,12 @@ mov %rax, %cr0
 
 // TODO: before park
 mov $1, %al
-lock xchgb (arg_booted - smp_trampoline)(%rbx), %al
+lock xchgb (smp_core_booted - smp_trampoline)(%rbx), %al
 xor %rax, %rax
 cli
 hlt
 
-
 .align 16
-
 temporal_stack:
 .fill 128, 0
 temporal_stack_top:
@@ -112,43 +111,18 @@ invalid_idt:
 .quad 0
 .quad 0
 
-.align 8
+.align 16
 smp_trampoline_arg_start:
 arg_hhdm:
-.byte 0
-.byte 0
-.byte 0
-.byte 0
-.byte 0
-.byte 0
-.byte 0
-.byte 0
+.quad 0
 arg_cr3:
-.byte 0
-.byte 0
-.byte 0
-.byte 0
-arg_booted:
-.byte 0
-arg_options:
-.byte 0
-reserved:
-.word 0
+.long 0
+reserved: .word 0
+smp_gdt_descriptor:
+.limit: .word 0
+.address: .quad 0
 smp_trampoline_arg_end:
 
-.align 16
-smp_gdt:
-null_entry: .quad 0
-code_16: .quad 0x000f9a000000ffff // 0x08
-data_16: .quad  0x000f92000000ffff // 0x10
-code_32: .quad 0x00cf9a000000ffff // 0x18
-data_32: .quad 0x00cf92000000ffff // 0x20
-code_64: .quad 0x00af9b000000ffff // 0x28
-data_64: .quad 0x00af93000000ffff // 0x30
-user_data_64: .quad 0x00affb000000ffff // 0x38
-user_code_64: .quad 0x00cff2000000ffff // 0x40
-smp_gdt_end:
+smp_core_booted: .byte 0
 
-smp_gdt_descriptor:
-.limit: .word (smp_gdt_end - smp_gdt) - 1
-.address: .quad 0x1000 + smp_gdt
+smp_trampoline_end:

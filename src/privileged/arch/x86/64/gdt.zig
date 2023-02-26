@@ -126,8 +126,8 @@ pub const Table = extern struct {
             .present = true,
         },
         .long_mode = true,
-        .size_flag = true,
-        .granularity = true,
+        .size_flag = false,
+        .granularity = false,
     },
     // 0x30
     data_64: Entry = .{
@@ -141,8 +141,8 @@ pub const Table = extern struct {
             .present = true,
         },
         .long_mode = false,
-        .size_flag = true,
-        .granularity = true,
+        .size_flag = false,
+        .granularity = false,
     },
     // 0x38
     user_data_64: Entry = .{
@@ -211,7 +211,7 @@ pub const Table = extern struct {
 
     pub fn getDescriptor(gdt: *const GDT.Table) GDT.Descriptor {
         return .{
-            .limit = @offsetOf(GDT.Table, "tss"),
+            .limit = @offsetOf(GDT.Table, "tss") - 1,
             .address = @ptrToInt(gdt),
         };
     }

@@ -462,7 +462,7 @@ pub fn entryPoint() callconv(.C) noreturn {
         },
         .smps = .{
             .length = cpu_count,
-            .alignment = 8,
+            .alignment = @alignOf(bootloader.Information.SMP.Information),
         },
     });
 
@@ -631,6 +631,7 @@ pub fn entryPoint() callconv(.C) noreturn {
         \\mov %rsp, %[result]
         : [result] "=r" (-> u64),
     );
+
     for (memory_map_entries) |entry| {
         if (entry.type == .bootloader_reclaimable) {
             if (entry.region.address.toHigherHalfVirtualAddress().value() < rsp and entry.region.address.offset(entry.region.size).toHigherHalfVirtualAddress().value() > rsp) {
@@ -638,7 +639,7 @@ pub fn entryPoint() callconv(.C) noreturn {
                 break;
             }
         }
-    }
+    } else @panic("Can't find memory map region for RSP");
 
     bootloader.arch.x86_64.trampoline(bootloader_information);
 }

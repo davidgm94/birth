@@ -6,7 +6,7 @@ megs: 512
 
 clock: sync=realtime, time0=local
 
-ata0-master: type=disk, path="zig-cache/rise.hdd", mode=flat
+ata0-master: type=disk, path="zig-cache/rise_Debug_x86_64_rise_bios_normal_exe.hdd", mode=flat
 
 boot: c
 

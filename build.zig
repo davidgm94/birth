@@ -64,8 +64,8 @@ pub fn build(b_arg: *Build) !void {
 
     build_steps = try b.allocator.create(BuildSteps);
     build_steps.* = .{
-        .build_all = b.step("build_all", "Build all the artifacts"),
-        .build_all_tests = b.step("build_all_tests", "Build all the artifacts related to tests"),
+        .build_all = b.step("all", "Build all the artifacts"),
+        .build_all_tests = b.step("all_tests", "Build all the artifacts related to tests"),
         .run = b.step("run", "Run the operating system through an emulator"),
         .debug = b.step("debug", "Debug the operating system through an emulator"),
         .test_step = b.step("test", "Run unit tests"),
@@ -198,6 +198,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                                 },
                                 .optimize = .ReleaseSafe,
                             });
+                            executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
                             executable.setOutputDir(cache_dir);
                             executable.setMainPkgPath("src");
                             executable.strip = true;
@@ -418,6 +419,7 @@ const RunSteps = struct {
 
         switch (try process.spawnAndWait()) {
             .Exited => |exit_code| {
+                std.log.debug("Exit code: 0x{x}", .{exit_code});
                 if (exit_code & 1 == 0) {
                     return RunError.failure;
                 }
@@ -574,7 +576,6 @@ const RunSteps = struct {
                 "-cpu",
                 "host",
             });
-        } else {
             if (arguments.log) |log_configuration| {
                 var log_what = std.ArrayList(u8).init(b.allocator);
 
@@ -595,7 +596,7 @@ const RunSteps = struct {
                     try argument_list.append(log_file);
                 }
             }
-
+        } else {
             if (arguments.trace) |tracees| {
                 for (tracees) |tracee| {
                     const tracee_slice = b.fmt("-{s}*", .{tracee});
