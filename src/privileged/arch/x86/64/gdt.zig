@@ -10,17 +10,170 @@ const TSS = privileged.arch.x86_64.TSS;
 
 pub const Descriptor = DescriptorTable.Register;
 
+pub const Entry = packed struct(u64) {
+    limit_low: u16 = lib.maxInt(u16),
+    base_low: u16 = 0,
+    base_mid: u8 = 0,
+    access: packed struct(u8) {
+        accessed: bool,
+        read_write: bool,
+        direction_conforming: bool,
+        executable: bool,
+        code_data_segment: bool,
+        dpl: u2,
+        present: bool,
+    },
+    limit_high: u4 = lib.maxInt(u4),
+    reserved: u1 = 0,
+    long_mode: bool,
+    size_flag: bool,
+    granularity: bool,
+    base_high: u8 = 0,
+};
+
 // This is the most basic x86_64 GDT
 pub const Table = extern struct {
-    null_entry: Entry = 0, // 0x00
-    code_16: Entry = 0x00_0f9a_00_0000ffff, // 0x08
-    data_16: Entry = 0x00_0f92_00_0000ffff, // 0x10
-    code_32: Entry = 0x00_cf9a_00_0000ffff, // 0x18
-    data_32: Entry = 0x00_cf92_00_0000ffff, // 0x20
-    code_64: Entry = 0x00af9b000000ffff, // 0x28
-    data_64: Entry = 0x00af93000000ffff, // 0x30
-    user_data_64: Entry = 0x00cff2000000ffff, // 0x38
-    user_code_64: Entry = 0x00affb000000ffff, // 0x40
+    // 0x00
+    null_entry: Entry = .{
+        .limit_low = 0,
+        .access = .{
+            .accessed = false,
+            .read_write = false,
+            .direction_conforming = false,
+            .executable = false,
+            .code_data_segment = false,
+            .dpl = 0,
+            .present = false,
+        },
+        .limit_high = 0,
+        .long_mode = false,
+        .size_flag = false,
+        .granularity = false,
+    },
+    // 0x08
+    code_16: Entry = .{
+        .limit_low = 0,
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = true,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .limit_high = 0,
+        .long_mode = false,
+        .size_flag = false,
+        .granularity = false,
+    },
+    // 0x10
+    data_16: Entry = .{
+        .limit_low = 0,
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = false,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .limit_high = 0,
+        .long_mode = false,
+        .size_flag = false,
+        .granularity = false,
+    },
+    // 0x18
+    code_32: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = true,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .long_mode = false,
+        .size_flag = true,
+        .granularity = true,
+    },
+    // 0x20
+    data_32: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = false,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .long_mode = false,
+        .size_flag = true,
+        .granularity = true,
+    },
+    // 0x28
+    code_64: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = true,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .long_mode = true,
+        .size_flag = false,
+        .granularity = false,
+    },
+    // 0x30
+    data_64: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = false,
+            .code_data_segment = true,
+            .dpl = 0,
+            .present = true,
+        },
+        .long_mode = false,
+        .size_flag = false,
+        .granularity = false,
+    },
+    // 0x38
+    user_data_64: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = false,
+            .code_data_segment = true,
+            .dpl = 3,
+            .present = true,
+        },
+        .long_mode = false,
+        .size_flag = true,
+        .granularity = true,
+    },
+    // 0x40
+    user_code_64: Entry = .{
+        .access = .{
+            .accessed = false,
+            .read_write = true,
+            .direction_conforming = false,
+            .executable = true,
+            .code_data_segment = true,
+            .dpl = 3,
+            .present = true,
+        },
+        .long_mode = true,
+        .size_flag = true,
+        .granularity = true,
+    },
     // We don't need a user data 64 selector because 32 bit is enough, most values are not relevant
     tss_descriptor: TSS.Descriptor = undefined,
     tss: TSS.Struct align(8) = .{},
@@ -58,7 +211,7 @@ pub const Table = extern struct {
 
     pub fn getDescriptor(gdt: *const GDT.Table) GDT.Descriptor {
         return .{
-            .limit = @offsetOf(GDT.Table, "tss"),
+            .limit = @offsetOf(GDT.Table, "tss") - 1,
             .address = @ptrToInt(gdt),
         };
     }
@@ -82,8 +235,6 @@ pub const Table = extern struct {
         log.debug("Updated TSS", .{});
     }
 };
-
-const Entry = u64;
 
 pub fn save() DescriptorTable.Register {
     var register: DescriptorTable.Register = undefined;

@@ -69,12 +69,14 @@ pub fn main() noreturn {
         @panic("Unable to find RSDP");
     };
 
-    const cpu_count = blk: {
+    const madt = blk: {
         const rsdp_descriptor = rsdp_physical_address.toIdentityMappedVirtualAddress().access(*ACPI.RSDP.Descriptor1);
         const madt_header = rsdp_descriptor.findTable(.APIC) orelse @panic("Can't find MADT");
         const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
-        break :blk madt.getCPUCount();
+        break :blk madt;
     };
+
+    const cpu_count = madt.getCPUCount();
 
     framebuffer = blk: {
         const gop = Protocol.locate(UEFI.GraphicsOutputProtocol, boot_services) catch @panic("Can't locate GOP");
@@ -205,7 +207,7 @@ pub fn main() noreturn {
         },
         .smps = .{
             .length = cpu_count,
-            .alignment = 8,
+            .alignment = @alignOf(bootloader.Information.SMP.Information),
         },
     });
 
@@ -512,6 +514,10 @@ pub fn main() noreturn {
         const size = bootloader_information.framebuffer.getSize();
         paging.bootstrap_map(&bootloader_information.virtual_address_space, .global, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
     }
+
+    log.debug("Initialize SMP", .{});
+    bootloader_information.initializeSMP(madt);
+    log.debug("Ended SMP initialization", .{});
 
     log.debug("Jumping to trampoline...", .{});
     bootloader.arch.x86_64.trampoline(bootloader_information);

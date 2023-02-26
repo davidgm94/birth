@@ -71,16 +71,14 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
                 : [code_segment] "i" (code_segment_selector),
             );
         },
-        .x86 => {
-            asm volatile (
-                \\jmp %[code_segment_selector], $bits64
-                \\.code64
-                \\bits64:
-                :
-                : [gdt_register] "*p" (&gdt_descriptor),
-                  [code_segment_selector] "i" (code_segment_selector),
-            );
-        },
+        .x86 => asm volatile (
+            \\jmp %[code_segment_selector], $bits64
+            \\.code64
+            \\bits64:
+            :
+            : [gdt_register] "*p" (&gdt_descriptor),
+              [code_segment_selector] "i" (code_segment_selector),
+        ),
         else => @compileError("Architecture not supported"),
     }
 
@@ -110,40 +108,38 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
                   [bootloader_information] "{rdi}" (bootloader_information),
             );
         },
-        .x86 => {
-            asm volatile (
-                \\mov %edi, %eax
-                \\add %[higher_half_offset], %eax
-                \\.byte 0x48
-                \\add (%eax), %edi
-                \\.byte 0x48
-                \\mov %edi, %eax
-                \\.byte 0x48
-                \\add %[stack_slice_offset], %eax
-                \\add %[slice_offset], %eax
-                \\mov (%eax), %esp
-                \\add %[slice_size_slide], %eax
-                \\add (%eax), %esp
-                \\.byte 0x48
-                \\add %edi, %esp
-                // RSP: stack top hh
-                \\.byte 0x48
-                \\mov %edi, %eax
-                \\add %[entry_point_offset], %eax
-                \\.byte 0x48
-                \\mov (%eax), %eax
-                \\jmp *%eax
-                \\cli
-                \\hlt
-                :
-                : [bootloader_information] "{edi}" (bootloader_information_arg),
-                  [higher_half_offset] "i" (higher_half_offset),
-                  [stack_slice_offset] "i" (comptime bootloader.Information.getStackSliceOffset()),
-                  [slice_offset] "i" (@offsetOf(bootloader.Information.Slice, "offset")),
-                  [slice_size_slide] "i" (@offsetOf(bootloader.Information.Slice, "size") - @offsetOf(bootloader.Information.Slice, "offset")),
-                  [entry_point_offset] "i" (entry_point_offset),
-            );
-        },
+        .x86 => asm volatile (
+            \\mov %edi, %eax
+            \\add %[higher_half_offset], %eax
+            \\.byte 0x48
+            \\add (%eax), %edi
+            \\.byte 0x48
+            \\mov %edi, %eax
+            \\.byte 0x48
+            \\add %[stack_slice_offset], %eax
+            \\add %[slice_offset], %eax
+            \\mov (%eax), %esp
+            \\add %[slice_size_slide], %eax
+            \\add (%eax), %esp
+            \\.byte 0x48
+            \\add %edi, %esp
+            // RSP: stack top hh
+            \\.byte 0x48
+            \\mov %edi, %eax
+            \\add %[entry_point_offset], %eax
+            \\.byte 0x48
+            \\mov (%eax), %eax
+            \\jmp *%eax
+            \\cli
+            \\hlt
+            :
+            : [bootloader_information] "{edi}" (bootloader_information_arg),
+              [higher_half_offset] "i" (higher_half_offset),
+              [stack_slice_offset] "i" (comptime bootloader.Information.getStackSliceOffset()),
+              [slice_offset] "i" (@offsetOf(bootloader.Information.Slice, "offset")),
+              [slice_size_slide] "i" (@offsetOf(bootloader.Information.Slice, "size") - @offsetOf(bootloader.Information.Slice, "offset")),
+              [entry_point_offset] "i" (entry_point_offset),
+        ),
         else => @compileError("Architecture not supported"),
     }
 
