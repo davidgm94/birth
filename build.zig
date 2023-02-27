@@ -159,64 +159,62 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
             }, "bootloader_");
 
             const maybe_bootloader_compile_step: ?*CompileStep = switch (bootloader) {
-                .rise => switch (architecture) {
-                    .x86_64 => switch (protocol) {
-                        .bios => blk: {
+                .rise => switch (protocol) {
+                    .bios => switch (architecture) {
+                        .x86_64 => blk: {
                             const bootloader_path = rise_loader_path ++ "bios/";
-                            //try configuration.getSuffix()
                             const executable = b.addExecutable(.{
                                 .name = bootloader_name,
                                 .root_source_file = FileSource.relative(bootloader_path ++ "main.zig"),
-                                .target = getTarget(.x86, .privileged),
+                                .target = try getTarget(.x86, .privileged),
                                 .optimize = .ReleaseSmall,
                             });
                             executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
                             executable.addAssemblyFile(bootloader_path ++ "unreal_mode.S");
-                            executable.setOutputDir(cache_dir);
-                            executable.setMainPkgPath("src");
                             executable.setLinkerScriptPath(FileSource.relative(bootloader_path ++ "linker_script.ld"));
-                            executable.red_zone = false;
-                            executable.link_gc_sections = true;
-                            executable.want_lto = true;
-                            executable.strip = true;
                             executable.entry_symbol_name = entry_point_name;
                             executable.code_model = .small;
 
-                            modules.addModule(executable, .lib);
-                            modules.addModule(executable, .bootloader);
-                            modules.addModule(executable, .privileged);
-
                             break :blk executable;
                         },
-                        .uefi => blk: {
-                            const executable = b.addExecutable(.{
-                                .name = bootloader_name,
-                                .root_source_file = FileSource.relative(rise_loader_path ++ "uefi/main.zig"),
-                                .target = .{
-                                    .cpu_arch = .x86_64,
-                                    .os_tag = .uefi,
-                                    .abi = .msvc,
-                                },
-                                .optimize = .ReleaseSafe,
-                            });
-                            executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
-                            executable.setOutputDir(cache_dir);
-                            executable.setMainPkgPath("src");
-                            executable.strip = true;
-
-                            modules.addModule(executable, .lib);
-                            modules.addModule(executable, .bootloader);
-                            modules.addModule(executable, .privileged);
-
-                            break :blk executable;
-                        },
+                        else => return Error.architecture_not_supported,
                     },
-                    else => return Error.architecture_not_supported,
+                    .uefi => blk: {
+                        const executable = b.addExecutable(.{
+                            .name = bootloader_name,
+                            .root_source_file = FileSource.relative(rise_loader_path ++ "uefi/main.zig"),
+                            .target = .{
+                                .cpu_arch = architecture,
+                                .os_tag = .uefi,
+                                .abi = .msvc,
+                            },
+                            .optimize = .ReleaseSafe,
+                        });
+
+                        switch (architecture) {
+                            .x86_64 => executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S"),
+                            else => {},
+                        }
+
+                        break :blk executable;
+                    },
                 },
                 .limine => null,
             };
 
             if (maybe_bootloader_compile_step) |bootloader_compile_step| {
+                bootloader_compile_step.setOutputDir(cache_dir);
+                bootloader_compile_step.setMainPkgPath("src");
+
+                bootloader_compile_step.red_zone = false;
+                bootloader_compile_step.link_gc_sections = true;
+                bootloader_compile_step.want_lto = true;
+                bootloader_compile_step.strip = true;
+
+                modules.addModule(bootloader_compile_step, .lib);
+                modules.addModule(bootloader_compile_step, .bootloader);
+                modules.addModule(bootloader_compile_step, .privileged);
+
                 if (default_configuration.architecture == architecture and default_configuration.optimize_mode == optimize_mode and default_configuration.bootloader == bootloader and default_configuration.boot_protocol == protocol) {
                     b.default_step.dependOn(&bootloader_compile_step.step);
                 }
@@ -225,12 +223,12 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
             }
 
             const execution_environments: []const ExecutionEnvironment = switch (bootloader) {
-                .rise, .limine => switch (architecture) {
-                    .x86_64 => switch (protocol) {
-                        .bios => &.{.qemu},
-                        .uefi => &.{.qemu},
+                .rise, .limine => switch (protocol) {
+                    .bios => switch (architecture) {
+                        .x86_64 => &.{.qemu},
+                        else => return Error.architecture_not_supported,
                     },
-                    else => return Error.architecture_not_supported,
+                    .uefi => &.{.qemu},
                 },
             };
 
@@ -282,7 +280,7 @@ fn prepareArchitectureCompilation(architecture_index: usize, execution_type: Exe
                 run_steps.debug.dependOn(&run_steps.gdb_script);
                 run_steps.test_debug.dependOn(&run_steps.test_gdb_script);
 
-                build_steps.test_all.dependOn(&run_steps.test_run);
+                if (architecture == .x86_64) build_steps.test_all.dependOn(&run_steps.test_run);
 
                 if (std.meta.eql(configuration, default_configuration)) {
                     build_steps.run.dependOn(&run_steps.run);
@@ -651,7 +649,7 @@ fn createCPUDriver(architecture: Target.Cpu.Arch, optimize_mode: OptimizeMode, e
     }, "cpu_driver_");
 
     const cpu_driver_file = FileSource.relative(cpu_driver_main_source_file);
-    const target = getTarget(architecture, .privileged);
+    const target = try getTarget(architecture, .privileged);
     const cpu_driver = switch (executable_kind) {
         .normal_exe => b.addExecutable(.{
             .name = exe_name,
@@ -683,18 +681,18 @@ fn createCPUDriver(architecture: Target.Cpu.Arch, optimize_mode: OptimizeMode, e
         cpu_driver.setTestRunner(cpu_driver_main_source_file);
     }
 
-    cpu_driver.setLinkerScriptPath(FileSource.relative(cpu_driver_path ++ "arch/" ++ switch (architecture) {
-        .x86_64 => "x86/64/",
-        .x86 => "x86/32/",
-        else => return Error.architecture_not_supported,
-    } ++ "linker_script.ld"));
+    cpu_driver.setLinkerScriptPath(FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ cpu_driver_path, "arch/", switch (architecture) {
+        .x86_64 => "x86/64",
+        .x86 => "x86/32",
+        else => @tagName(architecture),
+    }, "/linker_script.ld" })));
 
-    switch (architecture) {
-        .x86_64 => {
-            cpu_driver.code_model = .kernel;
-        },
+    cpu_driver.code_model = switch (architecture) {
+        .x86_64 => .kernel,
+        .riscv64 => .medium,
+        .aarch64 => .small,
         else => return Error.architecture_not_supported,
-    }
+    };
 
     modules.addModule(cpu_driver, .lib);
     modules.addModule(cpu_driver, .bootloader);
@@ -708,24 +706,27 @@ fn createCPUDriver(architecture: Target.Cpu.Arch, optimize_mode: OptimizeMode, e
     return cpu_driver;
 }
 
-fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMode) CrossTarget {
+fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMode) Error!CrossTarget {
     var enabled_features = Cpu.Feature.Set.empty;
     var disabled_features = Cpu.Feature.Set.empty;
 
     if (execution_mode == .privileged) {
-        assert(asked_arch == .x86_64 or asked_arch == .x86);
+        switch (common.cpu.arch) {
+            .x86, .x86_64 => {
+                // disable FPU
+                const Feature = Target.x86.Feature;
+                disabled_features.addFeature(@enumToInt(Feature.x87));
+                disabled_features.addFeature(@enumToInt(Feature.mmx));
+                disabled_features.addFeature(@enumToInt(Feature.sse));
+                disabled_features.addFeature(@enumToInt(Feature.sse2));
+                disabled_features.addFeature(@enumToInt(Feature.avx));
+                disabled_features.addFeature(@enumToInt(Feature.avx2));
+                disabled_features.addFeature(@enumToInt(Feature.avx512f));
 
-        // disable FPU
-        const Feature = Target.x86.Feature;
-        disabled_features.addFeature(@enumToInt(Feature.x87));
-        disabled_features.addFeature(@enumToInt(Feature.mmx));
-        disabled_features.addFeature(@enumToInt(Feature.sse));
-        disabled_features.addFeature(@enumToInt(Feature.sse2));
-        disabled_features.addFeature(@enumToInt(Feature.avx));
-        disabled_features.addFeature(@enumToInt(Feature.avx2));
-        disabled_features.addFeature(@enumToInt(Feature.avx512f));
-
-        enabled_features.addFeature(@enumToInt(Feature.soft_float));
+                enabled_features.addFeature(@enumToInt(Feature.soft_float));
+            },
+            else => return Error.architecture_not_supported,
+        }
     }
 
     const target = CrossTarget{

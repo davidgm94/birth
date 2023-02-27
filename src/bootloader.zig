@@ -64,6 +64,12 @@ pub const Information = extern struct {
             rsdp_address: u64,
             gdt: privileged.arch.x86_64.GDT.Table = .{},
         },
+        .aarch64 => extern struct {
+            foo: u64 = 0,
+        },
+        .riscv64 => extern struct {
+            foo: u64 = 0,
+        },
         else => @compileError("Architecture not supported"),
     };
 
@@ -125,9 +131,18 @@ pub const Information = extern struct {
         entry_point: u64,
         argument: u64,
 
-        pub const Information = extern struct {
-            cpu_count: u32,
-            bsp_lapic_id: u32,
+        pub const Information = switch (lib.cpu.arch) {
+            .x86, .x86_64 => extern struct {
+                cpu_count: u32,
+                bsp_lapic_id: u32,
+            },
+            .aarch64 => extern struct {
+                cpu_count: u32,
+            },
+            .riscv64 => extern struct {
+                cpu_count: u32,
+            },
+            else => @compileError("Architecture not supported"),
         };
 
         pub const Trampoline = extern struct {
