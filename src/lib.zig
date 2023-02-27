@@ -187,7 +187,7 @@ pub const Allocator = extern struct {
             allocate: *const Allocate.Fn,
             allocate_padding: u32 = 0,
         },
-        .x86_64, .aarch64 => extern struct {
+        .x86_64, .aarch64, .riscv64 => extern struct {
             allocate: *const Allocate.Fn,
         },
         else => @compileError("Architecture not supported"),

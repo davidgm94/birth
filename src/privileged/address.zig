@@ -302,16 +302,13 @@ pub fn Interface(comptime Usize: type) type {
         };
 
         pub fn VirtualAddressSpace(comptime architecture: Arch) type {
+            _ = architecture;
             return extern struct {
                 arch: paging.Specific,
 
                 const VAS = @This();
 
-                pub const paging = switch (architecture) {
-                    .x86 => privileged.arch.x86.paging,
-                    .x86_64 => privileged.arch.x86_64.paging,
-                    else => @compileError("error: paging"),
-                };
+                pub const paging = privileged.arch.current.paging;
 
                 pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space;
 

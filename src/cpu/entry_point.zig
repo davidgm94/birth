@@ -33,7 +33,10 @@ pub const std_options = struct {
 };
 
 comptime {
-    @export(limine.entryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong });
+    switch (lib.cpu.arch) {
+        .x86_64, .aarch64 => @export(limine.entryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong }),
+        else => {},
+    }
 }
 
 pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {

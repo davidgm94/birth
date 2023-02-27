@@ -179,7 +179,11 @@ pub const PartitionTableType = enum {
     gpt,
 };
 
-pub const supported_architectures = [_]Cpu.Arch{.x86_64};
+pub const supported_architectures = [_]Cpu.Arch{
+    .x86_64,
+    .aarch64,
+    //.riscv64,
+};
 
 pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
     inline for (supported_architectures, 0..) |architecture, index| {
@@ -188,6 +192,7 @@ pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
 
     @panic("WTF");
 }
+
 pub const architecture_bootloader_map = blk: {
     var array: [supported_architectures.len][]const ArchitectureBootloader = undefined;
 
@@ -201,6 +206,24 @@ pub const architecture_bootloader_map = blk: {
             .protocols = &.{ .bios, .uefi },
         },
     };
+
+    array[architectureIndex(.aarch64)] = &.{
+        .{
+            .id = .rise,
+            .protocols = &.{.uefi},
+        },
+        .{
+            .id = .limine,
+            .protocols = &.{.uefi},
+        },
+    };
+
+    // array[architectureIndex(.riscv64)] = &.{
+    //     .{
+    //         .id = .rise,
+    //         .protocols = &.{.uefi},
+    //     },
+    // };
 
     break :blk array;
 };

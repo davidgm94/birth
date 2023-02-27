@@ -105,7 +105,7 @@ const Error = error{
     unaligned_size,
 };
 
-pub fn bootstrap_map(virtual_address_space: *x86_64.VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
+pub fn map(virtual_address_space: *x86_64.VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
     // TODO: use flags
     const flags = general_flags.toArchitectureSpecific(locality);
     const vas_cr3 = virtual_address_space.arch.cr3;

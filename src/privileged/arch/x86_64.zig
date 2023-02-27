@@ -1,3 +1,6 @@
+const x86 = @import("x86/common.zig");
+pub usingnamespace x86;
+
 const lib = @import("lib");
 const assert = lib.assert;
 const cpuid = lib.arch.x86_64.CPUID;
@@ -21,20 +24,6 @@ pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
 pub const Syscall = @import("x86/64/syscall.zig");
 pub const TSS = @import("x86/64/tss.zig");
-
-pub inline fn disableInterrupts() void {
-    asm volatile ("cli" ::: "memory");
-}
-
-pub inline fn stopCPU() noreturn {
-    while (true) {
-        asm volatile (
-            \\cli
-            \\hlt
-            \\pause
-            ::: "memory");
-    }
-}
 
 pub const dispatch_count = IDT.entry_count - IDT.exception_count;
 
