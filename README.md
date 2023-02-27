@@ -4,7 +4,7 @@
 
 An experiment of an operating system for modern 64-bit architectures which focuses on building robust, fast and usable system software and learning how to do it along the way.
 
-The current plan is to explore the idea of the multi-kernel exposed in the Barrelfish and Arrakis papers (very roughly simplified, an exokernel per core). Hopefully this academic model proves worthy, resulting in a big improvement in multiple aspects. If not, a hybrid kernel model with high-performance async syscalls will be used.
+The current plan is to explore the idea of the multikernel exposed in the Barrelfish and Arrakis papers (very roughly simplified, an exokernel per core). Hopefully this academic model proves worthy, resulting in a big improvement in multiple aspects. If not, a hybrid kernel model with high-performance async syscalls will be used.
 
 The operating system design for developers aims at fast iteration times, so there are no external dependencies aside from the execution environment and the compiler.
 
@@ -16,16 +16,38 @@ For each run, Github CI currently compiles all build and test artifacts and test
 
 ## High-level design goals
 
-- Multi-kernel model, which would grant more safety and speed.
+- Multikernel model, which would grant more safety and speed.
 - Try to supress interpreted/JIT language uses in every field as much as possible, preferring compiled type-safe native languages instead and then favoring speed, robustness and safety.
 - Make everything go reasonably fast (as fast as possible).
 - Usable desktop, for both basic and developer purposes.
-- Sandbox execution of programs by default.
+- Sandboxed execution of programs by default.
 - New library and executable format for modern times, which aims at performance and scalability and admits both static and dynamic linking, preferring static.
 - Prefer typed commmunication as opposed to strings, for example in program arguments and configuration files.
 - Clean up shells, move away from current ones as much as possible: make it type-safe and compiled, commands are function calls from libraries instead of executables, etc.
 - Promote open-source driver code (especially for GPUs, since these drivers being close-source is hurting the computing space) and simplified drivers through ISA/DMA.
 - (far away in the future) Think of a way to substitute browser's Javascript for native compiled code.
+
+## External dependencies to compile and run the code (executables your machine should have in the PATH environment variable)
+
+* The Zig compiler - This is required to compile and run the code. Apart from the operating system being written in Zig, Zig is used as a build system, so no platform-specific scripting language is needed.
+* QEMU - to load and execute the operating system in a virtual environment
+* GDB - only for debugging
+
+## Internal dependencies
+
+* STB TTF
+
+## Build and run instructions
+
+- To build for the default target options (located in config/default.json): `zig build`
+- To build and run for the default target options: `zig build run`
+- To build and debug for the default target options: `zig build debug`
+- To build and test for the default target options: `zig build test`
+- To build and debug the tests for the default target options: `zig build test_debug`
+- To build all host and guest normal artifacts (): `zig build all`
+- To build all host and guest test artifacts: `zig build all_tests`
+- To build and run all host and guest tests: `zig build test_all`
+- To run any other specialized step, please consult the steps listed in `zig build --help`
 
 ## Target architectures:
 
@@ -73,21 +95,11 @@ Currently only x86_64 is supported, although aarch64 and RISC-V 64 are planned f
 - [ ] VMWare
 - [ ] VirtualBox
 
-## External dependencies to compile and run the code (executables your machine should have in the PATH variable)
-
-* The Zig compiler - This is required to compile and run the code. Apart from the operating system being written in Zig, Zig is used as a build system, so no platform-specific scripting language is needed.
-* QEMU - to load and execute the operating system in a virtual environment
-* GDB - only for debugging
-
-## Internal dependencies
-
-* STB TTF
-
-## Next taks to be done
+## Next tasks to be done
 
 ### General
 
-* Implement the CPU driver according to the `multi-kernel` model.
+* Implement the CPU driver according to the `multikernel` model.
 
 ## Inspirations and acknowledgements
 
