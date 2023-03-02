@@ -14,16 +14,13 @@ pub const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
 pub const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
 pub const VirtualAddressSpace = AddressInterface.VirtualAddressSpace(.x86_64);
 
-pub const DescriptorTable = @import("x86/64/descriptor_table.zig");
 pub const APIC = @import("x86/64/apic.zig");
-pub const GDT = @import("x86/64/gdt.zig");
 pub const IDT = @import("x86/64/idt.zig");
 pub const io = @import("x86/64/io.zig");
 pub const paging = @import("x86/64/paging.zig");
 pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
 pub const Syscall = @import("x86/64/syscall.zig");
-pub const TSS = @import("x86/64/tss.zig");
 
 pub const dispatch_count = IDT.entry_count - IDT.exception_count;
 
@@ -105,3 +102,261 @@ pub const Registers = extern struct {
 pub inline fn get_max_physical_address_bit() u6 {
     return @truncate(u6, cpuid(0x80000008).eax);
 }
+
+pub const GDT = extern struct {
+    pub const Entry = packed struct(u64) {
+        limit_low: u16,
+        base_low: u16,
+        base_mid: u8,
+        access: packed struct(u8) {
+            accessed: bool,
+            read_write: bool,
+            direction_conforming: bool,
+            executable: bool,
+            code_data_segment: bool,
+            dpl: u2,
+            present: bool,
+        },
+        limit_high: u4,
+        reserved: u1 = 0,
+        long_mode: bool,
+        size_flag: bool,
+        granularity: bool,
+        base_high: u8 = 0,
+
+        pub const null_entry = Entry{
+            .limit_low = 0,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = false,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = false,
+                .dpl = 0,
+                .present = false,
+            },
+            .limit_high = 0,
+            .long_mode = false,
+            .size_flag = false,
+            .granularity = false,
+        };
+
+        pub const code_16 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0,
+            .long_mode = false,
+            .size_flag = false,
+            .granularity = false,
+        };
+
+        pub const data_16 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0,
+            .long_mode = false,
+            .size_flag = false,
+            .granularity = false,
+        };
+
+        pub const code_32 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = false,
+            .size_flag = true,
+            .granularity = true,
+        };
+
+        pub const data_32 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = false,
+            .size_flag = true,
+            .granularity = true,
+        };
+
+        pub const code_64 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = true,
+            .size_flag = false,
+            .granularity = false,
+        };
+
+        pub const data_64 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 0,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = false,
+            .size_flag = false,
+            .granularity = false,
+        };
+
+        pub const user_data_64 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = false,
+                .code_data_segment = true,
+                .dpl = 3,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = false,
+            .size_flag = true,
+            .granularity = true,
+        };
+
+        pub const user_code_64 = Entry{
+            .limit_low = 0xffff,
+            .base_low = 0,
+            .base_mid = 0,
+            .access = .{
+                .accessed = false,
+                .read_write = true,
+                .direction_conforming = false,
+                .executable = true,
+                .code_data_segment = true,
+                .dpl = 3,
+                .present = true,
+            },
+            .limit_high = 0xf,
+            .long_mode = true,
+            .size_flag = true,
+            .granularity = true,
+        };
+    };
+
+    pub const Descriptor = SegmentDescriptor;
+};
+
+pub const SegmentDescriptor = x86.SegmentDescriptor;
+
+pub const SystemSegmentDescriptor = extern struct {
+    low: Low,
+    base_high: u32,
+    reserved: u32 = 0,
+
+    comptime {
+        assert(@sizeOf(SystemSegmentDescriptor) == 0x10);
+    }
+
+    const Low = packed struct(u64) {
+        limit_low: u16,
+        base_low: u16,
+        base_low_mid: u8,
+        type: u4,
+        unused0: u1 = 0,
+        descriptor_privilege_level: u2,
+        present: u1,
+        limit_high: u4,
+        available_for_system_software: u1,
+        unused1: u2 = 0,
+        granularity: u1,
+        base_mid: u8,
+    };
+};
+
+pub const TSS = extern struct {
+    reserved0: u32 = 0,
+    rsp: [3]u64 align(4) = [3]u64{ 0, 0, 0 },
+    reserved1: u64 align(4) = 0,
+    IST: [7]u64 align(4) = [7]u64{ 0, 0, 0, 0, 0, 0, 0 },
+    reserved3: u64 align(4) = 0,
+    reserved4: u16 = 0,
+    IO_map_base_address: u16 = 104,
+
+    comptime {
+        assert(@sizeOf(TSS) == 104);
+    }
+
+    pub const Descriptor = SystemSegmentDescriptor;
+
+    pub fn getDescriptor(tss: *const TSS, offset: u64) Descriptor {
+        const address = @ptrToInt(tss) + offset;
+        return Descriptor{
+            .low = .{
+                .limit_low = @truncate(u16, @sizeOf(TSS) - 1),
+                .base_low = @truncate(u16, address),
+                .base_low_mid = @truncate(u8, address >> 16),
+                .type = 0b1001,
+                .descriptor_privilege_level = 0,
+                .present = 1,
+                .limit_high = 0,
+                .available_for_system_software = 0,
+                .granularity = 0,
+                .base_mid = @truncate(u8, address >> 24),
+            },
+            .base_high = @truncate(u32, address >> 32),
+        };
+    }
+};

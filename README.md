@@ -10,7 +10,7 @@ The operating system design for developers aims at fast iteration times, so ther
 
 Currently only the Limine bootloader and a custom one are supported. Both only support BIOS and UEFI for the x86_64 architecture and both implement SMP trampoline, modules, memory map and framebuffer, among other features.
 
-The disk image creation is currently raw (not ISO format) made by a handmade written-in-Zig FAT32 driver which needs severe improvements and bug fixing, but works for now.
+The disk image creation is currently raw (not ISO format) made by a handmade written-in-Zig FAT32 driver which needs severe improvements and bug fixing, but it does the job for now.
 
 For each run, Github CI currently compiles all build and test artifacts and tests all the guest (only x86_64 for now) and host executables. Guest testing is done through QEMU TCG.
 
@@ -44,7 +44,7 @@ For each run, Github CI currently compiles all build and test artifacts and test
 - To build and debug for the default target options: `zig build debug`
 - To build and test for the default target options: `zig build test`
 - To build and debug the tests for the default target options: `zig build test_debug`
-- To build all host and guest normal artifacts (): `zig build all`
+- To build all host and guest normal artifacts: `zig build all`
 - To build all host and guest test artifacts: `zig build all_tests`
 - To build and run all host and guest tests: `zig build test_all`
 - To run any other specialized step, please consult the steps listed in `zig build --help`

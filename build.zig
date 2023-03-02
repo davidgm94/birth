@@ -551,6 +551,7 @@ const RunSteps = struct {
             }) });
             try argument_list.append(memory_argument);
         }
+
         if (canVirtualizeWithQEMU(run_steps.configuration.architecture) and (run_steps.configuration.execution_type == .accelerated or (arguments.virtualize orelse false))) {
             try argument_list.appendSlice(&.{
                 "-accel",
@@ -563,6 +564,15 @@ const RunSteps = struct {
                 "-cpu",
                 "host",
             });
+        } else {
+            if (arguments.trace) |tracees| {
+                for (tracees) |tracee| {
+                    const tracee_slice = b.fmt("-{s}*", .{tracee});
+                    try argument_list.append("-trace");
+                    try argument_list.append(tracee_slice);
+                }
+            }
+
             if (arguments.log) |log_configuration| {
                 var log_what = std.ArrayList(u8).init(b.allocator);
 
@@ -581,14 +591,6 @@ const RunSteps = struct {
                 if (log_configuration.file) |log_file| {
                     try argument_list.append("-D");
                     try argument_list.append(log_file);
-                }
-            }
-        } else {
-            if (arguments.trace) |tracees| {
-                for (tracees) |tracee| {
-                    const tracee_slice = b.fmt("-{s}*", .{tracee});
-                    try argument_list.append("-trace");
-                    try argument_list.append(tracee_slice);
                 }
             }
         }

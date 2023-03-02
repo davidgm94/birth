@@ -1,3 +1,5 @@
+const lib = @import("lib");
+const assert = lib.assert;
 const privileged = @import("privileged");
 
 const x86 = @import("x86/common.zig");

@@ -453,7 +453,7 @@ pub fn main() noreturn {
     log.debug("Mapping trampoline code...", .{});
     switch (lib.cpu.arch) {
         .x86_64 => {
-            const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.trampoline);
+            const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
 
             memory_map.reset();
             while (memory_map.next()) |entry| {
@@ -535,7 +535,7 @@ pub fn main() noreturn {
 
     log.debug("Jumping to trampoline...", .{});
     switch (lib.cpu.arch) {
-        .x86_64 => bootloader.arch.x86_64.trampoline(bootloader_information),
+        .x86_64 => bootloader.arch.x86_64.jumpToKernel(bootloader_information),
         .aarch64 => @panic("TODO trampoline"),
         else => @compileError("Architecture not supported"),
     }
