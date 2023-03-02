@@ -317,7 +317,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
             lib.log.debug("bootloader_information: 0x{x}", .{@ptrToInt(bootloader_information)});
             if (bootloader_information.entry_point != 0) {
-                bootloader.arch.x86_64.trampoline(bootloader_information);
+                bootloader.arch.x86_64.jumpToKernel(bootloader_information);
             }
         }
     }

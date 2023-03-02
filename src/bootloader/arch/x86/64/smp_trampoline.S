@@ -121,6 +121,14 @@ reserved: .word 0
 smp_gdt_descriptor:
 .limit: .word 0
 .address: .quad 0
+smp_gdt:
+smp_gdt_null: .quad 0
+smp_gdt_code_16: .quad 0
+smp_gdt_data_16: .quad 0
+smp_gdt_code_32: .quad 0
+smp_gdt_data_32: .quad 0
+smp_gdt_code_64: .quad 0
+smp_gdt_data_64: .quad 0
 smp_trampoline_arg_end:
 
 smp_core_booted: .byte 0

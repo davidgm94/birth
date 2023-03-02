@@ -2,14 +2,40 @@ const lib = @import("lib");
 const assert = lib.assert;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
-const GDT = privileged.arch.x86_64.GDT;
+const x86_64 = privileged.arch.x86_64;
 
-const code_segment_selector = @offsetOf(GDT.Table, "code_64");
-const data_segment_selector = @offsetOf(GDT.Table, "data_64");
+pub const GDT = extern struct {
+    null_entry: Entry = Entry.null_entry,
+    // 0x08
+    code_16: Entry = Entry.code_16,
+    // 0x10
+    data_16: Entry = Entry.data_16,
+    // 0x18
+    code_32: Entry = Entry.code_32,
+    // 0x20
+    data_32: Entry = Entry.data_32,
+    // 0x28
+    code_64: Entry = Entry.code_64,
+    // 0x30
+    data_64: Entry = Entry.data_64,
+
+    pub const Entry = x86_64.GDT.Entry;
+    pub const Descriptor = x86_64.GDT.Descriptor;
+
+    pub fn getDescriptor(gdt: *const GDT) GDT.Descriptor {
+        return .{
+            .limit = @sizeOf(GDT) - 1,
+            .address = @ptrToInt(gdt),
+        };
+    }
+};
+
+const code_segment_selector = @offsetOf(GDT, "code_64");
+const data_segment_selector = @offsetOf(GDT, "data_64");
 const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
 const higher_half_offset = @offsetOf(bootloader.Information, "higher_half");
 
-pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn {
+pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noreturn {
     if (@ptrToInt(bootloader_information_arg) >= lib.config.cpu_driver_higher_half_address) {
         // Error
         privileged.arch.stopCPU();
@@ -48,49 +74,21 @@ pub fn trampoline(bootloader_information_arg: *bootloader.Information) noreturn 
             :
             : [cr0] "r" (cr0),
         );
-    }
 
-    var gdt_descriptor = bootloader_information_arg.architecture.gdt.getDescriptor();
-    if (lib.cpu.arch == .x86) gdt_descriptor.address += lib.config.cpu_driver_higher_half_address;
-
-    asm volatile (
-        \\lgdt %[gdt_register]
-        :
-        : [gdt_register] "*p" (&gdt_descriptor),
-    );
-
-    switch (lib.cpu.arch) {
-        .x86_64 => {
-            _ = asm volatile (
-                \\push %[code_segment]
-                \\lea trampoline_reload_cs(%rip), %[reload_cs]
-                \\push %[reload_cs]
-                \\lretq
-                \\trampoline_reload_cs:
-                : [reload_cs] "=r" (-> u64),
-                : [code_segment] "i" (code_segment_selector),
-            );
-        },
-        .x86 => asm volatile (
+        asm volatile (
             \\jmp %[code_segment_selector], $bits64
             \\.code64
             \\bits64:
+            \\mov %[data_segment_selector], %ds
+            \\mov %[data_segment_selector], %es
+            \\mov %[data_segment_selector], %fs
+            \\mov %[data_segment_selector], %gs
+            \\mov %[data_segment_selector], %ss
             :
-            : [gdt_register] "*p" (&gdt_descriptor),
-              [code_segment_selector] "i" (code_segment_selector),
-        ),
-        else => @compileError("Architecture not supported"),
+            : [code_segment_selector] "i" (code_segment_selector),
+              [data_segment_selector] "r" (data_segment_selector),
+        );
     }
-
-    asm volatile (
-        \\mov %[data_segment], %ds
-        \\mov %[data_segment], %es
-        \\mov %[data_segment], %fs
-        \\mov %[data_segment], %gs
-        \\mov %[data_segment], %ss
-        :
-        : [data_segment] "r" (data_segment_selector),
-    );
 
     switch (lib.cpu.arch) {
         .x86_64 => {

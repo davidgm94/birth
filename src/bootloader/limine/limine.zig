@@ -655,7 +655,7 @@ pub fn entryPoint() callconv(.C) noreturn {
     } else @panic("Can't find memory map region for RSP");
 
     switch (lib.cpu.arch) {
-        .x86_64 => bootloader.arch.x86_64.trampoline(bootloader_information),
+        .x86_64 => bootloader.arch.x86_64.jumpToKernel(bootloader_information),
         .aarch64 => while (true) {},
         else => @compileError("Architecture not supported"),
     }

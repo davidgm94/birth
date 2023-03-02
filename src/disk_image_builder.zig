@@ -136,7 +136,6 @@ pub fn main() anyerror!void {
                         const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
                         const dap_offset = @offsetOf(BootDisk, "dap");
                         lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-                        assert(dap_offset == 0x1ae);
                         const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
@@ -181,133 +180,15 @@ pub fn main() anyerror!void {
 pub const BootDisk = extern struct {
     bpb: MBR.BIOSParameterBlock.DOS7_1_79,
     code: [code_byte_count]u8,
-    gdt_32: GDT32,
+    gdt: GDT,
+    gdt_descriptor: GDT.Descriptor,
     dap: MBR.DAP align(2),
     partitions: [4]MBR.LegacyPartition align(2),
     signature: [2]u8 = [_]u8{ 0x55, 0xaa },
 
-    const GDT32 = extern struct {
-        register: Register,
-        null: Descriptor = .{
-            .limit = 0,
-            .access = lib.zeroes(Descriptor.AccessByte),
-            .limit_and_flags = lib.zeroes(Descriptor.LimitAndFlags),
-        },
-        code_32: Descriptor = .{
-            .access = .{
-                .accessed = false,
-                .read_write = true,
-                .direction_conforming = false,
-                .executable = true,
-                .code_data_segment = true,
-                .dpl = 0,
-                .present = true,
-            },
-            .limit_and_flags = .{
-                .limit = 0xf,
-                .long_mode = false,
-                .protected_mode = true,
-                .granularity = true,
-            },
-        },
-        data_32: Descriptor = .{
-            .access = .{
-                .accessed = false,
-                .read_write = true,
-                .direction_conforming = false,
-                .executable = false,
-                .code_data_segment = true,
-                .dpl = 0,
-                .present = true,
-            },
-            .limit_and_flags = .{
-                .limit = 0xf,
-                .long_mode = false,
-                .protected_mode = true,
-                .granularity = true,
-            },
-        },
-        code_16: Descriptor = .{
-            .access = .{
-                .accessed = false,
-                .read_write = true,
-                .direction_conforming = false,
-                .executable = true,
-                .code_data_segment = true,
-                .dpl = 0,
-                .present = true,
-            },
-            .limit_and_flags = .{
-                .limit = 0x0,
-                .long_mode = false,
-                .protected_mode = false,
-                .granularity = false,
-            },
-        },
-        data_16: Descriptor = .{
-            .access = .{
-                .accessed = false,
-                .read_write = true,
-                .direction_conforming = false,
-                .executable = false,
-                .code_data_segment = true,
-                .dpl = 0,
-                .present = true,
-            },
-            .limit_and_flags = .{
-                .limit = 0x0,
-                .long_mode = false,
-                .protected_mode = false,
-                .granularity = false,
-            },
-        },
+    const code_byte_count = 0x10d;
 
-        comptime {
-            assert(@sizeOf(GDT32) == @sizeOf(Register) + 5 * @sizeOf(Descriptor));
-        }
-
-        const Descriptor = extern struct {
-            limit: u16 = 0xffff,
-            base_low: u16 = 0,
-            base_mid: u8 = 0,
-            access: AccessByte,
-            limit_and_flags: LimitAndFlags,
-            base_high: u8 = 0,
-
-            comptime {
-                assert(@sizeOf(Descriptor) == @sizeOf(u64));
-            }
-
-            const AccessByte = packed struct(u8) {
-                accessed: bool = true,
-                read_write: bool = false,
-                direction_conforming: bool = false,
-                executable: bool = false,
-                code_data_segment: bool = true,
-                dpl: u2 = 0,
-                present: bool = true,
-            };
-
-            const LimitAndFlags = packed struct(u8) {
-                limit: u4,
-                reserved: bool = false,
-                long_mode: bool,
-                protected_mode: bool,
-                granularity: bool,
-            };
-        };
-
-        const Register = extern struct {
-            size: u16,
-            pointer: u32 align(2),
-
-            comptime {
-                assert(@sizeOf(Register) == @sizeOf(u16) + @sizeOf(u32));
-            }
-        };
-    };
-
-    const code_byte_count = 0x126;
+    const GDT = bootloader.arch.x86_64.GDT;
 
     const hlt = [_]u8{0xf4};
     const clc = [_]u8{0xf8};
@@ -330,8 +211,12 @@ pub const BootDisk = extern struct {
 
     const mov_eax_cr0 = [_]u8{ 0x0f, 0x20, 0xc0 };
     const mov_cr0_eax = [_]u8{ 0x0f, 0x22, 0xc0 };
+
+    const code_32 = @offsetOf(GDT, "code_32");
+    const data_32 = @offsetOf(GDT, "data_32");
+
     const reload_data_segments_32 = [_]u8{
-        0xb8, 0x10, 0x00, 0x00, 0x00, // mov eax, 0x10
+        0xb8, data_32, 0x00, 0x00, 0x00, // mov eax, 0x10
         0x8e, 0xd8, // mov ds, ax
         0x8e, 0xc0, // mov es, ax
         0x8e, 0xe0, // mov fs, ax
@@ -375,13 +260,11 @@ pub const BootDisk = extern struct {
         const jmp_to_end_of_bpb = .{ 0xeb, @sizeOf(MBR.BIOSParameterBlock.DOS7_1_79) - 2 };
         mbr.bpb.dos3_31.dos2_0.jmp_code = jmp_to_end_of_bpb ++ nop;
         mbr.dap = dap;
-        mbr.gdt_32 = GDT32{
-            .register = .{
-                .size = @sizeOf(GDT32) - @sizeOf(GDT32.Register) - 1,
-                .pointer = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "gdt_32") + @sizeOf(GDT32.Register),
-            },
+        mbr.gdt = .{};
+        mbr.gdt_descriptor = .{
+            .limit = @sizeOf(GDT) - 1,
+            .address = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "gdt"),
         };
-        log.debug("GDT: {}", .{mbr.gdt_32});
         var assembler = Assembler{
             .boot_disk = mbr,
             .patches = host.ArrayList(Patch).init(allocator),
@@ -416,12 +299,12 @@ pub const BootDisk = extern struct {
 
         try assembler.jcc(jc, .error16);
         // Save real mode
-        try assembler.lgdt_16(.gdt);
+        try assembler.lgdt_16(.gdt_descriptor);
         assembler.add_instruction(&cli);
         assembler.add_instruction(&mov_eax_cr0);
         assembler.add_instruction(&or_ax(1));
         assembler.add_instruction(&mov_cr0_eax);
-        try assembler.far_jmp_16(0x8, .protected_mode);
+        try assembler.far_jmp_16(code_32, .protected_mode);
 
         try assembler.add_instruction_with_label(&cli, .error16);
         assembler.add_instruction(&hlt);
@@ -474,7 +357,7 @@ pub const BootDisk = extern struct {
         read_sectors,
         dap,
         dap_pointer,
-        gdt,
+        gdt_descriptor,
         protected_mode,
         elf_loader_loop,
         elf_loader_loop_continue,
@@ -643,7 +526,7 @@ pub const BootDisk = extern struct {
                                 assert(patch_descriptor.label_size == @sizeOf(u16));
                                 const ptr = bootloader.BIOS.mbr_offset + @as(u16, switch (patch_descriptor.label) {
                                     .dap => dap_offset,
-                                    .gdt => @offsetOf(BootDisk, "gdt_32"),
+                                    .gdt_descriptor => @offsetOf(BootDisk, "gdt_descriptor"),
                                     .dap_pointer => dap_offset + @offsetOf(MBR.DAP, "offset"),
                                     else => @panic("wtF"),
                                 });

@@ -20,11 +20,11 @@ push %esi
 push %edi
 push %ebp
 
-jmp $0x18, $.bits16
+jmp $0x08, $.bits16
 
 .code16
 .bits16:
-mov $0x20, %ax
+mov $0x10, %ax
 mov %ax, %ds
 mov %ax, %es
 mov %ax, %fs
@@ -79,7 +79,7 @@ lidtl %ss:(.protected_mode_idt)
 mov %cr0, %eax
 or $0x1, %al
 mov %eax, %cr0
-jmp $0x8, $.bits32
+jmp $0x18, $.bits32
 
 err:
 cli
@@ -87,7 +87,7 @@ hlt
 
 .bits32:
 .code32
-mov $0x10, %eax
+mov $0x20, %eax
 mov %eax, %ds
 mov %eax, %es
 mov %eax, %fs

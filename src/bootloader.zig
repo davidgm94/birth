@@ -60,9 +60,12 @@ pub const Information = extern struct {
     slices: lib.EnumStruct(Slice.Name, Slice),
 
     pub const Architecture = switch (lib.cpu.arch) {
-        .x86, .x86_64 => extern struct {
-            rsdp_address: u64,
-            gdt: privileged.arch.x86_64.GDT.Table = .{},
+        .x86, .x86_64 => blk: {
+            const x86_64 = privileged.arch.x86_64;
+            break :blk extern struct {
+                rsdp_address: u64,
+                gdt: x86_64.GDT = .{},
+            };
         },
         .aarch64 => extern struct {
             foo: u64 = 0,
@@ -146,21 +149,23 @@ pub const Information = extern struct {
         };
 
         pub const Trampoline = extern struct {
-            address: u32,
-
             comptime {
                 assert(lib.cpu.arch == .x86 or lib.cpu.arch == .x86_64);
             }
 
-            pub const Argument = extern struct {
-                hhdm: u64 align(8),
-                cr3: u32,
-                reserved: u16 = 0,
-                gdt_descriptor: privileged.arch.x86_64.GDT.Descriptor,
+            pub const Argument = switch (lib.cpu.arch) {
+                .x86, .x86_64 => extern struct {
+                    hhdm: u64 align(8),
+                    cr3: u32,
+                    reserved: u16 = 0,
+                    gdt_descriptor: arch.x86_64.GDT.Descriptor,
+                    gdt: arch.x86_64.GDT,
 
-                comptime {
-                    assert(@sizeOf(Argument) == 24);
-                }
+                    comptime {
+                        assert(@sizeOf(Argument) == 24 + @sizeOf(arch.x86_64.GDT));
+                    }
+                },
+                else => {},
             };
         };
     };
@@ -239,8 +244,11 @@ pub const Information = extern struct {
                 trampoline_argument.* = .{
                     .hhdm = bootloader_information.higher_half,
                     .cr3 = @intCast(u32, @bitCast(u64, cr3)),
-                    .gdt_descriptor = bootloader_information.architecture.gdt.getDescriptor(),
+                    .gdt_descriptor = undefined,
+                    .gdt = .{},
                 };
+
+                trampoline_argument.gdt_descriptor = trampoline_argument.gdt.getDescriptor();
 
                 const smp_core_booted = @intToPtr(*bool, smp_trampoline + smp_core_booted_offset);
 
