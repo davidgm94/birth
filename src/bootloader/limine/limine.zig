@@ -427,7 +427,6 @@ pub fn entryPoint() callconv(.C) noreturn {
     log.debug("Memory map entry count: {}", .{memory_map.entry_count});
     const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
 
-    const stack_size = privileged.default_stack_size;
     const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
     const memory_map_entry_count = @intCast(u32, memory_map_entries.len);
 
@@ -447,10 +446,6 @@ pub fn entryPoint() callconv(.C) noreturn {
         .files = .{
             .length = 0,
             .alignment = @alignOf(bootloader.File),
-        },
-        .cpu_driver_stack = .{
-            .length = stack_size,
-            .alignment = lib.arch.valid_page_sizes[0],
         },
         .memory_map_entries = .{
             .length = memory_map_entry_count,

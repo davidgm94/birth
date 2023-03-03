@@ -175,7 +175,6 @@ pub fn main() noreturn {
 
     memory_map_size += memory_map_descriptor_size;
 
-    const stack_size = privileged.default_stack_size;
     const length_size_tuples = bootloader.LengthSizeTuples.new(.{
         .bootloader_information = .{
             .length = 1,
@@ -192,10 +191,6 @@ pub fn main() noreturn {
         .files = .{
             .length = file_count,
             .alignment = @alignOf(bootloader.File),
-        },
-        .cpu_driver_stack = .{
-            .length = stack_size,
-            .alignment = lib.arch.valid_page_sizes[0],
         },
         .memory_map_entries = .{
             .length = memory_map_entry_count,

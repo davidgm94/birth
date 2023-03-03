@@ -60,12 +60,8 @@ pub const Information = extern struct {
     slices: lib.EnumStruct(Slice.Name, Slice),
 
     pub const Architecture = switch (lib.cpu.arch) {
-        .x86, .x86_64 => blk: {
-            const x86_64 = privileged.arch.x86_64;
-            break :blk extern struct {
-                rsdp_address: u64,
-                gdt: x86_64.GDT = .{},
-            };
+        .x86, .x86_64 => extern struct {
+            rsdp_address: u64,
         },
         .aarch64 => extern struct {
             foo: u64 = 0,
@@ -84,7 +80,6 @@ pub const Information = extern struct {
 
         pub const Name = enum {
             bootloader_information, // The main struct
-            cpu_driver_stack,
             file_contents,
             file_names,
             files,
@@ -101,7 +96,6 @@ pub const Information = extern struct {
             arr[@enumToInt(Slice.Name.file_contents)] = u8;
             arr[@enumToInt(Slice.Name.file_names)] = u8;
             arr[@enumToInt(Slice.Name.files)] = File;
-            arr[@enumToInt(Slice.Name.cpu_driver_stack)] = u8;
             arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
             arr[@enumToInt(Slice.Name.page_counters)] = u32;
             arr[@enumToInt(Slice.Name.smps)] = SMP;
@@ -318,15 +312,6 @@ pub const Information = extern struct {
     pub fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
         const slice_offset = information.slices.array.values[@enumToInt(offset_name)];
         return slice_offset.dereference(offset_name, information);
-    }
-
-    pub inline fn getStackTop(information: *const Information) usize {
-        const stack_slice = information.getSlice(.cpu_driver_stack);
-        return @ptrToInt(stack_slice.ptr) + stack_slice.len;
-    }
-
-    pub fn getStackSliceOffset() comptime_int {
-        return @offsetOf(Information, "slices") + (@as(comptime_int, @enumToInt(Slice.Name.cpu_driver_stack)) * @sizeOf(Slice));
     }
 
     pub fn getMemoryMapEntryCount(information: *Information) usize {
