@@ -322,7 +322,7 @@ export fn entryPoint() callconv(.C) noreturn {
 }
 
 pub const std_options = struct {
-    pub const log_level = lib.std.log.Level.debug;
+    pub const log_level = lib.std.log.Level.err;
 
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
         _ = level;
