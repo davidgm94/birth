@@ -565,6 +565,11 @@ const RunSteps = struct {
                 "host",
             });
         } else {
+            switch (common.cpu.arch) {
+                .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "qemu64,level=11,+x2apic" }),
+                else => return Error.architecture_not_supported,
+            }
+
             if (arguments.trace) |tracees| {
                 for (tracees) |tracee| {
                     const tracee_slice = b.fmt("-{s}*", .{tracee});

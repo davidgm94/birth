@@ -13,6 +13,7 @@ const tss_selector = @offsetOf(GDT, "tss_descriptor");
 const cpu = @import("cpu");
 
 pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
+    // Initialize GDT
     const gdt_descriptor = GDT.Descriptor{
         .limit = @sizeOf(GDT) - 1,
         .address = @ptrToInt(&gdt),
@@ -64,6 +65,8 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
         : [tss_selector] "r" (@as(u16, tss_selector)),
         : "memory"
     );
+
+    // Initialize IDT
 
     const interrupt_address = @ptrToInt(&dummyInterruptHandler);
     log.debug("interrupt address: 0x{x}", .{interrupt_address});

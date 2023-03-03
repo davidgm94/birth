@@ -175,7 +175,13 @@ pub const Information = extern struct {
                 if (@bitCast(u64, cr3) > lib.maxInt(u32)) {
                     @panic("CR3 overflow");
                 }
+
+                const cpuid = lib.arch.x86_64.cpuid;
                 const lapicWrite = privileged.arch.x86_64.APIC.write;
+
+                if (cpuid(1).edx & (1 << 9) == 0) {
+                    @panic("No APIC detected");
+                }
 
                 var iterator = madt.getIterator();
                 var smp_index: usize = 0;
@@ -283,7 +289,9 @@ pub const Information = extern struct {
                             } else @panic("SMP not booted");
                         },
                         .x2APIC => @panic("x2APIC"),
-                        else => {},
+                        else => {
+                            lib.log.warn("Missing {s} entry", .{@tagName(entry.type)});
+                        },
                     }
                 }
 
