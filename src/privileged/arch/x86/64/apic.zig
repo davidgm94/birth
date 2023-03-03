@@ -16,8 +16,8 @@ const ID = packed struct(u32) {
     reserved: u24,
     apic_id: u8,
 
-    pub fn read(apic_base: VirtualAddress(.global)) ID {
-        return apic_base.offset(@enumToInt(Register.id)).access(*volatile ID).*;
+    pub inline fn read() ID {
+        return lapicRead(.id);
     }
 };
 
@@ -26,8 +26,8 @@ const TaskPriorityRegister = packed struct(u32) {
     class: u4 = 0,
     reserved: u24 = 0,
 
-    pub fn write(tpr: TaskPriorityRegister, apic_base: VirtualAddress(.global)) void {
-        apic_base.offset(@enumToInt(Register.tpr)).access(*volatile TaskPriorityRegister).* = tpr;
+    pub inline fn write(tpr: TaskPriorityRegister) void {
+        lapicWrite(.tpr, @bitCast(u32, tpr));
     }
 };
 
@@ -46,8 +46,8 @@ const LVTTimer = packed struct(u32) {
         tsc_deadline = 2,
     };
 
-    fn write(timer: LVTTimer, apic_base: VirtualAddress(.global)) void {
-        lapicWriteOffset(@This(), timer, Register.lvt_timer, apic_base);
+    inline fn write(timer: LVTTimer) void {
+        lapicWrite(.lvt_timer, @bitCast(u32, timer));
     }
 };
 
@@ -67,33 +67,36 @@ const DivideConfigurationRegister = packed struct(u32) {
         by_1 = 0b1011,
     };
 
-    fn read(apic_base: VirtualAddress(.global)) DivideConfigurationRegister {
-        return lapicReadOffset(@This(), Register.timer_div, apic_base);
+    inline fn read() DivideConfigurationRegister {
+        return lapicRead(.timer_div);
     }
 
-    fn write(dcr: DivideConfigurationRegister, apic_base: VirtualAddress(.global)) void {
-        lapicWriteOffset(@This(), dcr, Register.timer_div, apic_base);
+    inline fn write(dcr: DivideConfigurationRegister) void {
+        lapicWrite(.timer_div, @bitCast(u32, dcr));
     }
-
-    //fn write(
 };
 
-inline fn lapicReadOffset(comptime T: type, register_offset: Register, apic_base: VirtualAddress(.global)) T {
-    return apic_base.offset(@enumToInt(register_offset)).access(*volatile T).*;
+pub inline fn access(register: Register) *volatile u32 {
+    const physical_address = IA32_APIC_BASE.read().getAddress();
+    const virtual_address = switch (lib.cpu.arch) {
+        .x86 => physical_address.toIdentityMappedVirtualAddress(),
+        .x86_64 => switch (lib.os) {
+            .freestanding => physical_address.toHigherHalfVirtualAddress(),
+            .uefi => physical_address.toIdentityMappedVirtualAddress(),
+            else => @compileError("Operating system not supported"),
+        },
+        else => @compileError("Architecture not supported"),
+    };
+
+    return virtual_address.offset(@enumToInt(register)).access(*volatile u32);
 }
 
-inline fn lapicWriteOffset(comptime T: type, register: T, register_offset: Register, apic_base: VirtualAddress(.global)) void {
-    apic_base.offset(@enumToInt(register_offset)).access(*volatile T).* = register;
+pub inline fn lapicRead(register: Register) u32 {
+    return access(register).*;
 }
 
-pub inline fn read(register: Register) u32 {
-    const apic_address = IA32_APIC_BASE.read().getAddress().toIdentityMappedVirtualAddress();
-    return lapicReadOffset(u32, register, apic_address);
-}
-
-pub inline fn write(register: Register, value: u32) void {
-    const apic_address = IA32_APIC_BASE.read().getAddress().toIdentityMappedVirtualAddress();
-    return lapicWriteOffset(u32, value, register, apic_address);
+pub inline fn lapicWrite(register: Register, value: u32) void {
+    access(register).* = value;
 }
 
 const Register = enum(u32) {
@@ -113,96 +116,57 @@ const Register = enum(u32) {
     timer_current_count = 0x390,
 };
 
-pub fn init() VirtualAddress(.global) {
+pub var timestamp_ticks_per_ms: u64 = 0;
+
+pub fn calibrateTimer() void {
+    //calibrate_timer_with_rtc(apic_base);
+    const timer_calibration_start = lib.arch.x86_64.readTimestamp();
+    var times_i: u64 = 0;
+    const times = 8;
+
+    lapicWrite(.timer_initcnt, lib.maxInt(u32));
+
+    while (times_i < times) : (times_i += 1) {
+        io.write(u8, io.Ports.PIT_command, 0x30);
+        io.write(u8, io.Ports.PIT_data, 0xa9);
+        io.write(u8, io.Ports.PIT_data, 0x04);
+
+        while (true) {
+            io.write(u8, io.Ports.PIT_command, 0xe2);
+            if (io.read(u8, io.Ports.PIT_data) & (1 << 7) != 0) break;
+        }
+    }
+
+    const ticks_per_ms = (maxInt(u32) - lapicRead(.timer_current_count)) >> 4;
+    const timer_calibration_end = lib.arch.x86_64.readTimestamp();
+    timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
+    log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
+}
+
+pub fn init() void {
+    log.debug("initializing apic", .{});
     var ia32_apic_base = IA32_APIC_BASE.read();
-    is_bsp = ia32_apic_base.bsp;
-    const apic_base_physical_address = ia32_apic_base.get_address();
+    const apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
-    const apic_base = arch.paging.map_device(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
+    log.debug("mapping apic", .{});
+    const apic_base = arch.paging.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
+    log.debug("mapped apic", .{});
     log.debug("APIC base: {}", .{apic_base});
-    const id_register = ID.read(apic_base);
-    const id = id_register.apic_id;
-    _ = id;
-    const cpuid_result = cpuid(1);
 
-    // TODO: x2APIC
-    if (cpuid_result.ecx & 0b10000_0000_0000_0000_0000 != 0) {
-        log.warn("x2apic is supported by the CPU but not implemented!", .{});
-    }
     const spurious_vector: u8 = 0xFF;
     apic_base.offset(@enumToInt(Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;
 
     const tpr = TaskPriorityRegister{};
-    tpr.write(apic_base);
+    tpr.write();
 
     const lvt_timer = LVTTimer{};
-    lvt_timer.write(apic_base);
+    lvt_timer.write();
 
     ia32_apic_base.global_enable = true;
     ia32_apic_base.write();
     log.debug("APIC enabled", .{});
 
-    if (is_bsp) {
-        asm volatile ("cli");
-        arch.x86_64.PIC.disable();
-        log.debug("PIC disabled!", .{});
-    }
-
-    return apic_base;
-}
-
-const use_tsc_deadline = false;
-
-fn init_timer(apic_base: VirtualAddress, masked: bool, periodic: bool) void {
-    var lvt_timer = LVTTimer{};
-    lvt_timer.vector = 0xfa;
-    lvt_timer.mask = masked;
-    lvt_timer.mode = if (periodic) .periodic else if (use_tsc_deadline and !masked) .tsc_deadline else .oneshot;
-    lvt_timer.write(apic_base);
-}
-
-fn set_divide(apic_base: VirtualAddress, divide: DivideConfigurationRegister.Divide) void {
-    var dcr = DivideConfigurationRegister.read(apic_base);
-    dcr.divide = divide;
-    dcr.write(apic_base);
-}
-
-pub fn calibrate_timer_with_rtc(apic_base: VirtualAddress(.global)) void {
-    init_timer(apic_base, true, false);
-    set_divide(apic_base, .by_1);
-
-    @panic("TODO: calibrate_timer_with_rtc");
-}
-
-pub var is_bsp = false;
-
-pub fn calibrate_timer(apic_base: VirtualAddress(.global)) void {
-    if (is_bsp) {
-        //calibrate_timer_with_rtc(apic_base);
-        const timer_calibration_start = lib.arch.x86_64.readTimestamp();
-        var times_i: u64 = 0;
-        const times = 8;
-
-        lapicWriteOffset(u32, lib.maxInt(u32), Register.timer_initcnt, apic_base);
-
-        while (times_i < times) : (times_i += 1) {
-            io.write(u8, io.Ports.PIT_command, 0x30);
-            io.write(u8, io.Ports.PIT_data, 0xa9);
-            io.write(u8, io.Ports.PIT_data, 0x04);
-
-            while (true) {
-                io.write(u8, io.Ports.PIT_command, 0xe2);
-                if (io.read(u8, io.Ports.PIT_data) & (1 << 7) != 0) break;
-            }
-        }
-
-        const ticks_per_ms = (maxInt(u32) - lapicReadOffset(u32, .timer_current_count, apic_base)) >> 4;
-        const timer_calibration_end = lib.arch.x86_64.readTimestamp();
-        const timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
-        log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
-    } else {
-        @panic("todo calibrate_timer");
-    }
+    calibrateTimer();
 }

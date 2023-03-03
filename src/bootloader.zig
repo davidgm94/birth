@@ -177,7 +177,7 @@ pub const Information = extern struct {
                 }
 
                 const cpuid = lib.arch.x86_64.cpuid;
-                const lapicWrite = privileged.arch.x86_64.APIC.write;
+                const lapicWrite = privileged.arch.x86_64.APIC.lapicWrite;
 
                 if (cpuid(1).edx & (1 << 9) == 0) {
                     @panic("No APIC detected");
