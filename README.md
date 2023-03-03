@@ -107,6 +107,7 @@ Currently only x86_64 is supported, although aarch64 and RISC-V 64 are planned f
 - Barrelfish and Arrakis:
 * https://barrelfish.org/
 * https://arrakis.cs.washington.edu/
+- Essence: https://gitlab.com/nakst/essence/
 - Limine bootloader: https://github.com/limine-bootloader/limine
 - Florence: https://github.com/FlorenceOS/Florence
 - Managarm: https://github.com/managarm/managarm

@@ -38,20 +38,20 @@ comptime {
         else => {},
     }
 }
+pub extern fn entryPoint() callconv(.Naked) noreturn;
+comptime {
+    @export(cpu.arch.entryPoint, .{ .name = "entryPoint", .linkage = .Strong });
+}
 
-pub export fn entryPoint(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    bootloader_information.draw_context.clearScreen(0xff005000);
+pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
+    cpu.arch.earlyInitialize(bootloader_information);
     log.debug("Is test: {}", .{lib.is_test});
+    bootloader_information.draw_context.clearScreen(0xff005000);
     if (lib.is_test) {
         cpu.test_runner.runAllTests() catch @panic("Tests failed");
     }
     log.debug("Starting...", .{});
-    // var total_page_count: u32 = 0;
-    // for (bootloader_information.page.counters) |page_counter| {
-    //     total_page_count += page_counter;
-    // }
-    // log.debug("Total page count: {}. Total memory: 0x{x}", .{ total_page_count, total_page_count << lib.arch.page_shifter(0x1000) });
 
     todoEndEntryPoint();
 }

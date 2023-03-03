@@ -84,10 +84,6 @@ export fn entryPoint() callconv(.C) noreturn {
             .length = 0,
             .alignment = @alignOf(File),
         },
-        .cpu_driver_stack = .{
-            .length = privileged.default_stack_size,
-            .alignment = lib.arch.valid_page_sizes[0],
-        },
         .memory_map_entries = .{
             .length = memory_map_entry_count,
             .alignment = @alignOf(bootloader.MemoryMapEntry),

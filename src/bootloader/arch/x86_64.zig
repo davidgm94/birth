@@ -55,24 +55,30 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
         var cr4 = asm volatile (
             \\mov %%cr4, %[cr4]
             : [cr4] "=r" (-> u32),
+            :
+            : "memory"
         );
         cr4 |= (1 << 5);
         asm volatile (
             \\mov %[cr4], %%cr4 
             :
             : [cr4] "r" (cr4),
+            : "memory"
         );
 
         // Enable paging
         var cr0 = asm volatile (
             \\mov %%cr0, %[cr0]
             : [cr0] "=r" (-> u32),
+            :
+            : "memory"
         );
         cr0 |= (1 << 31);
         asm volatile (
             \\mov %[cr0], %%cr0 
             :
             : [cr0] "r" (cr0),
+            : "memory"
         );
 
         asm volatile (
@@ -87,6 +93,7 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
             :
             : [code_segment_selector] "i" (code_segment_selector),
               [data_segment_selector] "r" (data_segment_selector),
+            : "memory"
         );
     }
 
@@ -94,7 +101,6 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
         .x86_64 => {
             const bootloader_information = @intToPtr(*bootloader.Information, @ptrToInt(bootloader_information_arg) + lib.config.cpu_driver_higher_half_address);
             const entry_point = bootloader_information.entry_point;
-            const stack_top = bootloader_information.getStackTop();
             asm volatile (
                 \\.code64
                 \\jmp *%[entry_point]
@@ -102,8 +108,8 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
                 \\hlt
                 :
                 : [entry_point] "r" (entry_point),
-                  [stack_top] "{rsp}" (stack_top),
                   [bootloader_information] "{rdi}" (bootloader_information),
+                : "memory"
             );
         },
         .x86 => asm volatile (
@@ -113,15 +119,6 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
             \\add (%eax), %edi
             \\.byte 0x48
             \\mov %edi, %eax
-            \\.byte 0x48
-            \\add %[stack_slice_offset], %eax
-            \\add %[slice_offset], %eax
-            \\mov (%eax), %esp
-            \\add %[slice_size_slide], %eax
-            \\add (%eax), %esp
-            \\.byte 0x48
-            \\add %edi, %esp
-            // RSP: stack top hh
             \\.byte 0x48
             \\mov %edi, %eax
             \\add %[entry_point_offset], %eax
@@ -133,10 +130,10 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
             :
             : [bootloader_information] "{edi}" (bootloader_information_arg),
               [higher_half_offset] "i" (higher_half_offset),
-              [stack_slice_offset] "i" (comptime bootloader.Information.getStackSliceOffset()),
               [slice_offset] "i" (@offsetOf(bootloader.Information.Slice, "offset")),
               [slice_size_slide] "i" (@offsetOf(bootloader.Information.Slice, "size") - @offsetOf(bootloader.Information.Slice, "offset")),
               [entry_point_offset] "i" (entry_point_offset),
+            : "memory"
         ),
         else => @compileError("Architecture not supported"),
     }

@@ -15,14 +15,11 @@ pub const PhysicalAddressSpace = AddressInterface.PhysicalAddressSpace;
 pub const VirtualAddressSpace = AddressInterface.VirtualAddressSpace(.x86_64);
 
 pub const APIC = @import("x86/64/apic.zig");
-pub const IDT = @import("x86/64/idt.zig");
 pub const io = @import("x86/64/io.zig");
 pub const paging = @import("x86/64/paging.zig");
 pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
 pub const Syscall = @import("x86/64/syscall.zig");
-
-pub const dispatch_count = IDT.entry_count - IDT.exception_count;
 
 pub const valid_page_sizes = [3]comptime_int{ 0x1000, 0x1000 * 0x200, 0x1000 * 0x200 * 0x200 };
 pub const reverse_valid_page_sizes = blk: {
@@ -296,33 +293,17 @@ pub const GDT = extern struct {
         };
     };
 
-    pub const Descriptor = SegmentDescriptor;
+    pub const Descriptor = x86.SegmentDescriptor;
 };
 
-pub const SegmentDescriptor = x86.SegmentDescriptor;
-
 pub const SystemSegmentDescriptor = extern struct {
-    low: Low,
-    base_high: u32,
-    reserved: u32 = 0,
-
-    comptime {
-        assert(@sizeOf(SystemSegmentDescriptor) == 0x10);
-    }
-
-    const Low = packed struct(u64) {
-        limit_low: u16,
-        base_low: u16,
-        base_low_mid: u8,
-        type: u4,
-        unused0: u1 = 0,
-        descriptor_privilege_level: u2,
-        present: u1,
-        limit_high: u4,
-        available_for_system_software: u1,
-        unused1: u2 = 0,
-        granularity: u1,
-        base_mid: u8,
+    pub const Type = enum(u4) {
+        ldt = 0b0010,
+        tss_available = 0b1001,
+        tss_busy = 0b1011,
+        call_gate = 0b1100,
+        interrupt_gate = 0b1110,
+        trap_gate = 0b1111,
     };
 };
 
@@ -339,7 +320,34 @@ pub const TSS = extern struct {
         assert(@sizeOf(TSS) == 104);
     }
 
-    pub const Descriptor = SystemSegmentDescriptor;
+    pub const Descriptor = extern struct {
+        limit_low: u16,
+        base_low: u16,
+        base_mid_low: u8,
+        access: Access,
+        attributes: Attributes,
+        base_mid_high: u8,
+        base_high: u32,
+        reserved: u32 = 0,
+
+        pub const Access = packed struct(u8) {
+            type: SystemSegmentDescriptor.Type,
+            reserved: u1 = 0,
+            dpl: u2,
+            present: bool,
+        };
+
+        pub const Attributes = packed struct(u8) {
+            limit: u4,
+            available_for_system_software: bool,
+            reserved: u2 = 0,
+            granularity: bool,
+        };
+
+        comptime {
+            assert(@sizeOf(TSS.Descriptor) == 0x10);
+        }
+    };
 
     pub fn getDescriptor(tss: *const TSS, offset: u64) Descriptor {
         const address = @ptrToInt(tss) + offset;

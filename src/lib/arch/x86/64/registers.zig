@@ -36,6 +36,8 @@ pub const RFLAGS = packed struct(u64) {
             \\pushfq
             \\pop %[flags]
             : [flags] "=r" (-> RFLAGS),
+            :
+            : "memory"
         );
     }
 
@@ -141,9 +143,13 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
                 ),
                 .gs => asm volatile ("mov %%gs, %[result]"
                     : [result] "=r" (-> u64),
+                    :
+                    : "memory"
                 ),
                 .cs => asm volatile ("mov %%cs, %[result]"
                     : [result] "=r" (-> u64),
+                    :
+                    : "memory"
                 ),
                 .dr0 => asm volatile ("mov %%dr0, %[result]"
                     : [result] "=r" (-> u64),
@@ -171,9 +177,13 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
                 ),
                 .cr2 => asm volatile ("mov %%cr2, %[result]"
                     : [result] "=r" (-> u64),
+                    :
+                    : "memory"
                 ),
                 .cr8 => asm volatile ("mov %%cr8, %[result]"
                     : [result] "=r" (-> u64),
+                    :
+                    : "memory"
                 ),
             };
         }
@@ -247,10 +257,12 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
                 .gs => asm volatile ("mov %[in], %%gs"
                     :
                     : [in] "r" (value),
+                    : "memory"
                 ),
                 .cs => asm volatile ("mov %[in], %%cs"
                     :
                     : [in] "r" (value),
+                    : "memory"
                 ),
                 .dr0 => asm volatile ("mov %[in], %%dr0"
                     :
@@ -287,10 +299,12 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
                 .cr2 => asm volatile ("mov %[in], %%cr2"
                     :
                     : [in] "r" (value),
+                    : "memory"
                 ),
                 .cr8 => asm volatile ("mov %[in], %%cr8"
                     :
                     : [in] "r" (value),
+                    : "memory"
                 ),
             }
         }
