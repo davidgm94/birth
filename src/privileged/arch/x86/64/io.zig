@@ -1,6 +1,8 @@
 const common = @import("common");
 const log = common.log.scoped(.IO);
 
+const privileged = @import("privileged");
+
 pub const Ports = struct {
     pub const DMA1 = 0x0000;
     pub const PIC1 = 0x0020;
@@ -25,46 +27,6 @@ pub const Ports = struct {
     pub const PCI_data = 0x0cfc;
 };
 
-pub inline fn read(comptime T: type, port: u16) T {
-    return switch (T) {
-        u8 => asm volatile ("inb %[port], %[result]"
-            : [result] "={al}" (-> u8),
-            : [port] "N{dx}" (port),
-        ),
-        u16 => asm volatile ("inw %[port], %[result]"
-            : [result] "={ax}" (-> u16),
-            : [port] "N{dx}" (port),
-        ),
-        u32 => asm volatile ("inl %[port], %[result]"
-            : [result] "={eax}" (-> u32),
-            : [port] "N{dx}" (port),
-        ),
-
-        else => unreachable,
-    };
-}
-
-pub inline fn write(comptime T: type, port: u16, value: T) void {
-    switch (T) {
-        u8 => asm volatile ("outb %[value], %[port]"
-            :
-            : [value] "{al}" (value),
-              [port] "N{dx}" (port),
-        ),
-        u16 => asm volatile ("outw %[value], %[port]"
-            :
-            : [value] "{ax}" (value),
-              [port] "N{dx}" (port),
-        ),
-        u32 => asm volatile ("outl %[value], %[port]"
-            :
-            : [value] "{eax}" (value),
-              [port] "N{dx}" (port),
-        ),
-        else => unreachable,
-    }
-}
-
 pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     const bytes_left = asm volatile (
         \\cld
@@ -77,3 +39,6 @@ pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
 
     return bytes.len - bytes_left;
 }
+
+pub const read = privileged.arch.x86_64.read;
+pub const write = privileged.arch.x86_64.write;

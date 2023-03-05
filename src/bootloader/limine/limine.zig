@@ -1,3 +1,5 @@
+pub const Installer = @import("installer.zig");
+
 const ID = [4]u64;
 
 fn requestID(c: u64, d: u64) ID {
@@ -395,19 +397,37 @@ fn mapSection(cpu_driver_address_space: *VirtualAddressSpace, comptime section_n
     VirtualAddressSpace.paging.map(cpu_driver_address_space, .local, physical_address, virtual_address, size, flags, page_allocator) catch |err| privileged.panic("Mapping of section failed: {}", .{err});
 }
 
-export var limine_information = BootloaderInfo.Request{ .revision = 0 };
-export var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = privileged.default_stack_size };
-export var limine_hhdm = HHDM.Request{ .revision = 0 };
-export var limine_framebuffer = Framebuffer.Request{ .revision = 0 };
-export var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
-export var limine_memory_map = MemoryMap.Request{ .revision = 0 };
-export var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
-export var limine_kernel_file = KernelFile.Request{ .revision = 0 };
-export var limine_kernel_address = KernelAddress.Request{ .revision = 0 };
-export var limine_modules = Module.Request{ .revision = 0 };
-export var limine_rsdp = RSDP.Request{ .revision = 0 };
-export var limine_smbios = SMBIOS.Request{ .revision = 0 };
-export var limine_efi_system_table = EFISystemTable.Request{ .revision = 0 };
+var limine_information = BootloaderInfo.Request{ .revision = 0 };
+var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = privileged.default_stack_size };
+var limine_hhdm = HHDM.Request{ .revision = 0 };
+var limine_framebuffer = Framebuffer.Request{ .revision = 0 };
+var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
+var limine_memory_map = MemoryMap.Request{ .revision = 0 };
+var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
+var limine_kernel_file = KernelFile.Request{ .revision = 0 };
+var limine_kernel_address = KernelAddress.Request{ .revision = 0 };
+var limine_modules = Module.Request{ .revision = 0 };
+var limine_rsdp = RSDP.Request{ .revision = 0 };
+var limine_smbios = SMBIOS.Request{ .revision = 0 };
+var limine_efi_system_table = EFISystemTable.Request{ .revision = 0 };
+
+comptime {
+    if (lib.os == .freestanding) {
+        @export(limine_information, .{ .name = "limine_information", .linkage = .Strong });
+        @export(limine_stack_size, .{ .name = "limine_stack_size", .linkage = .Strong });
+        @export(limine_hhdm, .{ .name = "limine_hhdm", .linkage = .Strong });
+        @export(limine_framebuffer, .{ .name = "limine_framebuffer", .linkage = .Strong });
+        @export(limine_smp, .{ .name = "limine_smp", .linkage = .Strong });
+        @export(limine_memory_map, .{ .name = "limine_memory_map", .linkage = .Strong });
+        @export(limine_entry_point, .{ .name = "limine_entry_point", .linkage = .Strong });
+        @export(limine_kernel_file, .{ .name = "limine_kernel_file", .linkage = .Strong });
+        @export(limine_kernel_address, .{ .name = "limine_kernel_address", .linkage = .Strong });
+        @export(limine_modules, .{ .name = "limine_modules", .linkage = .Strong });
+        @export(limine_rsdp, .{ .name = "limine_rsdp", .linkage = .Strong });
+        @export(limine_smbios, .{ .name = "limine_smbios", .linkage = .Strong });
+        @export(limine_efi_system_table, .{ .name = "limine_efi_system_table", .linkage = .Strong });
+    }
+}
 
 extern fn limineEntryPoint() callconv(.C) noreturn;
 

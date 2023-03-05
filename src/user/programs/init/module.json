@@ -1,4 +1,4 @@
 {
-    "type": "zig_exe",
+    "kind": "zig_exe",
     "dependencies": []
 }

@@ -56,40 +56,15 @@ const RAM = extern struct {
     bytes: u64,
 };
 
-pub const RBED = struct {
-    queue_head: ?*CoreDirectorData,
-    queue_tail: ?*CoreDirectorData,
-    // TODO: more stuff
-};
+// pub const RBED = struct {
+//     queue_head: ?*CoreDirectorData,
+//     queue_tail: ?*CoreDirectorData,
+//     // TODO: more stuff
+// };
 
 pub const SchedulerType = enum(u8) {
     round_robin,
     rate_based_earliest_deadline,
-};
-
-pub const CoreDirectorData = extern struct {
-    dispatcher_handle: arch.VirtualAddress(.local),
-    disabled: bool,
-    cspace: CTE,
-    vspace: usize,
-    dispatcher_cte: CTE,
-    faults_taken: u32,
-    is_vm_guest: bool,
-    // TODO: guest desc
-    domain_id: u64,
-    // TODO: wakeup time
-    wakeup_previous: ?*CoreDirectorData,
-    wakeup_next: ?*CoreDirectorData,
-    next: ?*CoreDirectorData,
-    previous: ?*CoreDirectorData,
-
-    pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
-        arch.paging.context_switch(core_director_data.vspace);
-        context_switch_counter += 1;
-        // TODO: implement LDT
-    }
-
-    var context_switch_counter: usize = 0;
 };
 
 pub const CoreDirectorSharedGeneric = extern struct {

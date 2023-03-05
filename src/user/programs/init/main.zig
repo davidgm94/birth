@@ -1,3 +1,3 @@
-export fn user_entry_point() noreturn {
+export fn entryPoint() noreturn {
     while (true) {}
 }

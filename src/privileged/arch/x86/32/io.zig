@@ -1,3 +1,4 @@
+const privileged = @import("privileged");
 pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     const bytes_left = asm volatile (
         \\cld
@@ -9,3 +10,5 @@ pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     );
     return bytes.len - bytes_left;
 }
+pub const read = privileged.arch.x86.read;
+pub const write = privileged.arch.x86.write;

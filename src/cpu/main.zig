@@ -223,9 +223,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 //         };
 //     };
 // };
-//
-// export
-//
+
 // fn kernel_startup(init_file: []const u8) noreturn {
 //     if (APIC.is_bsp) {
 //         const core_director_data = spawn_bsp_init(init_file) catch |err| {
@@ -238,7 +236,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 //     }
 //     privileged.arch.CPU_stop();
 // }
-//
+
 // fn dispatch(core_director_data: *CoreDirectorData) noreturn {
 //     if (core_director_data != current_core_director_data) {
 //         core_director_data.contextSwitch();
@@ -255,7 +253,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 //         false => @panic("not disabled"),
 //     }
 // }
-//
+
 // fn resume_state(state: *privileged.arch.Registers) noreturn {
 //     logger.debug("fxsave area address: 0x{x}", .{@ptrToInt(&state.fxsave_area)});
 //     logger.debug("fxsave area: {}", .{state.fxsave_area});
@@ -295,7 +293,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 //     );
 //     @panic("resume state");
 // }
-//
+
 // fn spawn_bsp_init(init_file: []const u8) !*CoreDirectorData {
 //     assert(APIC.is_bsp);
 //     const core_director_data = try spawn_init_common(&start_spawn_state);
@@ -307,7 +305,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 //     logger.warn("implement capabilities", .{});
 //     return core_director_data;
 // }
-//
+
 // fn spawn_init_common(spawn_state: *SpawnState) !*CoreDirectorData {
 //     const core_director_data = try spawn_module(spawn_state);
 //     var virtual_address_space = init_page_tables(spawn_state);
@@ -465,118 +463,3 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 // }
 //
 // pub var start_spawn_state = SpawnState{};
-//
-// fn configure_page_attribute_table() void {
-//     logger.debug("Configuring page attribute table...", .{});
-//     defer logger.debug("Page attribute table configured!", .{});
-//     var pat = IA32_PAT.read();
-//     pat.page_attributes[4] = .write_combining;
-//     pat.page_attributes[5] = .write_protected;
-//     pat.write();
-// }
-//
-// fn enable_global_pages() void {
-//     logger.debug("Enabling global pages...", .{});
-//     defer logger.debug("Global pages enabled!", .{});
-//     var my_cr4 = cr4.read();
-//     my_cr4.page_global_enable = true;
-//     my_cr4.write();
-// }
-//
-// fn enable_monitor_mwait() void {
-//     // This is just reporting if it's available
-//     const supported = monitor_mwait.is_supported();
-//     logger.debug("mwait support: {}", .{supported});
-// }
-//
-// var monitor_mwait: struct {
-//     supported: bool = false,
-//     called: bool = false,
-//
-//     pub fn is_supported(mwait: *@This()) bool {
-//         if (!mwait.called) {
-//             const result = cpuid(1);
-//             mwait.supported = result.ecx & (1 << 3) != 0;
-//             mwait.called = true;
-//         }
-//
-//         return mwait.supported;
-//     }
-// } = .{};
-//
-// fn enable_performance_counters() void {
-//     logger.debug("Enabling performance counters...", .{});
-//     defer logger.debug("Performance counters enabled!", .{});
-//     var my_cr4 = cr4.read();
-//     my_cr4.performance_monitoring_counter_enable = true;
-//     my_cr4.write();
-// }
-//
-// fn enable_fpu() void {
-//     logger.debug("Enabling FPU...", .{});
-//     defer logger.debug("FPU enabled!", .{});
-//     var my_cr0 = cr0.read();
-//     my_cr0.emulation = false;
-//     my_cr0.monitor_coprocessor = true;
-//     my_cr0.numeric_error = true;
-//     my_cr0.task_switched = false;
-//     my_cr0.write();
-//     var my_cr4 = cr4.read();
-//     my_cr4.operating_system_support_for_fx_save_restore = true;
-//     my_cr4.operating_system_support_for_unmasked_simd_fp_exceptions = true;
-//     my_cr4.write();
-//
-//     asm volatile ("fninit");
-//     const status_word = asm volatile ("fnstsw %[status_word]"
-//         : [status_word] "={ax}" (-> u16),
-//     );
-//     logger.debug("Status word: 0x{x}", .{status_word});
-//     // should we ldmxcsr ?
-// }
-//
-// pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
-//     asm volatile (
-//         \\cli
-//     );
-//     lib.log.scoped(.PANIC).err("{s}", .{message});
-//     privileged.arch.CPU_stop();
-// }
-//
-// // TODO: implement syscall
-// pub export fn kernel_syscall_entry_point() callconv(.Naked) void {
-//     // This function only modifies RSP. The other registers are preserved in user space
-//     // This sets up the kernel stack before actually starting to run kernel code
-//     //asm volatile (
-//     //\\swapgs
-//     //// Save RFLAGS (R11), next instruction address after sysret (RCX) and user stack (RSP)
-//     //\\mov %%r11, %%r12
-//     //\\mov %%rcx, %%r13
-//     //\\mov %%rsp, %%r14
-//     //// Pass original RCX (4th argument)
-//     //\\mov %%rax, %%rcx
-//     //// Get kernel stack
-//     //\\mov %%gs:[0], %%r15
-//     //\\add %[offset], %%r15
-//     //\\mov (%%r15), %%r15
-//     //\\mov %%r15, %%rbp
-//     //// Use kernel stack
-//     //\\mov %%rbp, %%rsp
-//     //// Call the syscall handler
-//     //\\mov %[handler], %%rax
-//     //\\call *(%%rax)
-//     //// Restore RSP, R11 (RFLAGS) and RCX (RIP after sysret)
-//     //\\mov %%r14, %%rsp
-//     //\\mov %%r12, %%r11
-//     //\\mov %%r13, %%rcx
-//     //// Restore user GS
-//     //\\swapgs
-//     //// Go back to user mode
-//     //\\sysretq
-//     //:
-//     //: [offset] "i" (@intCast(u8, @offsetOf(Thread, "kernel_stack"))),
-//     //[handler] "i" (&Syscall.handler),
-//     //);
-//
-//     @panic("reached unreachable: syscall handler");
-// }
-//

@@ -269,10 +269,51 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
 
     log.debug("Enabled FPU", .{});
 
-    log.debug("BSP: {}", .{bsp});
-    // if (bsp) {
-    //     @panic("BSP");
-    // } else {
-    //     @panic("AP");
-    // }
+    // TODO: configure PAT
+
+    // TODO:
+    //kernelStartup(bootloader_information);
+}
+
+fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
+    if (bsp) {
+        const init_director = spawnBSPInit(bootloader_information);
+        _ = init_director;
+        @panic("TODO: bsp");
+    } else {
+        @panic("APP");
+    }
+
+    @panic("TODO: kernel startup");
+}
+
+pub const CoreDirectorData = extern struct {
+    dispatcher_handle: privileged.arch.VirtualAddress(.local),
+    disabled: bool,
+    //cspace: CTE,
+    vspace: usize,
+    //dispatcher_cte: CTE,
+    faults_taken: u32,
+    is_vm_guest: bool,
+    // TODO: guest desc
+    domain_id: u64,
+    // TODO: wakeup time
+    wakeup_previous: ?*CoreDirectorData,
+    wakeup_next: ?*CoreDirectorData,
+    next: ?*CoreDirectorData,
+    previous: ?*CoreDirectorData,
+
+    pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
+        privileged.arch.paging.context_switch(core_director_data.vspace);
+        context_switch_counter += 1;
+        // TODO: implement LDT
+    }
+
+    var context_switch_counter: usize = 0;
+};
+
+fn spawnBSPInit(bootloader_information: *bootloader.Information) *CoreDirectorData {
+    _ = bootloader_information;
+    assert(bsp);
+    @panic("spawnBSPInit");
 }

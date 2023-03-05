@@ -5,5 +5,5 @@
     "execution_environment": "qemu",
     "optimize_mode": "Debug",
     "execution_type": "emulated",
-    "executable_kind": "normal_exe"
+    "executable_kind": "exe"
 }
