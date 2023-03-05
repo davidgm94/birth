@@ -473,6 +473,7 @@ pub const File = extern struct {
     pub const Type = enum(u32) {
         cpu_driver,
         font,
+        init,
     };
 
     pub const Parser = struct {

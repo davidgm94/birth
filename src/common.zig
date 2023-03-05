@@ -181,7 +181,7 @@ pub const PartitionTableType = enum {
 
 pub const supported_architectures = [_]Cpu.Arch{
     .x86_64,
-    .aarch64,
+    //.aarch64,
     //.riscv64,
 };
 
@@ -207,16 +207,16 @@ pub const architecture_bootloader_map = blk: {
         },
     };
 
-    array[architectureIndex(.aarch64)] = &.{
-        .{
-            .id = .rise,
-            .protocols = &.{.uefi},
-        },
-        .{
-            .id = .limine,
-            .protocols = &.{.uefi},
-        },
-    };
+    // array[architectureIndex(.aarch64)] = &.{
+    //     .{
+    //         .id = .rise,
+    //         .protocols = &.{.uefi},
+    //     },
+    //     .{
+    //         .id = .limine,
+    //         .protocols = &.{.uefi},
+    //     },
+    // };
 
     // array[architectureIndex(.riscv64)] = &.{
     //     .{
@@ -297,12 +297,7 @@ pub const Configuration = struct {
     execution_environment: ExecutionEnvironment,
     optimize_mode: OptimizeMode,
     execution_type: ExecutionType,
-    executable_kind: ExecutableKind,
-};
-
-pub const ExecutableKind = enum {
-    normal_exe,
-    test_exe,
+    executable_kind: std.Build.CompileStep.Kind,
 };
 
 pub const ExecutionType = enum {
@@ -355,4 +350,21 @@ pub const Suffix = enum {
             .complete => if (prefix) |pf| [1][]const u8{pf} ++ complete_suffix else complete_suffix,
         });
     }
+};
+
+pub const Module = struct {
+    program: UserProgram,
+    name: []const u8,
+};
+pub const UserProgram = struct {
+    kind: Kind,
+    dependencies: []const Dependency,
+
+    pub const Kind = enum {
+        zig_exe,
+    };
+
+    pub const Dependency = struct {
+        foo: u64 = 0,
+    };
 };
