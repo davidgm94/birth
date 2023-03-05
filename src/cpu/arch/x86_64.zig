@@ -252,6 +252,8 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
     my_cr4.performance_monitoring_counter_enable = true;
     my_cr4.write();
 
+    log.debug("Set up CR4", .{});
+
     var my_cr0 = cr0.read();
     my_cr0.monitor_coprocessor = true;
     my_cr0.emulation = false;
@@ -259,13 +261,14 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
     my_cr0.task_switched = false;
     my_cr0.write();
 
+    log.debug("Set up CR0", .{});
+
     asm volatile (
         \\fninit
-        \\ldmxcsr %[mxcsr]
-        :
-        : [mxcsr] "m" (@as(u32, 0x1f80)),
-        : "memory"
-    );
+        // TODO: figure out why this crashes with KVM
+        //\\ldmxcsr %[mxcsr]
+        :: //[mxcsr] "m" (@as(u32, 0x1f80)),
+        : "memory");
 
     log.debug("Enabled FPU", .{});
 
