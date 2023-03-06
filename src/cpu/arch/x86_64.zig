@@ -316,7 +316,11 @@ pub const CoreDirectorData = extern struct {
 };
 
 fn spawnBSPInit(bootloader_information: *bootloader.Information) *CoreDirectorData {
-    _ = bootloader_information;
+    const files = bootloader_information.getFiles();
+    log.debug("File count: {}", .{files.len});
+    for (files) |file| {
+        log.debug("File: {}", .{file});
+    }
     assert(bsp);
     @panic("spawnBSPInit");
 }

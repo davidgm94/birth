@@ -272,7 +272,7 @@ pub fn main() noreturn {
         const file_name = file.path;
         const file_slice = &files_slice[file_index];
         file_slice.* = .{
-            .content_offset = content_offset + file_contents_slice.offset,
+            .content_offset = content_offset,
             .content_size = file.uefi.size,
             .path_offset = name_offset + file_names_slice.offset,
             .path_size = @intCast(u32, file_name.len),
@@ -350,9 +350,7 @@ pub fn main() noreturn {
         break :blk VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
     };
 
-    const cpu_driver_file_offset = files_slice[cpu_driver_file_index].content_offset;
-    const cpu_driver_file_size = files_slice[cpu_driver_file_index].content_size;
-    const cpu_driver_executable = @intToPtr([*]const u8, @ptrToInt(bootloader_information) + cpu_driver_file_offset)[0..cpu_driver_file_size];
+    const cpu_driver_executable = files_slice[cpu_driver_file_index].getContent(bootloader_information);
     var elf_parser = ELF.Parser.init(cpu_driver_executable) catch |err| UEFI.panic("Failed to initialize ELF parser: {}", .{err});
 
     const program_headers = elf_parser.getProgramHeaders();

@@ -174,6 +174,10 @@ pub const Allocator = extern struct {
         pub const Result = struct {
             address: u64,
             size: u64,
+
+            pub fn toBytes(result: Result) []u8 {
+                return @intToPtr([*]u8, result.address)[0..result.size];
+            }
         };
         pub const Fn = fn (allocator: *Allocator, size: u64, alignment: u64) Error!Result;
         pub const Error = error{

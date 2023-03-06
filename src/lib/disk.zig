@@ -57,7 +57,7 @@ pub const Disk = extern struct {
         reserved: u7 = 0,
     };
 
-    pub inline fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
+    pub fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
         const sector_count = @divExact(@sizeOf(T), disk.sector_size);
         const provided_buffer = try disk.get_provided_buffer(T, 1, allocator, options.force);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);

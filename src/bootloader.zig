@@ -102,7 +102,7 @@ pub const Information = extern struct {
             break :blk arr;
         };
 
-        pub fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@enumToInt(slice_name)] {
+        pub inline fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@enumToInt(slice_name)] {
             const Type = Slice.TypeMap[@enumToInt(slice_name)];
             const address = @ptrToInt(bootloader_information) + slice.offset;
             return @intToPtr([*]Type, address)[0..slice.len];
@@ -312,12 +312,12 @@ pub const Information = extern struct {
         return files;
     }
 
-    pub fn getSliceOffset(information: *const Information, comptime offset_name: Slice.Name) Slice {
+    pub inline fn getSliceOffset(information: *const Information, comptime offset_name: Slice.Name) Slice {
         const slice_offset = information.slices.array.values[@enumToInt(offset_name)];
         return slice_offset;
     }
 
-    pub fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
+    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
         const slice_offset = information.slices.array.values[@enumToInt(offset_name)];
         return slice_offset.dereference(offset_name, information);
     }
@@ -467,7 +467,13 @@ pub const File = extern struct {
     reserved: u32 = 0,
 
     pub fn getContent(file: File, bootloader_information: *Information) []const u8 {
-        return @intToPtr([*]const u8, @ptrToInt(bootloader_information) + file.content_offset)[0..file.content_size];
+        const content_slice_offset = bootloader_information.getSliceOffset(.file_contents);
+        return @intToPtr([*]const u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
+    }
+
+    pub fn getPath(file: File, bootloader_information: *Information) []const u8 {
+        const content_slice_offset = bootloader_information.getSliceOffset(.file_names);
+        return @intToPtr([*]const u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.path_offset)[0..file.path_size];
     }
 
     pub const Type = enum(u32) {
@@ -552,7 +558,7 @@ pub const File = extern struct {
             return field_value;
         }
 
-        fn skipSpace(parser: *File.Parser) void {
+        inline fn skipSpace(parser: *File.Parser) void {
             while (parser.index < parser.text.len) {
                 const char = parser.text[parser.index];
                 const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
@@ -561,7 +567,7 @@ pub const File = extern struct {
             }
         }
 
-        fn maybeExpectChar(parser: *File.Parser, char: u8) void {
+        inline fn maybeExpectChar(parser: *File.Parser, char: u8) void {
             parser.skipSpace();
             if (parser.text[parser.index] == char) {
                 parser.consume();

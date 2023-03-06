@@ -212,6 +212,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
         .partition_range = partition_range,
         .mbr = fat_partition_mbr,
         .fs_info = fs_info,
+        .allocator = null,
     };
 
     // TODO: write this properly
