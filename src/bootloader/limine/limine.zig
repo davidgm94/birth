@@ -440,6 +440,10 @@ pub fn entryPoint() callconv(.C) noreturn {
         @panic("undefined protocol");
     };
 
+    // TODO: fetch files
+    const module_count = @intCast(u32, limine_modules.response.?.module_count + 1);
+    log.warn("TODO: fetch files", .{});
+
     const framebuffer = &limine_framebuffer.response.?.framebuffers.*[0];
     assert(limine_stack_size.response != null);
     log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
@@ -453,18 +457,18 @@ pub fn entryPoint() callconv(.C) noreturn {
     const length_size_tuples = bootloader.LengthSizeTuples.new(.{
         .bootloader_information = .{
             .length = 1,
-            .alignment = lib.arch.valid_page_sizes[0],
+            .alignment = @alignOf(bootloader.Information),
         },
         .file_contents = .{
-            .length = 0,
-            .alignment = lib.arch.valid_page_sizes[0],
+            .length = module_count,
+            .alignment = 0x200,
         },
         .file_names = .{
-            .length = 0,
-            .alignment = @alignOf(u64),
+            .length = module_count,
+            .alignment = 1,
         },
         .files = .{
-            .length = 0,
+            .length = module_count,
             .alignment = @alignOf(bootloader.File),
         },
         .memory_map_entries = .{

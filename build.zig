@@ -357,14 +357,14 @@ pub fn build(b_arg: *Build) !void {
                                         .exe => {
                                             build_steps.run.dependOn(&run_steps.run);
                                             build_steps.debug.dependOn(&run_steps.debug);
-                                            // b.default_step.dependOn(&cpu_driver.step);
-                                            // if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                                            //     b.default_step.dependOn(&bootloader_compile_step.step);
-                                            // }
-                                            //
-                                            // for (setup.user_modules) |user_module| {
-                                            //     b.default_step.dependOn(&user_module.step);
-                                            // }
+                                            b.default_step.dependOn(&cpu_driver.step);
+                                            if (maybe_bootloader_compile_step) |bootloader_compile_step| {
+                                                b.default_step.dependOn(&bootloader_compile_step.step);
+                                            }
+
+                                            for (setup.user_modules) |user_module| {
+                                                b.default_step.dependOn(&user_module.step);
+                                            }
                                         },
                                         .test_exe => {
                                             build_steps.test_run.dependOn(&run_steps.run);

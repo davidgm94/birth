@@ -45,6 +45,7 @@ comptime {
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
+    if (bootloader_information.getSlice(.files).len == 0) @panic("Files must be loaded by the bootloader");
     cpu.arch.earlyInitialize(bootloader_information);
     log.debug("Is test: {}", .{lib.is_test});
     bootloader_information.draw_context.clearScreen(0xff005000);

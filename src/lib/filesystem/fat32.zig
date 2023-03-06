@@ -328,13 +328,14 @@ pub const Cache = extern struct {
     mbr: *MBR.Partition,
     fs_info: *FSInfo,
     name_configuration: NameConfiguration = mixed,
+    allocator: ?*lib.Allocator,
 
     fn get_backup_boot_record_sector(cache: Cache) u64 {
         return cache.partition_range.first_lba + cache.mbr.bpb.backup_boot_record_sector;
     }
 
     pub fn readFile(cache: Cache, allocator: ?*lib.Allocator, file_path: []const u8) ![]u8 {
-        const directory_entry_result = try cache.getDirectoryEntry(file_path, allocator, null);
+        const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
         const directory_entry = directory_entry_result.directory_entry;
         const first_cluster = directory_entry.getFirstCluster();
         const file_size = directory_entry.file_size;
@@ -342,6 +343,22 @@ pub const Cache = extern struct {
         const lba = cache.clusterToSector(first_cluster);
         const result = try cache.disk.read_slice(u8, aligned_file_size, lba, allocator, .{});
         return result[0..file_size];
+    }
+
+    pub fn readFileToBuffer(cache: Cache, file_path: []const u8, file_buffer: []u8) !void {
+        const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
+        const directory_entry = directory_entry_result.directory_entry;
+        const first_cluster = directory_entry.getFirstCluster();
+        const file_size = directory_entry.file_size;
+        const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
+        const lba = cache.clusterToSector(first_cluster);
+
+        _ = try cache.disk.callbacks.read(cache.disk, @divExact(aligned_file_size, cache.disk.sector_size), lba, file_buffer);
+    }
+
+    pub fn getFileSize(cache: Cache, file_path: []const u8) !u32 {
+        const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
+        return directory_entry_result.directory_entry.file_size;
     }
 
     pub fn fromGPTPartitionCache(allocator: *lib.Allocator, gpt_partition_cache: GPT.Partition.Cache) !FAT32.Cache {
@@ -361,6 +378,7 @@ pub const Cache = extern struct {
             .partition_range = partition_range,
             .mbr = partition_mbr,
             .fs_info = fs_info,
+            .allocator = allocator,
         };
     }
 
@@ -408,30 +426,30 @@ pub const Cache = extern struct {
         entry_already_exist,
     };
 
-    fn getDirectoryEntryCluster(cache: Cache, dir: []const u8, allocator: ?*lib.Allocator) !u32 {
+    fn getDirectoryEntryCluster(cache: Cache, dir: []const u8) !u32 {
         if (lib.equal(u8, dir, "/")) {
             return cache.getRootCluster();
         } else {
-            const containing_dir_entry = try cache.getDirectoryEntry(dir, allocator, null);
+            const containing_dir_entry = try cache.getDirectoryEntry(dir, null);
             return containing_dir_entry.directory_entry.getFirstCluster();
         }
     }
 
     pub fn makeNewDirectory(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, miliseconds: u64) !void {
-        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(absolute_path, allocator, null)).directory_entry else null;
+        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(absolute_path, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("wtf");
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir, allocator);
+        const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir);
         const content_cluster = try cache.allocateNewDirectory(containing_dir_cluster, allocator, copy_cache);
         const last_element = absolute_path[last_slash_index + 1 ..];
         try cache.addEntry(.{ .name = last_element, .is_dir = true, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, miliseconds);
     }
 
     pub fn makeNewFile(cache: Cache, file_path: []const u8, file_content: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, milliseconds: u64) !void {
-        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(file_path, null, null)).directory_entry else null;
+        const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(file_path, null)).directory_entry else null;
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
         const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
-        const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir, allocator);
+        const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir);
         const content_cluster = try cache.allocateNewFile(file_content, allocator);
         const file_name = file_path[last_slash_index + 1 ..];
         try cache.addEntry(.{ .name = file_name, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
@@ -1019,7 +1037,7 @@ pub const Cache = extern struct {
         @panic("wtf");
     }
 
-    pub fn getDirectoryEntry(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
+    pub fn getDirectoryEntry(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
         const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
         const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
         const data_lba = fat_lba + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
@@ -1038,7 +1056,7 @@ pub const Cache = extern struct {
             const copy_entry: ?*FAT32.DirectoryEntry = blk: {
                 if (copy_cache) |cc| {
                     const name = absolute_path[0..dir_tokenizer.index];
-                    const entry_result = try cc.getDirectoryEntry(name, allocator, null);
+                    const entry_result = try cc.getDirectoryEntry(name, null);
                     break :blk entry_result.directory_entry;
                 } else break :blk null;
             };
@@ -1052,7 +1070,7 @@ pub const Cache = extern struct {
 
             while (true) : (upper_cluster += 1) {
                 const cluster_sector_offset = root_cluster_sector + cache.getClusterSectorCount() * (upper_cluster - root_cluster);
-                const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector_offset, allocator, .{});
+                const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector_offset, cache.allocator, .{});
 
                 var entry_index: usize = 0;
                 while (entry_index < directory_entries_in_cluster.len) : ({
@@ -1125,17 +1143,17 @@ pub const Cache = extern struct {
         @panic("wtf");
     }
 
-    pub fn getFATLBA(cache: Cache) u64 {
+    pub inline fn getFATLBA(cache: Cache) u64 {
         const fat_lba = cache.partition_range.first_lba + cache.mbr.bpb.dos3_31.dos2_0.reserved_sector_count;
         return fat_lba;
     }
 
-    pub fn getDataLBA(cache: Cache) u64 {
+    pub inline fn getDataLBA(cache: Cache) u64 {
         const data_lba = cache.getFATLBA() + (cache.mbr.bpb.fat_sector_count_32 * cache.mbr.bpb.dos3_31.dos2_0.fat_count);
         return data_lba;
     }
 
-    pub fn getRootCluster(cache: Cache) u32 {
+    pub inline fn getRootCluster(cache: Cache) u32 {
         const root_cluster = cache.mbr.bpb.root_directory_cluster_offset;
         return root_cluster;
     }

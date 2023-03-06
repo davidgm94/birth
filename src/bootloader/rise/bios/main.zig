@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const Allocator = lib.Allocator;
 const log = lib.log;
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
@@ -6,7 +7,6 @@ const MemoryMap = privileged.MemoryMap;
 const MemoryManager = privileged.MemoryManager;
 const PhysicalHeap = privileged.PhyicalHeap;
 const writer = privileged.writer;
-pub const panic = privileged.zigPanic;
 
 const x86_64 = privileged.arch.x86_64;
 const GDT = x86_64.GDT;
@@ -22,14 +22,39 @@ const BIOS = bootloader.BIOS;
 extern const loader_start: u8;
 extern const loader_end: u8;
 
-var files: [16]File = undefined;
-var file_count: u8 = 0;
+// var files: [16]File = undefined;
+// var file_count: u8 = 0;
+//
+// const File = struct {
+//     path: []const u8,
+//     content: []const u8,
+//     type: bootloader.File.Type,
+// };
 
-const File = struct {
-    path: []const u8,
-    content: []const u8,
-    type: bootloader.File.Type,
+const FATAllocator = extern struct {
+    buffer: [0x1800]u8 = undefined,
+    allocated: usize = 0,
+    allocator: Allocator = .{
+        .callbacks = .{
+            .allocate = allocate,
+        },
+    },
+
+    pub fn allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        const fat = @fieldParentPtr(FATAllocator, "allocator", allocator);
+        const aligned_allocated = lib.alignForward(fat.allocated, @intCast(usize, alignment));
+        if (aligned_allocated + size > fat.buffer.len) @panic("no alloc");
+        fat.allocated = aligned_allocated;
+        const result = Allocator.Allocate.Result{
+            .address = @ptrToInt(&fat.buffer) + fat.allocated,
+            .size = size,
+        };
+        fat.allocated += @intCast(usize, size);
+        return result;
+    }
 };
+
+var fat_allocator = FATAllocator{};
 
 export fn entryPoint() callconv(.C) noreturn {
     BIOS.A20Enable() catch @panic("can't enable a20");
@@ -67,22 +92,64 @@ export fn entryPoint() callconv(.C) noreturn {
     const bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*;
     const memory_map_entry_count = BIOS.getMemoryMapEntryCount();
 
+    var bios_disk = BIOS.Disk{
+        .disk = .{
+            // TODO:
+            .disk_size = 64 * 1024 * 1024,
+            .sector_size = 0x200,
+            .callbacks = .{
+                .read = BIOS.Disk.read,
+                .write = BIOS.Disk.write,
+            },
+            .type = .bios,
+        },
+    };
+
+    const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, &fat_allocator.allocator) catch @panic("can't load gpt cache");
+    var fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&fat_allocator.allocator, gpt_cache) catch @panic("can't load fat cache");
+    const rise_files_file = fat_cache.readFile(&fat_allocator.allocator, "/files") catch @panic("cant load json from disk");
+    const cache_allocated = fat_allocator.allocated;
+    var file_parser = bootloader.File.Parser.init(rise_files_file);
+    var total_file_size: usize = 0;
+    var total_aligned_file_size: usize = 0;
+    var total_file_name_size: usize = 0;
+    var file_count: usize = 0;
+    const file_alignment = 0x200;
+    const cpu_driver_name = blk: {
+        var maybe_cpu_driver_name: ?[]const u8 = null;
+        while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
+            const file_name = file_descriptor.guest;
+            if (file_descriptor.type == .cpu_driver) {
+                if (maybe_cpu_driver_name != null) @panic("Two cpu drivers");
+                maybe_cpu_driver_name = file_name;
+            }
+
+            const file_size = fat_cache.getFileSize(file_name) catch @panic("cant'get file size");
+            total_file_size += file_size;
+            total_aligned_file_size += lib.alignForward(file_size, file_alignment);
+            total_file_name_size += file_name.len;
+
+            file_count += 1;
+        }
+
+        break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
+    };
+
+    file_parser = bootloader.File.Parser.init(rise_files_file);
+    fat_allocator.allocated = cache_allocated;
+
     const length_size_tuples = bootloader.LengthSizeTuples.new(.{
         .bootloader_information = .{
             .length = 1,
-            .alignment = lib.arch.valid_page_sizes[0],
-        },
-        .file_contents = .{
-            .length = 0,
-            .alignment = lib.arch.valid_page_sizes[0],
+            .alignment = @alignOf(bootloader.Information),
         },
         .file_names = .{
-            .length = 0,
-            .alignment = 8,
+            .length = total_file_name_size,
+            .alignment = 1,
         },
         .files = .{
-            .length = 0,
-            .alignment = @alignOf(File),
+            .length = file_count,
+            .alignment = @alignOf(bootloader.File),
         },
         .memory_map_entries = .{
             .length = memory_map_entry_count,
@@ -95,6 +162,10 @@ export fn entryPoint() callconv(.C) noreturn {
         .smps = .{
             .length = cpu_count,
             .alignment = lib.max(8, @alignOf(bootloader.Information.SMP.Information)),
+        },
+        .file_contents = .{
+            .length = total_aligned_file_size,
+            .alignment = file_alignment,
         },
     });
 
@@ -169,46 +240,49 @@ export fn entryPoint() callconv(.C) noreturn {
         @panic("No memory map");
     };
 
-    var bios_disk = BIOS.Disk{
-        .disk = .{
-            // TODO:
-            .disk_size = 64 * 1024 * 1024,
-            .sector_size = 0x200,
-            .callbacks = .{
-                .read = BIOS.Disk.read,
-                .write = BIOS.Disk.write,
-            },
-            .type = .bios,
-        },
-    };
-
     const allocator = &bootloader_information.heap.allocator;
     const page_allocator = &bootloader_information.page_allocator;
 
-    const gpt_cache = lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&bios_disk.disk, 0, allocator) catch @panic("can't load gpt cache");
-    const fat_cache = lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(allocator, gpt_cache) catch @panic("can't load fat cache");
-    const rise_files_file = fat_cache.readFile(allocator, "/files") catch @panic("cant load json from disk");
-    var file_parser = bootloader.File.Parser.init(rise_files_file);
-    const cpu_driver_name = blk: {
-        var maybe_cpu_driver_name: ?[]const u8 = null;
-        while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
-            if (file_count == files.len) @panic("max files");
-            if (file_descriptor.type == .cpu_driver) {
-                if (maybe_cpu_driver_name != null) @panic("Two cpu drivers");
-                maybe_cpu_driver_name = file_descriptor.guest;
+    fat_cache.allocator = allocator;
+
+    // Read files
+    {
+        const file_content_buffer = bootloader_information.getSlice(.file_contents);
+        const file_name_buffer = bootloader_information.getSlice(.file_names);
+        const file_slice = bootloader_information.getSlice(.files);
+
+        var file_content_offset: usize = 0;
+        var file_name_offset: usize = 0;
+        var file_index: usize = 0;
+
+        while (file_parser.next() catch @panic("Cant' parse files file")) |file_descriptor| {
+            const file_name = file_descriptor.guest;
+            lib.copy(u8, file_name_buffer[file_name_offset .. file_content_offset + file_name.len], file_name);
+            const file_size = fat_cache.getFileSize(file_name) catch @panic("can't get file size");
+            const aligned_file_size = lib.alignForward(file_size, file_alignment);
+            const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
+            _ = fat_cache.readFileToBuffer(file_name, file_buffer) catch @panic("cant load json from disk");
+            for (file_buffer[0..10], 0..) |file_byte, i| {
+                lib.log.debug("File byte #{}: 0x{x}", .{ i, file_byte });
             }
 
-            const file_content = fat_cache.readFile(allocator, file_descriptor.guest) catch @panic("cant read file");
-            files[file_count] = .{
+            file_slice[file_index] = .{
+                .content_offset = file_content_offset,
+                .content_size = file_size,
+                .path_offset = file_name_offset,
+                .path_size = file_name.len,
                 .type = file_descriptor.type,
-                .path = file_descriptor.guest,
-                .content = file_content,
             };
-            file_count += 1;
+
+            file_content_offset += aligned_file_size;
+            file_name_offset += file_name.len;
+            file_index += 1;
         }
 
-        break :blk maybe_cpu_driver_name orelse @panic("No CPU driver specified in the configuration");
-    };
+        if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
+        if (file_name_offset != file_name_buffer.len) @panic("File name slice size mismatch");
+        if (file_index != file_count) @panic("File count mismatch");
+    }
 
     bootloader_information.virtual_address_space = blk: {
         const allocation_result = page_allocator.allocateBytes(privileged.arch.x86_64.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]) catch @panic("Unable to get physical memory to bootstrap cpu driver address space");
@@ -240,13 +314,18 @@ export fn entryPoint() callconv(.C) noreturn {
     // Map more than necessary
     //
     // Dirty trick
-    const loader_stack_size = 0x2000;
+    const loader_stack_size = BIOS.stack_size;
     const loader_stack = PhysicalAddress(.global).new(lib.alignForwardGeneric(u32, BIOS.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
     VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .global, loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
 
-    for (files) |file| {
-        if (lib.equal(u8, file.path, cpu_driver_name)) {
-            var parser = lib.ELF(64).Parser.init(file.content) catch @panic("Can't parser ELF");
+    // TODO:
+    for (bootloader_information.getSlice(.files)) |file_descriptor| {
+        if (lib.equal(u8, file_descriptor.getPath(bootloader_information), cpu_driver_name)) {
+            const file_content = file_descriptor.getContent(bootloader_information);
+            for (file_content[0..10]) |file_byte| {
+                lib.log.debug("File byte: 0x{x}", .{file_byte});
+            }
+            var parser = lib.ELF(64).Parser.init(file_content) catch @panic("Can't parser ELF");
 
             const program_headers = parser.getProgramHeaders();
             for (program_headers) |*ph| {
@@ -278,13 +357,12 @@ export fn entryPoint() callconv(.C) noreturn {
                             },
                         }
 
-                        VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch |err| {
-                            log.err("Mapping failed: {}", .{err});
+                        VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, aligned_size, .{ .write = ph.flags.writable, .execute = ph.flags.executable }, page_allocator) catch {
                             @panic("Mapping of section failed");
                         };
 
                         const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
-                        const src_slice = file.content[lib.safeArchitectureCast(ph.offset)..][0..lib.safeArchitectureCast(ph.size_in_file)];
+                        const src_slice = file_content[lib.safeArchitectureCast(ph.offset)..][0..lib.safeArchitectureCast(ph.size_in_file)];
                         if (!(dst_slice.len >= src_slice.len)) {
                             @panic("WTFFFFFFF");
                         }
@@ -300,10 +378,7 @@ export fn entryPoint() callconv(.C) noreturn {
             // Map this struct
             const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
             const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-            VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator) catch |err| {
-                log.debug("Error: {}", .{err});
-                @panic("Mapping of bootloader information failed");
-            };
+            VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
 
             bootloader_information.initializeSMP(madt);
 
@@ -311,18 +386,21 @@ export fn entryPoint() callconv(.C) noreturn {
 
             writer.writeAll("[STAGE 1] Trying to jump to CPU driver...\n") catch unreachable;
 
-            lib.log.debug("bootloader_information: 0x{x}", .{@ptrToInt(bootloader_information)});
             if (bootloader_information.entry_point != 0) {
                 bootloader.arch.x86_64.jumpToKernel(bootloader_information);
             }
         }
     }
 
+    // for (files) |file| {
+    //     if (lib.equal(u8, file.path, cpu_driver_name)) {
+    // }
+
     @panic("loader not found");
 }
 
 pub const std_options = struct {
-    pub const log_level = lib.std.log.Level.err;
+    pub const log_level = lib.std.log.Level.debug;
 
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
         _ = level;
@@ -333,3 +411,16 @@ pub const std_options = struct {
         writer.writeByte('\n') catch unreachable;
     }
 };
+
+pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    privileged.arch.disableInterrupts();
+    writer.writeAll("[PANIC] ") catch unreachable;
+    writer.writeAll(message) catch unreachable;
+    writer.writeByte('\n') catch unreachable;
+
+    if (lib.is_test) {
+        privileged.exitFromQEMU(false);
+    } else {
+        privileged.arch.stopCPU();
+    }
+}
