@@ -441,8 +441,24 @@ pub fn entryPoint() callconv(.C) noreturn {
     };
 
     // TODO: fetch files
-    const module_count = @intCast(u32, limine_modules.response.?.module_count + 1);
+    const module_count = @intCast(u32, limine_modules.response.?.module_count);
     log.warn("TODO: fetch files", .{});
+
+    const limine_module_response = limine_modules.response.?;
+    const limine_module_slice = limine_module_response.modules.?.*[0..limine_module_response.module_count];
+    const file_alignment = 0x200;
+    var aligned_total_file_size: u32 = 0;
+    var total_name_size: u32 = 0;
+    {
+        for (limine_module_slice) |module_descriptor| {
+            const file_size = @intCast(u32, module_descriptor.size);
+            aligned_total_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
+
+            total_name_size += @intCast(u32, lib.length(module_descriptor.path));
+
+            log.debug("Path: {s}", .{module_descriptor.path});
+        }
+    }
 
     const framebuffer = &limine_framebuffer.response.?.framebuffers.*[0];
     assert(limine_stack_size.response != null);
@@ -460,11 +476,11 @@ pub fn entryPoint() callconv(.C) noreturn {
             .alignment = @alignOf(bootloader.Information),
         },
         .file_contents = .{
-            .length = module_count,
-            .alignment = 0x200,
+            .length = aligned_total_file_size,
+            .alignment = file_alignment,
         },
         .file_names = .{
-            .length = module_count,
+            .length = total_name_size,
             .alignment = 1,
         },
         .files = .{
@@ -594,8 +610,6 @@ pub fn entryPoint() callconv(.C) noreturn {
     page_counters[entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
     const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
-    var discarded: usize = 0;
-    _ = discarded;
     for (memory_map_entries, 0..) |entry, index| {
         bootloader_memory_map_entries[index] = .{
             .region = entry.region,
@@ -610,6 +624,38 @@ pub fn entryPoint() callconv(.C) noreturn {
         if (entry.type != .usable) {
             // Reserved
             page_counters[index] = entry_page_count;
+        }
+    }
+
+    // Copy files
+    {
+        var file_content_offset: u32 = 0;
+        var file_name_offset: u32 = 0;
+        // var file_index: usize = 0;
+        // _ = file_index;
+        const file_slice = bootloader_information.getSliceOffset(.files);
+        const file_name_buffer = bootloader_information.getSlice(.file_names);
+        _ = file_slice;
+        var files = bootloader_information.getFiles();
+        for (files, limine_module_slice) |*file, limine_file| {
+            const file_size = @intCast(u32, limine_file.size);
+            const limine_path = limine_file.path[0..lib.length(limine_file.path)];
+            file.* = .{
+                .content_offset = file_content_offset,
+                .content_size = file_size,
+                .path_offset = file_name_offset,
+                .path_size = @intCast(u32, limine_path.len),
+                .type = if (lib.containsAtLeast(u8, limine_path, 1, "cpu")) .cpu_driver else if (lib.containsAtLeast(u8, limine_path, 1, "font")) .font else if (lib.containsAtLeast(u8, limine_path, 1, "init")) .init else @panic("Unexpected file type"),
+            };
+
+            const limine_file_slice = @intToPtr([*]const u8, limine_file.address)[0..limine_file.size];
+            file.copyContent(bootloader_information, limine_file_slice);
+
+            const dst_file_name = file_name_buffer[file_name_offset .. file_name_offset + limine_path.len];
+            lib.copy(u8, dst_file_name, limine_path);
+
+            file_content_offset += lib.alignForwardGeneric(u32, file_size, file_alignment);
+            file_name_offset += @intCast(u32, limine_path.len);
         }
     }
 

@@ -66,6 +66,7 @@ pub const isAligned = mem.isAligned;
 pub const isAlignedGeneric = mem.isAlignedGeneric;
 pub const reverse = mem.reverse;
 pub const tokenize = mem.tokenize;
+pub const containsAtLeast = mem.containsAtLeast;
 
 pub const random = std.rand;
 
