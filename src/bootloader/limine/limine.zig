@@ -622,7 +622,7 @@ pub fn entryPoint() callconv(.C) noreturn {
             .address = PhysicalAddress(.local).new(allocation_result.address),
             .size = allocation_result.size,
         };
-        const result = VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
+        const result = VirtualAddressSpace.paging.initKernelBSP(cpu_driver_address_space_physical_region);
         break :blk result;
     };
 
@@ -630,6 +630,7 @@ pub fn entryPoint() callconv(.C) noreturn {
         if (entry.type == .usable) {
             log.debug("Usable memory map entry: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
             VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, &bootloader_information.page_allocator) catch |err| privileged.panic("Mapping of usable memory map entry failed: {}", .{err});
+            VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, &bootloader_information.page_allocator) catch |err| privileged.panic("Mapping of usable memory map entry failed: {}", .{err});
         }
     }
 
@@ -649,10 +650,10 @@ pub fn entryPoint() callconv(.C) noreturn {
         mapSection(&bootloader_information.virtual_address_space, section.name, &bootloader_information.page_allocator, section.flags) catch @panic("Can't map cpu driver section");
     }
 
-    const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
-    const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
-    log.debug("mapping 0x{x}-0x{x}", .{ bootloader_information_physical_address.value(), bootloader_information_virtual_address.value() });
-    VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
+    // const bootloader_information_physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
+    // const bootloader_information_virtual_address = bootloader_information_physical_address.toHigherHalfVirtualAddress();
+    // log.debug("mapping 0x{x}-0x{x}", .{ bootloader_information_physical_address.value(), bootloader_information_virtual_address.value() });
+    // VirtualAddressSpace.paging.map(&bootloader_information.virtual_address_space, .local, bootloader_information_physical_address, bootloader_information_virtual_address, bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Mapping of bootloader information failed");
 
     // Hack: map Limine stack to jump properly
     const rsp = switch (lib.cpu.arch) {

@@ -310,11 +310,11 @@ pub fn Interface(comptime Usize: type) type {
 
                 pub const paging = privileged.arch.current.paging;
 
-                pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space;
-
-                pub fn kernelBSP(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
-                    return paging.initKernelBSP(physical_memory_region);
-                }
+                // pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space;
+                //
+                // pub fn kernelBSP(physical_memory_region: PhysicalMemoryRegion(.local)) VAS {
+                //     return paging.initKernelBSP(physical_memory_region);
+                // }
 
                 pub fn user(physical_address_space: *PhysicalAddressSpace) VAS {
                     // TODO: defer memory free when this produces an error

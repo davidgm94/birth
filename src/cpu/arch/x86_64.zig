@@ -211,11 +211,16 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
         : "memory"
     );
 
+    log.debug("Loaded IDT", .{});
+
     // Mask PIC
     privileged.arch.io.write(u8, 0xa1, 0xff);
     privileged.arch.io.write(u8, 0x21, 0xff);
 
+    log.debug("Masked PIC", .{});
+
     asm volatile ("sti" ::: "memory");
+    log.debug("Enabled interrupts", .{});
 
     const ia32_apic_base = IA32_APIC_BASE.read();
     bsp = ia32_apic_base.bsp;
@@ -275,7 +280,7 @@ pub fn earlyInitialize(bootloader_information: *bootloader.Information) void {
     // TODO: configure PAT
 
     // TODO:
-    //kernelStartup(bootloader_information);
+    kernelStartup(bootloader_information);
 }
 
 fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
@@ -316,11 +321,9 @@ pub const CoreDirectorData = extern struct {
 };
 
 fn spawnBSPInit(bootloader_information: *bootloader.Information) *CoreDirectorData {
-    const files = bootloader_information.getFiles();
-    log.debug("File count: {}", .{files.len});
-    for (files) |file| {
-        log.debug("File: {}", .{file});
-    }
-    assert(bsp);
-    @panic("spawnBSPInit");
+    _ = bootloader_information;
+    // const init_file = bootloader_information.fetchFileByType(.init) orelse @panic("No init module found");
+    // _ = init_file;
+    // assert(bsp);
+    privileged.exitFromQEMU(true);
 }

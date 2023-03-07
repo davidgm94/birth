@@ -342,12 +342,12 @@ pub fn main() noreturn {
     }
 
     bootloader_information.virtual_address_space = blk: {
-        const chunk_allocation = bootloader_information.page_allocator.allocateBytes(VirtualAddressSpace.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, UEFI.page_size) catch @panic("Unable to get physical memory to bootstrap CPU driver address space");
+        const chunk_allocation = bootloader_information.page_allocator.allocateBytes(VirtualAddressSpace.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, UEFI.page_size) catch @panic("Unable to get physical memory to bootstrap CPU driver address space");
         const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
             .address = PhysicalAddress(.local).new(chunk_allocation.address),
             .size = chunk_allocation.size,
         };
-        break :blk VirtualAddressSpace.kernelBSP(cpu_driver_address_space_physical_region);
+        break :blk VirtualAddressSpace.paging.initKernelBSP(cpu_driver_address_space_physical_region);
     };
 
     const cpu_driver_executable = files_slice[cpu_driver_file_index].getContent(bootloader_information);
@@ -483,9 +483,9 @@ pub fn main() noreturn {
     while (memory_map.next()) |entry| {
         if (entry.type == .ConventionalMemory) {
             const physical_address = PhysicalAddress(.local).new(entry.physical_start);
-            const virtual_address = physical_address.toIdentityMappedVirtualAddress();
             const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
-            paging.map(&bootloader_information.virtual_address_space, .local, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+            paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+            paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
         }
         //log.debug("entry: {s}. 0x{x}, pages: 0x{x}", .{ @tagName(entry.type), entry.physical_start, entry.number_of_pages });
         if (entry.physical_start <= 0x00000000bfef1f98 and 0x00000000bfef1f98 < entry.physical_start + entry.number_of_pages * UEFI.page_size) {
