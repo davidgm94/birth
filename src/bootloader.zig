@@ -477,8 +477,18 @@ pub const File = extern struct {
     reserved: u32 = 0,
 
     pub fn getContent(file: File, bootloader_information: *Information) []const u8 {
+        return file.getContentSlice(bootloader_information);
+    }
+
+    inline fn getContentSlice(file: File, bootloader_information: *Information) []u8 {
         const content_slice_offset = bootloader_information.getSliceOffset(.file_contents);
-        return @intToPtr([*]const u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
+        return @intToPtr([*]u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
+    }
+
+    pub fn copyContent(file: File, bootloader_information: *Information, src_slice: []const u8) void {
+        const dst_slice = file.getContentSlice(bootloader_information);
+        lib.log.debug("Destination slice: {}. Source slice: {}", .{ dst_slice.len, src_slice.len });
+        lib.copy(u8, dst_slice, src_slice);
     }
 
     pub fn getPath(file: File, bootloader_information: *Information) []const u8 {

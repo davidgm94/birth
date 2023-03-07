@@ -321,9 +321,8 @@ pub const CoreDirectorData = extern struct {
 };
 
 fn spawnBSPInit(bootloader_information: *bootloader.Information) *CoreDirectorData {
-    _ = bootloader_information;
-    // const init_file = bootloader_information.fetchFileByType(.init) orelse @panic("No init module found");
-    // _ = init_file;
-    // assert(bsp);
+    const init_file = bootloader_information.fetchFileByType(.init) orelse @panic("No init module found");
+    _ = init_file;
+    assert(bsp);
     privileged.exitFromQEMU(true);
 }
