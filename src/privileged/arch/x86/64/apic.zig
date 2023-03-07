@@ -144,12 +144,15 @@ pub fn calibrateTimer() void {
 }
 
 pub fn init() void {
+    log.debug("Initializing APIC", .{});
     var ia32_apic_base = IA32_APIC_BASE.read();
     const apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
+    log.debug("Mapping APIC", .{});
     const apic_base = arch.paging.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
+    log.debug("Mapped APIC", .{});
 
     const spurious_vector: u8 = 0xFF;
     apic_base.offset(@enumToInt(Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;

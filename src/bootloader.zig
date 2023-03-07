@@ -219,7 +219,7 @@ pub const Information = extern struct {
                                     page_counter.* += 1;
                                     const smp_trampoline_buffer_region = memory_map_entry.region.offset(offset).toIdentityMappedVirtualAddress();
 
-                                    privileged.arch.x86_64.paging.setMappingFlags(&bootloader_information.virtual_address_space, .global, smp_trampoline_buffer_region.address, .{
+                                    privileged.arch.x86_64.paging.setMappingFlags(&bootloader_information.virtual_address_space, smp_trampoline_buffer_region.address.value(), .{
                                         .write = true,
                                         .execute = true,
                                         .global = true,
@@ -426,6 +426,16 @@ pub const Information = extern struct {
 
         _ = alignment;
         @panic("todo: heap allocate");
+    }
+
+    pub fn fetchFileByType(bootloader_information: *Information, file_type: File.Type) ?[]const u8 {
+        for (bootloader_information.getFiles()) |file_descriptor| {
+            if (file_descriptor.type == file_type) {
+                return file_descriptor.getContent(bootloader_information);
+            }
+        }
+
+        return null;
     }
 };
 
