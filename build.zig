@@ -7,6 +7,7 @@ const CompileStep = std.Build.CompileStep;
 const FileSource = std.Build.FileSource;
 const Module = std.Build.Module;
 const ModuleDependency = std.Build.ModuleDependency;
+const OptionsStep = std.Build.OptionsStep;
 const RunStep = std.Build.RunStep;
 const Step = std.Build.Step;
 
@@ -20,6 +21,7 @@ const ExecutionType = common.ExecutionType;
 const ExecutionEnvironment = common.ExecutionEnvironment;
 const FilesystemType = common.FilesystemType;
 const OptimizeMode = common.OptimizeMode;
+const RiseProgram = common.RiseProgram;
 const Suffix = common.Suffix;
 const Target = common.Target;
 
@@ -39,6 +41,17 @@ var b: *Build = undefined;
 var build_steps: *BuildSteps = undefined;
 var default_configuration: Configuration = undefined;
 var user_modules: []const common.Module = undefined;
+var options = Options{};
+
+const Options = struct {
+    arr: std.EnumArray(RiseProgram, *OptionsStep) = std.EnumArray(RiseProgram, *OptionsStep).initUndefined(),
+
+    pub fn createOption(options_struct: *Options, rise_program: RiseProgram) void {
+        const new_options = b.addOptions();
+        new_options.addOption(RiseProgram, "program_type", rise_program);
+        options_struct.arr.set(rise_program, new_options);
+    }
+};
 
 pub fn build(b_arg: *Build) !void {
     b = b_arg;
@@ -60,6 +73,15 @@ pub fn build(b_arg: *Build) !void {
         break :blk mods;
     };
 
+    options = blk: {
+        var opts = Options{};
+        opts.createOption(.bootloader);
+        opts.createOption(.cpu);
+        opts.createOption(.user);
+        opts.createOption(.host);
+        break :blk opts;
+    };
+
     default_configuration = blk: {
         const default_json_file = try std.fs.cwd().readFileAlloc(b.allocator, default_cfg_override, common.maxInt(usize));
         var token_stream = std.json.TokenStream.init(default_json_file);
@@ -70,7 +92,7 @@ pub fn build(b_arg: *Build) !void {
             .bootloader = cfg.bootloader,
             .boot_protocol = cfg.boot_protocol,
             .execution_environment = cfg.execution_environment,
-            .optimize_mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = cfg.optimize_mode }),
+            .optimize_mode = cfg.optimize_mode,
             .execution_type = cfg.execution_type,
             .executable_kind = .exe,
         };
@@ -89,7 +111,7 @@ pub fn build(b_arg: *Build) !void {
 
     const disk_image_builder_modules = &.{ .lib, .host, .bootloader, .disk_image_builder };
     const disk_image_builder = blk: {
-        const exe = try addCompileStep(.{
+        const exe = try addCompileStep(.host, .{
             .kind = .exe,
             .name = "disk_image_builder",
             .root_project_path = "src/disk_image_builder",
@@ -109,7 +131,7 @@ pub fn build(b_arg: *Build) !void {
     for (common.enumValues(OptimizeMode)) |optimize_mode| {
         for (native_tests) |native_test| {
             const test_name = try std.mem.concat(b.allocator, u8, &.{ native_test.name, "_", @tagName(optimize_mode) });
-            const test_exe = try addCompileStep(.{
+            const test_exe = try addCompileStep(.host, .{
                 .kind = .test_exe,
                 .name = test_name,
                 .root_project_path = native_test.root_project_path,
@@ -172,7 +194,7 @@ pub fn build(b_arg: *Build) !void {
                 }, "cpu_driver_");
 
                 const target = try getTarget(architecture, .privileged);
-                const cpu_driver = try addCompileStep(.{
+                const cpu_driver = try addCompileStep(.cpu, .{
                     .kind = executable_kind,
                     .name = exe_name,
                     .root_project_path = cpu_driver_path,
@@ -216,7 +238,7 @@ pub fn build(b_arg: *Build) !void {
                         .execution_type = .emulated,
                     }, try std.mem.concat(b.allocator, u8, &.{ module.name, "_" }));
 
-                    const user_module = try addCompileStep(.{
+                    const user_module = try addCompileStep(.user, .{
                         .kind = executable_kind,
                         .name = user_module_name,
                         .root_project_path = try std.mem.concat(b.allocator, u8, &.{ user_program_dir_path, "/", module.name }),
@@ -253,7 +275,7 @@ pub fn build(b_arg: *Build) !void {
                                 .bios => switch (architecture) {
                                     .x86_64 => blk: {
                                         const bootloader_path = rise_loader_path ++ "bios";
-                                        const executable = try addCompileStep(.{
+                                        const executable = try addCompileStep(.bootloader, .{
                                             .kind = executable_kind,
                                             .name = bootloader_name,
                                             .root_project_path = bootloader_path,
@@ -261,6 +283,9 @@ pub fn build(b_arg: *Build) !void {
                                             .optimize_mode = .ReleaseSmall,
                                             .modules = bootloader_modules,
                                         });
+
+                                        executable.disable_stack_probing = true;
+                                        executable.stack_protector = false;
 
                                         executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
                                         executable.addAssemblyFile(bootloader_path ++ "/unreal_mode.S");
@@ -273,7 +298,7 @@ pub fn build(b_arg: *Build) !void {
                                 },
                                 .uefi => blk: {
                                     const bootloader_path = rise_loader_path ++ "uefi";
-                                    const executable = try addCompileStep(.{
+                                    const executable = try addCompileStep(.bootloader, .{
                                         .kind = executable_kind,
                                         .name = bootloader_name,
                                         .root_project_path = bootloader_path,
@@ -391,15 +416,16 @@ const Executable = struct {
     modules: []const ModuleID,
 };
 
-fn addCompileStep(options: Executable) !*CompileStep {
-    const main_file = try std.mem.concat(b.allocator, u8, &.{ options.root_project_path, "/main.zig" });
-    const compile_step = switch (options.kind) {
+fn addCompileStep(program_type: RiseProgram, executable_options: Executable) !*CompileStep {
+    _ = program_type;
+    const main_file = try std.mem.concat(b.allocator, u8, &.{ executable_options.root_project_path, "/main.zig" });
+    const compile_step = switch (executable_options.kind) {
         .exe => blk: {
             const executable = b.addExecutable(.{
-                .name = options.name,
+                .name = executable_options.name,
                 .root_source_file = FileSource.relative(main_file),
-                .target = options.target,
-                .optimize = options.optimize_mode,
+                .target = executable_options.target,
+                .optimize = executable_options.optimize_mode,
             });
 
             build_steps.build_all.dependOn(&executable.step);
@@ -407,12 +433,12 @@ fn addCompileStep(options: Executable) !*CompileStep {
             break :blk executable;
         },
         .test_exe => blk: {
-            const test_file = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ options.root_project_path, "/test.zig" }));
+            const test_file = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ executable_options.root_project_path, "/test.zig" }));
             const test_exe = b.addTest(.{
-                .name = options.name,
+                .name = executable_options.name,
                 .root_source_file = test_file,
-                .target = options.target,
-                .optimize = options.optimize_mode,
+                .target = executable_options.target,
+                .optimize = executable_options.optimize_mode,
                 .kind = .test_exe,
             });
 
@@ -426,10 +452,10 @@ fn addCompileStep(options: Executable) !*CompileStep {
     compile_step.setMainPkgPath(source_root_dir);
     compile_step.setOutputDir(cache_dir);
 
-    if (options.target.os_tag) |os| {
+    if (executable_options.target.os_tag) |os| {
         switch (os) {
             .freestanding, .uefi => {
-                if (options.kind == .test_exe) {
+                if (executable_options.kind == .test_exe) {
                     compile_step.setTestRunner(main_file);
                 }
 
@@ -441,7 +467,7 @@ fn addCompileStep(options: Executable) !*CompileStep {
         }
     }
 
-    for (options.modules) |module| {
+    for (executable_options.modules) |module| {
         modules.addModule(compile_step, module);
     }
 
@@ -626,7 +652,7 @@ const RunSteps = struct {
         is_debug: bool,
     };
 
-    fn qemuCommon(run_steps: *RunSteps, options: QEMUOptions) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
+    fn qemuCommon(run_steps: *RunSteps, qemu_options: QEMUOptions) !struct { config: Arguments, list: std.ArrayList([]const u8) } {
         const config_file = try std.fs.cwd().readFileAlloc(b.allocator, try std.mem.concat(b.allocator, u8, &.{"config/" ++ @tagName(run_steps.configuration.execution_environment) ++ ".json"}), common.maxInt(usize));
         var token_stream = std.json.TokenStream.init(config_file);
         const arguments = try std.json.parse(Arguments, &token_stream, .{ .allocator = b.allocator });
@@ -635,7 +661,7 @@ const RunSteps = struct {
 
         try argument_list.append(try std.mem.concat(b.allocator, u8, &.{ "qemu-system-", @tagName(run_steps.configuration.architecture) }));
 
-        if (options.is_test and !options.is_debug) {
+        if (qemu_options.is_test and !qemu_options.is_debug) {
             try argument_list.appendSlice(&.{ "-device", b.fmt("isa-debug-exit,iobase=0x{x:0>2},iosize=0x{x:0>2}", .{ common.QEMU.isa_debug_exit.io_base, common.QEMU.isa_debug_exit.io_size }) });
         }
 
@@ -648,12 +674,12 @@ const RunSteps = struct {
         test_configuration.executable_kind = .test_exe;
 
         const image_config = try common.ImageConfig.get(b.allocator, common.ImageConfig.default_path);
-        const disk_image_path = try std.mem.concat(b.allocator, u8, &.{ "zig-cache/", image_config.image_name, try Suffix.image.fromConfiguration(b.allocator, if (options.is_test) test_configuration else run_steps.configuration, "_"), ".hdd" });
+        const disk_image_path = try std.mem.concat(b.allocator, u8, &.{ "zig-cache/", image_config.image_name, try Suffix.image.fromConfiguration(b.allocator, if (qemu_options.is_test) test_configuration else run_steps.configuration, "_"), ".hdd" });
         try argument_list.appendSlice(&.{ "-drive", b.fmt("file={s},index=0,media=disk,format=raw", .{disk_image_path}) });
 
         try argument_list.append("-no-reboot");
 
-        if (!options.is_test) {
+        if (!qemu_options.is_test) {
             try argument_list.append("-no-shutdown");
         }
 
@@ -701,10 +727,10 @@ const RunSteps = struct {
                 "host",
             });
         } else {
-            switch (common.cpu.arch) {
-                .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "qemu64,level=11,+x2apic" }),
-                else => return Error.architecture_not_supported,
-            }
+            // switch (common.cpu.arch) {
+            //     .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "qemu64,level=11,+x2apic" }),
+            //     else => return Error.architecture_not_supported,
+            // }
 
             if (arguments.trace) |tracees| {
                 for (tracees) |tracee| {
@@ -727,6 +753,10 @@ const RunSteps = struct {
 
                     try argument_list.append("-d");
                     try argument_list.append(log_what.items);
+
+                    if (log_configuration.interrupts) {
+                        try argument_list.appendSlice(&.{ "-machine", "smm=off" });
+                    }
                 }
 
                 if (log_configuration.file) |log_file| {

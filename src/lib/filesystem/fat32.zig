@@ -242,7 +242,7 @@ pub const Entry = packed struct(u32) {
             value_bad_cluster => .bad_cluster,
             value_reserved_and_should_not_be_used_eof_start...value_reserved_and_should_not_be_used_eof_end => .reserved_and_should_not_be_used_eof,
             value_allocated_and_eof => .allocated_and_eof,
-            else => if (entry.value >= value_allocated_start and entry.value <= @intCast(u28, max_valid_cluster_number)) .allocated else if (entry.value >= @intCast(u28, max_valid_cluster_number) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else @panic("wtF"),
+            else => if (entry.value >= value_allocated_start and entry.value <= @intCast(u28, max_valid_cluster_number)) .allocated else if (entry.value >= @intCast(u28, max_valid_cluster_number) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else @panic("fat32: getType unexpected error"),
         };
     }
 
@@ -437,7 +437,7 @@ pub const Cache = extern struct {
 
     pub fn makeNewDirectory(cache: Cache, absolute_path: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, miliseconds: u64) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(absolute_path, null)).directory_entry else null;
-        const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("wtf");
+        const last_slash_index = lib.lastIndexOf(u8, absolute_path, "/") orelse @panic("there must be a slash");
         const containing_dir = absolute_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir);
         const content_cluster = try cache.allocateNewDirectory(containing_dir_cluster, allocator, copy_cache);
@@ -447,7 +447,7 @@ pub const Cache = extern struct {
 
     pub fn makeNewFile(cache: Cache, file_path: []const u8, file_content: []const u8, allocator: ?*lib.Allocator, copy_cache: ?FAT32.Cache, milliseconds: u64) !void {
         const copy_entry: ?*DirectoryEntry = if (copy_cache) |my_copy_cache| (try my_copy_cache.getDirectoryEntry(file_path, null)).directory_entry else null;
-        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("there must be a slash");
         const containing_dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
         const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir);
         const content_cluster = try cache.allocateNewFile(file_content, allocator);
@@ -540,19 +540,19 @@ pub const Cache = extern struct {
         var is_upper = true;
         var is_valid = true;
 
-        if (isSkipCharacter(wchar)) @panic("wtf");
-        if (isReplaceCharacter(wchar)) @panic("wtf");
+        if (isSkipCharacter(wchar)) @panic("short names must not contain skip characters");
+        if (isReplaceCharacter(wchar)) @panic("short names must not contain replace characters");
 
         try nls.unicode_to_character(wchar, char_buffer);
 
         // TODO:
         const len = 1;
         if (len == 0) {
-            @panic("wtf");
+            @panic("nls: character length 0");
         } else if (len == 1) {
             const previous = char_buffer[0];
 
-            if (previous >= 0x7f) @panic("wtf");
+            if (previous >= 0x7f) @panic("nls: character value is too high");
 
             char_buffer[0] = nls.to_upper(previous);
             if (lib.isAlphabetic(char_buffer[0])) {
@@ -562,7 +562,7 @@ pub const Cache = extern struct {
                     is_upper = false;
                 }
             }
-        } else @panic("wtf");
+        } else @panic("nls: unexpected length");
 
         return ShortNameInfo{
             .len = @intCast(u5, len),
@@ -668,7 +668,7 @@ pub const Cache = extern struct {
             }
         }
 
-        if (base_len == 0) @panic("wtf");
+        if (base_len == 0) @panic("fat32: base length is 0");
 
         var extension_len: usize = 0;
         var extension: [4]u8 = undefined;
@@ -716,15 +716,15 @@ pub const Cache = extern struct {
         };
 
         if (is_short_name and base_info.valid and extension_info.valid) {
-            if (try cache.exists(&short_name_result.name, cluster, allocator)) @panic("wtf");
+            if (try cache.exists(&short_name_result.name, cluster, allocator)) @panic("fat32: entry with such name already exists");
             const result = switch (cache.name_configuration.create) {
                 .windows_95 => base_info.upper and extension_info.upper,
-                .windows_nt => @panic("wtf"),
+                .windows_nt => @panic("fat32: unsupported name configuration"),
             };
             return result;
         }
 
-        @panic("wtf");
+        @panic("fat32: cannot create shortname");
     }
 
     pub fn scan(cache: Cache, name: []const u8, cluster: u32, allocator: ?*lib.Allocator) !?*DirectoryEntry {
@@ -810,7 +810,7 @@ pub const Cache = extern struct {
 
             const long_slot_count = @intCast(u5, size.size / character_count_per_long_entry);
             entry.long_name_entries = blk: {
-                const allocator = maybe_allocator orelse @panic("WTF allocator");
+                const allocator = maybe_allocator orelse @panic("fat32: allocator not provided");
                 const alloc_result = try allocator.allocateBytes(@intCast(usize, @sizeOf(LongNameEntry)) * long_slot_count, @alignOf(LongNameEntry));
                 break :blk @intToPtr([*]LongNameEntry, alloc_result.address)[0..long_slot_count];
             };
@@ -871,7 +871,7 @@ pub const Cache = extern struct {
             }
         }
 
-        @panic("wtf");
+        @panic("fat32: cannot build slots");
     }
 
     const EntrySetup = struct {
@@ -1030,11 +1030,11 @@ pub const Cache = extern struct {
 
                 previous_cluster = cluster;
             } else if (cluster_index > 0) {
-                @panic("Wrjaksjkd");
+                @panic("cluster index unreachable");
             }
         }
 
-        @panic("wtf");
+        @panic("fat32: allocateClusters");
     }
 
     pub fn getDirectoryEntry(cache: Cache, absolute_path: []const u8, copy_cache: ?Cache) !EntryResult(DirectoryEntry) {
@@ -1047,7 +1047,7 @@ pub const Cache = extern struct {
         var dir_tokenizer = lib.DirectoryTokenizer.init(absolute_path);
         var directories: usize = 0;
 
-        const first_dir = dir_tokenizer.next() orelse @panic("wtf");
+        const first_dir = dir_tokenizer.next() orelse @panic("fat32: there must be at least one directory in the path");
         assert(lib.equal(u8, first_dir, "/"));
 
         entry_loop: while (dir_tokenizer.next()) |entry_name| : (directories += 1) {
@@ -1086,7 +1086,7 @@ pub const Cache = extern struct {
                         return GetError.not_found;
                     } else {
                         if (is_unused) {
-                            @panic("wtf");
+                            @panic("fat32: unused entry found");
                         } else if (is_long_name) {
                             const long_name_entry = @ptrCast(*FAT32.LongNameEntry, directory_entry);
                             const original_starting_index = entry_index;
@@ -1103,11 +1103,11 @@ pub const Cache = extern struct {
                                         } else if (u16_ch <= lib.maxInt(u8)) {
                                             arr[index] = @intCast(u8, u16_ch);
                                         } else {
-                                            @panic("wtf");
+                                            @panic("fat32: u16 unreachable");
                                         }
                                     }
 
-                                    @panic("wtf");
+                                    @panic("long_name_u8 unreachable");
                                 };
 
                                 // TODO: compare long name entry
@@ -1121,7 +1121,7 @@ pub const Cache = extern struct {
                                     }
                                 }
                             } else {
-                                @panic("wtf");
+                                @panic("fat32: not last entry");
                             }
                         } else {
                             if (lib.equal(u8, &directory_entry.name, &normalized_name)) {
@@ -1140,7 +1140,7 @@ pub const Cache = extern struct {
             }
         }
 
-        @panic("wtf");
+        @panic("fat32: unable to get directory entry");
     }
 
     pub inline fn getFATLBA(cache: Cache) u64 {
@@ -1229,7 +1229,7 @@ const FATEntryIterator = struct {
             return result;
         }
 
-        @panic("wtf");
+        @panic("fat32: entry iterator unreachable");
     }
 };
 

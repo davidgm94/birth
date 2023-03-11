@@ -314,7 +314,7 @@ pub const Partition = extern struct {
 };
 
 pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
-    if (disk.type != .memory) @panic("wtF");
+    if (disk.type != .memory) @panic("gpt: creation is only supported for memory disks");
     // 1. Create MBR fake partition
     const mbr_lba = MBR.default_lba;
     const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, null, .{});
@@ -414,93 +414,3 @@ test "gpt size" {
         assert(@sizeOf(Header) == 0x200);
     }
 }
-
-//fn make(step: *lib.build.Step) !void {
-
-//switch (kernel.options.arch) {
-//.x86_64 => {
-//const x86_64 = kernel.options.arch.x86_64;
-//switch (x86_64.boot_protocol) {
-//.bios => {
-//const barebones = blk: {
-//const gpt_partition_cache = try GPT.Partition.Cache.from_partition_index(&barebones_disk_image.descriptor, 0);
-//const fat_partition = try FAT32.Cache.from_gpt_partition_cache(gpt_partition_cache);
-//break :blk Barebones{
-//.gpt_partition_cache = gpt_partition_cache,
-//.fat_partition = fat_partition,
-//};
-//};
-
-//// TODO: mark this with FAT32 GUID (Microsoft basic data partition) and not EFI GUID.Then add a function to modify GUID
-//const gpt_partition_cache = try gpt_cache.add_partition(.fat32, lib.std.unicode.utf8ToUtf16LeStringLiteral("ESP"), 0x800, gpt_cache.header.last_usable_lba, barebones.gpt_partition_cache.partition);
-//const fat_cache = try gpt_partition_cache.format(.fat32);
-//try fat_cache.mkdir("/EFI/BOOT");
-//const foo_entry = try barebones.fat_partition.get_directory_entry("/foo", .fail, null);
-//try fat_cache.add_file("/foo", "a\n", foo_entry.directory_entry);
-
-//lib.diff(barebones_disk_image.get_buffer(), disk.get_buffer());
-
-//try cwd().writeFile("zig-cache/mydisk.bin", disk.get_buffer());
-//@panic("WTF");
-////try lib.Disk.image(&disk.descriptor, &.{lib.Disk.min_partition_size}, try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", 0x200), 0, 0, .{
-////.read = read,
-////.write = write,
-////});
-
-////try disk.descriptor.verify();
-////try cwd().writeFile("zig-cache/disk_image.bin", disk.get_buffer());
-
-////const fat32_partition = try kernel.builder.allocator.create(lib.Filesystem.FAT32.Partition);
-
-////fat32_partition.* = try disk.descriptor.get_partition(0);
-
-////const r = try fat32_partition.create_file("loader.elf");
-////_ = r;
-////
-
-////const mbr_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/mbr.bin", max_file_length);
-////assert(mbr_file.len == 0x200);
-////disk.buffer.appendSliceAssumeCapacity(mbr_file);
-////const mbr = @ptrCast(*MBRBIOS, disk.buffer.items.ptr);
-////const loader_file = try cwd().readFileAlloc(kernel.builder.allocator, "zig-cache/rise.elf", max_file_length);
-////disk.buffer.appendNTimesAssumeCapacity(0, 0x200);
-////mbr.dap = .{
-////.sector_count = @intCast(u16, lib.align_forward(loader_file.len, 0x200) >> 9),
-////.pointer = 0x7e00,
-////.lba = disk.buffer.items.len >> 9,
-////};
-//////std.debug.print("DAP sector count: {}, pointer: 0x{x}, lba: 0x{x}", .{ mbr.dap.sector_count, mbr.dap.pointer, mbr.dap.lba });
-//////if (true) @panic("WTF");
-//////const a = @ptrToInt(&mbr.dap.pointer);
-//////const b = @ptrToInt(mbr);
-//////std.debug.print("A: 0x{x}\n", .{a - b});
-//////if (true) @panic("WTF");
-////disk.buffer.appendSliceAssumeCapacity(loader_file);
-//////assert(loader_file.len < 0x200);
-////disk.buffer.appendNTimesAssumeCapacity(0, lib.align_forward(loader_file.len, 0x200) - loader_file.len);
-//},
-//.uefi => @panic("WTF"),
-//}
-//},
-//else => @panic("WTF"),
-//}
-
-////assert(resource_files.len > 0);
-
-////for (resource_files) |filename| {
-////const file_content = try cwd().readFileAlloc(kernel.builder.allocator, kernel.builder.fmt("resources/{s}", .{filename}), max_file_length);
-////try filesystem.write_file(kernel.allocator, filename, file_content);
-////}
-
-////assert(kernel.userspace_programs.len > 0);
-
-////for (kernel.userspace_programs) |program| {
-////const filename = program.out_filename;
-////const file_path = program.output_path_source.getPath();
-////const file_content = try cwd().readFileAlloc(kernel.builder.allocator, file_path, max_file_length);
-////try filesystem.write_file(get_allocator(), filename, file_content);
-////}
-
-//// TODO: use filesystem
-//try cwd().writeFile(kernel.builder.fmt("{s}disk.bin", .{cache_dir}), disk.buffer.items);
-//}

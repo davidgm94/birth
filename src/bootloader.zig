@@ -10,15 +10,11 @@ pub const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
-const AddressInterface = privileged.Address.Interface(u64);
-const PhysicalAddress = AddressInterface.PhysicalAddress;
-const VirtualAddress = AddressInterface.VirtualAddress;
-const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
-const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
-pub const VirtualAddressSpace = privileged.Address.Interface(u64).VirtualAddressSpace(switch (lib.cpu.arch) {
-    .x86 => .x86_64,
-    else => lib.cpu.arch,
-});
+const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 pub const Version = extern struct {
     patch: u8,
@@ -32,10 +28,12 @@ pub const CompactDate = packed struct(u16) {
     day: u5,
 };
 
+const last_struct_offset = @offsetOf(Information, "slices");
 pub const Information = extern struct {
-    entry_point: u64,
-    higher_half: u64,
+    entry_point: u64 align(8),
+    higher_half: u64 align(8),
     total_size: u32,
+    last_struct_offset: u32 = last_struct_offset,
     version: Version,
     protocol: lib.Bootloader.Protocol,
     bootloader: lib.Bootloader,
@@ -173,6 +171,7 @@ pub const Information = extern struct {
             .x86, .x86_64 => {
                 const cr3 = bootloader_information.virtual_address_space.arch.cr3;
                 if (@bitCast(u64, cr3) > lib.maxInt(u32)) {
+                    lib.log.err("CR3: 0x{x}, {}", .{ @bitCast(u64, cr3), cr3 });
                     @panic("CR3 overflow");
                 }
 
@@ -290,7 +289,7 @@ pub const Information = extern struct {
                         },
                         .x2APIC => @panic("x2APIC"),
                         else => {
-                            lib.log.warn("Missing {s} entry", .{@tagName(entry.type)});
+                            lib.log.warn("Unhandled {s} entry", .{@tagName(entry.type)});
                         },
                     }
                 }
@@ -338,9 +337,11 @@ pub const Information = extern struct {
         bad_slice_alignment,
         bad_slice_size,
         bad_total_size,
+        bad_struct_offset,
     };
     // TODO: further checks
     pub fn checkIntegrity(information: *const Information) !void {
+        if (information.last_struct_offset != last_struct_offset) return IntegrityError.bad_struct_offset;
         const original_total_size = information.total_size;
         var total_size: u32 = 0;
         inline for (Information.Slice.TypeMap, 0..) |T, index| {
@@ -361,31 +362,35 @@ pub const Information = extern struct {
 
     pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
+        if (bootloader_information.stage != .cpu) {
+            if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+            if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+            const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
 
-        if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
-        if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
-        const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
+            const entries = bootloader_information.getMemoryMapEntries();
+            const page_counters = bootloader_information.getPageCounters();
 
-        const entries = bootloader_information.getMemoryMapEntries();
-        const page_counters = bootloader_information.getPageCounters();
+            for (entries, 0..) |entry, entry_index| {
+                lib.log.debug("Entry size: {}. Page counter: {}", .{ entry.region.size, page_counters[entry_index] });
+                const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
+                const size_left = entry.region.size - busy_size;
+                if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
+                    if (entry.region.address.isAligned(alignment)) {
+                        const result = Allocator.Allocate.Result{
+                            .address = entry.region.address.offset(busy_size).value(),
+                            .size = size,
+                        };
 
-        for (entries, 0..) |entry, entry_index| {
-            const busy_size = page_counters[entry_index] * lib.arch.valid_page_sizes[0];
-            const size_left = entry.region.size - busy_size;
-            if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
-                if (entry.region.address.isAligned(alignment)) {
-                    const result = Allocator.Allocate.Result{
-                        .address = entry.region.address.offset(busy_size).value(),
-                        .size = size,
-                    };
+                        if (result.address + result.size <= lib.maxInt(usize)) {
+                            lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address))[0..lib.safeArchitectureCast(result.size)]);
 
-                    lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address))[0..lib.safeArchitectureCast(result.size)]);
+                            lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.address + result.size });
 
-                    //lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.address + result.size });
+                            page_counters[entry_index] += four_kb_pages;
 
-                    page_counters[entry_index] += four_kb_pages;
-
-                    return result;
+                            return result;
+                        }
+                    }
                 }
             }
         }
@@ -395,37 +400,40 @@ pub const Information = extern struct {
 
     pub fn heapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         const bootloader_information = @fieldParentPtr(Information, "heap", @fieldParentPtr(Heap, "allocator", allocator));
-        for (&bootloader_information.heap.regions) |*region| {
-            if (region.size > size) {
-                const result = .{
-                    .address = region.address.value(),
-                    .size = size,
-                };
-                region.size -= size;
-                region.address.addOffset(size);
-                return result;
+        if (bootloader_information.stage != .cpu) {
+            for (&bootloader_information.heap.regions) |*region| {
+                if (region.size > size) {
+                    const result = .{
+                        .address = region.address.value(),
+                        .size = size,
+                    };
+                    region.size -= size;
+                    region.address.addOffset(size);
+                    return result;
+                }
             }
-        }
-        const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
-        for (&bootloader_information.heap.regions) |*region| {
-            if (region.size == 0) {
-                const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
-                region.* = .{
-                    .address = PA.new(allocated_region.address),
-                    .size = allocated_region.size,
-                };
-                const result = .{
-                    .address = region.address.value(),
-                    .size = size,
-                };
-                region.address.addOffset(size);
-                region.size -= size;
-                return result;
+            const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
+            for (&bootloader_information.heap.regions) |*region| {
+                if (region.size == 0) {
+                    const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
+                    region.* = .{
+                        .address = PA.new(allocated_region.address),
+                        .size = allocated_region.size,
+                    };
+                    const result = .{
+                        .address = region.address.value(),
+                        .size = size,
+                    };
+                    region.address.addOffset(size);
+                    region.size -= size;
+                    return result;
+                }
             }
+
+            _ = alignment;
         }
 
-        _ = alignment;
-        @panic("todo: heap allocate");
+        return Allocator.Allocate.Error.OutOfMemory;
     }
 
     pub fn fetchFileByType(bootloader_information: *Information, file_type: File.Type) ?[]const u8 {
@@ -443,15 +451,8 @@ pub const CPUDriverMappings = extern struct {
     text: Mapping = .{},
     data: Mapping = .{},
     rodata: Mapping = .{},
-
-    const Mapping = extern struct {
-        physical: PhysicalAddress(.local) = PhysicalAddress(.local).invalid(),
-        virtual: VirtualAddress(.local) = .null,
-        size: u64 = 0,
-        flags: privileged.arch.VirtualAddressSpace.Flags = .{},
-        reserved: u32 = 0,
-    };
 };
+const Mapping = privileged.Mapping;
 
 pub const MemoryMapEntry = extern struct {
     region: PhysicalMemoryRegion(.global) align(8),
@@ -542,6 +543,7 @@ pub const File = extern struct {
                 if (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
                     const host_path_field = try parser.parseField("host_path");
                     const host_base_field = try parser.parseField("host_base");
+                    lib.log.debug("Host base: {s}", .{host_base_field});
                     const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.err;
                     const guest_field = try parser.parseField("guest");
                     const file_type = lib.stringToEnum(File.Type, try parser.parseField("type")) orelse return Error.err;
@@ -557,7 +559,7 @@ pub const File = extern struct {
                         .type = file_type,
                     };
                 } else {
-                    @panic("WTF");
+                    @panic("file parser: unexpected error while parsing files");
                 }
             }
 
@@ -728,7 +730,7 @@ pub const LengthSizeTuples = extern struct {
 };
 
 pub const Font = extern struct {
-    file: PhysicalMemoryRegion(.local),
+    file: PhysicalMemoryRegion(.local) align(8), // so 32-bit doesn't whine
     glyph_buffer_size: u32,
     character_size: u8,
     draw: *const fn (font: *const Font, framebuffer: *const Framebuffer, character: u8, color: u32, offset_x: u32, offset_y: u32) void,
@@ -832,4 +834,5 @@ pub const Stage = enum(u32) {
     early = 0,
     only_graphics = 1,
     trampoline = 2,
+    cpu = 3,
 };

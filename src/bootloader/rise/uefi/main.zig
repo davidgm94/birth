@@ -24,11 +24,11 @@ const SystemTable = UEFI.SystemTable;
 
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
-const PhysicalAddress = privileged.arch.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.arch.PhysicalMemoryRegion;
-const VirtualAddress = privileged.arch.VirtualAddress;
-const VirtualAddressSpace = privileged.arch.VirtualAddressSpace;
-const VirtualMemoryRegion = privileged.arch.VirtualMemoryRegion;
+const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualAddress = privileged.VirtualAddress;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 pub const writer = privileged.writer;
 
 const CPU = privileged.arch.CPU;
@@ -245,7 +245,7 @@ pub fn main() noreturn {
         .framebuffer = framebuffer,
         .draw_context = .{},
         .font = undefined,
-        .virtual_address_space = .{ .arch = .{} },
+        .virtual_address_space = undefined,
         .architecture = switch (lib.cpu.arch) {
             .x86_64 => .{ .rsdp_address = rsdp_physical_address.value() },
             .aarch64, .riscv64 => .{},
@@ -341,14 +341,7 @@ pub fn main() noreturn {
         };
     }
 
-    bootloader_information.virtual_address_space = blk: {
-        const chunk_allocation = bootloader_information.page_allocator.allocateBytes(VirtualAddressSpace.paging.needed_physical_memory_for_bootstrapping_cpu_driver_address_space, UEFI.page_size) catch @panic("Unable to get physical memory to bootstrap CPU driver address space");
-        const cpu_driver_address_space_physical_region = PhysicalMemoryRegion(.local){
-            .address = PhysicalAddress(.local).new(chunk_allocation.address),
-            .size = chunk_allocation.size,
-        };
-        break :blk VirtualAddressSpace.paging.initKernelBSP(cpu_driver_address_space_physical_region);
-    };
+    bootloader_information.virtual_address_space = VirtualAddressSpace.paging.initKernelBSP(&bootloader_information.page_allocator) catch @panic("Failed to initialize address space");
 
     const cpu_driver_executable = files_slice[cpu_driver_file_index].getContent(bootloader_information);
     var elf_parser = ELF.Parser.init(cpu_driver_executable) catch |err| UEFI.panic("Failed to initialize ELF parser: {}", .{err});
@@ -397,7 +390,7 @@ pub fn main() noreturn {
                 const src_slice = cpu_driver_executable[ph.offset..][0..ph.size_in_memory];
 
                 if (!(dst_slice.len >= src_slice.len)) {
-                    @panic("WTFFFFFFF");
+                    @panic("uefi: segment allocated memory must be equal or greater than especified");
                 }
                 assert(dst_slice.len >= src_slice.len);
                 lib.copy(u8, dst_slice, src_slice);
@@ -413,7 +406,7 @@ pub fn main() noreturn {
                         const size = aligned_segment_size;
                         const flags = .{ .write = ph.flags.writable, .execute = ph.flags.executable };
                         log.debug("trying to map cpu driver section: 0x{x} -> 0x{x}, 0x{x}", .{ physical_address.value(), virtual_address.value(), size });
-                        paging.map(&bootloader_information.virtual_address_space, locality, physical_address, virtual_address, size, flags, &bootloader_information.page_allocator) catch |err| UEFI.panic("unable to map program segment: {}", .{err});
+                        bootloader_information.virtual_address_space.map(locality, physical_address, virtual_address, size, flags) catch |err| UEFI.panic("unable to map program segment: {}", .{err});
                         log.debug("mapped cpu driver section: 0x{x} -> 0x{x}, 0x{x}", .{ physical_address.value(), virtual_address.value(), size });
 
                         const mapping_ptr =
@@ -456,7 +449,7 @@ pub fn main() noreturn {
 
                     const code_physical_region = PhysicalMemoryRegion(.local).new(PhysicalAddress(.local).new(entry.physical_start), entry_size);
                     const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-                    paging.map(&bootloader_information.virtual_address_space, .local, code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, &bootloader_information.page_allocator) catch @panic("Unable to map kernel trampoline code");
+                    bootloader_information.virtual_address_space.map(.local, code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }) catch @panic("Unable to map cpu trampoline code");
                     break;
                 }
             }
@@ -470,8 +463,8 @@ pub fn main() noreturn {
     {
         const physical_address = PhysicalAddress(.local).new(@ptrToInt(bootloader_information));
         const size = bootloader_information.getAlignedTotalSize();
-        paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
-        paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
+        bootloader_information.virtual_address_space.map(.local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
+        bootloader_information.virtual_address_space.map(.local, physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
     }
 
     // Map all usable memory to avoid kernel delays later
@@ -484,12 +477,10 @@ pub fn main() noreturn {
         if (entry.type == .ConventionalMemory) {
             const physical_address = PhysicalAddress(.local).new(entry.physical_start);
             const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
-            paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
-            paging.map(&bootloader_information.virtual_address_space, .local, physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
-        }
-        //log.debug("entry: {s}. 0x{x}, pages: 0x{x}", .{ @tagName(entry.type), entry.physical_start, entry.number_of_pages });
-        if (entry.physical_start <= 0x00000000bfef1f98 and 0x00000000bfef1f98 < entry.physical_start + entry.number_of_pages * UEFI.page_size) {
-            log.debug("contained", .{});
+            log.debug("Identity", .{});
+            // bootloader_information.virtual_address_space.map(.local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }) catch @panic("Unable to map page tables");
+            log.debug("Higher half", .{});
+            bootloader_information.virtual_address_space.map(.local, physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }) catch @panic("Unable to map page tables");
         }
     }
 
@@ -508,7 +499,7 @@ pub fn main() noreturn {
             const rsp_virtual_address = rsp_physical_address.toIdentityMappedVirtualAddress();
             log.debug("mapping {s} 0x{x} - 0x{x}", .{ @tagName(entry.type), entry.physical_start, entry.physical_start + region_size });
             assert(region_size > 0);
-            paging.map(&bootloader_information.virtual_address_space, .local, rsp_physical_address, rsp_virtual_address, region_size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+            bootloader_information.virtual_address_space.map(.local, rsp_physical_address, rsp_virtual_address, region_size, .{ .write = true, .execute = false }) catch @panic("Unable to map page tables");
             break;
         }
     }
@@ -519,12 +510,12 @@ pub fn main() noreturn {
         const physical_address = PhysicalAddress(.global).new(bootloader_information.framebuffer.address);
         const virtual_address = physical_address.toIdentityMappedVirtualAddress();
         const size = bootloader_information.framebuffer.getSize();
-        paging.map(&bootloader_information.virtual_address_space, .global, physical_address, virtual_address, size, .{ .write = true, .execute = false }, &bootloader_information.page_allocator) catch @panic("Unable to map page tables");
+        bootloader_information.virtual_address_space.map(.global, physical_address, virtual_address, size, .{ .write = true, .execute = false }) catch @panic("Unable to map page tables");
     }
 
-    log.debug("Initialize SMP", .{});
-    bootloader_information.initializeSMP(madt);
-    log.debug("Ended SMP initialization", .{});
+    //log.debug("Initialize SMP", .{});
+    //bootloader_information.initializeSMP(madt);
+    //log.debug("Ended SMP initialization", .{});
 
     log.debug("Jumping to trampoline...", .{});
     switch (lib.cpu.arch) {
@@ -551,19 +542,19 @@ pub const std_options = struct {
         const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
         switch (lib.cpu.arch) {
             .x86_64 => {
-                if (maybe_bootloader_information) |bootloader_information| {
-                    if (@enumToInt(bootloader_information.stage) < @enumToInt(bootloader.Stage.only_graphics)) {
-                        var buffer: [4096]u8 = undefined;
-                        const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\r\n", args) catch unreachable;
-
-                        for (formatted_buffer) |c| {
-                            const fake_c = [2]u16{ c, 0 };
-                            _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
-                        }
-                    } else {
-                        draw_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
-                    }
-                }
+                // if (maybe_bootloader_information) |bootloader_information| {
+                //     if (@enumToInt(bootloader_information.stage) < @enumToInt(bootloader.Stage.only_graphics)) {
+                //         var buffer: [4096]u8 = undefined;
+                //         const formatted_buffer = lib.std.fmt.bufPrint(buffer[0..], prefix ++ format ++ "\r\n", args) catch unreachable;
+                //
+                //         for (formatted_buffer) |c| {
+                //             const fake_c = [2]u16{ c, 0 };
+                //             _ = UEFI.get_system_table().con_out.?.outputString(@ptrCast(*const [1:0]u16, &fake_c));
+                //         }
+                //     } else {
+                //         draw_writer.print(prefix ++ format ++ "\n", args) catch unreachable;
+                //     }
+                // }
 
                 writer.print(prefix ++ format ++ "\n", args) catch unreachable;
             },

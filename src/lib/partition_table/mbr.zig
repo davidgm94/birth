@@ -155,7 +155,7 @@ pub const Partition = extern struct {
         mbr.bpb.compare(&other.bpb);
 
         if (!lib.equal(u8, &mbr.code, &other.code)) {
-            @panic("wtF");
+            @panic("mbr: code does not match");
         }
 
         for (mbr.partitions, 0..) |this_partition, partition_i| {
@@ -287,7 +287,7 @@ pub const Partition = extern struct {
             return VerificationError.filesystem_type;
         }
 
-        @panic("wtF");
+        @panic("mbr: unexpected verification error");
     }
 
     pub fn format(mbr: *const MBR.Partition, comptime _: []const u8, _: lib.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {

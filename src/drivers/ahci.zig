@@ -41,7 +41,7 @@ pub const InitError = error{
 pub fn init(device_manager: *DeviceManager, virtual_address_space: *VirtualAddressSpace, pci_device: PCI.Device) !void {
     const driver = try drivers.add_one(virtual_address_space.heap.allocator);
     driver.pci = pci_device;
-    driver.abar = (driver.pci.enable_bar(virtual_address_space, 5) catch @panic("wtf")).access(*HBAMemory);
+    driver.abar = (driver.pci.enable_bar(virtual_address_space, 5) catch @panic("ahci.init: unexpected error when enabling BAR")).access(*HBAMemory);
 
     driver.probe_ports();
 
@@ -199,21 +199,21 @@ pub const Drive = struct {
         {
             // TODO: maybe don't allocate as much?
             // TODO: batch allocations
-            const command_list_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("wtf");
+            const command_list_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("command list allocation failed");
             // TODO: what's 1024?
             zero(command_list_alloc_result.virtual_address.access([*]u8)[0..1024]);
             const command_list_base = command_list_alloc_result.physical_address.value;
             drive.hba_port.command_list_base_low = @truncate(u32, command_list_base);
             drive.hba_port.command_list_base_high = @truncate(u32, command_list_base >> 32);
 
-            const fis_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
+            const fis_alloc_result = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("fis allocation failed");
             zero(fis_alloc_result.virtual_address.access([*]u8)[0..256]);
             const fis_base = fis_alloc_result.physical_address.value;
             drive.hba_port.fis_base_address_low = @truncate(u32, fis_base);
             drive.hba_port.fis_base_address_high = @truncate(u32, fis_base >> 32);
 
             const command_headers = command_list_alloc_result.virtual_address.access([*]volatile HBACommandHeader)[0..32];
-            const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("Wtf");
+            const command_table_address = virtual_address_space.allocate_extended(arch.page_size, null, .{ .write = true }, .no) catch @panic("command table allocation failed");
             zero(command_table_address.virtual_address.access([*]u8)[0..arch.page_size]);
             for (command_headers, 0..) |*header, i| {
                 header.prdt_length = 8; // TODO: figure out how to get the value
@@ -334,7 +334,7 @@ pub const Drive = struct {
         zero_slice(HBAPRDTEntry, entries);
 
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), extra_context));
-        const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.virtual_address)) orelse @panic("wtF");
+        const buffer_base_physical_address = virtual_address_space.translate_address(VirtualAddress.new(buffer.virtual_address)) orelse @panic("ahci: buffer allocation failed");
         const buffer_physical_address = buffer_base_physical_address.offset(buffer.completed_size);
 
         // TODO: stop hardcoding this?

@@ -51,12 +51,12 @@ const MountedPartition = struct {
     }
 
     pub fn get_mount_dir(partition: MountedPartition) []const u8 {
-        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
+        const mount_dir = partition.loopback_device.mount_dir orelse @panic("get_mount_dir");
         return mount_dir;
     }
 
     fn copy_file(partition: MountedPartition, allocator: lib.ZigAllocator, file_path: []const u8, file_content: []const u8) !void {
-        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("wtf");
+        const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("fat32: copy file last slash");
         const file_name = file_path[last_slash_index + 1 ..];
         assert(file_name.len > 0);
         try host.cwd().writeFile(file_name, file_content);
@@ -70,7 +70,7 @@ const MountedPartition = struct {
     }
 
     fn end(partition: *MountedPartition, allocator: lib.ZigAllocator) !void {
-        const mount_dir = partition.loopback_device.mount_dir orelse @panic("wtf");
+        const mount_dir = partition.loopback_device.mount_dir orelse @panic("mount partition end");
         host.sync();
         try host.spawnProcess(&.{ "sudo", "umount", mount_dir }, allocator);
         host.spawnProcess(&.{ "sudo", "rm", "-rf", mount_dir }, allocator) catch |err| {
