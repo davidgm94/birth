@@ -1,9 +1,9 @@
 {
     "architecture": "x86_64",
-    "bootloader": "limine",
+    "bootloader": "rise",
     "boot_protocol": "bios",
     "execution_environment": "qemu",
-    "optimize_mode": "ReleaseFast",
+    "optimize_mode": "Debug",
     "execution_type": "emulated",
     "executable_kind": "exe"
 }

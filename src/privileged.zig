@@ -106,7 +106,7 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     arch.disableInterrupts();
     panic_logger.err(format, arguments);
     if (lib.is_test) {
-        exitFromQEMU(false);
+        exitFromQEMU(.failure);
     } else {
         arch.stopCPU();
     }
@@ -150,12 +150,9 @@ pub fn dumpStackTrace(start_address: usize, frame_pointer: usize) void {
     // }
 }
 
-pub inline fn exitFromQEMU(success: bool) noreturn {
+pub inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {
     comptime assert(@sizeOf(lib.QEMU.ExitCode) == @sizeOf(u32));
-    arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(switch (success) {
-        true => lib.QEMU.ExitCode.success,
-        false => lib.QEMU.ExitCode.failure,
-    }));
+    arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(exit_code));
 
     arch.stopCPU();
 }

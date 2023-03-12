@@ -5,20 +5,21 @@ comptime {
 const lib = @import("lib");
 const ExecutionMode = lib.Syscall.ExecutionMode;
 
-pub const Syscall = @import("user/syscall.zig");
+pub const arch = @import("user/arch.zig");
+pub usingnamespace @import("user/syscall.zig");
 
-pub const Writer = struct {
-    const Error = error{};
-    const execution_mode = ExecutionMode.blocking;
-    pub var lock = Lock{};
-
-    // TODO: handle errors
-    fn write(_: void, bytes: []const u8) Error!usize {
-        _ = syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
-
-        return bytes.len;
-    }
-};
+// pub const Writer = struct {
+//     const Error = error{};
+//     const execution_mode = ExecutionMode.blocking;
+//     pub var lock = Lock{};
+//
+//     // TODO: handle errors
+//     fn write(_: void, bytes: []const u8) Error!usize {
+//         _ = syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
+//
+//         return bytes.len;
+//     }
+// };
 
 const Lock = struct {
     status: u8 = 0,
@@ -69,17 +70,17 @@ const Lock = struct {
     }
 };
 
-var writer: lib.Writer(void, Writer.Error, Writer.write) = undefined;
+// var writer: lib.Writer(void, Writer.Error, Writer.write) = undefined;
 
 // TODO: handle locks in userspace
 // TODO: handle errors
-pub fn zig_log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-    var buffer: [0x2000]u8 = undefined;
-    Writer.lock.acquire();
-    defer Writer.lock.release();
-    const resulting_slice = lib.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
-    writer.writeAll(resulting_slice) catch unreachable;
-}
+// pub fn zig_log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+//     var buffer: [0x2000]u8 = undefined;
+//     Writer.lock.acquire();
+//     defer Writer.lock.release();
+//     const resulting_slice = lib.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
+//     writer.writeAll(resulting_slice) catch unreachable;
+// }
 
 // TODO: improve user panic implementation
 pub fn zig_panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
@@ -90,5 +91,3 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     lib.log.scoped(.PANIC).err(format, arguments);
     while (true) {}
 }
-
-pub var syscall_manager: *Syscall.Manager = undefined;

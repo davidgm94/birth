@@ -238,7 +238,9 @@ pub fn fetchMemoryEntries(memory_map: []bootloader.MemoryMapEntry) void {
         };
     }
 
-    if (iterator.index != memory_map.len) @panic("Memory map entries don't match");
+    if (iterator.index != memory_map.len) {
+        privileged.panic("Memory map entries don't match. Got {}. Expected: {}", .{ iterator.index, memory_map.len });
+    }
 }
 
 const FindRSDPResult = union(enum) {
