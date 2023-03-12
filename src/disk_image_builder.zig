@@ -142,7 +142,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
 
         const keep_going = cluster_size != 0 and cluster_size <= max_cluster_size;
         if (!keep_going) break;
-        @panic("wtf");
+        @panic("unexpected fat32 bug");
     }
 
     var root_directory_entries: u64 = 0;

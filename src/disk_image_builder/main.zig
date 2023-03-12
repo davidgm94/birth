@@ -150,7 +150,7 @@ pub fn main() anyerror!void {
                         lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
                         const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
-                        if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("WTFFFF");
+                        if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("unexpected size");
                         const dap_top = bootloader.BIOS.stack_top - bootloader.BIOS.stack_size;
                         if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
                         log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
@@ -550,12 +550,12 @@ pub const BootDisk = extern struct {
                                     .dap => dap_offset,
                                     .gdt_descriptor => @offsetOf(BootDisk, "gdt_descriptor"),
                                     .dap_pointer => dap_offset + @offsetOf(MBR.DAP, "offset"),
-                                    else => @panic("wtF"),
+                                    else => @panic("unreachable tag"),
                                 });
                                 log.debug("Ptr patched: 0x{x}", .{ptr});
                                 @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = ptr;
                             },
-                            .relative => @panic("wtF"),
+                            .relative => @panic("unreachable relative"),
                         }
 
                         log.debug("Patched instruction:", .{});

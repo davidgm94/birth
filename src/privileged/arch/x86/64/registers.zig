@@ -158,6 +158,21 @@ pub const cr8 = SimpleR64(.cr8);
 
 pub const IA32_LSTAR = SimpleMSR(0xC0000082);
 pub const IA32_FMASK = SimpleMSR(0xC0000084);
+pub const syscall_mask = (1 << @bitOffsetOf(RFLAGS, "CF")) |
+    (1 << @bitOffsetOf(RFLAGS, "PF")) |
+    (1 << @bitOffsetOf(RFLAGS, "AF")) |
+    (1 << @bitOffsetOf(RFLAGS, "ZF")) |
+    (1 << @bitOffsetOf(RFLAGS, "SF")) |
+    (1 << @bitOffsetOf(RFLAGS, "TF")) |
+    (1 << @bitOffsetOf(RFLAGS, "IF")) |
+    (1 << @bitOffsetOf(RFLAGS, "DF")) |
+    (1 << @bitOffsetOf(RFLAGS, "OF")) |
+    (1 << @bitOffsetOf(RFLAGS, "IOPL")) |
+    (1 << @bitOffsetOf(RFLAGS, "NT")) |
+    (1 << @bitOffsetOf(RFLAGS, "RF")) |
+    (1 << @bitOffsetOf(RFLAGS, "AC")) |
+    (1 << @bitOffsetOf(RFLAGS, "ID"));
+
 pub const IA32_FS_BASE = SimpleMSR(0xC0000100);
 pub const IA32_GS_BASE = SimpleMSR(0xC0000101);
 pub const IA32_KERNEL_GS_BASE = SimpleMSR(0xC0000102);

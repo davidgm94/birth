@@ -191,7 +191,7 @@ pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
         if (arch == architecture) return index;
     }
 
-    @panic("WTF");
+    unreachable;
 }
 
 pub const architecture_bootloader_map = blk: {
@@ -244,9 +244,9 @@ pub const ArchitectureBootloader = struct {
     protocols: []const Bootloader.Protocol,
 };
 
-pub const TraditionalExecutionMode = enum {
-    privileged,
-    user,
+pub const TraditionalExecutionMode = enum(u1) {
+    privileged = 0,
+    user = 1,
 };
 
 pub const ExecutionEnvironment = enum {
@@ -368,4 +368,11 @@ pub const UserProgram = struct {
     pub const Dependency = struct {
         foo: u64 = 0,
     };
+};
+
+pub const RiseProgram = enum {
+    bootloader,
+    cpu,
+    user,
+    host,
 };

@@ -6,33 +6,42 @@ PHDRS {
 }
 
 SECTIONS {
-  . = 0xFFFFFFFF80000000;
-  cpu_driver_start = .;
+    . = 0xFFFFFFFF80000000;
+    PROVIDE(cpu_driver_start = .);
 
 
-  text_section_start = .;
-  .text . : {
-    *(.text*)
+    PROVIDE(text_section_start = .);
+    .text . : {
+        PROVIDE(user_text_start = .);
+        *(.user_text*)
+        . = ALIGN(4K);
+        PROVIDE(user_text_end = .);
+        *(.text*)
   }:text
-  
-  . = ALIGN(4K);
-  text_section_end = .;
 
-  rodata_section_start = .;
+  . = ALIGN(4K);
+  PROVIDE(text_section_end = .);
+
+  PROVIDE(rodata_section_start = .);
   .rodata . : {
-    *(.rodata*)
+      *(.rodata*)
   }:rodata
 
   . = ALIGN(4K);
-  rodata_section_end = .;
+  PROVIDE(rodata_section_end = .);
 
-  data_section_start = .;
+  PROVIDE(data_section_start = .);
   .data . : {
-    *(.data*)
-    *(.bss*)
+      PROVIDE(user_data_start = .);
+      *(.user_data*)
+      . = ALIGN(4K);
+      PROVIDE(user_data_end = .);
+      *(.data*)
+          *(.bss*)
+          *(.got*)
   }:data
 
   . = ALIGN(4K);
-  data_section_end = .;
-  cpu_driver_end = .;
+  PROVIDE(data_section_end = .);
+  PROVIDE(cpu_driver_end = .);
 }

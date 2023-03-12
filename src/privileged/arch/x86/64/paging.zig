@@ -14,6 +14,7 @@ const Allocator = lib.Allocator;
 
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
+const PageAllocator = privileged.PageAllocator;
 
 const valid_page_sizes = lib.arch.x86_64.valid_page_sizes;
 const reverse_valid_page_sizes = lib.arch.x86_64.reverse_valid_page_sizes;
@@ -37,9 +38,10 @@ const MapError = error{
     already_present_4kb,
     already_present_2mb,
     already_present_1gb,
+    validation_failed,
 };
 
-const Error = error{
+pub const Error = error{
     invalid_physical,
     invalid_virtual,
     invalid_size,
@@ -59,7 +61,7 @@ pub const TranslateError = error{
     pt_entry_address_null,
 };
 
-fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
+pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: u64, asked_virtual_address: u64, size: u64, flags: MemoryFlags) !void {
     const top_virtual_address = asked_virtual_address + size;
 
     inline for (reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_page_index| {
@@ -74,7 +76,7 @@ fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
                     physical_address += reverse_page_size;
                     virtual_address += reverse_page_size;
                 }) {
-                    try map4KPage(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
+                    try map4KPage(virtual_address_space, physical_address, virtual_address, flags);
                 }
 
                 return;
@@ -85,7 +87,7 @@ fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
 
                 if (aligned_size_left >= reverse_page_size) {
                     if (prologue_misalignment != 0) {
-                        try mapFunction(vas_cr3, asked_physical_address, asked_virtual_address, prologue_misalignment, flags, physical_allocator);
+                        try map(virtual_address_space, asked_physical_address, asked_virtual_address, prologue_misalignment, flags);
                     }
 
                     const virtual_address = aligned_page_address;
@@ -93,7 +95,7 @@ fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
                     const this_page_top_physical_address = alignBackwardGeneric(u64, physical_address + aligned_size_left, reverse_page_size);
                     const this_page_top_virtual_address = alignBackwardGeneric(u64, virtual_address + aligned_size_left, reverse_page_size);
                     const this_huge_page_size = this_page_top_virtual_address - virtual_address;
-                    try mapGeneric(vas_cr3, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, physical_allocator);
+                    try mapGeneric(virtual_address_space, physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags);
 
                     const epilogue_misalignment = top_virtual_address - this_page_top_virtual_address;
 
@@ -101,7 +103,7 @@ fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
                         const epilogue_physical_address = this_page_top_physical_address;
                         const epilogue_virtual_address = this_page_top_virtual_address;
 
-                        try mapFunction(vas_cr3, epilogue_physical_address, epilogue_virtual_address, epilogue_misalignment, flags, physical_allocator);
+                        try map(virtual_address_space, epilogue_physical_address, epilogue_virtual_address, epilogue_misalignment, flags);
                     }
 
                     return;
@@ -113,39 +115,7 @@ fn mapFunction(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address:
     @panic("Some mapping did not go well");
 }
 
-pub fn map(virtual_address_space: *x86_64.VirtualAddressSpace, comptime locality: privileged.CoreLocality, asked_physical_address: PhysicalAddress(locality), asked_virtual_address: VirtualAddress(locality), size: u64, general_flags: VirtualAddressSpace.Flags, physical_allocator: *Allocator) !void {
-    // TODO: use flags
-    const flags = general_flags.toArchitectureSpecific(locality);
-    const vas_cr3 = virtual_address_space.arch.cr3;
-
-    //log.debug("Mapping 0x{x}-0x{x} to 0x{x}-0x{x}", .{ asked_physical_address.value(), asked_physical_address.offset(size).value(), asked_virtual_address.value(), asked_virtual_address.offset(size).value() });
-
-    // if (!asked_physical_address.isValid()) return Error.invalid_physical;
-    // if (!asked_virtual_address.isValid()) return Error.invalid_virtual;
-    if (size == 0) {
-        return Error.invalid_size;
-    }
-
-    if (!isAlignedGeneric(u64, asked_physical_address.value(), valid_page_sizes[0])) {
-        return Error.unaligned_physical;
-    }
-
-    if (!isAlignedGeneric(u64, asked_virtual_address.value(), valid_page_sizes[0])) {
-        return Error.unaligned_virtual;
-    }
-
-    if (!isAlignedGeneric(u64, size, valid_page_sizes[0])) {
-        return Error.unaligned_size;
-    }
-
-    if (asked_physical_address.value() >= lib.config.cpu_driver_higher_half_address) {
-        return Error.invalid_physical;
-    }
-
-    try mapFunction(vas_cr3, asked_physical_address.value(), asked_virtual_address.value(), size, flags, physical_allocator);
-}
-
-fn mapGeneric(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, physical_allocator: *Allocator) !void {
+fn mapGeneric(virtual_address_space: *VirtualAddressSpace, asked_physical_address: u64, asked_virtual_address: u64, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags) !void {
     const reverse_index = switch (asked_page_size) {
         reverse_valid_page_sizes[0] => 0,
         reverse_valid_page_sizes[1] => 1,
@@ -184,7 +154,7 @@ fn mapGeneric(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: 
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map1GBPage(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
+                try map1GBPage(virtual_address_space, physical_address, virtual_address, flags);
             }
         },
         // 2 MB
@@ -193,7 +163,7 @@ fn mapGeneric(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: 
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map2MBPage(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
+                try map2MBPage(virtual_address_space, physical_address, virtual_address, flags);
             }
         },
         // Smallest: 4 KB
@@ -202,45 +172,82 @@ fn mapGeneric(vas_cr3: cr3, asked_physical_address: u64, asked_virtual_address: 
                 physical_address += asked_page_size;
                 virtual_address += asked_page_size;
             }) {
-                try map4KPage(vas_cr3, physical_address, virtual_address, flags, physical_allocator);
+                try map4KPage(virtual_address_space, physical_address, virtual_address, flags);
             }
         },
         else => @compileError("Invalid reverse valid page size"),
     }
 }
 
-fn map1GBPage(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
+fn map1GBPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags) !void {
     const indices = computeIndices(virtual_address);
 
-    const pml4_table = getPML4Table(vas_cr3);
-    const pdp_table = getPDPTable(pml4_table, indices, physical_allocator);
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[1G] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[1G] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
     try mapPageTable1GB(pdp_table, indices, physical_address, flags);
+
+    const translated_physical_address = translateAddress(virtual_address_space, VirtualAddress(.local).new(virtual_address)) catch |err| {
+        log.err("Error when mapping 1GB page (0x{x} -> 0x{x}): {}", .{ virtual_address, physical_address, err });
+        return MapError.validation_failed;
+    };
+
+    if (physical_address != translated_physical_address.value()) {
+        log.err("Given: 0x{x}. Have: 0x{x}", .{ physical_address, translated_physical_address.value() });
+        return MapError.validation_failed;
+    }
 }
 
-fn map2MBPage(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) !void {
+fn map2MBPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags) !void {
     const indices = computeIndices(virtual_address);
 
-    const pml4_table = getPML4Table(vas_cr3);
-    const pdp_table = getPDPTable(pml4_table, indices, physical_allocator);
-    const pd_table = getPDTable(pdp_table, indices, physical_allocator);
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[2M] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
     try mapPageTable2MB(pd_table, indices, physical_address, flags);
+
+    const translated_physical_address = translateAddress(virtual_address_space, VirtualAddress(.local).new(virtual_address)) catch |err| {
+        log.err("Error when mapping 2MB page (0x{x} -> 0x{x}): {}", .{ virtual_address, physical_address, err });
+        return MapError.validation_failed;
+    };
+
+    if (physical_address != translated_physical_address.value()) {
+        log.err("Given: 0x{x}. Have: 0x{x}", .{ physical_address, translated_physical_address.value() });
+        return MapError.validation_failed;
+    }
 }
 
-fn map4KPage(vas_cr3: cr3, physical_address: u64, virtual_address: u64, flags: MemoryFlags, physical_allocator: *Allocator) MapError!void {
+fn map4KPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags) MapError!void {
     const indices = computeIndices(virtual_address);
 
-    const pml4_table = getPML4Table(vas_cr3);
-    const pdp_table = getPDPTable(pml4_table, indices, physical_allocator);
-    const pd_table = getPDTable(pdp_table, indices, physical_allocator);
-    const p_table = getPTable(pd_table, indices, physical_allocator);
+    // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("Before PML4", .{});
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[4K] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("PML4Table: 0x{x}", .{@ptrToInt(pml4_table)});
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[4K] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    // if (virtual_address >= 0xffff_ffff_8000_0000)
+    // log.debug("PDP table: 0x{x}", .{@ptrToInt(pdp_table)});
+    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch privileged.panic("[4K] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    // if (virtual_address >= 0xffff_ffff_8000_0000)
+    // log.debug("PD table: 0x{x}", .{@ptrToInt(pd_table)});
+    const p_table = getPTable(virtual_address_space, pd_table, indices, flags) catch privileged.panic("[4K] P table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    // if (virtual_address >= 0xffff_ffff_8000_0000)
+    // log.debug("P table: 0x{x}", .{@ptrToInt(p_table)});
 
     try mapPageTable4KB(p_table, indices, physical_address, flags);
-}
 
-pub fn getPageTableVirtualAddress(physical_address: PhysicalAddress(.local)) VirtualAddress(.local) {
-    return switch (lib.cpu.arch) {
+    const translated_physical_address = translateAddress(virtual_address_space, VirtualAddress(.local).new(virtual_address)) catch |err| {
+        log.err("Error when mapping 4KB page (0x{x} -> 0x{x}): {}", .{ virtual_address, physical_address, err });
+        return MapError.validation_failed;
+    };
+
+    if (physical_address != translated_physical_address.value()) {
+        log.err("Given: 0x{x}. Have: 0x{x}", .{ physical_address, translated_physical_address.value() });
+        return MapError.validation_failed;
+    }
+}
+pub fn accessPageTable(physical_address: PhysicalAddress(.local), comptime Pointer: type) !Pointer {
+    const virtual_address = switch (lib.cpu.arch) {
         .x86 => physical_address.toIdentityMappedVirtualAddress(),
         .x86_64 => switch (lib.os) {
             .freestanding => physical_address.toHigherHalfVirtualAddress(),
@@ -249,52 +256,42 @@ pub fn getPageTableVirtualAddress(physical_address: PhysicalAddress(.local)) Vir
         },
         else => @compileError("Architecture not supported"),
     };
+
+    return switch (lib.cpu.arch) {
+        .x86 => @intToPtr(Pointer, try lib.tryDereferenceAddress(virtual_address.value())),
+        else => virtual_address.access(Pointer),
+    };
 }
 
-fn getPML4Table(cr3_register: cr3) *volatile PML4Table {
-    const pml4_physical_address = cr3_register.getAddress();
-    const pml4_virtual_address = getPageTableVirtualAddress(pml4_physical_address);
-    if (lib.config.safe_slow) {
-        assert(pml4_virtual_address.is_valid());
-    }
-
-    return pml4_virtual_address.access(*volatile PML4Table);
+fn getPML4Table(cr3r: cr3) !*volatile PML4Table {
+    return try accessPageTable(cr3r.getAddress(), *volatile PML4Table);
 }
 
-fn getPDPTable(pml4_table: *volatile PML4Table, indices: Indices, physical_allocator: *Allocator) *volatile PDPTable {
-    const entry_pointer = &pml4_table[indices[@enumToInt(PageIndex.PML4)]];
+fn getPDPTable(virtual_address_space: *VirtualAddressSpace, pml4_table: *volatile PML4Table, indices: Indices, flags: MemoryFlags) !*volatile PDPTable {
+    const index = indices[@enumToInt(PageIndex.PML4)];
+    const entry_pointer = &pml4_table[index];
 
-    const table_physical_address_value = physical_address_blk: {
+    const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
-        //log.debug("PML4 entry: {}", .{entry_value});
         if (entry_value.present) {
-            break :physical_address_blk unpackAddress(entry_value);
+            const entry_address = unpackAddress(entry_value);
+            break :physical_address_blk PhysicalAddress(.local).new(entry_address);
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDPTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = virtual_address_space.allocatePageTables(@sizeOf(PDPTable), 0x1000) catch @panic("PDP table allocation");
 
             entry_pointer.* = PML4TE{
                 .present = true,
                 .read_write = true,
-                .address = packAddress(PML4TE, entry_allocation.address),
+                .user = flags.user,
+                .address = packAddress(PML4TE, entry_allocation.address.value()),
             };
 
             break :physical_address_blk entry_allocation.address;
         }
     };
 
-    const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = getPageTableVirtualAddress(table_physical_address);
-
-    const is_valid = table_virtual_address.isValid();
-    if (!is_valid) {
-        @panic("Virtual address is invalid");
-        //log.debug("check pdp table valid: {}", .{is_valid});
-    }
-
-    if (lib.config.safe_slow) assert(is_valid);
-
-    return table_virtual_address.access(*volatile PDPTable);
+    return try accessPageTable(table_physical_address, *volatile PDPTable);
 }
 
 fn getPageEntry(comptime Entry: type, physical_address: u64, flags: MemoryFlags) Entry {
@@ -347,87 +344,84 @@ fn mapPageTable4KB(p_table: *volatile PTable, indices: Indices, physical_address
     entry_pointer.* = @bitCast(PTE, getPageEntry(PTE, physical_address, flags));
 }
 
-fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, physical_allocator: *Allocator) *volatile PDTable {
+fn getPDTable(virtual_address_space: *VirtualAddressSpace, pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlags) !*volatile PDTable {
     const entry_index = indices[@enumToInt(PageIndex.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
-    const table_physical_address_value = physical_address_blk: {
+    const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
         if (entry_value.present) {
             // The address is mapped with a 1GB page
             if (entry_value.page_size) {
                 @panic("todo pd table page size");
             }
-            break :physical_address_blk unpackAddress(entry_value);
+            break :physical_address_blk PhysicalAddress(.local).new(unpackAddress(entry_value));
         } else {
             // TODO: track this physical allocation in order to map it later in the kernel address space
-            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PDTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = virtual_address_space.allocatePageTables(@sizeOf(PDTable), 0x1000) catch @panic("getPDTable");
 
             entry_pointer.* = PDPTE{
                 .present = true,
                 .read_write = true,
-                .address = packAddress(PDPTE, entry_allocation.address),
+                .user = flags.user,
+                .address = packAddress(PDPTE, entry_allocation.address.value()),
             };
 
             break :physical_address_blk entry_allocation.address;
         }
     };
 
-    const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = getPageTableVirtualAddress(table_physical_address);
-    if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
-    return table_virtual_address.access(*volatile PDTable);
+    return try accessPageTable(table_physical_address, *volatile PDTable);
 }
 
-fn getPTable(pd_table: *volatile PDTable, indices: Indices, physical_allocator: *Allocator) *volatile PTable {
+fn getPTable(virtual_address_space: *VirtualAddressSpace, pd_table: *volatile PDTable, indices: Indices, flags: MemoryFlags) !*volatile PTable {
     const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
-    const table_physical_address_value = physical_address_blk: {
+    const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
         if (entry_value.present) {
             // The address is mapped with a 2MB page
             if (entry_value.page_size) {
                 @panic("todo ptable page size");
             }
-            break :physical_address_blk unpackAddress(entry_value);
+            break :physical_address_blk PhysicalAddress(.local).new(unpackAddress(entry_value));
         } else {
-            const entry_allocation = physical_allocator.allocateBytes(@sizeOf(PTable), valid_page_sizes[0]) catch @panic("wtf");
+            const entry_allocation = virtual_address_space.allocatePageTables(@sizeOf(PTable), 0x1000) catch @panic("getPTable allocation failed");
 
             entry_pointer.* = PDTE{
                 .present = true,
                 .read_write = true,
-                .address = packAddress(PDTE, entry_allocation.address),
+                .user = flags.user,
+                .address = packAddress(PDTE, entry_allocation.address.value()),
             };
 
             break :physical_address_blk entry_allocation.address;
         }
     };
 
-    const table_physical_address = PhysicalAddress(.local).new(table_physical_address_value);
-    const table_virtual_address = getPageTableVirtualAddress(table_physical_address);
-
-    if (lib.config.safe_slow) assert(table_virtual_address.is_valid());
-
-    return table_virtual_address.access(*volatile PTable);
+    return try accessPageTable(table_physical_address, *volatile PTable);
 }
 
 const half_entry_count = (@sizeOf(PML4Table) / @sizeOf(PML4TE)) / 2;
 
-pub const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
+const needed_physical_memory_for_bootstrapping_cpu_driver_address_space = @sizeOf(PML4Table) + @sizeOf(PDPTable) * 256;
 
-pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAddressSpace {
-    const pml4_physical_region = allocation_region.takeSlice(@sizeOf(PML4Table));
-    const pdp_physical_region = allocation_region.offset(@sizeOf(PML4Table));
+pub fn initKernelBSP(page_allocator: *Allocator) !VirtualAddressSpace {
+    var virtual_address_space = VirtualAddressSpace{
+        .arch = undefined,
+        .options = .{
+            .user = false,
+            .mapped_page_tables = true,
+            .log_pages = false,
+        },
+        .backing_allocator = page_allocator,
+    };
+
+    const allocation_result = try virtual_address_space.allocatePageTables(needed_physical_memory_for_bootstrapping_cpu_driver_address_space, lib.arch.valid_page_sizes[0]);
+    const pml4_physical_region = allocation_result.takeSlice(@sizeOf(PML4Table));
+    const pdp_physical_region = allocation_result.offset(@sizeOf(PML4Table));
 
     //log.debug("PML4", .{});
-    const pml4_entries = switch (lib.cpu.arch) {
-        .x86 => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
-        .x86_64 => switch (lib.os) {
-            .freestanding => pml4_physical_region.toHigherHalfVirtualAddress().access(PML4TE),
-            .uefi => pml4_physical_region.toIdentityMappedVirtualAddress().access(PML4TE),
-            else => @compileError("OS not supported"),
-        },
-        else => @compileError("Architecture panic"),
-    };
+    const pml4_entries = try accessPageTable(pml4_physical_region.address, *volatile PML4Table);
 
     for (pml4_entries[0..half_entry_count]) |*entry| {
         entry.* = @bitCast(PML4TE, @as(u64, 0));
@@ -442,11 +436,11 @@ pub fn initKernelBSP(allocation_region: PhysicalMemoryRegion(.local)) VirtualAdd
         };
     }
 
-    return .{
-        .arch = .{
-            .cr3 = cr3.from_address(pml4_physical_region.address),
-        },
+    virtual_address_space.arch = .{
+        .cr3 = cr3.from_address(pml4_physical_region.address),
     };
+
+    return virtual_address_space;
 }
 
 pub inline fn makeCurrent(virtual_address_space: *const VirtualAddressSpace) void {
@@ -466,22 +460,6 @@ fn computeIndices(virtual_address: u64) Indices {
     indices[0] = @truncate(u9, va);
 
     return indices;
-}
-
-var paging_physical_allocator: ?*Allocator = null;
-
-pub fn registerPhysicalAllocator(allocator: *Allocator) void {
-    paging_physical_allocator = allocator;
-}
-
-pub fn mapDevice(asked_physical_address: PhysicalAddress(.global), size: u64) !VirtualAddress(.global) {
-    try mapFunction(cr3.read(), asked_physical_address.value(), asked_physical_address.toHigherHalfVirtualAddress().value(), size, .{
-        .read_write = true,
-        .cache_disable = true,
-        .global = false,
-    }, paging_physical_allocator orelse @panic("No registered paging physical allocator"));
-
-    return asked_physical_address.toHigherHalfVirtualAddress();
 }
 
 pub inline fn newFlags(general_flags: VirtualAddressSpace.Flags, comptime core_locality: privileged.CoreLocality) MemoryFlags {
@@ -676,21 +654,15 @@ const PTE = packed struct(u64) {
     }
 };
 
-const PML4Table = [512]PML4TE;
-const PDPTable = [512]PDPTE;
-const PDTable = [512]PDTE;
-const PTable = [512]PTE;
+pub const PML4Table = [512]PML4TE;
+pub const PDPTable = [512]PDPTE;
+pub const PDTable = [512]PDTE;
+pub const PTable = [512]PTE;
 
 pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress(.local)) TranslateError!PhysicalAddress(.local) {
     const indices = computeIndices(virtual_address.value());
 
-    const vas_cr3 = virtual_address_space.arch.cr3;
-    log.debug("CR3: {}", .{vas_cr3});
-
-    const pml4_physical_address = vas_cr3.getAddress();
-    log.debug("PML4: 0x{x}", .{pml4_physical_address.value()});
-
-    const pml4_table = getPageTableVirtualAddress(pml4_physical_address).access(*PML4Table);
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[translateAddress] PML4 access failed when translating 0x{x}", .{virtual_address.value()});
     const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
     if (!pml4_entry.present) {
         return TranslateError.pml4_entry_not_present;
@@ -701,21 +673,45 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
         return TranslateError.pml4_entry_address_null;
     }
 
-    const pdp_table = getPageTableVirtualAddress(pml4_entry_address).access(*PDPTable);
-    const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, undefined) catch privileged.panic("[translateAddress] PDP access failed when translating 0x{x}", .{virtual_address.value()});
+    const pdp_entry = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
     if (!pdp_entry.present) {
         return TranslateError.pdp_entry_not_present;
     }
 
-    const pdp_entry_address = PhysicalAddress(.local).new(unpackAddress(pdp_entry));
+    if (pdp_entry.page_size) {
+        const pdp_entry_1gb = @bitCast(PDPTE_1GB, pdp_entry.*);
+        const entry_address_value = unpackAddress(pdp_entry_1gb);
+        const physical_address = PhysicalAddress(.local).new(entry_address_value);
+        if (lib.isAlignedGeneric(u64, virtual_address.value(), lib.gb)) {
+            return physical_address;
+        } else {
+            @panic("unaligned 1gb");
+        }
+    }
+
+    const pdp_entry_address = PhysicalAddress(.local).new(unpackAddress(pdp_entry.*));
     if (pdp_entry_address.value() == 0) {
         return TranslateError.pdp_entry_address_null;
     }
 
-    const pd_table = getPageTableVirtualAddress(pdp_entry_address).access(*PDTable);
+    const pd_table = accessPageTable(pdp_entry_address, *volatile PDTable) catch {
+        privileged.panic("[translateAddress] PD access failed when translating 0x{x}. Tried to access page at physical address: 0x{x}. Written in 0x{x}", .{ virtual_address.value(), pdp_entry_address.value(), @ptrToInt(pdp_entry) });
+    };
     const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
     if (!pd_entry.present) {
         return TranslateError.pd_entry_not_present;
+    }
+
+    if (pd_entry.page_size) {
+        const pd_entry_2mb = @bitCast(PDTE_2MB, pd_entry);
+        const entry_address_value = unpackAddress(pd_entry_2mb);
+        const physical_address = PhysicalAddress(.local).new(entry_address_value);
+        if (lib.isAlignedGeneric(u64, virtual_address.value(), 2 * lib.mb)) {
+            return physical_address;
+        } else {
+            @panic("unaligned 2mb");
+        }
     }
 
     const pd_entry_address = PhysicalAddress(.local).new(unpackAddress(pd_entry));
@@ -723,15 +719,15 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
         return TranslateError.pd_entry_address_null;
     }
 
-    const pt_table = getPageTableVirtualAddress(pd_entry_address).access(*PTable);
-    const pt_entry = pt_table[indices[@enumToInt(PageIndex.PT)]];
+    const p_table = accessPageTable(pd_entry_address, *volatile PTable) catch privileged.panic("[translateAddress] PD access failed when translating 0x{x}", .{virtual_address.value()});
+    const pt_entry = p_table[indices[@enumToInt(PageIndex.PT)]];
     if (!pt_entry.present) {
-        return TranslateError.pd_entry_not_present;
+        return TranslateError.pt_entry_not_present;
     }
 
     const pt_entry_address = PhysicalAddress(.local).new(unpackAddress(pt_entry));
     if (pt_entry_address.value() == 0) {
-        return TranslateError.pd_entry_address_null;
+        return TranslateError.pt_entry_address_null;
     }
 
     return pt_entry_address;
@@ -746,7 +742,7 @@ pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, virtual_addr
     const pml4_physical_address = vas_cr3.getAddress();
     log.debug("PML4: 0x{x}", .{pml4_physical_address.value()});
 
-    const pml4_table = getPageTableVirtualAddress(pml4_physical_address).access(*PML4Table);
+    const pml4_table = try accessPageTable(pml4_physical_address, *volatile PML4Table);
     const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
     if (!pml4_entry.present) {
         return TranslateError.pml4_entry_not_present;
@@ -757,7 +753,7 @@ pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, virtual_addr
         return TranslateError.pml4_entry_address_null;
     }
 
-    const pdp_table = getPageTableVirtualAddress(pml4_entry_address).access(*PDPTable);
+    const pdp_table = try accessPageTable(pml4_entry_address, *volatile PDPTable);
     const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
     if (!pdp_entry.present) {
         return TranslateError.pdp_entry_not_present;
@@ -768,7 +764,7 @@ pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, virtual_addr
         return TranslateError.pdp_entry_address_null;
     }
 
-    const pd_table = getPageTableVirtualAddress(pdp_entry_address).access(*PDTable);
+    const pd_table = try accessPageTable(pdp_entry_address, *volatile PDTable);
     const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
     if (!pd_entry.present) {
         return TranslateError.pd_entry_not_present;
@@ -779,7 +775,7 @@ pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, virtual_addr
         return TranslateError.pd_entry_address_null;
     }
 
-    const pt_table = getPageTableVirtualAddress(pd_entry_address).access(*PTable);
+    const pt_table = try accessPageTable(pd_entry_address, *volatile PTable);
     const pt_entry = &pt_table[indices[@enumToInt(PageIndex.PT)]];
     if (!pt_entry.present) {
         return TranslateError.pd_entry_not_present;
@@ -790,4 +786,50 @@ pub fn setMappingFlags(virtual_address_space: *VirtualAddressSpace, virtual_addr
     pt_entry.page_level_cache_disable = flags.cache_disable;
     pt_entry.global = flags.global;
     pt_entry.execute_disable = !flags.execute;
+}
+
+pub inline fn copyHigherHalf(pml4_physical_address: PhysicalAddress(.local)) void {
+    log.debug("Higher half", .{});
+    const cpu_side_pml4_table = pml4_physical_address.toHigherHalfVirtualAddress().access(*PML4Table);
+    const privileged_cpu_pml4_table = try getPML4Table(cr3.read());
+    for (cpu_side_pml4_table[0x100..], privileged_cpu_pml4_table[0x100..]) |*pml4_entry, cpu_pml4_entry| {
+        pml4_entry.* = cpu_pml4_entry;
+    }
+}
+
+pub fn contextSwitch(virtual_address_space: *VirtualAddressSpace) void {
+    assert(virtual_address_space.options.mapped_page_tables);
+    log.debug("Setting new address space: {}", .{virtual_address_space.arch.cr3});
+    virtual_address_space.arch.cr3.write();
+}
+
+pub fn validate(virtual_address_space: *VirtualAddressSpace) !void {
+    const pml4_table_physical_address = virtual_address_space.arch.cr3.getAddress();
+    try makeSurePageIsMapped(virtual_address_space, pml4_table_physical_address);
+    @panic("TODO: validate");
+}
+
+const MakeSureError = error{
+    translate_identity,
+    translate_higher_half,
+};
+
+fn makeSurePageIsMapped(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress(.local)) !void {
+    const translated_identity_physical_address = try virtual_address_space.translateAddress(physical_address.toIdentityMappedVirtualAddress());
+    if (translated_identity_physical_address.value() != physical_address.value()) {
+        return MakeSureError.translate_identity;
+    }
+    const translated_higher_half_physical_address = try virtual_address_space.translateAddress(physical_address.toHigherHalfVirtualAddress());
+    if (translated_higher_half_physical_address.value() != physical_address.value()) {
+        return MakeSureError.translate_higher_half;
+    }
+}
+
+pub inline fn switchTo(virtual_address_space: *VirtualAddressSpace, execution_mode: lib.TraditionalExecutionMode) void {
+    const mask = ~@as(u64, 1 << 12);
+    const masked_cr3 = (@bitCast(u64, virtual_address_space.arch.cr3) & mask);
+    const privileged_or = (@as(u64, @enumToInt(execution_mode)) << 12);
+    const new_cr3 = @bitCast(cr3, masked_cr3 | privileged_or);
+    log.debug("Execution mode: {s}. CR3: 0x{x}. Mask: 0x{x}. Masked CR3: 0x{x}. Privileged OR: 0x{x}. New CR3: 0x{x}", .{ @tagName(execution_mode), @bitCast(u64, virtual_address_space.arch.cr3), mask, masked_cr3, privileged_or, @bitCast(u64, new_cr3) });
+    virtual_address_space.arch.cr3 = new_cr3;
 }

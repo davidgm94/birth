@@ -1,2 +1,1 @@
-b main
-c
+set can-use-hw-watchpoints 1

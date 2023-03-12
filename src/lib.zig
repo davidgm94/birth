@@ -204,7 +204,7 @@ pub const Allocator = extern struct {
     pub inline fn allocate(allocator: *Allocator, comptime T: type, len: usize) Allocate.Error![]T {
         const size = @sizeOf(T) * len;
         const alignment = @alignOf(T);
-        const allocation_result = try allocator.callback_allocate(allocator, size, alignment);
+        const allocation_result = try allocator.callbacks.allocate(allocator, size, alignment);
         const result = @intToPtr([*]T, safeArchitectureCast(allocation_result.address))[0..len];
         return result;
     }
@@ -290,7 +290,7 @@ pub const Allocator = extern struct {
             const wrapped_allocator = @fieldParentPtr(Wrapped, "allocator", allocator);
             const zig_allocator = wrapped_allocator.unwrap_zig();
             if (alignment > common.maxInt(u8)) {
-                @panic("wtf alignment big");
+                @panic("alignment supported by Zig is less than asked");
             }
             const zig_result = zig_allocator.vtable.alloc(zig_allocator.ptr, size, @intCast(u8, alignment), @returnAddress());
             return .{
@@ -533,9 +533,21 @@ pub fn ELF(comptime bits: comptime_int) type {
 
 pub inline fn safeArchitectureCast(value: anytype) usize {
     return switch (@sizeOf(@TypeOf(value)) > @sizeOf(usize)) {
-        true => if (value <= common.maxInt(usize)) @truncate(usize, value) else @panic("safeArchitectureCast"),
+        true => if (value <= common.maxInt(usize)) @truncate(usize, value) else {
+            common.log.err("PANIC: virtual address is longer than usize: 0x{x}", .{value});
+            @panic("safeArchitectureCast");
+        },
         false => value,
     };
+}
+
+pub const DereferenceError = error{
+    address_bigger_than_usize,
+};
+
+pub inline fn tryDereferenceAddress(value: anytype) DereferenceError!usize {
+    common.assert(@sizeOf(@TypeOf(value)) > @sizeOf(usize));
+    return if (value <= common.maxInt(usize)) @truncate(usize, value) else return DereferenceError.address_bigger_than_usize;
 }
 
 pub fn TargetUsize(comptime architecture: common.Target.Cpu.Arch) type {

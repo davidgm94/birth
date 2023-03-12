@@ -101,7 +101,7 @@ pub fn StableBuffer(comptime T: type, comptime bucket_size: comptime_int) type {
                     return result;
                 }
 
-                @panic("wtf");
+                @panic("allocate_indices: unexpected end");
             }
         };
 

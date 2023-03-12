@@ -76,7 +76,7 @@ pub const Disk = extern struct {
         const sector_count = @divExact(len, element_count_per_sector);
         const provided_buffer = try disk.get_provided_buffer(T, len, allocator, options.force);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
-        if (read_result.sector_count != sector_count) @panic("wtf");
+        if (read_result.sector_count != sector_count) @panic("read_slice: sector count mismatch");
         const result = @ptrCast([*]T, @alignCast(@alignOf(T), read_result.buffer))[0..len];
         return result;
     }

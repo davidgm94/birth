@@ -21,7 +21,7 @@ const ID = packed struct(u32) {
     }
 };
 
-const TaskPriorityRegister = packed struct(u32) {
+pub const TaskPriorityRegister = packed struct(u32) {
     subclass: u4 = 0,
     class: u4 = 0,
     reserved: u24 = 0,
@@ -31,7 +31,7 @@ const TaskPriorityRegister = packed struct(u32) {
     }
 };
 
-const LVTTimer = packed struct(u32) {
+pub const LVTTimer = packed struct(u32) {
     vector: u8 = 0xfa,
     reserved: u4 = 0,
     delivery_status: bool = false,
@@ -46,7 +46,7 @@ const LVTTimer = packed struct(u32) {
         tsc_deadline = 2,
     };
 
-    inline fn write(timer: LVTTimer) void {
+    pub inline fn write(timer: LVTTimer) void {
         lapicWrite(.lvt_timer, @bitCast(u32, timer));
     }
 };
@@ -99,7 +99,7 @@ pub inline fn lapicWrite(register: Register, value: u32) void {
     access(register).* = value;
 }
 
-const Register = enum(u32) {
+pub const Register = enum(u32) {
     id = 0x20,
     version = 0x30,
     tpr = 0x80,
@@ -141,31 +141,4 @@ pub fn calibrateTimer() void {
     const timer_calibration_end = lib.arch.x86_64.readTimestamp();
     timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
     log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
-}
-
-pub fn init() void {
-    log.debug("Initializing APIC", .{});
-    var ia32_apic_base = IA32_APIC_BASE.read();
-    const apic_base_physical_address = ia32_apic_base.getAddress();
-    comptime {
-        assert(lib.arch.valid_page_sizes[0] == 0x1000);
-    }
-    log.debug("Mapping APIC", .{});
-    const apic_base = arch.paging.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
-    log.debug("Mapped APIC", .{});
-
-    const spurious_vector: u8 = 0xFF;
-    apic_base.offset(@enumToInt(Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;
-
-    const tpr = TaskPriorityRegister{};
-    tpr.write();
-
-    const lvt_timer = LVTTimer{};
-    lvt_timer.write();
-
-    ia32_apic_base.global_enable = true;
-    ia32_apic_base.write();
-    log.debug("APIC enabled", .{});
-
-    calibrateTimer();
 }

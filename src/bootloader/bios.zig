@@ -32,7 +32,6 @@ pub const Disk = extern struct {
     var buffer = [1]u8{0} ** (0x200 * 1);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
-        lib.log.debug("Trying to read {} sectors from LBA 0x{x}", .{ sector_count, sector_offset });
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
         if (sector_count > lib.maxInt(u16)) @panic("too many sectors");
 

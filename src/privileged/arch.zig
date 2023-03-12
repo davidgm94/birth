@@ -24,10 +24,3 @@ pub const dispatch_count = current.dispatch_count;
 pub var max_physical_address_bit: u6 = 40;
 
 pub const io = current.io;
-
-const AddressInterface = privileged.Address.Interface(u64);
-pub const PhysicalAddress = AddressInterface.PhysicalAddress;
-pub const VirtualAddress = AddressInterface.VirtualAddress;
-pub const PhysicalMemoryRegion = AddressInterface.PhysicalMemoryRegion;
-pub const VirtualMemoryRegion = AddressInterface.VirtualMemoryRegion;
-pub const VirtualAddressSpace = AddressInterface.VirtualAddressSpace(lib.cpu.arch);

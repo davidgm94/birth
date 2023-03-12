@@ -115,7 +115,7 @@ fn skew(maybe_node: ?*CTE) ?*CTE {
                 node.mdb_node.left = left.mdb_node.right;
                 left.mdb_node.right = node;
                 if (@ptrToInt(node) < lib.config.kernel_higher_half_address) {
-                    @panic("wtf 1");
+                    @panic("mapping_database: skew");
                 }
                 update_end(node);
                 update_end(left);

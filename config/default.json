@@ -3,7 +3,7 @@
     "bootloader": "limine",
     "boot_protocol": "bios",
     "execution_environment": "qemu",
-    "optimize_mode": "Debug",
+    "optimize_mode": "ReleaseFast",
     "execution_type": "emulated",
     "executable_kind": "exe"
 }
