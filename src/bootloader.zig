@@ -371,7 +371,6 @@ pub const Information = extern struct {
             const page_counters = bootloader_information.getPageCounters();
 
             for (entries, 0..) |entry, entry_index| {
-                lib.log.debug("Entry size: {}. Page counter: {}", .{ entry.region.size, page_counters[entry_index] });
                 const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
                 const size_left = entry.region.size - busy_size;
                 if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
@@ -514,7 +513,10 @@ pub const File = extern struct {
         }
 
         const Error = error{
-            err,
+            expect_char,
+            expect_string,
+            suffix_type,
+            type,
         };
 
         pub const Unit = struct {
@@ -543,10 +545,16 @@ pub const File = extern struct {
                 if (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
                     const host_path_field = try parser.parseField("host_path");
                     const host_base_field = try parser.parseField("host_base");
-                    lib.log.debug("Host base: {s}", .{host_base_field});
-                    const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.err;
+                    const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.suffix_type;
                     const guest_field = try parser.parseField("guest");
-                    const file_type = lib.stringToEnum(File.Type, try parser.parseField("type")) orelse return Error.err;
+                    const file_type_str = try parser.parseField("type");
+                    lib.log.debug("File type str: {s}", .{file_type_str});
+                    const file_type = lib.stringToEnum(File.Type, file_type_str) orelse {
+                        if (@hasDecl(@import("root"), "writer")) {
+                            @import("root").writer.writeAll(file_type_str) catch unreachable;
+                        }
+                        return Error.type;
+                    };
                     try parser.expectChar(right_curly_brace);
                     parser.maybeExpectChar(',');
                     parser.skipSpace();
@@ -600,7 +608,7 @@ pub const File = extern struct {
             parser.skipSpace();
             const char = parser.text[parser.index];
             if (char != expected_char) {
-                return Error.err;
+                return Error.expect_char;
             }
 
             parser.consume();
@@ -609,7 +617,7 @@ pub const File = extern struct {
         fn expectString(parser: *File.Parser, string: []const u8) !void {
             parser.skipSpace();
             if (!lib.equal(u8, parser.text[parser.index..][0..string.len], string)) {
-                return Error.err;
+                return Error.expect_string;
             }
 
             for (string, 0..) |_, index| {

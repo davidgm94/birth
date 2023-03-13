@@ -286,6 +286,7 @@ pub const QEMU = extern struct {
     pub const ExitCode = enum(u32) {
         success = 0x10,
         failure = 0x11,
+        _,
     };
 };
 

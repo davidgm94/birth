@@ -69,6 +69,7 @@ pub fn build(b_arg: *Build) !void {
         try mods.setDependencies(.privileged, &.{ .lib, .bootloader });
         try mods.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader });
         try mods.setDependencies(.disk_image_builder, &.{ .lib, .host });
+        try mods.setDependencies(.user, &.{.lib});
 
         break :blk mods;
     };
@@ -244,7 +245,7 @@ pub fn build(b_arg: *Build) !void {
                         .root_project_path = try std.mem.concat(b.allocator, u8, &.{ user_program_dir_path, "/", module.name }),
                         .target = user_target,
                         .optimize_mode = optimize_mode,
-                        .modules = &.{},
+                        .modules = &.{ .lib, .user },
                     });
 
                     user_module.setLinkerScriptPath(user_linker_script_path);
@@ -491,6 +492,7 @@ const ModuleID = enum {
     bootloader,
     privileged,
     cpu,
+    user,
     disk_image_builder,
 };
 

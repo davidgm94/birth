@@ -38,13 +38,14 @@ const cpu = @import("cpu");
 
 pub const kpti = true;
 pub const pcid = false;
+pub const smap = false;
 
-export var interrupt_stack: [0x2000]u8 align(0x10) linksection(".user_data") = undefined;
+export var interrupt_stack: [0x1000]u8 align(0x10) linksection(".user_data") = undefined;
 export var gdt linksection(".user_data") = GDT{};
 export var tss linksection(".user_data") = TSS{};
 export var idt linksection(".user_data") = IDT{};
 export var user_stack: u64 linksection(".user_data") = 0;
-export var syscall_stack: [0x2000]u8 align(0x1000) = undefined;
+export var syscall_stack: [0x1000]u8 align(0x1000) = undefined;
 
 var bsp = false;
 
@@ -335,9 +336,16 @@ pub const IDT = extern struct {
 pub fn dummyInterruptHandler() linksection(".user_text") callconv(.Naked) noreturn {
     asm volatile (
         \\endbr64
+        ::: "memory");
 
+    if (smap) {
         // TODO: Investigate why this is Exception #6
-        //\\clac
+        asm volatile (
+            \\clac
+            ::: "memory");
+    }
+
+    asm volatile (
         \\cld
         \\hlt
     );
@@ -359,20 +367,19 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
     asm volatile (
         \\endbr64
         \\swapgs
-        \\mov %%rsp, (user_stack)
+        \\movq %%rsp, user_stack(%%rip)
     );
 
     if (kpti) {
         asm volatile (
             \\mov %%cr3, %%rsp
-            :
-            : [cr3_address] "i" (@ptrToInt(&user_stack)),
-            : "memory"
-        );
+            ::: "memory");
+
         if (pcid) {
             // TODO:
             @compileError("TODO: pcid");
         }
+
         asm volatile (
             \\andq %[mask], %rsp
             \\mov %rsp, %cr3
@@ -383,11 +390,10 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
     }
 
     asm volatile (
-        \\mov %[syscall_stack], %rsp
+        \\lea syscall_stack(%%rip), %rsp
         \\add %[syscall_stack_size], %rsp
         :
-        : [syscall_stack] "i" (&syscall_stack),
-          [syscall_stack_size] "i" (syscall_stack.len),
+        : [syscall_stack_size] "i" (syscall_stack.len),
         : "memory"
     );
 
@@ -448,23 +454,117 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
         \\call syscall
         ::: "memory");
 
+    // TODO: more security stuff
+
+    // Pop registers
+    asm volatile (
+        \\popq %r15
+        \\popq %r14
+        \\popq %r13
+        \\popq %r12
+        \\popq %r11
+        \\popq %r10
+        \\popq %r9
+        \\popq %r8
+        \\popq %rax
+        \\popq %rcx
+        \\popq %rdx
+        \\popq %rsi
+        \\popq %rdi
+        ::: "memory");
+
+    if (kpti) {
+        // Restore CR3
+        asm volatile (
+            \\mov %cr3, %rsp
+            ::: "memory");
+
+        if (pcid) {
+            @compileError("PCID not supported yet");
+        }
+
+        asm volatile (
+            \\orq %[user_cr3_mask], %rsp
+            \\mov %rsp, %cr3
+            :
+            : [user_cr3_mask] "i" (1 << @bitOffsetOf(cr3, "address")),
+            : "memory"
+        );
+    }
+
+    // Restore RSP
+    asm volatile (
+        \\mov user_stack(%%rip), %rsp
+        ::: "memory");
+
     asm volatile (
         \\swapgs
         \\sysretq
         ::: "memory");
+
+    asm volatile (
+        \\int3
+        ::: "memory");
+
     unreachable;
 }
 
-export fn syscall(arg0: u64, arg1: u64) callconv(.C) void {
-    _ = arg1;
-    _ = arg0;
+const SyscallRegisters = extern struct {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rax: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    syscall_number: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+};
 
-    log.debug("Hi from a syscall", .{});
-    privileged.exitFromQEMU(true);
-    asm volatile (
-        \\cli
-        \\hlt
-    );
+/// SYSCALL documentation
+/// ABI:
+/// - RAX: System call number
+/// - RCX: Return address
+/// - R11: Saved rflags
+/// - RDI: argument 0
+/// - RSI: argument 1
+/// - RDX: argument 2
+/// - R10: argument 3
+/// - R8:  argument 4
+/// - R9:  argument 5
+export fn syscall(regs: *const SyscallRegisters) callconv(.C) void {
+    const syscall_arguments = lib.Syscall.Arguments{
+        .number = @bitCast(lib.Syscall.Number, regs.syscall_number),
+        .arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 },
+    };
+
+    switch (syscall_arguments.number.convention) {
+        .rise => riseSyscall(@intToEnum(lib.Syscall.Rise, syscall_arguments.number.number), syscall_arguments.arguments),
+        .linux => @panic("TODO: linux syscall"),
+    }
+
+    log.debug("Received syscall: {}", .{syscall_arguments});
+}
+
+inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
+    switch (number) {
+        .qemu_exit => {
+            privileged.exitFromQEMU(@intToEnum(lib.QEMU.ExitCode, arguments[0]));
+        },
+        //else => panic("Unknown syscall: {s}", .{@tagName(number)}),
+    }
+
+    @panic("Rise syscall");
 }
 
 const pcid_bit = 11;
@@ -727,8 +827,12 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     log.debug("Addresses: Text: 0x{x}. Data: 0x{x}", .{ user_text_virtual_address.value(), user_data_virtual_address.value() });
     log.debug("Size: Text: 0x{x}. Data: 0x{x}", .{ user_text_size, user_data_size });
 
-    virtual_address_space.map(.local, user_text_physical_address, user_text_virtual_address, user_text_size, .{ .write = false, .execute = true, .user = false }) catch @panic("user text");
-    virtual_address_space.map(.local, user_data_physical_address, user_data_virtual_address, user_data_size, .{ .write = true, .execute = false, .user = false }) catch @panic("user data");
+    virtual_address_space.map(.local, user_text_physical_address, user_text_virtual_address, user_text_size, .{ .write = false, .execute = true, .user = true }) catch @panic("user text");
+    virtual_address_space.map(.local, user_data_physical_address, user_data_virtual_address, user_data_size, .{ .write = true, .execute = false, .user = true }) catch @panic("user data");
+
+    const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
+    virtual_address_space.map(.local, user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
+    _ = user_stack;
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
@@ -737,12 +841,13 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
             const segment_physical_address = segment_physical_region.address;
             const segment_virtual_address = VirtualAddress(.local).new(program_header.virtual_address);
-
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, .{
+            const segment_flags = .{
                 .execute = program_header.flags.executable,
                 .write = program_header.flags.writable,
                 .user = true,
-            }) catch @panic("Segment mapping failed user");
+            };
+
+            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
@@ -750,11 +855,7 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
 
             paging.switchTo(virtual_address_space, .privileged);
 
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, .{
-                .execute = program_header.flags.executable,
-                .write = program_header.flags.writable,
-                .user = true,
-            }) catch |err| {
+            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
                 const physical_address = virtual_address_space.translateAddress(segment_virtual_address) catch @panic("cannot be translated");
                 log.debug("Translated address: 0x{x}", .{physical_address.value()});
                 panic("Segment mapping failed cpu: {}", .{err});
@@ -777,17 +878,15 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
 
     init_director_shared.disabled_save_area.rip = entry_point;
+    init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
     init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
 
     virtual_address_space.mapPageTables() catch |err| privileged.panic("Unable to map page tables: {}", .{err});
 
     const physical_address = virtual_address_space.translateAddress(VirtualAddress(.local).new(0x200290)) catch @panic("can't translate");
     log.debug("PA: 0x{x}", .{physical_address.value()});
-    const new_physical_address = virtual_address_space.translateAddress(VirtualAddress(.local).new(0xffffffff80000104)) catch @panic("can't translate");
-    log.debug("new: 0x{x}", .{new_physical_address.value()});
-    log.debug("CR3: 0x{x}, {}", .{ @bitCast(u64, virtual_address_space.arch.cr3), virtual_address_space.arch.cr3 });
 
-    log.debug("Interrupt stack: 0x{x}", .{@ptrToInt(&interrupt_stack)});
+    log.debug("Initialized director", .{});
 
     return init_director;
 }

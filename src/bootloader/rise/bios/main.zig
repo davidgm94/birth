@@ -432,7 +432,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeByte('\n') catch unreachable;
 
     if (lib.is_test) {
-        privileged.exitFromQEMU(false);
+        privileged.exitFromQEMU(.failure);
     } else {
         privileged.arch.stopCPU();
     }
