@@ -59,7 +59,7 @@ Currently only x86_64 is supported, although aarch64 and RISC-V 64 are planned f
 
 ## Target execution environments
 
-- [x] Real hardware. BIG DISCLAIMER: Support on real hardware is really primitive as it has been implemented recently. Only the UEFI boot protocol is tested and should only be tried/tested if you know what you are doing.
+- [x] Real hardware. BIG DISCLAIMER: Support on real hardware is really primitive as it has been implemented recently. Only the UEFI boot protocol is tested and should only be tried/tested if you know what you are doing. Moreover, since currently there is no CI for real hardware, due to the diversity of the x86-64 platform and the lack of testing, real hardware might not work as emulated ones do.
 
 ### Emulators/Hypervisors
 

@@ -116,9 +116,7 @@ pub const Register = enum(u32) {
     timer_current_count = 0x390,
 };
 
-pub var timestamp_ticks_per_ms: u64 = 0;
-
-pub fn calibrateTimer() void {
+pub fn calibrateTimer() privileged.arch.x86_64.TicksPerMS {
     //calibrate_timer_with_rtc(apic_base);
     const timer_calibration_start = lib.arch.x86_64.readTimestamp();
     var times_i: u64 = 0;
@@ -139,6 +137,11 @@ pub fn calibrateTimer() void {
 
     const ticks_per_ms = (maxInt(u32) - lapicRead(.timer_current_count)) >> 4;
     const timer_calibration_end = lib.arch.x86_64.readTimestamp();
-    timestamp_ticks_per_ms = (timer_calibration_end - timer_calibration_start) >> 3;
-    log.debug("Ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
+    const timestamp_ticks_per_ms = @intCast(u32, (timer_calibration_end - timer_calibration_start) >> 3);
+    log.debug("LAPIC ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
+
+    return .{
+        .tsc = timestamp_ticks_per_ms,
+        .lapic = ticks_per_ms,
+    };
 }

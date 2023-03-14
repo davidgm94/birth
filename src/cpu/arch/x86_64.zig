@@ -85,6 +85,34 @@ pub const GDT = extern struct {
     }
 };
 
+const Interrupt = enum(u5) {
+    DE = 0x00,
+    DB = 0x01,
+    NMI = 0x02,
+    BP = 0x03,
+    OF = 0x04,
+    BR = 0x05,
+    UD = 0x06,
+    NM = 0x07,
+    DF = 0x08,
+    CSO = 0x09, // Not used anymore
+    TS = 0x0A,
+    NP = 0x0B,
+    SS = 0x0C,
+    GP = 0x0D,
+    PF = 0x0E,
+    MF = 0x10,
+    AC = 0x11,
+    MC = 0x12,
+    XM = 0x13,
+    VE = 0x14,
+    CP = 0x15,
+    _,
+};
+
+const interrupt_kind: u32 = 0;
+const interrupt_descriptions: lib.AutoEnumArray(Interrupt, []const u8) = undefined;
+
 pub fn entryPoint() callconv(.Naked) noreturn {
     asm volatile (
         \\lea stack(%%rip), %%rsp
@@ -103,9 +131,13 @@ pub fn entryPoint() callconv(.Naked) noreturn {
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     log.debug("Hello! Bootloader information address: 0x{x}", .{@ptrToInt(bootloader_information)});
 
+    const cpuid = lib.arch.x86_64.cpuid;
     if (pcid) {
-        const cpuid = lib.arch.x86_64.cpuid(1);
-        if (cpuid.ecx & (1 << 17) == 0) @panic("PCID not available");
+        if (cpuid(1).ecx & (1 << 17) == 0) @panic("PCID not available");
+    }
+
+    {
+        // if (cpuid(0x80000007).edx & (1 << 8) == 0) @panic("Invariant TSC not available");
     }
 
     // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
@@ -193,9 +225,8 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 
     // Initialize IDT
 
-    const interrupt_address = @ptrToInt(&dummyInterruptHandler);
-    log.debug("interrupt address: 0x{x}", .{interrupt_address});
-    for (&idt.descriptors, 0..) |*descriptor, i| {
+    for (&idt.descriptors, interrupt_handlers, 0..) |*descriptor, interrupt_handler, i| {
+        const interrupt_address = @ptrToInt(interrupt_handler);
         descriptor.* = .{
             .offset_low = @truncate(u16, interrupt_address),
             .segment_selector = code_64,
@@ -333,24 +364,372 @@ pub const IDT = extern struct {
     pub const entry_count = 256;
 };
 
-pub fn dummyInterruptHandler() linksection(".user_text") callconv(.Naked) noreturn {
-    asm volatile (
-        \\endbr64
-        ::: "memory");
-
-    if (smap) {
-        // TODO: Investigate why this is Exception #6
-        asm volatile (
-            \\clac
-            ::: "memory");
-    }
-
-    asm volatile (
-        \\cld
-        \\hlt
-    );
-    unreachable;
+export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
+    _ = interrupt_number;
+    _ = regs;
+    APIC.lapicWrite(.eoi, 0);
+    nextTimer(10);
 }
+
+pub const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
+    InterruptHandler(@enumToInt(Interrupt.DE), false),
+    InterruptHandler(@enumToInt(Interrupt.DB), false),
+    InterruptHandler(@enumToInt(Interrupt.NMI), false),
+    InterruptHandler(@enumToInt(Interrupt.BP), false),
+    InterruptHandler(@enumToInt(Interrupt.OF), false),
+    InterruptHandler(@enumToInt(Interrupt.BR), false),
+    InterruptHandler(@enumToInt(Interrupt.UD), false),
+    InterruptHandler(@enumToInt(Interrupt.NM), false),
+    InterruptHandler(@enumToInt(Interrupt.DF), true),
+    InterruptHandler(@enumToInt(Interrupt.CSO), false),
+    InterruptHandler(@enumToInt(Interrupt.TS), true),
+    InterruptHandler(@enumToInt(Interrupt.NP), true),
+    InterruptHandler(@enumToInt(Interrupt.SS), true),
+    InterruptHandler(@enumToInt(Interrupt.GP), true),
+    InterruptHandler(@enumToInt(Interrupt.PF), true),
+    InterruptHandler(0x0f, false),
+    InterruptHandler(@enumToInt(Interrupt.MF), false),
+    InterruptHandler(@enumToInt(Interrupt.AC), true),
+    InterruptHandler(@enumToInt(Interrupt.MC), false),
+    InterruptHandler(@enumToInt(Interrupt.XM), false),
+    InterruptHandler(@enumToInt(Interrupt.VE), false),
+    InterruptHandler(@enumToInt(Interrupt.CP), true),
+    InterruptHandler(0x16, false),
+    InterruptHandler(0x17, false),
+    InterruptHandler(0x18, false),
+    InterruptHandler(0x19, false),
+    InterruptHandler(0x1a, false),
+    InterruptHandler(0x1b, false),
+    InterruptHandler(0x1c, false),
+    InterruptHandler(0x1d, false),
+    InterruptHandler(0x1e, false),
+    InterruptHandler(0x1f, false),
+    InterruptHandler(0x20, false),
+    InterruptHandler(0x21, false),
+    InterruptHandler(0x22, false),
+    InterruptHandler(0x23, false),
+    InterruptHandler(0x24, false),
+    InterruptHandler(0x25, false),
+    InterruptHandler(0x26, false),
+    InterruptHandler(0x27, false),
+    InterruptHandler(0x28, false),
+    InterruptHandler(0x29, false),
+    InterruptHandler(0x2a, false),
+    InterruptHandler(0x2b, false),
+    InterruptHandler(0x2c, false),
+    InterruptHandler(0x2d, false),
+    InterruptHandler(0x2e, false),
+    InterruptHandler(0x2f, false),
+    InterruptHandler(0x30, false),
+    InterruptHandler(0x31, false),
+    InterruptHandler(0x32, false),
+    InterruptHandler(0x33, false),
+    InterruptHandler(0x34, false),
+    InterruptHandler(0x35, false),
+    InterruptHandler(0x36, false),
+    InterruptHandler(0x37, false),
+    InterruptHandler(0x38, false),
+    InterruptHandler(0x39, false),
+    InterruptHandler(0x3a, false),
+    InterruptHandler(0x3b, false),
+    InterruptHandler(0x3c, false),
+    InterruptHandler(0x3d, false),
+    InterruptHandler(0x3e, false),
+    InterruptHandler(0x3f, false),
+    InterruptHandler(0x40, false),
+    InterruptHandler(0x41, false),
+    InterruptHandler(0x42, false),
+    InterruptHandler(0x43, false),
+    InterruptHandler(0x44, false),
+    InterruptHandler(0x45, false),
+    InterruptHandler(0x46, false),
+    InterruptHandler(0x47, false),
+    InterruptHandler(0x48, false),
+    InterruptHandler(0x49, false),
+    InterruptHandler(0x4a, false),
+    InterruptHandler(0x4b, false),
+    InterruptHandler(0x4c, false),
+    InterruptHandler(0x4d, false),
+    InterruptHandler(0x4e, false),
+    InterruptHandler(0x4f, false),
+    InterruptHandler(0x50, false),
+    InterruptHandler(0x51, false),
+    InterruptHandler(0x52, false),
+    InterruptHandler(0x53, false),
+    InterruptHandler(0x54, false),
+    InterruptHandler(0x55, false),
+    InterruptHandler(0x56, false),
+    InterruptHandler(0x57, false),
+    InterruptHandler(0x58, false),
+    InterruptHandler(0x59, false),
+    InterruptHandler(0x5a, false),
+    InterruptHandler(0x5b, false),
+    InterruptHandler(0x5c, false),
+    InterruptHandler(0x5d, false),
+    InterruptHandler(0x5e, false),
+    InterruptHandler(0x5f, false),
+    InterruptHandler(0x60, false),
+    InterruptHandler(0x61, false),
+    InterruptHandler(0x62, false),
+    InterruptHandler(0x63, false),
+    InterruptHandler(0x64, false),
+    InterruptHandler(0x65, false),
+    InterruptHandler(0x66, false),
+    InterruptHandler(0x67, false),
+    InterruptHandler(0x68, false),
+    InterruptHandler(0x69, false),
+    InterruptHandler(0x6a, false),
+    InterruptHandler(0x6b, false),
+    InterruptHandler(0x6c, false),
+    InterruptHandler(0x6d, false),
+    InterruptHandler(0x6e, false),
+    InterruptHandler(0x6f, false),
+    InterruptHandler(0x70, false),
+    InterruptHandler(0x71, false),
+    InterruptHandler(0x72, false),
+    InterruptHandler(0x73, false),
+    InterruptHandler(0x74, false),
+    InterruptHandler(0x75, false),
+    InterruptHandler(0x76, false),
+    InterruptHandler(0x77, false),
+    InterruptHandler(0x78, false),
+    InterruptHandler(0x79, false),
+    InterruptHandler(0x7a, false),
+    InterruptHandler(0x7b, false),
+    InterruptHandler(0x7c, false),
+    InterruptHandler(0x7d, false),
+    InterruptHandler(0x7e, false),
+    InterruptHandler(0x7f, false),
+    InterruptHandler(0x80, false),
+    InterruptHandler(0x81, false),
+    InterruptHandler(0x82, false),
+    InterruptHandler(0x83, false),
+    InterruptHandler(0x84, false),
+    InterruptHandler(0x85, false),
+    InterruptHandler(0x86, false),
+    InterruptHandler(0x87, false),
+    InterruptHandler(0x88, false),
+    InterruptHandler(0x89, false),
+    InterruptHandler(0x8a, false),
+    InterruptHandler(0x8b, false),
+    InterruptHandler(0x8c, false),
+    InterruptHandler(0x8d, false),
+    InterruptHandler(0x8e, false),
+    InterruptHandler(0x8f, false),
+    InterruptHandler(0x90, false),
+    InterruptHandler(0x91, false),
+    InterruptHandler(0x92, false),
+    InterruptHandler(0x93, false),
+    InterruptHandler(0x94, false),
+    InterruptHandler(0x95, false),
+    InterruptHandler(0x96, false),
+    InterruptHandler(0x97, false),
+    InterruptHandler(0x98, false),
+    InterruptHandler(0x99, false),
+    InterruptHandler(0x9a, false),
+    InterruptHandler(0x9b, false),
+    InterruptHandler(0x9c, false),
+    InterruptHandler(0x9d, false),
+    InterruptHandler(0x9e, false),
+    InterruptHandler(0x9f, false),
+    InterruptHandler(0xa0, false),
+    InterruptHandler(0xa1, false),
+    InterruptHandler(0xa2, false),
+    InterruptHandler(0xa3, false),
+    InterruptHandler(0xa4, false),
+    InterruptHandler(0xa5, false),
+    InterruptHandler(0xa6, false),
+    InterruptHandler(0xa7, false),
+    InterruptHandler(0xa8, false),
+    InterruptHandler(0xa9, false),
+    InterruptHandler(0xaa, false),
+    InterruptHandler(0xab, false),
+    InterruptHandler(0xac, false),
+    InterruptHandler(0xad, false),
+    InterruptHandler(0xae, false),
+    InterruptHandler(0xaf, false),
+    InterruptHandler(0xb0, false),
+    InterruptHandler(0xb1, false),
+    InterruptHandler(0xb2, false),
+    InterruptHandler(0xb3, false),
+    InterruptHandler(0xb4, false),
+    InterruptHandler(0xb5, false),
+    InterruptHandler(0xb6, false),
+    InterruptHandler(0xb7, false),
+    InterruptHandler(0xb8, false),
+    InterruptHandler(0xb9, false),
+    InterruptHandler(0xba, false),
+    InterruptHandler(0xbb, false),
+    InterruptHandler(0xbc, false),
+    InterruptHandler(0xbd, false),
+    InterruptHandler(0xbe, false),
+    InterruptHandler(0xbf, false),
+    InterruptHandler(0xc0, false),
+    InterruptHandler(0xc1, false),
+    InterruptHandler(0xc2, false),
+    InterruptHandler(0xc3, false),
+    InterruptHandler(0xc4, false),
+    InterruptHandler(0xc5, false),
+    InterruptHandler(0xc6, false),
+    InterruptHandler(0xc7, false),
+    InterruptHandler(0xc8, false),
+    InterruptHandler(0xc9, false),
+    InterruptHandler(0xca, false),
+    InterruptHandler(0xcb, false),
+    InterruptHandler(0xcc, false),
+    InterruptHandler(0xcd, false),
+    InterruptHandler(0xce, false),
+    InterruptHandler(0xcf, false),
+    InterruptHandler(0xd0, false),
+    InterruptHandler(0xd1, false),
+    InterruptHandler(0xd2, false),
+    InterruptHandler(0xd3, false),
+    InterruptHandler(0xd4, false),
+    InterruptHandler(0xd5, false),
+    InterruptHandler(0xd6, false),
+    InterruptHandler(0xd7, false),
+    InterruptHandler(0xd8, false),
+    InterruptHandler(0xd9, false),
+    InterruptHandler(0xda, false),
+    InterruptHandler(0xdb, false),
+    InterruptHandler(0xdc, false),
+    InterruptHandler(0xdd, false),
+    InterruptHandler(0xde, false),
+    InterruptHandler(0xdf, false),
+    InterruptHandler(0xe0, false),
+    InterruptHandler(0xe1, false),
+    InterruptHandler(0xe2, false),
+    InterruptHandler(0xe3, false),
+    InterruptHandler(0xe4, false),
+    InterruptHandler(0xe5, false),
+    InterruptHandler(0xe6, false),
+    InterruptHandler(0xe7, false),
+    InterruptHandler(0xe8, false),
+    InterruptHandler(0xe9, false),
+    InterruptHandler(0xea, false),
+    InterruptHandler(0xeb, false),
+    InterruptHandler(0xec, false),
+    InterruptHandler(0xed, false),
+    InterruptHandler(0xee, false),
+    InterruptHandler(0xef, false),
+    InterruptHandler(0xf0, false),
+    InterruptHandler(0xf1, false),
+    InterruptHandler(0xf2, false),
+    InterruptHandler(0xf3, false),
+    InterruptHandler(0xf4, false),
+    InterruptHandler(0xf5, false),
+    InterruptHandler(0xf6, false),
+    InterruptHandler(0xf7, false),
+    InterruptHandler(0xf8, false),
+    InterruptHandler(0xf9, false),
+    InterruptHandler(0xfa, false),
+    InterruptHandler(0xfb, false),
+    InterruptHandler(0xfc, false),
+    InterruptHandler(0xfd, false),
+    InterruptHandler(0xfe, false),
+    InterruptHandler(0xff, false),
+};
+
+pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code: bool) fn () callconv(.Naked) noreturn {
+    return struct {
+        fn handler() callconv(.Naked) noreturn {
+            asm volatile (
+                \\endbr64
+                ::: "memory");
+
+            if (smap) {
+                // TODO: Investigate why this is Exception #6
+                asm volatile (
+                    \\clac
+                    ::: "memory");
+            }
+
+            asm volatile (
+                \\cld
+                ::: "memory");
+
+            if (!has_error_code) {
+                asm volatile ("pushq $0" ::: "memory");
+            }
+
+            asm volatile (
+                \\push %rdi
+                \\push %rsi
+                \\push %rdx
+                \\push %rcx
+                \\push %rax
+                \\push %r8
+                \\push %r9
+                \\push %r10
+                \\push %r11
+                \\pushq %rbx
+                \\pushq %rbp
+                \\push %r12
+                \\push %r13
+                \\push %r14
+                \\push %r15
+                \\mov %rsp, %rdi
+                \\mov %[interrupt_number], %rsi
+                \\call interruptHandler
+                \\pop %r15
+                \\pop %r14
+                \\pop %r13
+                \\pop %r12
+                \\pop %rbp
+                \\pop %rbx
+                \\pop %r11
+                \\pop %r10
+                \\pop %r9
+                \\pop %r8
+                \\pop %rax
+                \\pop %rcx
+                \\pop %rdx
+                \\pop %rsi
+                \\pop %rdi
+                :
+                : [interrupt_number] "i" (interrupt_number),
+                : "memory"
+            );
+
+            if (!has_error_code) {
+                asm volatile (
+                    \\add $0x8, %rsp
+                    ::: "memory");
+            }
+
+            asm volatile (
+                \\iretq
+                \\int3
+                ::: "memory");
+
+            unreachable;
+        }
+    }.handler;
+}
+
+const InterruptRegisters = extern struct {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    rbp: u64,
+    rbx: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rax: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    error_code: u64,
+    rip: u64,
+    cs: u64,
+    rflags: u64,
+    rsp: u64,
+    ss: u64,
+};
 
 /// SYSCALL documentation
 /// ABI:
@@ -422,6 +801,8 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
         \\pushq %r9
         \\pushq %r10
         \\pushq %r11
+        \\pushq %rbx
+        \\pushq %rbp
         \\pushq %r12
         \\pushq %r13
         \\pushq %r14
@@ -462,6 +843,8 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
         \\popq %r14
         \\popq %r13
         \\popq %r12
+        \\popq %rbp
+        \\popq %rbx
         \\popq %r11
         \\popq %r10
         \\popq %r9
@@ -487,7 +870,7 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
             \\orq %[user_cr3_mask], %rsp
             \\mov %rsp, %cr3
             :
-            : [user_cr3_mask] "i" (1 << @bitOffsetOf(cr3, "address")),
+            : [user_cr3_mask] "i" (cr3_user_page_table_mask),
             : "memory"
         );
     }
@@ -514,6 +897,8 @@ const SyscallRegisters = extern struct {
     r14: u64,
     r13: u64,
     r12: u64,
+    rbp: u64,
+    rbx: u64,
     r11: u64,
     r10: u64,
     r9: u64,
@@ -559,7 +944,9 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) void {
 inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
     switch (number) {
         .qemu_exit => {
-            privileged.exitFromQEMU(@intToEnum(lib.QEMU.ExitCode, arguments[0]));
+            const exit_code = @intToEnum(lib.QEMU.ExitCode, arguments[0]);
+            log.debug("Exiting QEMU with {s} code", .{@tagName(exit_code)});
+            privileged.exitFromQEMU(exit_code);
         },
         //else => panic("Unknown syscall: {s}", .{@tagName(number)}),
     }
@@ -568,7 +955,9 @@ inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
 }
 
 const pcid_bit = 11;
-const cr3_user_page_table_and_pcid_mask = (1 << @bitOffsetOf(cr3, "address")) | (1 << pcid_bit);
+const pcid_mask = 1 << pcid_bit;
+const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
+const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
 
 fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
     const init_director = switch (bsp) {
@@ -891,6 +1280,14 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     return init_director;
 }
 
+var ticks_per_ms: privileged.arch.x86_64.TicksPerMS = undefined;
+const local_timer_vector = 0xef;
+
+pub inline fn nextTimer(ms: u32) void {
+    APIC.lapicWrite(.lvt_timer, local_timer_vector | (1 << 17));
+    APIC.lapicWrite(.timer_initcnt, ticks_per_ms.lapic * ms);
+}
+
 pub fn initAPIC() void {
     log.debug("Initializing APIC", .{});
     var ia32_apic_base = IA32_APIC_BASE.read();
@@ -915,7 +1312,9 @@ pub fn initAPIC() void {
     ia32_apic_base.write();
     log.debug("APIC enabled", .{});
 
-    APIC.calibrateTimer();
+    ticks_per_ms = APIC.calibrateTimer();
+
+    nextTimer(1);
 }
 
 extern const text_section_start: *u8;

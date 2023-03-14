@@ -306,3 +306,8 @@ pub const TSS = extern struct {
         };
     }
 };
+
+pub const TicksPerMS = extern struct {
+    tsc: u32,
+    lapic: u32,
+};
