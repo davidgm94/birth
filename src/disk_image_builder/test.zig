@@ -155,6 +155,7 @@ test "Limine barebones" {
             var loopback_device = LoopbackDevice{ .name = "loopback_device" };
             try loopback_device.start(wrapped_allocator.unwrap_zig(), test_path);
 
+            log.debug("Formatting", .{});
             try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
 
             const mount_dir = "image_mount";

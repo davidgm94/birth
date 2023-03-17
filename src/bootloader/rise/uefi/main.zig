@@ -42,7 +42,13 @@ const Stage = enum {
 };
 
 pub var framebuffer: bootloader.Framebuffer = undefined;
-pub const panic = UEFI.zigPanic;
+pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+    writer.writeAll("[UEFI] [PANIC] ") catch unreachable;
+    writer.writeAll(message) catch unreachable;
+    writer.writeAll("\r\n") catch unreachable;
+
+    while (true) {}
+}
 pub var draw_writer: bootloader.DrawContext.Writer = undefined;
 
 pub var maybe_bootloader_information: ?*bootloader.Information = null;

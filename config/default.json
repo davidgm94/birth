@@ -4,6 +4,6 @@
     "boot_protocol": "bios",
     "execution_environment": "qemu",
     "optimize_mode": "Debug",
-    "execution_type": "emulated",
+    "execution_type": "accelerated",
     "executable_kind": "exe"
 }

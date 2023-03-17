@@ -395,7 +395,7 @@ fn mapSection(bootloader_information: *bootloader.Information, comptime section_
     const virtual_address = VirtualAddress(.local).new(section_start);
     const physical_address = PhysicalAddress(.local).new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
     // log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) for 0x{x} bytes", .{ section_name, physical_address.value(), virtual_address.value(), size });
-    bootloader_information.virtual_address_space.map(.local, physical_address, virtual_address, section_size, flags) catch |err| privileged.panic("Mapping of section failed: {}", .{err});
+    bootloader_information.virtual_address_space.map(.local, physical_address, virtual_address, section_size, flags) catch @panic("Mapping of section failed");
 
     @field(bootloader_information.cpu_driver_mappings, section_name) = .{
         .physical = physical_address,
@@ -672,8 +672,8 @@ pub fn entryPoint() callconv(.C) noreturn {
     for (bootloader_information.getMemoryMapEntries()) |entry| {
         if (entry.type == .usable) {
             log.debug("Usable memory map entry: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
-            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }) catch |err| privileged.panic("Mapping of usable memory map entry failed: {}", .{err});
-            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }) catch |err| privileged.panic("Mapping of usable memory map entry failed: {}", .{err});
+            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }) catch @panic("Mapping of usable memory map entry failed");
+            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }) catch @panic("Mapping of usable memory map entry failed");
         }
     }
 

@@ -4,7 +4,7 @@ const assert = lib.assert;
 const log = lib.log;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
-const panic = privileged.panic;
+const panic = cpu.panic;
 const PageAllocator = privileged.PageAllocator;
 const x86_64 = privileged.arch.x86_64;
 const APIC = x86_64.APIC;
@@ -40,11 +40,11 @@ pub const kpti = true;
 pub const pcid = false;
 pub const smap = false;
 
-export var interrupt_stack: [0x1000]u8 align(0x10) linksection(".user_data") = undefined;
-export var gdt linksection(".user_data") = GDT{};
-export var tss linksection(".user_data") = TSS{};
-export var idt linksection(".user_data") = IDT{};
-export var user_stack: u64 linksection(".user_data") = 0;
+export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
+export var gdt = GDT{};
+export var tss = TSS{};
+export var idt = IDT{};
+export var user_stack: u64 = 0;
 export var syscall_stack: [0x1000]u8 align(0x1000) = undefined;
 
 var bsp = false;
@@ -158,9 +158,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 
     // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
     // TODO: figure out the best way to create page allocators for the APP cores
-    log.debug("A", .{});
     cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
-    log.debug("B", .{});
 
     cpu.virtual_address_space = .{
         .arch = bootloader_information.virtual_address_space.arch,
@@ -742,7 +740,7 @@ const InterruptRegisters = extern struct {
 /// - R10: argument 3
 /// - R8:  argument 4
 /// - R9:  argument 5
-pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) void {
+pub export fn syscallEntryPoint() callconv(.Naked) void {
     asm volatile (
         \\endbr64
         \\swapgs
@@ -948,10 +946,14 @@ inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
             log.debug("Exiting QEMU with {s} code", .{@tagName(exit_code)});
             privileged.exitFromQEMU(exit_code);
         },
+        .print => {
+            const message = @intToPtr([*]const u8, arguments[0])[0..arguments[1]];
+            writerStart();
+            writer.writeAll(message) catch unreachable;
+            writerEnd();
+        },
         //else => panic("Unknown syscall: {s}", .{@tagName(number)}),
     }
-
-    @panic("Rise syscall");
 }
 
 const pcid_bit = 11;
@@ -983,7 +985,7 @@ fn dispatch(director: *CoreDirectorData) noreturn {
     }
 }
 
-noinline fn resumeExecution(state: *align(16) Registers) linksection(".user_text") noreturn {
+noinline fn resumeExecution(state: *align(16) Registers) noreturn {
     const regs = state;
     asm volatile (
         \\pushq %[ss]
@@ -1145,6 +1147,9 @@ const ELF = lib.ELF(64);
 
 // TODO: make this work with no KPTI
 fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
+    while (true) {
+        privileged.exitFromQEMU(.success);
+    }
     assert(bsp);
 
     const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
@@ -1182,42 +1187,21 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     log.debug("Higher half start", .{});
     paging.copyHigherHalf(cpu_side_pml4_physical_address);
+    defer paging.unmapCapabilitySpace(user_side_pml4_physical_address);
     log.debug("Higher half end", .{});
 
     // First map vital parts for context switch
     virtual_address_space.arch = .{
-        .cr3 = cr3.from_address(user_side_pml4_physical_address),
+        .cr3 = cr3.from_address(cpu_side_pml4_physical_address),
     };
 
     // Identity map dispatcher
-    virtual_address_space.map(.local, init_director_allocation.address, init_director_allocation.address.toHigherHalfVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    virtual_address_space.map(.local, init_director_shared_allocation.address, init_director_shared_allocation.address.toHigherHalfVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
+    virtual_address_space.map(.local, init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
+    virtual_address_space.map(.local, init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
 
     const init_director = init_director_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorData);
     const init_director_shared = init_director_shared_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorShared);
     init_director.shared = &init_director_shared.base;
-
-    const text_start = @ptrToInt(&text_section_start);
-    log.debug("Text start: 0x{x}", .{text_start});
-    const data_start = @ptrToInt(&data_section_start);
-
-    const user_text_offset = @ptrToInt(&user_text_start) - text_start;
-    const user_data_offset = @ptrToInt(&user_data_start) - data_start;
-
-    const user_text_size = @ptrToInt(&user_text_end) - @ptrToInt(&user_text_start);
-    const user_data_size = @ptrToInt(&user_data_end) - @ptrToInt(&user_data_start);
-
-    const user_text_physical_address = cpu.mappings.text.physical.offset(user_text_offset);
-    log.debug("CPU mapping data: 0x{x}", .{cpu.mappings.data.physical.value()});
-    const user_data_physical_address = cpu.mappings.data.physical.offset(user_data_offset);
-
-    const user_text_virtual_address = VirtualAddress(.local).new(@ptrToInt(&user_text_start));
-    const user_data_virtual_address = VirtualAddress(.local).new(@ptrToInt(&user_data_start));
-    log.debug("Addresses: Text: 0x{x}. Data: 0x{x}", .{ user_text_virtual_address.value(), user_data_virtual_address.value() });
-    log.debug("Size: Text: 0x{x}. Data: 0x{x}", .{ user_text_size, user_data_size });
-
-    virtual_address_space.map(.local, user_text_physical_address, user_text_virtual_address, user_text_size, .{ .write = false, .execute = true, .user = true }) catch @panic("user text");
-    virtual_address_space.map(.local, user_data_physical_address, user_data_virtual_address, user_data_size, .{ .write = true, .execute = false, .user = true }) catch @panic("user data");
 
     const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
     virtual_address_space.map(.local, user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
@@ -1270,12 +1254,7 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
     init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
 
-    virtual_address_space.mapPageTables() catch |err| privileged.panic("Unable to map page tables: {}", .{err});
-
-    const physical_address = virtual_address_space.translateAddress(VirtualAddress(.local).new(0x200290)) catch @panic("can't translate");
-    log.debug("PA: 0x{x}", .{physical_address.value()});
-
-    log.debug("Initialized director", .{});
+    virtual_address_space.mapPageTables() catch |err| panic("Unable to map page tables: {}", .{err});
 
     return init_director;
 }
@@ -1319,8 +1298,48 @@ pub fn initAPIC() void {
 
 extern const text_section_start: *u8;
 extern const data_section_start: *u8;
-
 extern const user_text_start: *u8;
 extern const user_text_end: *u8;
 extern const user_data_start: *u8;
 extern const user_data_end: *u8;
+
+pub const Spinlock = enum(u8) {
+    released = 0,
+    acquired = 1,
+
+    pub inline fn acquire(spinlock: *volatile Spinlock) void {
+        asm volatile (
+            \\0:
+            \\xchgb %[value], %[spinlock]
+            \\test %[value], %[value]
+            \\jz 2f
+            // If not acquire, go to spinloop
+            \\1:
+            \\pause
+            \\cmp %[value], %[spinlock]
+            // Retry
+            \\jne 0b
+            \\jmp 1b
+            \\2:
+            :
+            : [spinlock] "*p" (spinlock),
+              [value] "r" (Spinlock.acquired),
+            : "memory"
+        );
+    }
+
+    pub inline fn release(spinlock: *volatile Spinlock) void {
+        @atomicStore(Spinlock, spinlock, .released, .Release);
+    }
+};
+
+pub const writer = privileged.E9Writer{ .context = {} };
+var writer_lock: Spinlock = .released;
+
+pub inline fn writerStart() void {
+    writer_lock.acquire();
+}
+
+pub inline fn writerEnd() void {
+    writer_lock.release();
+}

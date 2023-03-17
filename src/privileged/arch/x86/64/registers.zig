@@ -295,18 +295,18 @@ pub const IA32_APIC_BASE = packed struct(u64) {
 
     pub const MSR = SimpleMSR(0x0000001B);
 
-    pub fn read() IA32_APIC_BASE {
+    pub inline fn read() IA32_APIC_BASE {
         const result = MSR.read();
         const typed_result = @bitCast(IA32_APIC_BASE, result);
         return typed_result;
     }
 
-    pub fn write(typed_value: IA32_APIC_BASE) void {
+    pub inline fn write(typed_value: IA32_APIC_BASE) void {
         const value = @bitCast(u64, typed_value);
         MSR.write(value);
     }
 
-    pub fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
+    pub inline fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
         return PhysicalAddress(.global).new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
     }
 };

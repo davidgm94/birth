@@ -436,7 +436,10 @@ pub const Information = extern struct {
     }
 
     pub fn fetchFileByType(bootloader_information: *Information, file_type: File.Type) ?[]const u8 {
-        for (bootloader_information.getFiles()) |file_descriptor| {
+        const files = bootloader_information.getFiles();
+        lib.log.debug("File count: {}", .{files.len});
+        for (files) |file_descriptor| {
+            lib.log.debug("File type: {}", .{file_descriptor.type});
             if (file_descriptor.type == file_type) {
                 return file_descriptor.getContent(bootloader_information);
             }

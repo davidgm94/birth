@@ -12,10 +12,6 @@ SECTIONS {
 
     PROVIDE(text_section_start = .);
     .text . : {
-        PROVIDE(user_text_start = .);
-        *(.user_text*)
-        . = ALIGN(4K);
-        PROVIDE(user_text_end = .);
         *(.text*)
   }:text
 
@@ -32,10 +28,6 @@ SECTIONS {
 
   PROVIDE(data_section_start = .);
   .data . : {
-      PROVIDE(user_data_start = .);
-      *(.user_data*)
-      . = ALIGN(4K);
-      PROVIDE(user_data_end = .);
       *(.data*)
           *(.bss*)
           *(.got*)

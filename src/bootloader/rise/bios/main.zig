@@ -117,8 +117,8 @@ export fn entryPoint() callconv(.C) noreturn {
     const file_alignment = 0x200;
     const cpu_driver_name = blk: {
         var maybe_cpu_driver_name: ?[]const u8 = null;
-        while (file_parser.next() catch |err| {
-            privileged.panic("Error while parsing: {}", .{err});
+        while (file_parser.next() catch {
+            @panic("Error while parsing");
         }) |file_descriptor| {
             const file_name = file_descriptor.guest;
             if (file_descriptor.type == .cpu_driver) {
@@ -287,11 +287,11 @@ export fn entryPoint() callconv(.C) noreturn {
     for (entries) |entry| {
         if (entry.type == .usable) {
             // bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }) catch @panic("Mapping of memory map entry failed (identity)");
-            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }) catch |err| privileged.panic("Mapping of memory map entry failed (higher half): {}", .{err});
+            bootloader_information.virtual_address_space.map(.global, entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }) catch @panic("Mapping memory entry (HH)"); //catch |err| privileged.panic("Mapping of memory map entry failed (higher half): {}", .{err});
         }
     }
 
-    bootloader_information.virtual_address_space.map(.global, bootloader_information_address, bootloader_information_address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }) catch |err| privileged.panic("Bootloader information mapping failed: {}", .{err});
+    bootloader_information.virtual_address_space.map(.global, bootloader_information_address, bootloader_information_address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }) catch @panic("bootloader information mapping"); //|err| // privileged.panic("Bootloader information mapping failed: {}", .{err});
 
     lib.log.debug("Loader", .{});
 

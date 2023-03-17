@@ -182,8 +182,8 @@ fn mapGeneric(virtual_address_space: *VirtualAddressSpace, asked_physical_addres
 fn map1GBPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags) !void {
     const indices = computeIndices(virtual_address);
 
-    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[1G] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[1G] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch @panic("1G PML4"); //privileged.panic("[1G] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch @panic("1G PDP"); //privileged.panic("[1G] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
     try mapPageTable1GB(pdp_table, indices, physical_address, flags);
 
@@ -201,9 +201,9 @@ fn map1GBPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64
 fn map2MBPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64, virtual_address: u64, flags: MemoryFlags) !void {
     const indices = computeIndices(virtual_address);
 
-    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[2M] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch @panic("2M pml4"); //privileged.panic("[2M] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch @panic("2M pdp"); //catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch @panic("2m pd"); //catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
     try mapPageTable2MB(pd_table, indices, physical_address, flags);
 
@@ -222,15 +222,15 @@ fn map4KPage(virtual_address_space: *VirtualAddressSpace, physical_address: u64,
     const indices = computeIndices(virtual_address);
 
     // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("Before PML4", .{});
-    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[4K] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch @panic("4k pml4"); //privileged.panic("[4K] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
     // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("PML4Table: 0x{x}", .{@ptrToInt(pml4_table)});
-    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch privileged.panic("[4K] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, flags) catch @panic("4k pdp"); //privileged.panic("[4K] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
     // if (virtual_address >= 0xffff_ffff_8000_0000)
     // log.debug("PDP table: 0x{x}", .{@ptrToInt(pdp_table)});
-    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch privileged.panic("[4K] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const pd_table = getPDTable(virtual_address_space, pdp_table, indices, flags) catch @panic("4k pd"); //privileged.panic("[4K] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
     // if (virtual_address >= 0xffff_ffff_8000_0000)
     // log.debug("PD table: 0x{x}", .{@ptrToInt(pd_table)});
-    const p_table = getPTable(virtual_address_space, pd_table, indices, flags) catch privileged.panic("[4K] P table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+    const p_table = getPTable(virtual_address_space, pd_table, indices, flags) catch @panic("4k p"); //privileged.panic("[4K] P table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
     // if (virtual_address >= 0xffff_ffff_8000_0000)
     // log.debug("P table: 0x{x}", .{@ptrToInt(p_table)});
 
@@ -662,7 +662,7 @@ pub const PTable = [512]PTE;
 pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress(.local)) TranslateError!PhysicalAddress(.local) {
     const indices = computeIndices(virtual_address.value());
 
-    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch privileged.panic("[translateAddress] PML4 access failed when translating 0x{x}", .{virtual_address.value()});
+    const pml4_table = getPML4Table(virtual_address_space.arch.cr3) catch @panic("translateAddress"); //catch privileged.panic("[translateAddress] PML4 access failed when translating 0x{x}", .{virtual_address.value()});
     const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
     if (!pml4_entry.present) {
         return TranslateError.pml4_entry_not_present;
@@ -673,7 +673,7 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
         return TranslateError.pml4_entry_address_null;
     }
 
-    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, undefined) catch privileged.panic("[translateAddress] PDP access failed when translating 0x{x}", .{virtual_address.value()});
+    const pdp_table = getPDPTable(virtual_address_space, pml4_table, indices, undefined) catch @panic("translateAddress"); //privileged.panic("[translateAddress] PDP access failed when translating 0x{x}", .{virtual_address.value()});
     const pdp_entry = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
     if (!pdp_entry.present) {
         return TranslateError.pdp_entry_not_present;
@@ -696,7 +696,8 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
     }
 
     const pd_table = accessPageTable(pdp_entry_address, *volatile PDTable) catch {
-        privileged.panic("[translateAddress] PD access failed when translating 0x{x}. Tried to access page at physical address: 0x{x}. Written in 0x{x}", .{ virtual_address.value(), pdp_entry_address.value(), @ptrToInt(pdp_entry) });
+        @panic("translateAddress");
+        //privileged.panic("[translateAddress] PD access failed when translating 0x{x}. Tried to access page at physical address: 0x{x}. Written in 0x{x}", .{ virtual_address.value(), pdp_entry_address.value(), @ptrToInt(pdp_entry) });
     };
     const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
     if (!pd_entry.present) {
@@ -719,7 +720,7 @@ pub fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_add
         return TranslateError.pd_entry_address_null;
     }
 
-    const p_table = accessPageTable(pd_entry_address, *volatile PTable) catch privileged.panic("[translateAddress] PD access failed when translating 0x{x}", .{virtual_address.value()});
+    const p_table = accessPageTable(pd_entry_address, *volatile PTable) catch @panic("translateAddress"); //privileged.panic("[translateAddress] PD access failed when translating 0x{x}", .{virtual_address.value()});
     const pt_entry = p_table[indices[@enumToInt(PageIndex.PT)]];
     if (!pt_entry.present) {
         return TranslateError.pt_entry_not_present;
@@ -832,4 +833,11 @@ pub inline fn switchTo(virtual_address_space: *VirtualAddressSpace, execution_mo
     const new_cr3 = @bitCast(cr3, masked_cr3 | privileged_or);
     log.debug("Execution mode: {s}. CR3: 0x{x}. Mask: 0x{x}. Masked CR3: 0x{x}. Privileged OR: 0x{x}. New CR3: 0x{x}", .{ @tagName(execution_mode), @bitCast(u64, virtual_address_space.arch.cr3), mask, masked_cr3, privileged_or, @bitCast(u64, new_cr3) });
     virtual_address_space.arch.cr3 = new_cr3;
+}
+
+pub fn unmapCapabilitySpace(pml4_physical_address: PhysicalAddress(.local)) void {
+    _ = pml4_physical_address;
+    const cap_space_start = @intCast(u64, @as(u65, lib.maxInt(u64)) + 1 - 2 * lib.gb);
+    log.debug("Cap space start: 0x{x}", .{cap_space_start});
+    @panic("unmapCapabilitySpace");
 }

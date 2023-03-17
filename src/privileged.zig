@@ -102,21 +102,6 @@ pub const SpawnState = struct {
 
 const panic_logger = lib.log.scoped(.PANIC);
 
-pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    arch.disableInterrupts();
-    panic_logger.err(format, arguments);
-    if (lib.is_test) {
-        exitFromQEMU(.failure);
-    } else {
-        arch.stopCPU();
-    }
-}
-
-pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
-    arch.disableInterrupts();
-    panic("{s}", .{message});
-}
-
 pub fn dumpStackTrace(start_address: usize, frame_pointer: usize) void {
     _ = frame_pointer;
     _ = start_address;
@@ -769,17 +754,13 @@ pub const VirtualAddressSpace = extern struct {
 
             const page_bulk_allocation = virtual_address_space.backing_allocator.allocateBytes(selected_size, selected_alignment) catch blk: {
                 if (alignment > lib.arch.valid_page_sizes[0]) return Allocator.Allocate.Error.OutOfMemory;
-                log.debug("Backing allocator call", .{});
                 break :blk try virtual_address_space.backing_allocator.allocateBytes(size, alignment);
             };
-            log.debug("Page bulk allocation: 0x{x}", .{page_bulk_allocation.size});
 
             virtual_address_space.page.context = .{
                 .region_base = page_bulk_allocation.address,
                 .size = page_bulk_allocation.size,
             };
-
-            log.debug("Page context after allocation: 0x{x}", .{virtual_address_space.page.context.size});
 
             if (virtual_address_space.options.log_pages) {
                 try virtual_address_space.addPage(page_bulk_allocation);
@@ -855,6 +836,7 @@ pub const VirtualAddressSpace = extern struct {
             .write = true,
             .cache_disable = true,
             .global = false,
+            .user = true,
         });
 
         return asked_physical_address.toHigherHalfVirtualAddress();

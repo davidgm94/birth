@@ -6,14 +6,6 @@ const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const bootloader = @import("bootloader");
 
-pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    privileged.arch.disableInterrupts();
-    privileged.writer.writeAll("[CPU DRIVER] [PANIC] ") catch unreachable;
-    privileged.writer.print(format, arguments) catch unreachable;
-    privileged.writer.writeByte('\n') catch unreachable;
-    privileged.arch.stopCPU();
-}
-
 pub const test_runner = @import("cpu/test_runner.zig");
 
 pub const arch = @import("cpu/arch.zig");
@@ -38,4 +30,29 @@ pub export var page_allocator = PageAllocator{
         },
         .primitive = true,
     },
+};
+
+pub const writer = arch.writer;
+var panic_lock = arch.Spinlock.released;
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    privileged.arch.disableInterrupts();
+
+    panic_lock.acquire();
+    writer.writeAll("[CPU DRIVER] [PANIC] ") catch unreachable;
+    writer.print(format, arguments) catch unreachable;
+    writer.writeByte('\n') catch unreachable;
+    privileged.arch.stopCPU();
+
+    panic_lock.release();
+
+    if (lib.is_test) {
+        privileged.exitFromQEMU(.failure);
+    } else {
+        privileged.arch.stopCPU();
+    }
+}
+
+pub const UserVirtualAddressSpace = extern struct {
+    generic: VirtualAddressSpace,
 };
