@@ -4,8 +4,9 @@ pub const limine = @import("bootloader/limine/limine.zig");
 pub const arch = @import("bootloader/arch.zig");
 
 const lib = @import("lib");
-const assert = lib.assert;
 const Allocator = lib.Allocator;
+const assert = lib.assert;
+//const Allocator = lib.Allocator;
 pub const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged");
@@ -15,6 +16,7 @@ const VirtualAddress = privileged.VirtualAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
+pub const paging = privileged.arch.paging;
 
 pub const Version = extern struct {
     patch: u8,
@@ -38,22 +40,22 @@ pub const Information = extern struct {
     protocol: lib.Bootloader.Protocol,
     bootloader: lib.Bootloader,
     stage: Stage,
-    page_allocator: Allocator = .{
-        .callbacks = .{
-            .allocate = pageAllocate,
-        },
-    },
+    // page_allocator: Allocator = .{
+    //     .callbacks = .{
+    //         .allocate = pageAllocate,
+    //     },
+    // },
     configuration: packed struct(u32) {
         memory_map_diff: u8,
         reserved: u24 = 0,
     },
-    heap: Heap,
+    // heap: Heap,
     cpu_driver_mappings: CPUDriverMappings,
     framebuffer: Framebuffer,
     draw_context: DrawContext,
     font: Font,
     smp: SMP.Information,
-    virtual_address_space: VirtualAddressSpace,
+    //virtual_address_space: VirtualAddressSpace,
     architecture: Architecture,
     slices: lib.EnumStruct(Slice.Name, Slice),
 
@@ -108,17 +110,17 @@ pub const Information = extern struct {
     };
 
     // TODO:
-    const PA = PhysicalAddress(.global);
-    const PMR = PhysicalMemoryRegion(.global);
+    const PA = PhysicalAddress;
+    const PMR = PhysicalMemoryRegion;
 
-    const Heap = extern struct {
-        allocator: Allocator = .{
-            .callbacks = .{
-                .allocate = heapAllocate,
-            },
-        },
-        regions: [6]PMR = lib.zeroes([6]PMR),
-    };
+    // const Heap = extern struct {
+    //     allocator: Allocator = .{
+    //         .callbacks = .{
+    //             .allocate = heapAllocate,
+    //         },
+    //     },
+    //     regions: [6]PMR = lib.zeroes([6]PMR),
+    // };
 
     pub const SMP = extern struct {
         acpi_id: u32,
@@ -185,7 +187,7 @@ pub const Information = extern struct {
                 var iterator = madt.getIterator();
                 var smp_index: usize = 0;
 
-                const smp_trampoline_physical_address = PhysicalAddress(.local).new(@ptrToInt(&arch.x86_64.smp_trampoline));
+                const smp_trampoline_physical_address = PhysicalAddress.new(@ptrToInt(&arch.x86_64.smp_trampoline));
                 // Sanity checks
                 const trampoline_argument_symbol = @extern(*SMP.Trampoline.Argument, .{ .name = "smp_trampoline_arg_start" });
                 const smp_core_booted_symbol = @extern(*bool, .{ .name = "smp_core_booted" });
@@ -225,7 +227,7 @@ pub const Information = extern struct {
                                     }) catch @panic("can't set smp trampoline flags");
 
                                     const smp_trampoline_buffer = smp_trampoline_buffer_region.access(u8);
-                                    const smp_trampoline_region = PhysicalMemoryRegion(.local).new(smp_trampoline_physical_address, smp_trampoline_size);
+                                    const smp_trampoline_region = PhysicalMemoryRegion.new(smp_trampoline_physical_address, smp_trampoline_size);
                                     const smp_trampoline_source = smp_trampoline_region.toIdentityMappedVirtualAddress().access(u8);
 
                                     lib.copy(u8, smp_trampoline_buffer, smp_trampoline_source);
@@ -360,8 +362,7 @@ pub const Information = extern struct {
         if (total_size != original_total_size) return IntegrityError.bad_total_size;
     }
 
-    pub fn pageAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        const bootloader_information = @fieldParentPtr(Information, "page_allocator", allocator);
+    pub fn allocatePages(bootloader_information: *Information, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
         if (bootloader_information.stage != .cpu) {
             if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
             if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
@@ -373,22 +374,21 @@ pub const Information = extern struct {
             for (entries, 0..) |entry, entry_index| {
                 const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
                 const size_left = entry.region.size - busy_size;
-                if (entry.type == .usable and size_left > size and entry.region.address.value() != 0) {
-                    if (entry.region.address.isAligned(alignment)) {
-                        const result = Allocator.Allocate.Result{
-                            .address = entry.region.address.offset(busy_size).value(),
-                            .size = size,
-                        };
 
-                        if (result.address + result.size <= lib.maxInt(usize)) {
-                            lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address))[0..lib.safeArchitectureCast(result.size)]);
+                if (entry.type == .usable and size_left > size and entry.region.address.value() != 0 and entry.region.address.isAligned(alignment)) {
+                    const result = PhysicalMemoryRegion{
+                        .address = entry.region.address.offset(busy_size),
+                        .size = size,
+                    };
 
-                            lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address, result.address + result.size });
+                    if (result.address.offset(result.size).value() <= lib.maxInt(usize)) {
+                        lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
 
-                            page_counters[entry_index] += four_kb_pages;
+                        lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address.value(), result.address.offset(result.size).value() });
 
-                            return result;
-                        }
+                        page_counters[entry_index] += four_kb_pages;
+
+                        return result;
                     }
                 }
             }
@@ -397,8 +397,12 @@ pub const Information = extern struct {
         return Allocator.Allocate.Error.OutOfMemory;
     }
 
-    pub fn heapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-        const bootloader_information = @fieldParentPtr(Information, "heap", @fieldParentPtr(Heap, "allocator", allocator));
+    pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        const bootloader_information = @ptrCast(*Information, @alignCast(@alignOf(Information), context));
+        return try bootloader_information.allocatePages(size, alignment);
+    }
+
+    pub fn heapAllocate(bootloader_information: *Information, size: u64, alignment: u64) !Allocator.Allocate.Result {
         if (bootloader_information.stage != .cpu) {
             for (&bootloader_information.heap.regions) |*region| {
                 if (region.size > size) {
@@ -447,6 +451,16 @@ pub const Information = extern struct {
 
         return null;
     }
+
+    pub fn initializeVirtualAddressSpace(bootloader_information: *Information) paging.Specific {
+        const page_allocator_interface = privileged.PageAllocatorInterface{
+            .allocate = Information.callbackAllocatePages,
+            .context = bootloader_information,
+            .context_type = .bootloader,
+        };
+
+        return VirtualAddressSpace.paging.initKernelBSP(page_allocator_interface) catch @panic("Virtual address space creation");
+    }
 };
 
 pub const CPUDriverMappings = extern struct {
@@ -454,10 +468,11 @@ pub const CPUDriverMappings = extern struct {
     data: Mapping = .{},
     rodata: Mapping = .{},
 };
+
 const Mapping = privileged.Mapping;
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion(.global) align(8),
+    region: PhysicalMemoryRegion align(8),
     type: Type align(8),
 
     const Type = enum(u64) {
@@ -741,7 +756,7 @@ pub const LengthSizeTuples = extern struct {
 };
 
 pub const Font = extern struct {
-    file: PhysicalMemoryRegion(.local) align(8), // so 32-bit doesn't whine
+    file: PhysicalMemoryRegion align(8), // so 32-bit doesn't whine
     glyph_buffer_size: u32,
     character_size: u8,
     draw: *const fn (font: *const Font, framebuffer: *const Framebuffer, character: u8, color: u32, offset_x: u32, offset_y: u32) void,
@@ -755,7 +770,7 @@ pub const Font = extern struct {
         const glyph_buffer_size = @as(u32, header.character_size) * (lib.maxInt(u8) + 1) * (1 + @boolToInt(header.mode == 1));
 
         return .{
-            .file = PhysicalMemoryRegion(.local).new(PhysicalAddress(.local).new(@ptrToInt(file.ptr)), file.len),
+            .file = PhysicalMemoryRegion.new(PhysicalAddress.new(@ptrToInt(file.ptr)), file.len),
             .glyph_buffer_size = glyph_buffer_size,
             .character_size = header.character_size,
             .draw = drawPSF1,

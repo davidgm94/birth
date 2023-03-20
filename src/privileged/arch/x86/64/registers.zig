@@ -31,7 +31,7 @@ pub const cr3 = packed struct(u64) {
         assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
     }
 
-    pub fn from_address(physical_address: PhysicalAddress(.local)) cr3 {
+    pub fn fromAddress(physical_address: PhysicalAddress) cr3 {
         const PackedAddressType = blk: {
             var foo_cr3: cr3 = undefined;
             break :blk @TypeOf(@field(foo_cr3, "address"));
@@ -61,8 +61,8 @@ pub const cr3 = packed struct(u64) {
         return self_int == other_int;
     }
 
-    pub inline fn getAddress(self: cr3) PhysicalAddress(.local) {
-        return PhysicalAddress(.local).new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
+    pub inline fn getAddress(self: cr3) PhysicalAddress {
+        return PhysicalAddress.new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
     }
 };
 
@@ -306,7 +306,7 @@ pub const IA32_APIC_BASE = packed struct(u64) {
         MSR.write(value);
     }
 
-    pub inline fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
-        return PhysicalAddress(.global).new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
+    pub inline fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress {
+        return PhysicalAddress.new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
     }
 };

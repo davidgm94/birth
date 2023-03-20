@@ -21,6 +21,7 @@ const IA32_FMASK = registers.IA32_FMASK;
 const IA32_LSTAR = registers.IA32_LSTAR;
 const IA32_STAR = registers.IA32_STAR;
 const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
@@ -145,9 +146,6 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
     // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
     if (bootloader_information.getSlice(.files).len == 0) @panic("Files must be loaded by the bootloader");
-    // Reset callbacks as there were 32-bit and calling them from here would be broken
-    bootloader_information.page_allocator.callbacks.allocate = bootloader.Information.pageAllocate;
-    bootloader_information.heap.allocator.callbacks.allocate = bootloader.Information.heapAllocate;
     // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
     // functionality is not available anymore
     bootloader_information.stage = .cpu;
@@ -161,14 +159,21 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
 
     cpu.virtual_address_space = .{
-        .arch = bootloader_information.virtual_address_space.arch,
+        .arch = .{
+            .cr3 = cr3.read(),
+        },
         .options = .{
             .user = false,
             .mapped_page_tables = true,
             .log_pages = false,
         },
-        .backing_allocator = &cpu.page_allocator.allocator,
     };
+
+    paging.setPageAllocator(.{
+        .allocate = callbackAllocatePages,
+        .context = &cpu.virtual_address_space,
+        .context_type = .cpu,
+    });
     // Initialize GDT
     const gdt_descriptor = GDT.Descriptor{
         .limit = @sizeOf(GDT) - 1,
@@ -1060,9 +1065,9 @@ pub const CoreDirectorData = extern struct {
 
 pub const CoreDirectorShared = extern struct {
     base: CoreDirectorSharedGeneric,
-    crit_pc_low: VirtualAddress(.local),
-    crit_pc_high: VirtualAddress(.local),
-    ldt_base: VirtualAddress(.local),
+    crit_pc_low: VirtualAddress,
+    crit_pc_high: VirtualAddress,
+    ldt_base: VirtualAddress,
     ldt_page_count: usize,
 
     enabled_save_area: Registers,
@@ -1073,15 +1078,15 @@ pub const CoreDirectorShared = extern struct {
 pub const CoreDirectorSharedGeneric = extern struct {
     disabled: u32,
     haswork: u32,
-    udisp: VirtualAddress(.local),
+    udisp: VirtualAddress,
     lmp_delivered: u32,
     lmp_seen: u32,
-    lmp_hint: VirtualAddress(.local),
-    dispatcher_run: VirtualAddress(.local),
-    dispatcher_lrpc: VirtualAddress(.local),
-    dispatcher_page_fault: VirtualAddress(.local),
-    dispatcher_page_fault_disabled: VirtualAddress(.local),
-    dispatcher_trap: VirtualAddress(.local),
+    lmp_hint: VirtualAddress,
+    dispatcher_run: VirtualAddress,
+    dispatcher_lrpc: VirtualAddress,
+    dispatcher_page_fault: VirtualAddress,
+    dispatcher_page_fault_disabled: VirtualAddress,
+    dispatcher_trap: VirtualAddress,
     // TODO: time
     systime_frequency: u64,
     core_id: u32,
@@ -1147,9 +1152,6 @@ const ELF = lib.ELF(64);
 
 // TODO: make this work with no KPTI
 fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
-    while (true) {
-        privileged.exitFromQEMU(.success);
-    }
     assert(bsp);
 
     const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
@@ -1165,9 +1167,8 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     log.debug("Init director allocation: 0x{x}. init_director_shared_allocation: 0x{x}", .{ init_director_allocation.address.value(), init_director_shared_allocation.address.value() });
 
     // TODO: don't waste this much space
-    const virtual_address_space_allocation = cpu.page_allocator.allocator.allocateBytes(0x1000, 0x1000) catch @panic("virtual_address_space");
-    const virtual_address_space_address = PhysicalAddress(.local).new(virtual_address_space_allocation.address);
-    const virtual_address_space = virtual_address_space_address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
+    const virtual_address_space_allocation = cpu.page_allocator.allocate(0x1000, 0x1000) catch @panic("virtual_address_space");
+    const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
     virtual_address_space.* = .{
         .arch = undefined,
         .options = .{
@@ -1175,11 +1176,10 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             .mapped_page_tables = false,
             .log_pages = true,
         },
-        .backing_allocator = &cpu.page_allocator.allocator,
     };
 
     // One for privileged mode, one for user
-    const pml4_table_regions = virtual_address_space.allocatePageTables(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
+    const pml4_table_regions = paging.allocatePageTables(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .cpu) catch @panic("pml4 regions");
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
     log.debug("CPU PML4: 0x{x}. User PML4: 0x{x}", .{ cpu_side_pml4_physical_address.value(), user_side_pml4_physical_address.value() });
@@ -1187,24 +1187,27 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     log.debug("Higher half start", .{});
     paging.copyHigherHalf(cpu_side_pml4_physical_address);
-    defer paging.unmapCapabilitySpace(user_side_pml4_physical_address);
+    defer {
+        //paging.unmapCapabilitySpace(user_side_pml4_physical_address);
+        @panic("TODO: unmap capability space");
+    }
     log.debug("Higher half end", .{});
 
     // First map vital parts for context switch
     virtual_address_space.arch = .{
-        .cr3 = cr3.from_address(cpu_side_pml4_physical_address),
+        .cr3 = cr3.fromAddress(cpu_side_pml4_physical_address),
     };
 
     // Identity map dispatcher
-    virtual_address_space.map(.local, init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    virtual_address_space.map(.local, init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
+    virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
+    virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
 
     const init_director = init_director_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorData);
     const init_director_shared = init_director_shared_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorShared);
     init_director.shared = &init_director_shared.base;
 
     const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
-    virtual_address_space.map(.local, user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
+    virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
     _ = user_stack;
 
     for (program_headers) |program_header| {
@@ -1213,14 +1216,14 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
             const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
             const segment_physical_address = segment_physical_region.address;
-            const segment_virtual_address = VirtualAddress(.local).new(program_header.virtual_address);
+            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
             const segment_flags = .{
                 .execute = program_header.flags.executable,
                 .write = program_header.flags.writable,
                 .user = true,
             };
 
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
+            virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
@@ -1228,7 +1231,7 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
 
             paging.switchTo(virtual_address_space, .privileged);
 
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
+            virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
                 const physical_address = virtual_address_space.translateAddress(segment_virtual_address) catch @panic("cannot be translated");
                 log.debug("Translated address: 0x{x}", .{physical_address.value()});
                 panic("Segment mapping failed cpu: {}", .{err});
@@ -1342,4 +1345,53 @@ pub inline fn writerStart() void {
 
 pub inline fn writerEnd() void {
     writer_lock.release();
+}
+
+pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    if (virtual_address_space.page.context.size == 0) {
+        if (alignment > lib.arch.valid_page_sizes[1]) return Allocator.Allocate.Error.OutOfMemory;
+        // Try to allocate a bigger bulk so we don't have to use the backing allocator (slower) everytime a page is needed
+        const selected_size = @max(size, lib.arch.valid_page_sizes[1]);
+        _ = selected_size;
+        const selected_alignment = @max(alignment, lib.arch.valid_page_sizes[1]);
+        _ = selected_alignment;
+
+        @panic("Todo: allocatePages");
+        // const page_bulk_allocation = page_allocator.allocateBytes(selected_size, selected_alignment) catch blk: {
+        //     if (alignment > lib.arch.valid_page_sizes[0]) return Allocator.Allocate.Error.OutOfMemory;
+        //     break :blk try virtual_address_space.backing_allocator.allocateBytes(size, alignment);
+        // };
+        //
+        // virtual_address_space.page.context = .{
+        //     .region_base = page_bulk_allocation.address,
+        //     .size = page_bulk_allocation.size,
+        // };
+        //
+        // if (virtual_address_space.options.log_pages) {
+        //     try virtual_address_space.addPage(page_bulk_allocation);
+        // }
+    }
+
+    assert(virtual_address_space.page.context.region_base != 0);
+
+    const allocation_result = .{
+        .address = PhysicalAddress.new(virtual_address_space.page.context.region_base),
+        .size = size,
+    };
+
+    if (!lib.isAlignedGeneric(u64, allocation_result.address.value(), alignment)) return Allocator.Allocate.Error.OutOfMemory;
+
+    virtual_address_space.page.context.region_base += size;
+    virtual_address_space.page.context.size -= size;
+
+    return allocation_result;
+}
+
+pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    _ = alignment;
+    _ = size;
+    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
+    _ = virtual_address_space;
+    @panic("TODO: callbackAllocatePages");
+    // return try virtual_address_space.allocatePages(size, alignment);
 }

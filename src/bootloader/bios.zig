@@ -164,7 +164,7 @@ pub fn A20Enable() A20Error!void {
 }
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion(.global),
+    region: PhysicalMemoryRegion,
     type: Type,
     unused: u32 = 0,
 
