@@ -6,12 +6,6 @@ const assert = lib.assert;
 const cpuid = lib.arch.x86_64.CPUID;
 
 const privileged = @import("privileged");
-pub const PhysicalAddress = privileged.PhysicalAddress;
-pub const VirtualAddress = privileged.VirtualAddress;
-pub const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-pub const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
-pub const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-pub const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 pub const APIC = @import("x86/64/apic.zig");
 pub const io = @import("x86/64/io.zig");
@@ -20,12 +14,7 @@ pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
 pub const Syscall = @import("x86/64/syscall.zig");
 
-pub const valid_page_sizes = [3]comptime_int{ 0x1000, 0x1000 * 0x200, 0x1000 * 0x200 * 0x200 };
-pub const reverse_valid_page_sizes = blk: {
-    var reverse = valid_page_sizes;
-    lib.reverse(@TypeOf(valid_page_sizes[0]), &reverse);
-    break :blk reverse;
-};
+pub const valid_page_sizes = privileged.arch.valid_page_sizes;
 pub const page_size = valid_page_sizes[0];
 pub const reasonable_page_size = valid_page_sizes[1];
 

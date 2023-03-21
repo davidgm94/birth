@@ -8,3 +8,4 @@ const current = switch (lib.cpu.arch) {
 pub usingnamespace current;
 
 pub const entryPoint = current.entryPoint;
+pub const virtualAddressSpaceallocatePages = current.virtualAddressSpaceallocatePages;

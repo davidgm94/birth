@@ -2,6 +2,7 @@ const lib = @import("lib");
 const assert = lib.assert;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
+const paging = privileged.arch.paging;
 const x86_64 = privileged.arch.x86_64;
 
 pub const GDT = extern struct {
@@ -35,7 +36,7 @@ const data_segment_selector = @offsetOf(GDT, "data_64");
 const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
 const higher_half_offset = @offsetOf(bootloader.Information, "higher_half");
 
-pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noreturn {
+pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal_paging: paging.Specific) noreturn {
     if (@ptrToInt(bootloader_information_arg) >= lib.config.cpu_driver_higher_half_address) {
         // Error
         privileged.arch.stopCPU();
@@ -48,7 +49,7 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information) noretur
     efer.SCE = true;
     efer.write();
 
-    bootloader_information_arg.virtual_address_space.makeCurrent();
+    minimal_paging.cr3.write();
 
     if (lib.cpu.arch == .x86) {
         // Enable PAE

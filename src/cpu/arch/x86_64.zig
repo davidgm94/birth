@@ -4,7 +4,7 @@ const assert = lib.assert;
 const log = lib.log;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
-const panic = privileged.panic;
+const panic = cpu.panic;
 const PageAllocator = privileged.PageAllocator;
 const x86_64 = privileged.arch.x86_64;
 const APIC = x86_64.APIC;
@@ -21,8 +21,8 @@ const IA32_FMASK = registers.IA32_FMASK;
 const IA32_LSTAR = registers.IA32_LSTAR;
 const IA32_STAR = registers.IA32_STAR;
 const PhysicalAddress = privileged.PhysicalAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 const user_dpl = 3;
 
@@ -35,17 +35,23 @@ const user_code_selector = @offsetOf(GDT, "user_code_64") | user_dpl;
 const user_data_selector = @offsetOf(GDT, "user_data_64") | user_dpl;
 
 const cpu = @import("cpu");
+const VirtualAddressSpace = cpu.VirtualAddressSpace;
 
 pub const kpti = true;
 pub const pcid = false;
 pub const smap = false;
 
-export var interrupt_stack: [0x1000]u8 align(0x10) linksection(".user_data") = undefined;
-export var gdt linksection(".user_data") = GDT{};
-export var tss linksection(".user_data") = TSS{};
-export var idt linksection(".user_data") = IDT{};
-export var user_stack: u64 linksection(".user_data") = 0;
-export var syscall_stack: [0x1000]u8 align(0x1000) = undefined;
+export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
+export var gdt = GDT{};
+export var tss = TSS{};
+export var idt = IDT{};
+export var user_stack: u64 = 0;
+
+pub const capability_address_space_size = 1 * lib.gb;
+pub const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
+pub const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
+pub const capability_address_space_stack_size = 0x1000;
+pub const capability_address_space_stack_address = capability_address_space_stack_top - capability_address_space_stack_size;
 
 var bsp = false;
 
@@ -145,9 +151,6 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
     // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
     if (bootloader_information.getSlice(.files).len == 0) @panic("Files must be loaded by the bootloader");
-    // Reset callbacks as there were 32-bit and calling them from here would be broken
-    bootloader_information.page_allocator.callbacks.allocate = bootloader.Information.pageAllocate;
-    bootloader_information.heap.allocator.callbacks.allocate = bootloader.Information.heapAllocate;
     // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
     // functionality is not available anymore
     bootloader_information.stage = .cpu;
@@ -158,19 +161,19 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 
     // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
     // TODO: figure out the best way to create page allocators for the APP cores
-    log.debug("A", .{});
     cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
-    log.debug("B", .{});
 
-    cpu.virtual_address_space = .{
-        .arch = bootloader_information.virtual_address_space.arch,
+    cpu.address_space = .{
+        .arch = .{
+            .cr3 = cr3.read(),
+        },
         .options = .{
             .user = false,
             .mapped_page_tables = true,
             .log_pages = false,
         },
-        .backing_allocator = &cpu.page_allocator.allocator,
     };
+
     // Initialize GDT
     const gdt_descriptor = GDT.Descriptor{
         .limit = @sizeOf(GDT) - 1,
@@ -742,7 +745,7 @@ const InterruptRegisters = extern struct {
 /// - R10: argument 3
 /// - R8:  argument 4
 /// - R9:  argument 5
-pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) void {
+pub export fn syscallEntryPoint() callconv(.Naked) void {
     asm volatile (
         \\endbr64
         \\swapgs
@@ -768,12 +771,11 @@ pub export fn syscallEntryPoint() linksection(".user_text") callconv(.Naked) voi
         );
     }
 
-    asm volatile (
-        \\lea syscall_stack(%%rip), %rsp
-        \\add %[syscall_stack_size], %rsp
+    // Safe stack
+    asm volatile ("movabsq %[capability_address_space_stack_top], %rsp"
         :
-        : [syscall_stack_size] "i" (syscall_stack.len),
-        : "memory"
+        : [capability_address_space_stack_top] "i" (capability_address_space_stack_top),
+        : "memory", "rsp"
     );
 
     asm volatile (
@@ -948,10 +950,14 @@ inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
             log.debug("Exiting QEMU with {s} code", .{@tagName(exit_code)});
             privileged.exitFromQEMU(exit_code);
         },
+        .print => {
+            const message = @intToPtr([*]const u8, arguments[0])[0..arguments[1]];
+            writerStart();
+            writer.writeAll(message) catch unreachable;
+            writerEnd();
+        },
         //else => panic("Unknown syscall: {s}", .{@tagName(number)}),
     }
-
-    @panic("Rise syscall");
 }
 
 const pcid_bit = 11;
@@ -983,7 +989,7 @@ fn dispatch(director: *CoreDirectorData) noreturn {
     }
 }
 
-noinline fn resumeExecution(state: *align(16) Registers) linksection(".user_text") noreturn {
+noinline fn resumeExecution(state: *align(16) Registers) noreturn {
     const regs = state;
     asm volatile (
         \\pushq %[ss]
@@ -1042,25 +1048,25 @@ pub const CoreDirectorData = extern struct {
     next: ?*CoreDirectorData,
     previous: ?*CoreDirectorData,
 
-    pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
-        if (core_director_data.virtual_address_space) |virtual_address_space| {
-            if (!virtual_address_space.options.mapped_page_tables) @panic("Page tables are not mapped before context switching");
-            privileged.arch.paging.contextSwitch(virtual_address_space);
-            context_switch_counter += 1;
-        } else {
-            @panic("VAS null");
-        }
-        // TODO: implement LDT
-    }
-
+    // pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
+    //     if (core_director_data.virtual_address_space) |virtual_address_space| {
+    //         if (!virtual_address_space.options.mapped_page_tables) @panic("Page tables are not mapped before context switching");
+    //         privileged.arch.paging.contextSwitch(virtual_address_space);
+    //         context_switch_counter += 1;
+    //     } else {
+    //         @panic("VAS null");
+    //     }
+    //     // TODO: implement LDT
+    // }
+    //
     var context_switch_counter: usize = 0;
 };
 
 pub const CoreDirectorShared = extern struct {
     base: CoreDirectorSharedGeneric,
-    crit_pc_low: VirtualAddress(.local),
-    crit_pc_high: VirtualAddress(.local),
-    ldt_base: VirtualAddress(.local),
+    crit_pc_low: VirtualAddress,
+    crit_pc_high: VirtualAddress,
+    ldt_base: VirtualAddress,
     ldt_page_count: usize,
 
     enabled_save_area: Registers,
@@ -1071,15 +1077,15 @@ pub const CoreDirectorShared = extern struct {
 pub const CoreDirectorSharedGeneric = extern struct {
     disabled: u32,
     haswork: u32,
-    udisp: VirtualAddress(.local),
+    udisp: VirtualAddress,
     lmp_delivered: u32,
     lmp_seen: u32,
-    lmp_hint: VirtualAddress(.local),
-    dispatcher_run: VirtualAddress(.local),
-    dispatcher_lrpc: VirtualAddress(.local),
-    dispatcher_page_fault: VirtualAddress(.local),
-    dispatcher_page_fault_disabled: VirtualAddress(.local),
-    dispatcher_trap: VirtualAddress(.local),
+    lmp_hint: VirtualAddress,
+    dispatcher_run: VirtualAddress,
+    dispatcher_lrpc: VirtualAddress,
+    dispatcher_page_fault: VirtualAddress,
+    dispatcher_page_fault_disabled: VirtualAddress,
+    dispatcher_trap: VirtualAddress,
     // TODO: time
     systime_frequency: u64,
     core_id: u32,
@@ -1157,12 +1163,19 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
     const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
 
+    const capability_address_space_stack_physical_region = cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000) catch @panic("Capability");
+    cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
+        .write = true,
+        .user = false,
+        .global = true,
+        .cache_disable = true,
+    }) catch @panic("Capability address space");
+
     log.debug("Init director allocation: 0x{x}. init_director_shared_allocation: 0x{x}", .{ init_director_allocation.address.value(), init_director_shared_allocation.address.value() });
 
     // TODO: don't waste this much space
-    const virtual_address_space_allocation = cpu.page_allocator.allocator.allocateBytes(0x1000, 0x1000) catch @panic("virtual_address_space");
-    const virtual_address_space_address = PhysicalAddress(.local).new(virtual_address_space_allocation.address);
-    const virtual_address_space = virtual_address_space_address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
+    const virtual_address_space_allocation = cpu.page_allocator.allocate(0x1000, 0x1000) catch @panic("virtual_address_space");
+    const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
     virtual_address_space.* = .{
         .arch = undefined,
         .options = .{
@@ -1170,58 +1183,37 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             .mapped_page_tables = false,
             .log_pages = true,
         },
-        .backing_allocator = &cpu.page_allocator.allocator,
     };
 
     // One for privileged mode, one for user
-    const pml4_table_regions = virtual_address_space.allocatePageTables(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
+    const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
     log.debug("CPU PML4: 0x{x}. User PML4: 0x{x}", .{ cpu_side_pml4_physical_address.value(), user_side_pml4_physical_address.value() });
 
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     log.debug("Higher half start", .{});
-    paging.copyHigherHalf(cpu_side_pml4_physical_address);
+    cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
+    cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator) catch @panic("higher half user");
     log.debug("Higher half end", .{});
 
     // First map vital parts for context switch
     virtual_address_space.arch = .{
-        .cr3 = cr3.from_address(user_side_pml4_physical_address),
+        .cr3 = cr3.fromAddress(cpu_side_pml4_physical_address),
     };
 
     // Identity map dispatcher
-    virtual_address_space.map(.local, init_director_allocation.address, init_director_allocation.address.toHigherHalfVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    virtual_address_space.map(.local, init_director_shared_allocation.address, init_director_shared_allocation.address.toHigherHalfVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
+    virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
+    virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
 
     const init_director = init_director_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorData);
     const init_director_shared = init_director_shared_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorShared);
     init_director.shared = &init_director_shared.base;
 
-    const text_start = @ptrToInt(&text_section_start);
-    log.debug("Text start: 0x{x}", .{text_start});
-    const data_start = @ptrToInt(&data_section_start);
-
-    const user_text_offset = @ptrToInt(&user_text_start) - text_start;
-    const user_data_offset = @ptrToInt(&user_data_start) - data_start;
-
-    const user_text_size = @ptrToInt(&user_text_end) - @ptrToInt(&user_text_start);
-    const user_data_size = @ptrToInt(&user_data_end) - @ptrToInt(&user_data_start);
-
-    const user_text_physical_address = cpu.mappings.text.physical.offset(user_text_offset);
-    log.debug("CPU mapping data: 0x{x}", .{cpu.mappings.data.physical.value()});
-    const user_data_physical_address = cpu.mappings.data.physical.offset(user_data_offset);
-
-    const user_text_virtual_address = VirtualAddress(.local).new(@ptrToInt(&user_text_start));
-    const user_data_virtual_address = VirtualAddress(.local).new(@ptrToInt(&user_data_start));
-    log.debug("Addresses: Text: 0x{x}. Data: 0x{x}", .{ user_text_virtual_address.value(), user_data_virtual_address.value() });
-    log.debug("Size: Text: 0x{x}. Data: 0x{x}", .{ user_text_size, user_data_size });
-
-    virtual_address_space.map(.local, user_text_physical_address, user_text_virtual_address, user_text_size, .{ .write = false, .execute = true, .user = true }) catch @panic("user text");
-    virtual_address_space.map(.local, user_data_physical_address, user_data_virtual_address, user_data_size, .{ .write = true, .execute = false, .user = true }) catch @panic("user data");
+    virtual_address_space.arch.switchTo(.user);
 
     const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
-    virtual_address_space.map(.local, user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
-    _ = user_stack;
+    virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
@@ -1229,28 +1221,28 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
             const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
             const segment_physical_address = segment_physical_region.address;
-            const segment_virtual_address = VirtualAddress(.local).new(program_header.virtual_address);
+            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
             const segment_flags = .{
                 .execute = program_header.flags.executable,
                 .write = program_header.flags.writable,
                 .user = true,
             };
 
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
+            virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
             lib.copy(u8, dst, src);
 
-            paging.switchTo(virtual_address_space, .privileged);
-
-            virtual_address_space.map(.local, segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
-                const physical_address = virtual_address_space.translateAddress(segment_virtual_address) catch @panic("cannot be translated");
-                log.debug("Translated address: 0x{x}", .{physical_address.value()});
-                panic("Segment mapping failed cpu: {}", .{err});
-            };
-
-            paging.switchTo(virtual_address_space, .user);
+            // virtual_address_space.arch.switchTo(.privileged);
+            //
+            // virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
+            //     const physical_address = virtual_address_space.translateAddress(segment_virtual_address) catch @panic("cannot be translated");
+            //     log.debug("Translated address: 0x{x}", .{physical_address.value()});
+            //     panic("Segment mapping failed cpu: {}", .{err});
+            // };
+            //
+            // virtual_address_space.arch.switchTo(.user);
         }
     }
 
@@ -1270,12 +1262,18 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
     init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
 
-    virtual_address_space.mapPageTables() catch |err| privileged.panic("Unable to map page tables: {}", .{err});
+    virtual_address_space.mapPageTables() catch |err| panic("Unable to map page tables: {}", .{err});
 
-    const physical_address = virtual_address_space.translateAddress(VirtualAddress(.local).new(0x200290)) catch @panic("can't translate");
-    log.debug("PA: 0x{x}", .{physical_address.value()});
+    const cpu_pml4 = cpu_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
+    const user_pml4 = user_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
+    lib.copy(@TypeOf(user_pml4[0]), cpu_pml4[0..0x100], user_pml4[0..0x100]);
 
-    log.debug("Initialized director", .{});
+    virtual_address_space.arch.switchTo(.privileged);
+    _ = virtual_address_space.translateAddress(VirtualAddress.new(0xffff_ffff_8000_0000 - 0x1000)) catch |err| {
+        log.err("error: {}", .{err});
+    };
+    //if (true) panic("Physical: 0x{x}", .{physical.value()});
+    virtual_address_space.arch.switchTo(.user);
 
     return init_director;
 }
@@ -1296,7 +1294,7 @@ pub fn initAPIC() void {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
     log.debug("Mapping APIC", .{});
-    const apic_base = cpu.virtual_address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
+    const apic_base = cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
     log.debug("Mapped APIC", .{});
 
     const spurious_vector: u8 = 0xFF;
@@ -1314,13 +1312,62 @@ pub fn initAPIC() void {
 
     ticks_per_ms = APIC.calibrateTimer();
 
-    nextTimer(1);
+    // nextTimer(1);
 }
 
 extern const text_section_start: *u8;
 extern const data_section_start: *u8;
-
 extern const user_text_start: *u8;
 extern const user_text_end: *u8;
 extern const user_data_start: *u8;
 extern const user_data_end: *u8;
+
+pub const Spinlock = enum(u8) {
+    released = 0,
+    acquired = 1,
+
+    pub inline fn acquire(spinlock: *volatile Spinlock) void {
+        asm volatile (
+            \\0:
+            \\xchgb %[value], %[spinlock]
+            \\test %[value], %[value]
+            \\jz 2f
+            // If not acquire, go to spinloop
+            \\1:
+            \\pause
+            \\cmp %[value], %[spinlock]
+            // Retry
+            \\jne 0b
+            \\jmp 1b
+            \\2:
+            :
+            : [spinlock] "*p" (spinlock),
+              [value] "r" (Spinlock.acquired),
+            : "memory"
+        );
+    }
+
+    pub inline fn release(spinlock: *volatile Spinlock) void {
+        @atomicStore(Spinlock, spinlock, .released, .Release);
+    }
+};
+
+pub const writer = privileged.E9Writer{ .context = {} };
+var writer_lock: Spinlock = .released;
+
+pub inline fn writerStart() void {
+    writer_lock.acquire();
+}
+
+pub inline fn writerEnd() void {
+    writer_lock.release();
+}
+
+pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    _ = alignment;
+    _ = size;
+    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
+    _ = virtual_address_space;
+    @panic("TODO: callbackAllocatePages");
+    // return try virtual_address_space.allocatePages(size, alignment);
+}

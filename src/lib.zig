@@ -557,3 +557,8 @@ pub fn TargetUsize(comptime architecture: common.Target.Cpu.Arch) type {
         else => @compileError("Architecture not supported"),
     };
 }
+
+pub const RiseStage = enum {
+    bootloader,
+    cpu,
+};

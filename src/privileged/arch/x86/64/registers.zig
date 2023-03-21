@@ -4,13 +4,12 @@ const SimpleR64 = lib.arch.x86_64.registers.SimpleR64;
 const RFLAGS = lib.arch.x86_64.registers.RFLAGS;
 
 const privileged = @import("privileged");
-const x86_64 = privileged.arch.x86_64;
-const PhysicalAddress = x86_64.PhysicalAddress;
-const VirtualAddress = x86_64.VirtualAddress;
-const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
-const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
-const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
-const VirtualAddressSpace = x86_64.VirtualAddressSpace;
+const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
+const VirtualAddressSpace = privileged.VirtualAddressSpace;
 
 pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,
@@ -31,7 +30,7 @@ pub const cr3 = packed struct(u64) {
         assert(@bitSizeOf(cr3) == @bitSizeOf(u64));
     }
 
-    pub fn from_address(physical_address: PhysicalAddress(.local)) cr3 {
+    pub fn fromAddress(physical_address: PhysicalAddress) cr3 {
         const PackedAddressType = blk: {
             var foo_cr3: cr3 = undefined;
             break :blk @TypeOf(@field(foo_cr3, "address"));
@@ -61,8 +60,8 @@ pub const cr3 = packed struct(u64) {
         return self_int == other_int;
     }
 
-    pub inline fn getAddress(self: cr3) PhysicalAddress(.local) {
-        return PhysicalAddress(.local).new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
+    pub inline fn getAddress(self: cr3) PhysicalAddress {
+        return PhysicalAddress.new(@as(u64, self.address) << @bitOffsetOf(cr3, "address"));
     }
 };
 
@@ -295,18 +294,18 @@ pub const IA32_APIC_BASE = packed struct(u64) {
 
     pub const MSR = SimpleMSR(0x0000001B);
 
-    pub fn read() IA32_APIC_BASE {
+    pub inline fn read() IA32_APIC_BASE {
         const result = MSR.read();
         const typed_result = @bitCast(IA32_APIC_BASE, result);
         return typed_result;
     }
 
-    pub fn write(typed_value: IA32_APIC_BASE) void {
+    pub inline fn write(typed_value: IA32_APIC_BASE) void {
         const value = @bitCast(u64, typed_value);
         MSR.write(value);
     }
 
-    pub fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress(.global) {
-        return PhysicalAddress(.global).new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
+    pub inline fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress {
+        return PhysicalAddress.new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
     }
 };

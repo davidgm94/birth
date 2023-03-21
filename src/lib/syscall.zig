@@ -11,6 +11,7 @@ const NumberInteger = lib.IntType(.unsigned, @bitSizeOf(u64) - @bitSizeOf(Conven
 
 pub const Rise = enum(NumberInteger) {
     qemu_exit = 50,
+    print = 51,
 };
 
 pub const Linux = enum(NumberInteger) {
