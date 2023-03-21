@@ -5,12 +5,11 @@ const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
 const x86_64 = privileged.arch.x86_64;
-const PhysicalAddress = x86_64.PhysicalAddress;
-const VirtualAddress = x86_64.VirtualAddress;
-const PhysicalMemoryRegion = x86_64.PhysicalMemoryRegion;
-const VirtualMemoryRegion = x86_64.VirtualMemoryRegion;
-const PhysicalAddressSpace = x86_64.PhysicalAddressSpace;
-const VirtualAddressSpace = x86_64.VirtualAddressSpace;
+const PhysicalAddress = privileged.PhysicalAddress;
+const VirtualAddress = privileged.VirtualAddress;
+const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;
@@ -164,7 +163,7 @@ pub fn A20Enable() A20Error!void {
 }
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion(.global),
+    region: PhysicalMemoryRegion,
     type: Type,
     unused: u32 = 0,
 
@@ -239,7 +238,8 @@ pub fn fetchMemoryEntries(memory_map: []bootloader.MemoryMapEntry) void {
     }
 
     if (iterator.index != memory_map.len) {
-        privileged.panic("Memory map entries don't match. Got {}. Expected: {}", .{ iterator.index, memory_map.len });
+        @panic("memory map entry mismatch");
+        //privileged.panic("Memory map entries don't match. Got {}. Expected: {}", .{ iterator.index, memory_map.len });
     }
 }
 

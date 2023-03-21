@@ -43,6 +43,8 @@ var default_configuration: Configuration = undefined;
 var user_modules: []const common.Module = undefined;
 var options = Options{};
 
+var qemu_mutex = std.Thread.Mutex{};
+
 const Options = struct {
     arr: std.EnumArray(RiseProgram, *OptionsStep) = std.EnumArray(RiseProgram, *OptionsStep).initUndefined(),
 
@@ -129,28 +131,27 @@ pub fn build(b_arg: *Build) !void {
         .{ .name = "disk_image_builder_native_test", .root_project_path = "src/disk_image_builder", .modules = disk_image_builder_modules },
     };
 
-    for (common.enumValues(OptimizeMode)) |optimize_mode| {
-        for (native_tests) |native_test| {
-            const test_name = try std.mem.concat(b.allocator, u8, &.{ native_test.name, "_", @tagName(optimize_mode) });
-            const test_exe = try addCompileStep(.host, .{
-                .kind = .test_exe,
-                .name = test_name,
-                .root_project_path = native_test.root_project_path,
-                .optimize_mode = optimize_mode,
-                .modules = native_test.modules,
-            });
+    const native_test_optimize_mode = .ReleaseFast;
+    for (native_tests) |native_test| {
+        const test_name = try std.mem.concat(b.allocator, u8, &.{ native_test.name, "_", @tagName(native_test_optimize_mode) });
+        const test_exe = try addCompileStep(.host, .{
+            .name = test_name,
+            .root_project_path = native_test.root_project_path,
+            .optimize_mode = native_test_optimize_mode,
+            .modules = native_test.modules,
+            .kind = .@"test",
+        });
 
-            // TODO: do this properly
-            if (std.mem.containsAtLeast(u8, native_test.name, 1, "disk_image_builder")) {
-                test_exe.addIncludePath("src/bootloader/limine/installables");
-                test_exe.addCSourceFile("src/bootloader/limine/installables/limine-deploy.c", &.{});
-                test_exe.linkLibC();
-            }
-
-            const run_test_step = test_exe.run();
-            run_test_step.condition = .always;
-            build_steps.test_all.dependOn(&run_test_step.step);
+        // TODO: do this properly
+        if (std.mem.containsAtLeast(u8, native_test.name, 1, "disk_image_builder")) {
+            test_exe.addIncludePath("src/bootloader/limine/installables");
+            test_exe.addCSourceFile("src/bootloader/limine/installables/limine-deploy.c", &.{});
+            test_exe.linkLibC();
         }
+
+        const run_test_step = test_exe.run();
+        //run_test_step.condition = .always;
+        build_steps.test_all.dependOn(&run_test_step.step);
     }
 
     {
@@ -175,7 +176,7 @@ pub fn build(b_arg: *Build) !void {
         user_modules = user_module_list.items;
     }
 
-    const executable_kinds = [2]CompileStep.Kind{ .exe, .test_exe };
+    const executable_kinds = [2]CompileStep.Kind{ .exe, .@"test" };
 
     for (common.enumValues(OptimizeMode)) |optimize_mode| {
         for (common.supported_architectures, 0..) |architecture, architecture_index| {
@@ -358,9 +359,9 @@ pub fn build(b_arg: *Build) !void {
 
                                 run_steps.* = .{
                                     .configuration = configuration,
-                                    .run = Step.init(.custom, "_run_", b.allocator, RunSteps.run),
-                                    .debug = Step.init(.custom, "_debug_", b.allocator, RunSteps.debug),
-                                    .gdb_script = Step.init(.custom, "_gdb_script_", b.allocator, RunSteps.gdbScript),
+                                    .run = Step.init(.{ .id = .custom, .name = try std.mem.concat(b.allocator, u8, &.{ "_run_", suffix }), .owner = b, .makeFn = RunSteps.run }),
+                                    .debug = Step.init(.{ .id = .custom, .name = try std.mem.concat(b.allocator, u8, &.{ "_debug_", suffix }), .owner = b, .makeFn = RunSteps.debug }),
+                                    .gdb_script = Step.init(.{ .id = .custom, .name = try std.mem.concat(b.allocator, u8, &.{ "_gdb_script_", suffix }), .owner = b, .makeFn = RunSteps.gdbScript }),
                                     .disk_image_builder = disk_image_builder.run(),
                                 };
 
@@ -374,7 +375,7 @@ pub fn build(b_arg: *Build) !void {
 
                                 run_steps.debug.dependOn(&run_steps.gdb_script);
 
-                                if (configuration.executable_kind == .test_exe) {
+                                if (configuration.executable_kind == .@"test") {
                                     build_steps.test_all.dependOn(&run_steps.run);
                                 }
 
@@ -392,7 +393,7 @@ pub fn build(b_arg: *Build) !void {
                                                 b.default_step.dependOn(&user_module.step);
                                             }
                                         },
-                                        .test_exe => {
+                                        .@"test" => {
                                             build_steps.test_run.dependOn(&run_steps.run);
                                             build_steps.test_debug.dependOn(&run_steps.debug);
                                         },
@@ -433,14 +434,13 @@ fn addCompileStep(program_type: RiseProgram, executable_options: Executable) !*C
 
             break :blk executable;
         },
-        .test_exe => blk: {
+        .@"test" => blk: {
             const test_file = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ executable_options.root_project_path, "/test.zig" }));
             const test_exe = b.addTest(.{
                 .name = executable_options.name,
                 .root_source_file = test_file,
                 .target = executable_options.target,
                 .optimize = executable_options.optimize_mode,
-                .kind = .test_exe,
             });
 
             build_steps.build_all_tests.dependOn(&test_exe.step);
@@ -456,7 +456,7 @@ fn addCompileStep(program_type: RiseProgram, executable_options: Executable) !*C
     if (executable_options.target.os_tag) |os| {
         switch (os) {
             .freestanding, .uefi => {
-                if (executable_options.kind == .test_exe) {
+                if (executable_options.kind == .@"test") {
                     compile_step.setTestRunner(main_file);
                 }
 
@@ -564,25 +564,20 @@ const RunSteps = struct {
         failure,
     };
 
-    fn run(step: *Step) !void {
+    fn run(step: *Step, progress_node: *std.Progress.Node) !void {
+        qemu_mutex.lock();
+        defer qemu_mutex.unlock();
+        _ = progress_node;
         const run_steps = @fieldParentPtr(RunSteps, "run", step);
 
-        for (step.dependencies.items) |dependency| {
-            common.log.debug("Dep: {s}", .{dependency.name});
-        }
-
         const is_debug = false;
-        const is_test = run_steps.configuration.executable_kind == .test_exe;
+        const is_test = run_steps.configuration.executable_kind == .@"test";
         const arguments = try qemuCommon(run_steps, .{ .is_debug = is_debug, .is_test = is_test });
-        for (arguments.list.items) |argument| {
-            std.log.debug("{s}", .{argument});
-        }
 
         var process = std.ChildProcess.init(arguments.list.items, b.allocator);
 
         switch (try process.spawnAndWait()) {
             .Exited => |exit_code| {
-                std.log.debug("Exit code: 0x{x}", .{exit_code});
                 if (exit_code & 1 == 0) {
                     return RunError.failure;
                 }
@@ -597,7 +592,6 @@ const RunSteps = struct {
                 const qemu_exit_code = @intToEnum(common.QEMU.ExitCode, masked_exit_code >> 1);
 
                 if (qemu_exit_code != .success) {
-                    common.log.err("QEMU exit code: {s}", .{@tagName(qemu_exit_code)});
                     return RunError.failure;
                 }
             },
@@ -605,10 +599,11 @@ const RunSteps = struct {
         }
     }
 
-    fn debug(step: *Step) !void {
+    fn debug(step: *Step, progress_node: *std.Progress.Node) !void {
+        _ = progress_node;
         const run_steps = @fieldParentPtr(RunSteps, "debug", step);
         const is_debug = true;
-        const is_test = run_steps.configuration.executable_kind == .test_exe;
+        const is_test = run_steps.configuration.executable_kind == .@"test";
         var arguments = try qemuCommon(run_steps, .{ .is_debug = is_debug, .is_test = is_test });
 
         if (!(run_steps.configuration.execution_type == .accelerated or (arguments.config.virtualize orelse false))) {
@@ -629,7 +624,8 @@ const RunSteps = struct {
         _ = try qemu_process.spawnAndWait();
     }
 
-    fn gdbScript(step: *Step) !void {
+    fn gdbScript(step: *Step, progress_node: *std.Progress.Node) !void {
+        _ = progress_node;
         const run_steps = @fieldParentPtr(RunSteps, "gdb_script", step);
 
         var gdb_script_buffer = std.ArrayList(u8).init(b.allocator);
@@ -673,7 +669,7 @@ const RunSteps = struct {
         }
 
         var test_configuration = run_steps.configuration;
-        test_configuration.executable_kind = .test_exe;
+        test_configuration.executable_kind = .@"test";
 
         const image_config = try common.ImageConfig.get(b.allocator, common.ImageConfig.default_path);
         const disk_image_path = try std.mem.concat(b.allocator, u8, &.{ "zig-cache/", image_config.image_name, try Suffix.image.fromConfiguration(b.allocator, if (qemu_options.is_test) test_configuration else run_steps.configuration, "_"), ".hdd" });

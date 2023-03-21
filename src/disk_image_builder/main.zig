@@ -507,7 +507,7 @@ pub const BootDisk = extern struct {
 
             next_patch: for (assembler.patches.items) |patch_descriptor| {
                 const index = patch_descriptor.instruction_starting_offset + patch_descriptor.label_offset;
-                log.debug("Trying to patch instruction. Section: {s}. Label: {s}. Label size: {}. Label type: {s}", .{ @tagName(patch_descriptor.label_section), @tagName(patch_descriptor.label), patch_descriptor.label_size, @tagName(patch_descriptor.label_type) });
+                // log.debug("Trying to patch instruction. Section: {s}. Label: {s}. Label size: {}. Label type: {s}", .{ @tagName(patch_descriptor.label_section), @tagName(patch_descriptor.label), patch_descriptor.label_size, @tagName(patch_descriptor.label_type) });
                 switch (patch_descriptor.label_section) {
                     .code => for (assembler.labels.items) |label_descriptor| {
                         if (patch_descriptor.label == label_descriptor.label) {
@@ -523,26 +523,25 @@ pub const BootDisk = extern struct {
                                     const operand_a = @intCast(isize, label_descriptor.offset);
                                     const operand_b = @intCast(isize, computed_after_instruction_offset);
                                     const diff = @bitCast(u8, @intCast(i8, operand_a - operand_b));
-                                    log.debug("Operand A: 0x{x}. Operand B: 0x{x}. Result: 0x{x}", .{ operand_a, operand_b, diff });
                                     @ptrCast(*align(1) u8, &assembler.boot_disk.code[index]).* = diff;
                                 },
                             }
 
-                            const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
-                            lib.print("[0x{x:0>4}] ", .{instruction_start});
-                            const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
-                            for (instruction_bytes) |byte| {
-                                lib.print("{x:0>2} ", .{byte});
-                            }
-                            lib.print("\n", .{});
+                            // const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                            // lib.print("[0x{x:0>4}] ", .{instruction_start});
+                            // const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
+                            // for (instruction_bytes) |byte| {
+                            //     lib.print("{x:0>2} ", .{byte});
+                            // }
+                            // lib.print("\n", .{});
                             patched += 1;
                             continue :next_patch;
                         }
                     },
                     .data => {
-                        log.debug("Data: {s}", .{@tagName(patch_descriptor.label)});
+                        // log.debug("Data: {s}", .{@tagName(patch_descriptor.label)});
                         const dap_offset = @offsetOf(BootDisk, "dap");
-                        log.debug("DAP offset: 0x{x}", .{dap_offset});
+                        // log.debug("DAP offset: 0x{x}", .{dap_offset});
                         switch (patch_descriptor.label_type) {
                             .absolute => {
                                 assert(patch_descriptor.label_size == @sizeOf(u16));
@@ -552,7 +551,7 @@ pub const BootDisk = extern struct {
                                     .dap_pointer => dap_offset + @offsetOf(MBR.DAP, "offset"),
                                     else => @panic("unreachable tag"),
                                 });
-                                log.debug("Ptr patched: 0x{x}", .{ptr});
+                                // log.debug("Ptr patched: 0x{x}", .{ptr});
                                 @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = ptr;
                             },
                             .relative => @panic("unreachable relative"),
