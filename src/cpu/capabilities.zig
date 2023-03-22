@@ -5,13 +5,15 @@ const log = lib.log.scoped(.Capabilities);
 const page_mask = lib.arch.page_mask;
 const valid_page_sizes = lib.arch.valid_page_sizes;
 
+const cpu = @import("cpu");
+const CoreDirectorData = cpu.CoreDirectorData;
+const CoreId = cpu.CoreId;
+const CoreSupervisorData = cpu.CoreSupervisorData;
+const MappingDatabase = cpu.MappingDatabase;
+const panic = cpu.panic;
+const PassId = cpu.PassId;
+
 const privileged = @import("privileged");
-const CoreDirectorData = privileged.CoreDirectorData;
-const CoreId = privileged.CoreId;
-const CoreSupervisorData = privileged.CoreSupervisorData;
-const MappingDatabase = privileged.MappingDatabase;
-const panic = privileged.panic;
-const PassId = privileged.PassId;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 

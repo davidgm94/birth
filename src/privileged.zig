@@ -10,15 +10,9 @@ const bootloader = @import("bootloader");
 
 pub const ACPI = @import("privileged/acpi.zig");
 pub const arch = @import("privileged/arch.zig");
-pub const Capabilities = @import("privileged/capabilities.zig");
 pub const ELF = @import("privileged/elf.zig");
 pub const Executable = @import("privileged/executable.zig");
 pub const MappingDatabase = @import("privileged/mapping_database.zig");
-pub const scheduler_type = SchedulerType.round_robin;
-pub const Scheduler = switch (scheduler_type) {
-    .round_robin => @import("privileged/round_robin.zig"),
-    else => @compileError("other scheduler is not supported right now"),
-};
 
 pub const E9WriterError = error{};
 pub const E9Writer = lib.Writer(void, E9WriterError, writeToE9);
@@ -36,68 +30,11 @@ pub const ResourceOwner = enum(u2) {
     user = 2,
 };
 
-pub const CoreSupervisorData = extern struct {
-    is_valid: bool,
-    next: ?*CoreSupervisorData,
-    previous: ?*CoreSupervisorData,
-    mdb_root: VirtualAddress,
-    init_rootcn: Capabilities.CTE,
-    scheduler_state: Scheduler.State,
-    kernel_offset: i64,
-    irq_in_use: [arch.dispatch_count]u8, // bitmap of handed out caps
-    irq_dispatch: [arch.dispatch_count]Capabilities.CTE,
-    pending_ram_in_use: u8,
-    pending_ram: [4]RAM,
-};
-
-const RAM = extern struct {
-    base: u64,
-    bytes: u64,
-};
-
 // pub const RBED = struct {
 //     queue_head: ?*CoreDirectorData,
 //     queue_tail: ?*CoreDirectorData,
 //     // TODO: more stuff
 // };
-
-pub const SchedulerType = enum(u8) {
-    round_robin,
-    rate_based_earliest_deadline,
-};
-
-pub const CoreLocality = enum {
-    local,
-    global,
-};
-
-pub const PassId = u32;
-pub const CoreId = u8;
-pub const CapAddr = u32;
-
-const CTE = Capabilities.CTE;
-pub const SpawnState = struct {
-    cnodes: struct {
-        task: ?*CTE = null,
-        seg: ?*CTE = null,
-        super: ?*CTE = null,
-        physical_address: ?*CTE = null,
-        module: ?*CTE = null,
-        page: ?*CTE = null,
-        base_page: ?*CTE = null,
-        early_cnode: ?*CTE = null,
-        slot_alloc0: ?*CTE = null,
-        slot_alloc1: ?*CTE = null,
-        slot_alloc2: ?*CTE = null,
-    } = .{},
-    slots: struct {
-        seg: Capabilities.Slot = 0,
-        super: Capabilities.Slot = 0,
-        physical_address: Capabilities.Slot = 0,
-        module: Capabilities.Slot = 0,
-    } = .{},
-    argument_page_address: PhysicalAddress = .null,
-};
 
 const panic_logger = lib.log.scoped(.PANIC);
 

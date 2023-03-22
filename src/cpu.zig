@@ -11,12 +11,24 @@ const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+
+pub const scheduler_type = SchedulerType.round_robin;
+pub const Scheduler = switch (scheduler_type) {
+    .round_robin => @import("cpu/round_robin.zig"),
+    else => @compileError("other scheduler is not supported right now"),
+};
+pub const SchedulerType = enum(u8) {
+    round_robin,
+    rate_based_earliest_deadline,
+};
 
 const bootloader = @import("bootloader");
 
 pub const test_runner = @import("cpu/test_runner.zig");
 
 pub const arch = @import("cpu/arch.zig");
+pub const Capabilities = @import("cpu/capabilities.zig");
 
 pub export var stack: [0x4000]u8 align(0x1000) = undefined;
 pub export var address_space: VirtualAddressSpace = undefined;
@@ -38,6 +50,50 @@ pub export var page_allocator = PageAllocator{
         },
         .primitive = true,
     },
+};
+
+pub const Heap = extern struct {
+    region: VirtualMemoryRegion = .{
+        .address = .null,
+        .size = 0,
+    },
+
+    pub inline fn allocate(heap: *Heap, comptime T: type, count: usize) Allocator.Allocate.Error!*T {
+        const region = try heap.allocateBytes(@sizeOf(T) * count, @alignOf(T));
+        return region.access(T);
+    }
+
+    pub inline fn create(heap: *Heap, comptime T: type) Allocator.Allocate.Error!*T {
+        const region = try heap.allocateBytes(@sizeOf(T), @alignOf(T));
+        return region.address.access(*T);
+    }
+
+    pub noinline fn allocateBytes(heap: *Heap, size: u64, alignment: u64) Allocator.Allocate.Error!VirtualMemoryRegion {
+        if (heap.region.size == 0) {
+            const region_allocation = try page_allocator.allocate(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]);
+            const virtual_region = region_allocation.toHigherHalfVirtualAddress();
+            heap.region = virtual_region;
+        }
+
+        if (heap.region.size < size) {
+            @panic("size too big");
+        }
+
+        if (!lib.isAligned(heap.region.address.value(), alignment)) {
+            @panic("alignment too big");
+        }
+
+        const result_address = heap.region.address;
+        heap.region.size -= size;
+        heap.region.address = heap.region.address.offset(size);
+
+        return .{
+            .address = result_address,
+            .size = size,
+        };
+    }
+
+    pub const Entry = PageAllocator.Entry;
 };
 
 pub const writer = arch.writer;
@@ -85,35 +141,6 @@ pub const VirtualAddressSpace = extern struct {
         context: Context = .{},
         log: ?*PageAllocator.Entry = null,
         log_count: u64 = 0,
-    };
-
-    const Heap = extern struct {
-        context: Context = .{},
-
-        pub fn allocate(heap: *Heap, comptime T: type) Allocator.Allocate.Error!*T {
-            if (heap.context.size == 0) {
-                const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", heap);
-                const result = try page_allocator.allocate(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]);
-                virtual_address_space.heap.context = .{
-                    .region_base = result.address.toHigherHalfVirtualAddress().value(),
-                    .size = result.size,
-                };
-            }
-
-            if (heap.context.size < @sizeOf(T)) {
-                @panic("size");
-            }
-            if (!lib.isAligned(heap.context.region_base, @alignOf(T))) {
-                @panic("alignment");
-            }
-
-            const result = @intToPtr(*T, heap.context.region_base);
-
-            heap.context.region_base += @sizeOf(T);
-            heap.context.size -= @sizeOf(T);
-
-            return result;
-        }
     };
 
     const VAS = @This();
@@ -250,7 +277,7 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub fn addPage(virtual_address_space: *VirtualAddressSpace, region: PhysicalMemoryRegion) !void {
-        const new_entry = try virtual_address_space.heap.allocate(PageAllocator.Entry);
+        const new_entry = try virtual_address_space.heap.create(PageAllocator.Entry);
         new_entry.* = .{
             .region = region,
             .next = virtual_address_space.page.log,
@@ -277,4 +304,51 @@ pub const VirtualAddressSpace = extern struct {
             .context_type = .cpu,
         };
     }
+};
+
+pub const CoreSupervisorData = extern struct {
+    is_valid: bool,
+    next: ?*CoreSupervisorData,
+    previous: ?*CoreSupervisorData,
+    mdb_root: VirtualAddress,
+    init_rootcn: Capabilities.CTE,
+    scheduler_state: Scheduler.State,
+    kernel_offset: i64,
+    irq_in_use: [arch.dispatch_count]u8, // bitmap of handed out caps
+    irq_dispatch: [arch.dispatch_count]Capabilities.CTE,
+    pending_ram_in_use: u8,
+    pending_ram: [4]RAM,
+};
+
+const RAM = extern struct {
+    base: u64,
+    bytes: u64,
+};
+
+pub const PassId = u32;
+pub const CoreId = u8;
+pub const CapAddr = u32;
+
+const CTE = Capabilities.CTE;
+pub const SpawnState = extern struct {
+    cnodes: extern struct {
+        task: ?*CTE = null,
+        seg: ?*CTE = null,
+        super: ?*CTE = null,
+        physical_address: ?*CTE = null,
+        module: ?*CTE = null,
+        page: ?*CTE = null,
+        base_page: ?*CTE = null,
+        early_cnode: ?*CTE = null,
+        slot_alloc0: ?*CTE = null,
+        slot_alloc1: ?*CTE = null,
+        slot_alloc2: ?*CTE = null,
+    } = .{},
+    slots: extern struct {
+        seg: Capabilities.Slot = 0,
+        super: Capabilities.Slot = 0,
+        physical_address: Capabilities.Slot = 0,
+        module: Capabilities.Slot = 0,
+    } = .{},
+    argument_page_address: PhysicalAddress = .null,
 };

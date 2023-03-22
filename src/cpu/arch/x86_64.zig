@@ -1362,12 +1362,3 @@ pub inline fn writerStart() void {
 pub inline fn writerEnd() void {
     writer_lock.release();
 }
-
-pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
-    _ = alignment;
-    _ = size;
-    const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
-    _ = virtual_address_space;
-    @panic("TODO: callbackAllocatePages");
-    // return try virtual_address_space.allocatePages(size, alignment);
-}
