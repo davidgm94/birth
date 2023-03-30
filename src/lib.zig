@@ -2,6 +2,7 @@ const common = @import("common.zig");
 pub usingnamespace common;
 
 pub const arch = @import("lib/arch.zig");
+pub const Capabilities = @import("lib/capabilities.zig");
 /// This is done so the allocator can respect allocating from different address spaces
 pub const config = @import("lib/config.zig");
 pub const CRC32 = @import("lib/crc32.zig");
@@ -171,7 +172,7 @@ pub const Allocator = extern struct {
     callbacks: Callbacks align(8),
 
     pub const Allocate = struct {
-        pub const Result = struct {
+        pub const Result = extern struct {
             address: u64,
             size: u64,
 
@@ -562,3 +563,30 @@ pub const RiseStage = enum {
     bootloader,
     cpu,
 };
+
+pub fn ErrorSet(comptime error_list: type) type {
+    comptime var error_fields: []const common.Type.Error = &.{};
+    inline for (@typeInfo(@TypeOf(error_list)).Struct.fields) |error_list_field| {
+        error_fields = error_fields ++ [1]common.Type.Error{
+            .{ .name = error_list_field.name },
+        };
+    }
+    comptime var enum_items: []const common.Type.EnumField = &.{};
+
+    const EnumType = @Type(common.Type{
+        .Enum = .{
+            .tag_type = u16,
+            .fields = enum_items,
+            .decls = &.{},
+            .is_exhaustive = false,
+        },
+    });
+    const ErrorType = @Type(common.Type{
+        .ErrorSet = error_fields,
+    });
+
+    return struct {
+        pub const Error = ErrorType;
+        pub const Enum = EnumType;
+    };
+}

@@ -460,7 +460,7 @@ pub const Cache = extern struct {
         const cluster_byte_count = cache.getClusterSectorCount() * cache.disk.sector_size;
         const aligned_file_size = lib.alignForward(file_content.len, cluster_byte_count);
         const cluster_count = @divExact(aligned_file_size, cluster_byte_count);
-        log.debug("Need to allocate {} clusters for file", .{cluster_count});
+        // log.debug("Need to allocate {} clusters for file", .{cluster_count});
         const allocator = maybe_allocator orelse @panic("We need an allocator");
         const clusters = blk: {
             const alloc_result = try allocator.allocateBytes(@sizeOf(u32) * cluster_count, @alignOf(u32));
@@ -1010,8 +1010,8 @@ pub const Cache = extern struct {
             if (entry.isFree()) {
                 if (previous_cluster) |pc| {
                     if (pc != cluster - 1) {
-                        log.debug("PC: 0x{x}. CC: 0x{x}", .{ pc, cluster });
-                        @panic("here");
+                        // log.debug("PC: 0x{x}. CC: 0x{x}", .{ pc, cluster });
+                        @panic("allocateClusters: unreachable");
                     }
                 }
                 const should_return = cluster_index == clusters.len - 1;
@@ -1022,9 +1022,9 @@ pub const Cache = extern struct {
                 cluster_index += 1;
 
                 if (should_return) {
-                    const first_cluster = @intCast(u32, cluster - clusters.len + 1);
-                    log.debug("First cluster: 0x{x}. Last cluster: 0x{x}", .{ first_cluster, cluster });
-                    log.debug("Allocated cluster range: {}-{}. LBA range: 0x{x}-0x{x}", .{ first_cluster, cluster, cache.clusterToSector(first_cluster), cache.clusterToSector(cluster) });
+                    // const first_cluster = @intCast(u32, cluster - clusters.len + 1);
+                    // log.debug("First cluster: 0x{x}. Last cluster: 0x{x}", .{ first_cluster, cluster });
+                    // log.debug("Allocated cluster range: {}-{}. LBA range: 0x{x}-0x{x}", .{ first_cluster, cluster, cache.clusterToSector(first_cluster), cache.clusterToSector(cluster) });
                     return;
                 }
 

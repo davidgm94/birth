@@ -130,6 +130,7 @@ pub const SourceLocation = std_builtin.SourceLocation;
 pub const AutoEnumArray = std.enums.EnumArray;
 pub const fields = std.meta.fields;
 pub const IntType = std.meta.Int;
+pub const intToEnum = std.meta.intToEnum;
 pub const stringToEnum = std.meta.stringToEnum;
 pub const Tag = std.meta.Tag;
 

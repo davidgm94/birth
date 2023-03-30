@@ -57,7 +57,7 @@ var fat_allocator = FATAllocator{};
 
 export fn entryPoint() callconv(.C) noreturn {
     BIOS.A20Enable() catch @panic("can't enable a20");
-    lib.log.debug("Loader start: 0x{x}. Loader end: 0x{x}", .{ @ptrToInt(&loader_start), @ptrToInt(&loader_end) });
+    // lib.log.debug("Loader start: 0x{x}. Loader end: 0x{x}", .{ @ptrToInt(&loader_start), @ptrToInt(&loader_end) });
     writer.writeAll("[STAGE 1] Initializing\n") catch unreachable;
 
     var iterator = BIOS.E820Iterator{};
@@ -289,7 +289,7 @@ export fn entryPoint() callconv(.C) noreturn {
 
     minimal_paging.map(bootloader_information_address, bootloader_information_address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("bootloader information mapping"); //|err| // privileged.panic("Bootloader information mapping failed: {}", .{err});
 
-    lib.log.debug("Loader", .{});
+    // lib.log.debug("Loader", .{});
 
     const loader_physical_start = PhysicalAddress.new(lib.alignBackward(@ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
     const loader_size = lib.alignForwardGeneric(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
@@ -297,7 +297,7 @@ export fn entryPoint() callconv(.C) noreturn {
         log.debug("Error: {}", .{err});
         @panic("Mapping of BIOS loader failed");
     };
-    lib.log.debug("Framebuffer", .{});
+    // lib.log.debug("Framebuffer", .{});
     const framebuffer_physical_address = PhysicalAddress.new(bootloader_information.framebuffer.address);
     minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("can't map framebuffer");
     bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
@@ -305,7 +305,7 @@ export fn entryPoint() callconv(.C) noreturn {
     // Map more than necessary
     //
     // Dirty trick
-    lib.log.debug("Loader stack", .{});
+    // lib.log.debug("Loader stack", .{});
     const loader_stack_size = BIOS.stack_size;
     const loader_stack = PhysicalAddress.new(lib.alignForwardGeneric(u32, BIOS.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
     minimal_paging.map(loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Mapping of loader stack failed");
@@ -364,15 +364,15 @@ export fn entryPoint() callconv(.C) noreturn {
                             },
                         }
 
-                        log.debug("Started mapping kernel section", .{});
+                        // log.debug("Started mapping kernel section", .{});
                         minimal_paging.map(physical_address, virtual_address, aligned_size, flags, page_allocator_interface) catch {
                             @panic("Mapping of section failed");
                         };
-                        log.debug("Ended mapping kernel section", .{});
+                        // log.debug("Ended mapping kernel section", .{});
 
                         const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
                         const src_slice = file_content[lib.safeArchitectureCast(ph.offset)..][0..lib.safeArchitectureCast(ph.size_in_file)];
-                        log.debug("Src slice: [0x{x}, 0x{x}]. Dst slice: [0x{x}, 0x{x}]", .{ @ptrToInt(src_slice.ptr), @ptrToInt(src_slice.ptr) + src_slice.len, @ptrToInt(dst_slice.ptr), @ptrToInt(dst_slice.ptr) + dst_slice.len });
+                        // log.debug("Src slice: [0x{x}, 0x{x}]. Dst slice: [0x{x}, 0x{x}]", .{ @ptrToInt(src_slice.ptr), @ptrToInt(src_slice.ptr) + src_slice.len, @ptrToInt(dst_slice.ptr), @ptrToInt(dst_slice.ptr) + dst_slice.len });
                         if (!(dst_slice.len >= src_slice.len)) {
                             @panic("bios: segment allocated memory must be equal or greater than especified");
                         }

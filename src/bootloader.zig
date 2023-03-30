@@ -383,8 +383,6 @@ pub const Information = extern struct {
                     if (result.address.offset(result.size).value() <= lib.maxInt(usize)) {
                         lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
 
-                        lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address.value(), result.address.offset(result.size).value() });
-
                         page_counters[entry_index] += four_kb_pages;
 
                         return result;
@@ -442,7 +440,6 @@ pub const Information = extern struct {
         const files = bootloader_information.getFiles();
         lib.log.debug("File count: {}", .{files.len});
         for (files) |file_descriptor| {
-            lib.log.debug("File type: {}", .{file_descriptor.type});
             if (file_descriptor.type == file_type) {
                 return file_descriptor.getContent(bootloader_information);
             }
@@ -567,7 +564,6 @@ pub const File = extern struct {
                     const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.suffix_type;
                     const guest_field = try parser.parseField("guest");
                     const file_type_str = try parser.parseField("type");
-                    lib.log.debug("File type str: {s}", .{file_type_str});
                     const file_type = lib.stringToEnum(File.Type, file_type_str) orelse {
                         if (@hasDecl(@import("root"), "writer")) {
                             @import("root").writer.writeAll(file_type_str) catch unreachable;

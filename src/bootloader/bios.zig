@@ -28,7 +28,7 @@ pub const loader_start = 0x1000;
 pub const Disk = extern struct {
     disk: lib.Disk,
 
-    var buffer = [1]u8{0} ** (0x200 * 1);
+    var buffer = [1]u8{0} ** (0x200 * 0x10);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
@@ -349,9 +349,9 @@ pub const VBE = extern struct {
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
                 if (isValidVideoMode(&mode) and mode.resolution_x == desired_width and mode.resolution_y == desired_height and mode.bpp == edid_bpp) {
-                    lib.log.debug("Video mode setting", .{});
+                    // lib.log.debug("Video mode setting", .{});
                     setVideoMode(video_mode_number) catch continue;
-                    lib.log.debug("Video mode set", .{});
+                    // lib.log.debug("Video mode set", .{});
                     return mode;
                 }
             }

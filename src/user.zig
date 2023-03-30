@@ -6,7 +6,12 @@ const lib = @import("lib");
 const ExecutionMode = lib.Syscall.ExecutionMode;
 
 pub const arch = @import("user/arch.zig");
-pub usingnamespace @import("user/syscall.zig");
+pub const syscall = arch.syscall;
+pub const Syscall = @import("user/syscall.zig");
+
+pub fn getCoreId() !u8 {
+    @panic("TODO: getCoreId");
+}
 
 // pub const Writer = struct {
 //     const Error = error{};
@@ -83,7 +88,7 @@ const Lock = struct {
 // }
 
 // TODO: improve user panic implementation
-pub fn zig_panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
+pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     panic("{s}", .{message});
 }
 
