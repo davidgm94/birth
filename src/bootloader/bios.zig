@@ -185,9 +185,8 @@ const max_memory_entry_count = 32;
 
 pub const E820Iterator = extern struct {
     registers: Registers = .{},
-    index: u32 = 0,
 
-    pub fn next(iterator: *E820Iterator) ?struct { descriptor: MemoryMapEntry, index: usize } {
+    pub fn next(iterator: *E820Iterator) ?MemoryMapEntry {
         var memory_map_entry: MemoryMapEntry = undefined;
 
         comptime assert(@sizeOf(MemoryMapEntry) == 24);
@@ -199,9 +198,7 @@ pub const E820Iterator = extern struct {
         interrupt(0x15, &iterator.registers, &iterator.registers);
 
         if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
-            const entry_index = iterator.index;
-            iterator.index += 1;
-            return .{ .index = entry_index, .descriptor = memory_map_entry };
+            return memory_map_entry;
         } else {
             return null;
         }

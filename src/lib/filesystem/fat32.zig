@@ -345,7 +345,7 @@ pub const Cache = extern struct {
         return result[0..file_size];
     }
 
-    pub fn readFileToBuffer(cache: Cache, file_path: []const u8, file_buffer: []u8) !void {
+    pub fn readFileToBuffer(cache: Cache, file_path: []const u8, file_buffer: []u8) ![]u8 {
         const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
         const directory_entry = directory_entry_result.directory_entry;
         const first_cluster = directory_entry.getFirstCluster();
@@ -353,7 +353,8 @@ pub const Cache = extern struct {
         const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
         const lba = cache.clusterToSector(first_cluster);
 
-        _ = try cache.disk.callbacks.read(cache.disk, @divExact(aligned_file_size, cache.disk.sector_size), lba, file_buffer);
+        const result = try cache.disk.callbacks.read(cache.disk, @divExact(aligned_file_size, cache.disk.sector_size), lba, file_buffer);
+        return result.buffer[0..file_size];
     }
 
     pub fn getFileSize(cache: Cache, file_path: []const u8) !u32 {
