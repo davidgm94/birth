@@ -157,10 +157,10 @@ pub const Information = extern struct {
         var files_buffer: [512]u8 = undefined;
         const FileList = struct {
             file: []const u8,
-            total_aligned_file_size: usize,
-            total_file_name_size: usize,
-            total_file_count: usize,
-            cpu_driver_index: usize,
+            cpu_driver_index: u32,
+            total_aligned_file_size: u32,
+            total_file_name_size: u32,
+            total_file_count: u32,
         };
 
         const file_alignment = 0x200;
@@ -169,11 +169,11 @@ pub const Information = extern struct {
             var file_parser = bootloader.File.Parser.init(rise_files_file);
             const maybe_cache_index = if (filesystem.get_cache_index) |getCacheIndex| getCacheIndex(filesystem.context) else null;
             var total_file_size: usize = 0;
-            var total_aligned_file_size: usize = 0;
+            var total_aligned_file_size: u32 = 0;
             var total_file_name_size: usize = 0;
-            var total_file_count: usize = 0;
+            var total_file_count: u32 = 0;
 
-            var maybe_cpu_driver_index: ?usize = null;
+            var maybe_cpu_driver_index: ?u32 = null;
 
             while (try file_parser.next()) |file_descriptor| : (total_file_count += 1) {
                 if (file_descriptor.type == .cpu_driver) {
@@ -184,7 +184,7 @@ pub const Information = extern struct {
                 const file_path = file_descriptor.guest;
                 const file_size = filesystem.get_file_size(filesystem.context, file_path) catch @panic("cant'get file size");
                 total_file_size += file_size;
-                total_aligned_file_size += lib.alignForward(file_size, file_alignment);
+                total_aligned_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
                 total_file_name_size += file_path.len;
             }
 
@@ -194,7 +194,7 @@ pub const Information = extern struct {
 
             break :blk FileList{
                 .file = rise_files_file,
-                .total_file_name_size = total_file_name_size,
+                .total_file_name_size = @intCast(u32, total_file_name_size),
                 .total_file_count = total_file_count,
                 .total_aligned_file_size = total_aligned_file_size,
                 .cpu_driver_index = maybe_cpu_driver_index orelse @panic("No CPU driver specified"),
@@ -301,15 +301,15 @@ pub const Information = extern struct {
             const file_name_buffer = bootloader_information.getSlice(.file_names);
             const file_slice = bootloader_information.getSlice(.files);
 
-            var file_content_offset: usize = 0;
-            var file_name_offset: usize = 0;
+            var file_content_offset: u32 = 0;
+            var file_name_offset: u32 = 0;
             var file_index: usize = 0;
 
             while (try file_parser.next()) |file_descriptor| : (file_index += 1) {
                 const file_path = file_descriptor.guest;
                 lib.copy(u8, file_name_buffer[file_name_offset .. file_content_offset + file_path.len], file_path);
                 const file_size = try filesystem.get_file_size(filesystem.context, file_path);
-                const aligned_file_size = lib.alignForward(file_size, file_alignment);
+                const aligned_file_size = lib.alignForwardGeneric(u32, file_size, file_alignment);
                 const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
                 const file = try filesystem.read_file(filesystem.context, file_path, file_buffer);
                 _ = file;
@@ -318,12 +318,12 @@ pub const Information = extern struct {
                     .content_offset = file_content_offset,
                     .content_size = file_size,
                     .path_offset = file_name_offset,
-                    .path_size = file_path.len,
+                    .path_size = @intCast(u32, file_path.len),
                     .type = file_descriptor.type,
                 };
 
                 file_content_offset += aligned_file_size;
-                file_name_offset += file_path.len;
+                file_name_offset += @intCast(u32, file_path.len);
             }
 
             if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
