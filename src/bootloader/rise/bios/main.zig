@@ -93,17 +93,45 @@ const Filesystem = extern struct {
             .type = .bios,
         },
     },
+    file_parser: bootloader.File.Parser,
+    file_buffer: [512]u8,
+    cache_index: usize = 0,
 
     fn initialize(context: ?*anyopaque) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const gpt_cache = try lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&filesystem.disk.disk, 0, &filesystem.fat_allocator.allocator);
         filesystem.fat_cache = try lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&filesystem.fat_allocator.allocator, gpt_cache);
+        const rise_files_file = try filesystem.readFile("/files", &filesystem.file_buffer);
+        filesystem.cache_index = filesystem.fat_allocator.allocated;
+        filesystem.file_parser = bootloader.File.Parser.init(rise_files_file);
     }
 
-    fn readFile(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+    fn deinitialize(context: ?*anyopaque) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        filesystem.fat_allocator.allocated = filesystem.cache_index;
+        filesystem.file_parser.reset();
+    }
+
+    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        if (try filesystem.file_parser.next()) |next| {
+            const file_path = next.guest;
+            return .{
+                .path = file_path,
+                .size = try filesystem.fat_cache.getFileSize(file_path),
+                .type = next.type,
+            };
+        } else return null;
+    }
+
+    fn readFile(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
         const file = try filesystem.fat_cache.readFileToBuffer(file_path, file_buffer);
         return file;
+    }
+
+    fn readFileCallback(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        return try filesystem.readFile(file_path, file_buffer);
     }
 
     fn getFileSize(context: ?*anyopaque, file_path: []const u8) anyerror!u32 {
@@ -224,6 +252,8 @@ export fn entryPoint() callconv(.C) noreturn {
 
 var fs = Filesystem{
     .fat_cache = undefined,
+    .file_parser = undefined,
+    .file_buffer = undefined,
 };
 
 var memory_map = MemoryMap{
@@ -238,10 +268,12 @@ fn main() !noreturn {
     const bootloader_information = try bootloader.Information.initialize(.{
         .context = &fs,
         .initialize = Filesystem.initialize,
-        .read_file = Filesystem.readFile,
-        .get_file_size = Filesystem.getFileSize,
-        .get_cache_index = Filesystem.getCacheIndex,
-        .set_cache_index = Filesystem.setCacheIndex,
+        .deinitialize = Filesystem.deinitialize,
+        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .read_file = Filesystem.readFileCallback,
+        // .get_file_size = Filesystem.getFileSize,
+        // .get_cache_index = Filesystem.getCacheIndex,
+        // .set_cache_index = Filesystem.setCacheIndex,
     }, .{
         .context = &memory_map,
         .get_memory_map_entry_count = MemoryMap.getMemoryMapEntryCount,

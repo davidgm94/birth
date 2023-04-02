@@ -503,26 +503,27 @@ const VAS = extern struct {
 
 pub fn main() !noreturn {
     const rsdp = @intToPtr(*privileged.ACPI.RSDP.Descriptor1, limine_rsdp.response.?.address);
-    const bootloader_information = try bootloader.Information.initialize(.{
-        .context = null,
-        .initialize = Filesystem.initialize,
-        .read_file = Filesystem.readFile,
-        .get_file_size = Filesystem.getFileSize,
-        .get_cache_index = null,
-        .set_cache_index = null,
-    }, .{
-        .context = null,
-        .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
-        .reset = MMap.reset,
-        .next = MMap.next,
-    }, .{
-        .context = null,
-        .initialize = FB.initialize,
-    }, .{
-        .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
-        .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
-    }, rsdp);
-    _ = bootloader_information;
+    _ = rsdp;
+    // const bootloader_information = try bootloader.Information.initialize(.{
+    //     .context = null,
+    //     .initialize = Filesystem.initialize,
+    //     .read_file = Filesystem.readFile,
+    //     .get_file_size = Filesystem.getFileSize,
+    //     .get_cache_index = null,
+    //     .set_cache_index = null,
+    // }, .{
+    //     .context = null,
+    //     .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
+    //     .reset = MMap.reset,
+    //     .next = MMap.next,
+    // }, .{
+    //     .context = null,
+    //     .initialize = FB.initialize,
+    // }, .{
+    //     .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
+    //     .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
+    // }, rsdp);
+    // _ = bootloader_information;
     while (true) {}
     // log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
     // const limine_protocol: bootloader.Protocol = blk: {

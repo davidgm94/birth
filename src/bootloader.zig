@@ -154,52 +154,29 @@ pub const Information = extern struct {
 
     pub fn initialize(filesystem: Initialization.Filesystem, memory_map: Initialization.MemoryMap, framebuffer: Initialization.Framebuffer, virtual_address_space: Initialization.VirtualAddressSpace, rsdp: *ACPI.RSDP.Descriptor1) anyerror!*bootloader.Information {
         try filesystem.initialize(filesystem.context);
-        var files_buffer: [512]u8 = undefined;
-        const FileList = struct {
-            file: []const u8,
-            cpu_driver_index: u32,
-            total_aligned_file_size: u32,
-            total_file_name_size: u32,
-            total_file_count: u32,
-        };
 
+        var total_file_size: usize = 0;
+        var total_aligned_file_size: u32 = 0;
+        var total_file_name_size: usize = 0;
+        var total_file_count: u32 = 0;
+        var maybe_cpu_driver_index: ?u32 = null;
         const file_alignment = 0x200;
-        const file_list = blk: {
-            const rise_files_file = try filesystem.read_file(filesystem.context, "/files", &files_buffer);
-            var file_parser = bootloader.File.Parser.init(rise_files_file);
-            const maybe_cache_index = if (filesystem.get_cache_index) |getCacheIndex| getCacheIndex(filesystem.context) else null;
-            var total_file_size: usize = 0;
-            var total_aligned_file_size: u32 = 0;
-            var total_file_name_size: usize = 0;
-            var total_file_count: u32 = 0;
 
-            var maybe_cpu_driver_index: ?u32 = null;
-
-            while (try file_parser.next()) |file_descriptor| : (total_file_count += 1) {
-                if (file_descriptor.type == .cpu_driver) {
-                    if (maybe_cpu_driver_index != null) @panic("Two cpu drivers");
-                    maybe_cpu_driver_index = total_file_count;
-                }
-
-                const file_path = file_descriptor.guest;
-                const file_size = filesystem.get_file_size(filesystem.context, file_path) catch @panic("cant'get file size");
-                total_file_size += file_size;
-                total_aligned_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
-                total_file_name_size += file_path.len;
+        while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (total_file_count += 1) {
+            if (file_descriptor.type == .cpu_driver) {
+                if (maybe_cpu_driver_index != null) @panic("Two cpu drivers");
+                maybe_cpu_driver_index = total_file_count;
             }
+            const file_path = file_descriptor.path;
+            const file_size = file_descriptor.size;
 
-            if (filesystem.set_cache_index) |setCacheIndex| {
-                setCacheIndex(filesystem.context, maybe_cache_index orelse @panic("Cache index is null when a set_cache_index function callback is assigned"));
-            } else if (maybe_cache_index != null) @panic("Cache index cannot be not null and not have a set_cache_index function callback assigned");
+            total_file_size += file_size;
+            total_aligned_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
+            total_file_name_size += file_path.len;
+        }
 
-            break :blk FileList{
-                .file = rise_files_file,
-                .total_file_name_size = @intCast(u32, total_file_name_size),
-                .total_file_count = total_file_count,
-                .total_aligned_file_size = total_aligned_file_size,
-                .cpu_driver_index = maybe_cpu_driver_index orelse @panic("No CPU driver specified"),
-            };
-        };
+        try filesystem.deinitialize(filesystem.context);
+        const cpu_driver_index = maybe_cpu_driver_index orelse @panic("No CPU driver found");
 
         const memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
         const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
@@ -212,11 +189,11 @@ pub const Information = extern struct {
                 .alignment = @alignOf(bootloader.Information),
             },
             .file_names = .{
-                .length = file_list.total_file_name_size,
+                .length = total_file_name_size,
                 .alignment = 1,
             },
             .files = .{
-                .length = file_list.total_file_count,
+                .length = total_file_count,
                 .alignment = @alignOf(bootloader.File),
             },
             .memory_map_entries = .{
@@ -232,7 +209,7 @@ pub const Information = extern struct {
                 .alignment = lib.max(8, @alignOf(bootloader.Information.SMP.Information)),
             },
             .file_contents = .{
-                .length = file_list.total_aligned_file_size,
+                .length = total_aligned_file_size,
                 .alignment = file_alignment,
             },
         });
@@ -294,9 +271,7 @@ pub const Information = extern struct {
             if (entry_index != memory_map_entry_count) @panic("Memory map entry count mismatch");
         }
 
-        // Read files
         {
-            var file_parser = bootloader.File.Parser.init(file_list.file);
             const file_content_buffer = bootloader_information.getSlice(.file_contents);
             const file_name_buffer = bootloader_information.getSlice(.file_names);
             const file_slice = bootloader_information.getSlice(.files);
@@ -304,31 +279,27 @@ pub const Information = extern struct {
             var file_content_offset: u32 = 0;
             var file_name_offset: u32 = 0;
             var file_index: usize = 0;
-
-            while (try file_parser.next()) |file_descriptor| : (file_index += 1) {
-                const file_path = file_descriptor.guest;
-                lib.copy(u8, file_name_buffer[file_name_offset .. file_content_offset + file_path.len], file_path);
-                const file_size = try filesystem.get_file_size(filesystem.context, file_path);
-                const aligned_file_size = lib.alignForwardGeneric(u32, file_size, file_alignment);
+            while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (file_index += 1) {
+                const path_len = @intCast(u32, file_descriptor.path.len);
+                lib.copy(u8, file_name_buffer[file_name_offset .. file_content_offset + path_len], file_descriptor.path);
+                const aligned_file_size = lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
                 const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
-                const file = try filesystem.read_file(filesystem.context, file_path, file_buffer);
+                const file = try filesystem.read_file(filesystem.context, file_descriptor.path, file_buffer);
                 _ = file;
-
                 file_slice[file_index] = .{
                     .content_offset = file_content_offset,
-                    .content_size = file_size,
+                    .content_size = file_descriptor.size,
                     .path_offset = file_name_offset,
-                    .path_size = @intCast(u32, file_path.len),
+                    .path_size = path_len,
                     .type = file_descriptor.type,
                 };
-
                 file_content_offset += aligned_file_size;
-                file_name_offset += @intCast(u32, file_path.len);
+                file_name_offset += path_len;
             }
 
             if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
             if (file_name_offset != file_name_buffer.len) @panic("File name slice size mismatch");
-            if (file_index != file_list.total_file_count) @panic("File count mismatch");
+            if (file_index != total_file_count) @panic("File count mismatch");
         }
 
         const minimal_paging = bootloader_information.initializeVirtualAddressSpace();
@@ -349,7 +320,7 @@ pub const Information = extern struct {
 
         try virtual_address_space.ensure_stack_is_mapped(minimal_paging, page_allocator_interface);
 
-        const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[file_list.cpu_driver_index];
+        const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[cpu_driver_index];
         const cpu_driver_file_content = cpu_driver_file_descriptor.getContent(bootloader_information);
         var elf_parser = try lib.ELF(64).Parser.init(cpu_driver_file_content);
         const program_headers = elf_parser.getProgramHeaders();
@@ -437,10 +408,15 @@ pub const Information = extern struct {
         pub const Filesystem = extern struct {
             context: ?*anyopaque,
             initialize: *const fn (context: ?*anyopaque) anyerror!void,
+            deinitialize: *const fn (context: ?*anyopaque) anyerror!void,
+            get_next_file_descriptor: *const fn (context: ?*anyopaque) anyerror!?Descriptor,
             read_file: *const fn (context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8,
-            get_file_size: *const fn (context: ?*anyopaque, file_path: []const u8) anyerror!u32,
-            get_cache_index: ?*const fn (context: ?*anyopaque) u32,
-            set_cache_index: ?*const fn (context: ?*anyopaque, cache_index: u32) void,
+
+            pub const Descriptor = struct {
+                path: []const u8,
+                size: u32,
+                type: File.Type,
+            };
         };
 
         pub const MemoryMap = extern struct {
@@ -816,14 +792,20 @@ pub const File = extern struct {
         init,
     };
 
-    pub const Parser = struct {
-        text: []const u8,
+    pub const Parser = extern struct {
+        text_ptr: [*]const u8,
+        text_len: usize,
         index: u32 = 0,
 
         pub fn init(text: []const u8) File.Parser {
             return .{
-                .text = text,
+                .text_ptr = text.ptr,
+                .text_len = text.len,
             };
+        }
+
+        pub fn reset(parser: *Parser) void {
+            parser.index = 0;
         }
 
         const Error = error{
@@ -852,11 +834,11 @@ pub const File = extern struct {
             const left_curly_brace = 0x7b;
             const right_curly_brace = 0x7d;
 
-            while (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
                 try parser.expectChar('.');
                 try parser.expectChar(left_curly_brace);
 
-                if (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+                if (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
                     const host_path_field = try parser.parseField("host_path");
                     const host_base_field = try parser.parseField("host_base");
                     const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.suffix_type;
@@ -902,8 +884,8 @@ pub const File = extern struct {
         }
 
         inline fn skipSpace(parser: *File.Parser) void {
-            while (parser.index < parser.text.len) {
-                const char = parser.text[parser.index];
+            while (parser.index < parser.text_len) {
+                const char = parser.text_ptr[parser.index];
                 const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
                 if (!is_space) break;
                 parser.consume();
@@ -912,14 +894,14 @@ pub const File = extern struct {
 
         inline fn maybeExpectChar(parser: *File.Parser, char: u8) void {
             parser.skipSpace();
-            if (parser.text[parser.index] == char) {
+            if (parser.text_ptr[parser.index] == char) {
                 parser.consume();
             }
         }
 
         fn expectChar(parser: *File.Parser, expected_char: u8) !void {
             parser.skipSpace();
-            const char = parser.text[parser.index];
+            const char = parser.text_ptr[parser.index];
             if (char != expected_char) {
                 return Error.expect_char;
             }
@@ -929,7 +911,7 @@ pub const File = extern struct {
 
         fn expectString(parser: *File.Parser, string: []const u8) !void {
             parser.skipSpace();
-            if (!lib.equal(u8, parser.text[parser.index..][0..string.len], string)) {
+            if (!lib.equal(u8, parser.text_ptr[parser.index..parser.text_len][0..string.len], string)) {
                 return Error.expect_string;
             }
 
@@ -943,13 +925,13 @@ pub const File = extern struct {
             parser.skipSpace();
             try parser.expectChar('"');
             const start_index = parser.index;
-            while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
+            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != '"') {
                 parser.consume();
             }
             const end_index = parser.index;
             try parser.expectChar('"');
 
-            const string = parser.text[start_index..end_index];
+            const string = parser.text_ptr[start_index..end_index];
             return string;
         }
     };
