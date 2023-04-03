@@ -37,6 +37,7 @@ pub const Specific = extern struct {
     pub noinline fn map(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags, page_allocator: PageAllocatorInterface) !void {
         const flags = general_flags.toArchitectureSpecific();
         const top_virtual_address = asked_virtual_address.offset(size);
+        log.debug("Mapping 0x{x} -> 0x{x} for 0x{x} bytes", .{ asked_virtual_address.value(), asked_physical_address.value(), size });
 
         inline for (reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_page_index| {
             if (size >= reverse_page_size) {

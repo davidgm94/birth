@@ -87,79 +87,89 @@ pub const PageAllocator = extern struct {
             @panic("head null");
         }
 
-        var ptr = page_allocator.head;
-        // while (ptr) |entry| : (ptr = entry.next) {
-        //     log.debug("Entry before allocate: (Address: 0x{x}. Size: 0x{x})", .{ entry.region.address.value(), entry.region.size });
-        // }
-        //
-        // ptr = page_allocator.head;
-        while (ptr) |entry| : (ptr = entry.next) {
-            if (lib.isAligned(entry.region.size, alignment) and entry.region.size > size) {
-                const result = .{
-                    .address = entry.region.address,
-                    .size = size,
-                };
-                entry.region.address = entry.region.address.offset(size);
-                entry.region.size -= size;
+        const allocation = blk: {
+            var ptr = page_allocator.head;
+            // while (ptr) |entry| : (ptr = entry.next) {
+            //     log.debug("Entry before allocate: (Address: 0x{x}. Size: 0x{x})", .{ entry.region.address.value(), entry.region.size });
+            // }
+            //
+            // ptr = page_allocator.head;
+            while (ptr) |entry| : (ptr = entry.next) {
+                log.debug("Entry(1): address: 0x{x}. size: 0x{x}", .{ entry.region.address.value(), entry.region.size });
+                if (lib.isAligned(entry.region.size, alignment) and entry.region.size > size) {
+                    const result = PhysicalMemoryRegion{
+                        .address = entry.region.address,
+                        .size = size,
+                    };
+                    entry.region.address = entry.region.address.offset(size);
+                    entry.region.size -= size;
 
-                page_allocator.total_allocated_size += @intCast(u32, size);
-                // log.debug("Allocated 0x{x}", .{size});
+                    page_allocator.total_allocated_size += @intCast(u32, size);
+                    // log.debug("Allocated 0x{x}", .{size});
+                    log.debug("Result(1): address: 0x{x}. size: 0x{x}", .{ result.address.value(), result.size });
 
-                return result;
+                    break :blk result;
+                }
             }
-        }
 
-        ptr = page_allocator.head;
+            ptr = page_allocator.head;
 
-        while (ptr) |entry| : (ptr = entry.next) {
-            const aligned_address = lib.alignForward(entry.region.address.value(), alignment);
-            const top = entry.region.address.offset(entry.region.size).value();
-            if (aligned_address < top and top - aligned_address > size) {
-                // log.debug("Found region which we should be splitting: (0x{x}, 0x{x})", .{ entry.region.address.value(), entry.region.size });
-                // log.debug("User asked for 0x{x} bytes with alignment 0x{x}", .{ size, alignment });
-                // Split the addresses to obtain the desired result
-                const first_region_size = aligned_address - entry.region.address.value();
-                const first_region_address = entry.region.address;
-                const first_region_next = entry.next;
+            while (ptr) |entry| : (ptr = entry.next) {
+                log.debug("Entry(2): address: 0x{x}. size: 0x{x}", .{ entry.region.address.value(), entry.region.size });
+                const aligned_address = lib.alignForward(entry.region.address.value(), alignment);
+                const top = entry.region.address.offset(entry.region.size).value();
+                if (aligned_address < top and top - aligned_address > size) {
+                    // log.debug("Found region which we should be splitting: (0x{x}, 0x{x})", .{ entry.region.address.value(), entry.region.size });
+                    // log.debug("User asked for 0x{x} bytes with alignment 0x{x}", .{ size, alignment });
+                    // Split the addresses to obtain the desired result
+                    const first_region_size = aligned_address - entry.region.address.value();
+                    const first_region_address = entry.region.address;
+                    const first_region_next = entry.next;
 
-                const second_region_address = aligned_address + size;
-                const second_region_size = top - aligned_address + size;
+                    const second_region_address = aligned_address + size;
+                    const second_region_size = top - aligned_address + size;
 
-                const result = .{
-                    .address = PhysicalAddress.new(aligned_address),
-                    .size = size,
-                };
+                    const result = PhysicalMemoryRegion{
+                        .address = PhysicalAddress.new(aligned_address),
+                        .size = size,
+                    };
 
-                // log.debug("\nFirst region: (Address: 0x{x}. Size: 0x{x}).\nRegion in the middle (allocated): (Address: 0x{x}. Size: 0x{x}).\nSecond region: (Address: 0x{x}. Size: 0x{x})", .{ first_region_address, first_region_size, result.address.value(), result.size, second_region_address, second_region_size });
+                    // log.debug("\nFirst region: (Address: 0x{x}. Size: 0x{x}).\nRegion in the middle (allocated): (Address: 0x{x}. Size: 0x{x}).\nSecond region: (Address: 0x{x}. Size: 0x{x})", .{ first_region_address, first_region_size, result.address.value(), result.size, second_region_address, second_region_size });
 
-                const new_entry = page_allocator.list_allocator.get();
-                entry.* = .{
-                    .region = .{
-                        .address = first_region_address,
-                        .size = first_region_size,
-                    },
-                    .next = new_entry,
-                };
+                    const new_entry = page_allocator.list_allocator.get();
+                    entry.* = .{
+                        .region = .{
+                            .address = first_region_address,
+                            .size = first_region_size,
+                        },
+                        .next = new_entry,
+                    };
 
-                new_entry.* = .{
-                    .region = .{
-                        .address = PhysicalAddress.new(second_region_address),
-                        .size = second_region_size,
-                    },
-                    .next = first_region_next,
-                };
-                // log.debug("First entry: (Address: 0x{x}. Size: 0x{x})", .{ entry.region.address.value(), entry.region.size });
-                // log.debug("Second entry: (Address: 0x{x}. Size: 0x{x})", .{ new_entry.region.address.value(), new_entry.region.size });
+                    new_entry.* = .{
+                        .region = .{
+                            .address = PhysicalAddress.new(second_region_address),
+                            .size = second_region_size,
+                        },
+                        .next = first_region_next,
+                    };
+                    // log.debug("First entry: (Address: 0x{x}. Size: 0x{x})", .{ entry.region.address.value(), entry.region.size });
+                    // log.debug("Second entry: (Address: 0x{x}. Size: 0x{x})", .{ new_entry.region.address.value(), new_entry.region.size });
 
-                // page_allocator.total_allocated_size += @intCast(u32, size);
-                // log.debug("Allocated 0x{x}", .{size});
+                    // page_allocator.total_allocated_size += @intCast(u32, size);
+                    // log.debug("Allocated 0x{x}", .{size});
 
-                return result;
+                    log.debug("Result(2): address: 0x{x}. size: 0x{x}", .{ result.address.value(), result.size });
+                    break :blk result;
+                }
             }
-        }
 
-        log.err("Allocate error. Size: 0x{x}. Alignment: 0x{x}. Total allocated size: 0x{x}", .{ size, alignment, page_allocator.total_allocated_size });
-        return Allocator.Allocate.Error.OutOfMemory;
+            log.err("Allocate error. Size: 0x{x}. Alignment: 0x{x}. Total allocated size: 0x{x}", .{ size, alignment, page_allocator.total_allocated_size });
+            return Allocator.Allocate.Error.OutOfMemory;
+        };
+
+        lib.zero(allocation.toHigherHalfVirtualAddress().access(u8));
+
+        return allocation;
     }
 
     const ListAllocator = extern struct {
@@ -205,9 +215,10 @@ pub const PageAllocator = extern struct {
         const page_shifter = lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
         for (memory_map_entries, page_counters) |entry, page_counter| {
-            if (!lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) {
+            if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) {
                 continue;
             }
+
             total_size += entry.region.size - (page_counter << page_shifter);
         }
 
@@ -219,7 +230,7 @@ pub const PageAllocator = extern struct {
             const occupied_size = page_counter.* << page_shifter;
             const entry_size_left = entry.region.size - occupied_size;
             if (entry_size_left != 0) {
-                if (!lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
+                if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
 
                 assert(lib.isAligned(entry_size_left, lib.arch.valid_page_sizes[0]));
                 page_counter.* += 1;
@@ -236,7 +247,7 @@ pub const PageAllocator = extern struct {
         var first_entry: ?*Entry = null;
 
         for (memory_map_entries, page_counters) |entry, *page_counter| {
-            if (!lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
+            if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
 
             const occupied_size = page_counter.* << page_shifter;
 
@@ -458,134 +469,6 @@ pub const VirtualMemoryRegion = extern struct {
         const result = virtual_memory_region.address.access([*]T)[0..lib.safeArchitectureCast(slice_len)];
         return result;
     }
-};
-
-const PhysicalAddressSpace = extern struct {
-    free_list: List = .{},
-    heap_list: List = .{},
-
-    const AllocateError = error{
-        not_base_page_aligned,
-        out_of_memory,
-    };
-
-    const valid_page_sizes = lib.arch.valid_page_sizes;
-
-    pub fn allocate(physical_address_space: *PhysicalAddressSpace, size: u64, page_size: u64) AllocateError!PhysicalMemoryRegion {
-        if (size >= valid_page_sizes[0]) {
-            if (!lib.isAligned(size, valid_page_sizes[0])) {
-                //log.err("Size is 0x{x} but alignment should be at least 0x{x}", .{ size, valid_page_sizes[0] });
-                return AllocateError.not_base_page_aligned;
-            }
-
-            var node_ptr = physical_address_space.free_list.first;
-
-            const allocated_region = blk: {
-                while (node_ptr) |node| : (node_ptr = node.next) {
-                    const result_address = node.descriptor.address.alignedForward(page_size);
-                    const size_up = size + result_address.value() - node.descriptor.address.value();
-                    if (node.descriptor.size > size_up) {
-                        const allocated_region = PhysicalMemoryRegion{
-                            .address = result_address,
-                            .size = size,
-                        };
-                        node.descriptor.address.addOffset(size_up);
-                        node.descriptor.size -= size_up;
-
-                        break :blk allocated_region;
-                    } else if (node.descriptor.size == size_up) {
-                        const allocated_region = node.descriptor.offset(size_up - size);
-                        if (node.previous) |previous| previous.next = node.next;
-                        if (node.next) |next| next.previous = node.previous;
-                        if (node_ptr == physical_address_space.free_list.first) physical_address_space.free_list.first = node.next;
-                        if (node_ptr == physical_address_space.free_list.last) physical_address_space.free_list.last = node.previous;
-
-                        break :blk allocated_region;
-                    }
-                }
-
-                return AllocateError.out_of_memory;
-            };
-
-            // For now, just zero it out.
-            // TODO: in the future, better organization of physical memory to know for sure if the memory still obbeys the upcoming zero flag
-            const region_bytes = allocated_region.toHigherHalfVirtualAddress().accessBytes();
-            lib.zero(region_bytes);
-
-            return allocated_region;
-        } else {
-            if (physical_address_space.heap_list.last) |last| {
-                if (last.descriptor.size >= size) {
-                    const chop = last.descriptor.chop(size);
-                    return chop;
-                } else {
-                    @panic("insufficient size");
-                }
-            } else {
-                var heap_region = try physical_address_space.allocate(valid_page_sizes[1], valid_page_sizes[0]);
-                const region_ptr = heap_region.chop(@sizeOf(Region)).address.toHigherHalfVirtualAddress().access(*Region);
-                region_ptr.* = .{
-                    .descriptor = heap_region,
-                };
-                physical_address_space.heap_list.append(region_ptr);
-
-                return try physical_address_space.allocate(size, page_size);
-            }
-        }
-    }
-
-    pub fn free(physical_address_space: *PhysicalAddressSpace, size: u64) void {
-        _ = physical_address_space;
-        _ = size;
-
-        @panic("todo free pages");
-    }
-
-    const List = extern struct {
-        first: ?*Region = null,
-        last: ?*Region = null,
-        count: u64 = 0,
-
-        pub fn append(list: *List, node: *Region) void {
-            defer list.count += 1;
-            if (list.last) |last| {
-                last.next = node;
-                node.previous = last;
-                list.last = node;
-            } else {
-                list.first = node;
-                list.last = node;
-            }
-        }
-
-        pub fn remove(list: *List, node: *Region) void {
-            if (list.first) |first| {
-                if (first == node) {
-                    list.first = node.next;
-                }
-            }
-
-            if (list.last) |last| {
-                if (last == node) {
-                    list.last = node.previous;
-                }
-            }
-
-            if (node.previous) |previous| {
-                previous.next = node.next;
-            }
-
-            if (node.next) |next| {
-                next.previous = node.previous;
-            }
-        }
-    };
-
-    pub const Region = extern struct {
-        descriptor: PhysicalMemoryRegion,
-        previous: ?*Region = null,
-        next: ?*Region = null,
-    };
 };
 
 pub const Mapping = extern struct {

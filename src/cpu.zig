@@ -237,6 +237,7 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        log.debug("allocatePages: size: 0x{x}, alignment: 0x{x}", .{ size, alignment });
         if (virtual_address_space.page.context.size == 0) {
             if (alignment > lib.arch.valid_page_sizes[1]) return Allocator.Allocate.Error.OutOfMemory;
             // Try to allocate a bigger bulk so we don't have to use the backing allocator (slower) everytime a page is needed
@@ -253,7 +254,7 @@ pub const VirtualAddressSpace = extern struct {
                 .size = page_bulk_allocation.size,
             };
 
-            log.debug("Page context: 0x{x}", .{virtual_address_space.page.context.region_base});
+            log.debug("Page context: 0x{x}, size: 0x{x}", .{ virtual_address_space.page.context.region_base, page_bulk_allocation.size });
 
             if (virtual_address_space.options.log_pages) {
                 try virtual_address_space.addPage(page_bulk_allocation);

@@ -238,6 +238,8 @@ const MMap = extern struct {
 
             log.debug("Exiting boot services...", .{});
             try UEFI.Try(mmap.boot_services.exitBootServices(mmap.handle, mmap.key));
+
+            privileged.arch.disableInterrupts();
         }
 
         mmap.offset = 0;
@@ -255,7 +257,7 @@ const MMap = extern struct {
         if (mmap.offset < mmap.size) {
             const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), mmap.buffer[mmap.offset..].ptr)).*;
             mmap.offset += mmap.descriptor_size;
-            return .{
+            const result = bootloader.MemoryMapEntry{
                 .region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry.number_of_pages << UEFI.page_shifter),
                 .type = switch (entry.type) {
                     .ReservedMemoryType, .LoaderCode, .LoaderData, .BootServicesCode, .BootServicesData, .RuntimeServicesCode, .RuntimeServicesData, .ACPIReclaimMemory, .ACPIMemoryNVS, .MemoryMappedIO, .MemoryMappedIOPortSpace, .PalCode, .PersistentMemory => .reserved,
@@ -264,6 +266,9 @@ const MMap = extern struct {
                     else => @panic("Unknown type"),
                 },
             };
+
+            log.debug("Result: 0x{x}, 0x{x}, {s}", .{ result.region.address.value(), result.region.size, @tagName(entry.type) });
+            return result;
         }
 
         return null;
