@@ -369,10 +369,14 @@ pub const IDT = extern struct {
 pub const dispatch_count = IDT.entry_count;
 
 export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
-    _ = interrupt_number;
     _ = regs;
-    APIC.lapicWrite(.eoi, 0);
-    nextTimer(10);
+    switch (interrupt_number) {
+        local_timer_vector => {
+            APIC.lapicWrite(.eoi, 0);
+            nextTimer(10);
+        },
+        else => panic("Fault: 0x{x}", .{interrupt_number}),
+    }
 }
 
 pub const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{

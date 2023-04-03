@@ -152,7 +152,20 @@ pub const Information = extern struct {
         };
     };
 
-    pub fn initialize(filesystem: Initialization.Filesystem, memory_map: Initialization.MemoryMap, framebuffer: Initialization.Framebuffer, virtual_address_space: Initialization.VirtualAddressSpace, rsdp: *ACPI.RSDP.Descriptor1) anyerror!*bootloader.Information {
+    fn initializeMemoryMap(bootloader_information: *bootloader.Information, memory_map: Initialization.MemoryMap) !usize {
+        try memory_map.deinitialize(memory_map.context);
+
+        const memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
+        var entry_index: usize = 0;
+        while (try memory_map.next(memory_map.context)) |entry| : (entry_index += 1) {
+            memory_map_entries[entry_index] = entry;
+        }
+
+        return entry_index;
+    }
+
+    pub fn initialize(filesystem: Initialization.Filesystem, memory_map: Initialization.MemoryMap, framebuffer: Initialization.Framebuffer, virtual_address_space: Initialization.VirtualAddressSpace, rsdp: *ACPI.RSDP.Descriptor1, bootloader_tag: lib.Bootloader, protocol: Protocol) anyerror!*bootloader.Information {
+        const framebuffer_data = try framebuffer.initialize(framebuffer.context);
         try filesystem.initialize(filesystem.context);
 
         var total_file_size: usize = 0;
@@ -178,9 +191,10 @@ pub const Information = extern struct {
         try filesystem.deinitialize(filesystem.context);
         const cpu_driver_index = maybe_cpu_driver_index orelse @panic("No CPU driver found");
 
-        const memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
+        try memory_map.initialize(memory_map.context);
+        var memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
         const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
-        const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
+        const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
         const cpu_count = madt.getCPUCount();
 
         const length_size_tuples = bootloader.LengthSizeTuples.new(.{
@@ -189,7 +203,7 @@ pub const Information = extern struct {
                 .alignment = @alignOf(bootloader.Information),
             },
             .file_names = .{
-                .length = total_file_name_size,
+                .length = @intCast(u32, total_file_name_size),
                 .alignment = 1,
             },
             .files = .{
@@ -214,18 +228,25 @@ pub const Information = extern struct {
             },
         });
 
-        memory_map.reset(memory_map.context);
-
         var host_entry_index: usize = 0;
-        const host_entry = while (try memory_map.next(memory_map.context)) |entry| : (host_entry_index += 1) {
-            if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
-                break entry;
+        const host_entry_region = blk: {
+            if (bootloader_tag == .rise and protocol == .uefi) {
+                const host_region = try (memory_map.get_host_region orelse unreachable)(memory_map.context, length_size_tuples);
+                break :blk host_region;
+            } else {
+                const host_entry = while (try memory_map.next(memory_map.context)) |entry| : (host_entry_index += 1) {
+                    if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
+                        break :blk entry.region;
+                    }
+                } else @panic("No memory map entry is suitable for hosting bootloader information");
+                _ = host_entry;
             }
-        } else @panic("No memory map entry is suitable for hosting bootloader information");
-        const bootloader_information = host_entry.region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
+        };
+
+        const bootloader_information = host_entry_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
         bootloader_information.* = .{
-            .protocol = .bios,
-            .bootloader = .rise,
+            .protocol = protocol,
+            .bootloader = bootloader_tag,
             .version = .{ .major = 0, .minor = 1, .patch = 0 },
             .total_size = length_size_tuples.total_size,
             .entry_point = 0,
@@ -234,7 +255,7 @@ pub const Information = extern struct {
             .configuration = .{
                 .memory_map_diff = 0,
             },
-            .framebuffer = try framebuffer.initialize(framebuffer.context),
+            .framebuffer = framebuffer_data,
             .draw_context = .{},
             .font = undefined,
             .cpu_driver_mappings = .{},
@@ -256,22 +277,16 @@ pub const Information = extern struct {
             page_counter.* = 0;
         }
 
-        // Make sure pages are allocated to host the bootloader information
-        page_counters[host_entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
-
-        // Fetch memory entries from firmware
         {
-            const memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
-            memory_map.reset(memory_map.context);
-            var entry_index: usize = 0;
-            while (try memory_map.next(memory_map.context)) |entry| : (entry_index += 1) {
-                memory_map_entries[entry_index] = entry;
+            // Make sure pages are allocated to host the bootloader information and fetch memory entries from firmware (only non-UEFI
+            if (bootloader_tag != .rise or protocol != .uefi) {
+                page_counters[host_entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+
+                const new_memory_map_entry_count = try bootloader_information.initializeMemoryMap(memory_map);
+
+                if (new_memory_map_entry_count != memory_map_entry_count) @panic("Memory map entry count mismatch");
             }
 
-            if (entry_index != memory_map_entry_count) @panic("Memory map entry count mismatch");
-        }
-
-        {
             const file_content_buffer = bootloader_information.getSlice(.file_contents);
             const file_name_buffer = bootloader_information.getSlice(.file_names);
             const file_slice = bootloader_information.getSlice(.files);
@@ -279,9 +294,10 @@ pub const Information = extern struct {
             var file_content_offset: u32 = 0;
             var file_name_offset: u32 = 0;
             var file_index: usize = 0;
+
             while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (file_index += 1) {
                 const path_len = @intCast(u32, file_descriptor.path.len);
-                lib.copy(u8, file_name_buffer[file_name_offset .. file_content_offset + path_len], file_descriptor.path);
+                lib.copy(u8, file_name_buffer[file_name_offset .. file_name_offset + path_len], file_descriptor.path);
                 const aligned_file_size = lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
                 const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
                 const file = try filesystem.read_file(filesystem.context, file_descriptor.path, file_buffer);
@@ -300,25 +316,33 @@ pub const Information = extern struct {
             if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
             if (file_name_offset != file_name_buffer.len) @panic("File name slice size mismatch");
             if (file_index != total_file_count) @panic("File count mismatch");
+
+            if (bootloader_tag == .rise and protocol == .uefi) {
+                // Check if the memory map entry count matches here is not useful because probably it's going to be less as exiting boot services seems
+                // like making some deallocations
+                memory_map_entry_count = @intCast(u32, try bootloader_information.initializeMemoryMap(memory_map));
+            }
         }
 
-        const minimal_paging = bootloader_information.initializeVirtualAddressSpace();
+        const minimal_paging = try bootloader_information.initializeVirtualAddressSpace();
         const page_allocator_interface = bootloader_information.getPageAllocatorInterface();
-        for (bootloader_information.getMemoryMapEntries()) |entry| {
+        for (bootloader_information.getMemoryMapEntries()[0..memory_map_entry_count]) |entry| {
             if (entry.type == .usable) {
                 try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
             }
         }
+        lib.log.debug("Mapped usable memory", .{});
 
-        try minimal_paging.map(host_entry.region.address, host_entry.region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface);
+        try minimal_paging.map(host_entry_region.address, host_entry_region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface);
 
-        try virtual_address_space.ensure_loader_is_mapped(minimal_paging, page_allocator_interface);
+        try virtual_address_space.ensure_loader_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface, bootloader_information);
 
-        const framebuffer_physical_address = PhysicalAddress.new(bootloader_information.framebuffer.address);
+        lib.log.debug("{s} bootloader framebuffer: 0x{x}", .{ @tagName(bootloader_information.bootloader), bootloader_information.framebuffer.address });
+        const framebuffer_physical_address = PhysicalAddress.new(if (bootloader_information.bootloader == .limine) bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address else bootloader_information.framebuffer.address);
         try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
         bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
-        try virtual_address_space.ensure_stack_is_mapped(minimal_paging, page_allocator_interface);
+        try virtual_address_space.ensure_stack_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface);
 
         const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[cpu_driver_index];
         const cpu_driver_file_content = cpu_driver_file_descriptor.getContent(bootloader_information);
@@ -373,9 +397,7 @@ pub const Information = extern struct {
                     }
 
                     // log.debug("Started mapping kernel section", .{});
-                    minimal_paging.map(physical_address, virtual_address, aligned_size, flags, page_allocator_interface) catch {
-                        @panic("Mapping of section failed");
-                    };
+                    try minimal_paging.map(physical_address, virtual_address, aligned_size, flags, page_allocator_interface);
                     // log.debug("Ended mapping kernel section", .{});
 
                     const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
@@ -422,8 +444,10 @@ pub const Information = extern struct {
         pub const MemoryMap = extern struct {
             context: ?*anyopaque,
             get_memory_map_entry_count: *const fn (context: ?*anyopaque) anyerror!u32,
-            reset: *const fn (context: ?*anyopaque) void,
+            initialize: *const fn (context: ?*anyopaque) anyerror!void,
+            deinitialize: *const fn (context: ?*anyopaque) anyerror!void,
             next: *const fn (context: ?*anyopaque) anyerror!?MemoryMapEntry,
+            get_host_region: ?*const fn (context: ?*anyopaque, length_size_tuples: LengthSizeTuples) anyerror!PhysicalMemoryRegion,
         };
 
         pub const Framebuffer = extern struct {
@@ -432,8 +456,9 @@ pub const Information = extern struct {
         };
 
         pub const VirtualAddressSpace = extern struct {
-            ensure_loader_is_mapped: *const fn (paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void,
-            ensure_stack_is_mapped: *const fn (paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void,
+            context: ?*anyopaque,
+            ensure_loader_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void,
+            ensure_stack_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void,
         };
     };
 
@@ -722,8 +747,8 @@ pub const Information = extern struct {
         return null;
     }
 
-    pub fn initializeVirtualAddressSpace(bootloader_information: *Information) paging.Specific {
-        return privileged.arch.paging.initKernelBSP(bootloader_information) catch @panic("Virtual address space creation");
+    pub fn initializeVirtualAddressSpace(bootloader_information: *Information) !paging.Specific {
+        return try privileged.arch.paging.initKernelBSP(bootloader_information);
     }
 
     pub fn getPageAllocatorInterface(bootloader_information: *Information) privileged.PageAllocatorInterface {

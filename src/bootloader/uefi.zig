@@ -17,7 +17,7 @@ pub const MemoryDescriptor = uefi.tables.MemoryDescriptor;
 pub const SimpleFilesystemProtocol = uefi.protocols.SimpleFileSystemProtocol;
 pub const Status = uefi.Status;
 pub const SystemTable = uefi.tables.SystemTable;
-pub const UEFIError = Status.err;
+pub const Try = Status.err;
 
 const str16 = lib.std.unicode.utf8ToUtf16LeStringLiteral;
 
@@ -38,45 +38,10 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
 }
 
 pub fn result(src: lib.SourceLocation, status: Status) void {
-    UEFIError(status) catch |err| {
+    Try(status) catch |err| {
         panic("UEFI error {} at {s}:{}:{} in function {s}", .{ err, src.file, src.line, src.column, src.fn_name });
     };
 }
-
-pub const File = struct {
-    handle: *FileProtocol,
-    size: u32,
-
-    pub fn get(filesystem_root: *FileProtocol, name: []const u8) !File {
-        var file: *FileProtocol = undefined;
-        var name_buffer: [256:0]u16 = undefined;
-        const length = try lib.unicode.utf8ToUtf16Le(&name_buffer, name);
-        name_buffer[length] = 0;
-        const filename = name_buffer[0..length :0];
-        try UEFIError(filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
-        const file_size = blk: {
-            // TODO: figure out why it is succeeding with 16 and not with 8
-            var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(filename)) + 0x100]u8 align(@alignOf(FileInfo)) = undefined;
-            var file_info_size = buffer.len;
-            try UEFIError(file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
-            const file_info = @ptrCast(*FileInfo, &buffer);
-            log.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
-            break :blk @intCast(u32, alignForward(file_info.file_size + page_size, page_size));
-        };
-
-        return File{
-            .handle = file,
-            .size = file_size,
-        };
-    }
-
-    pub fn read(file: File, buffer: []u8) []u8 {
-        var size: u64 = file.size;
-        result(@src(), file.handle.read(&size, buffer.ptr));
-        assert(size != buffer.len);
-        return buffer[0..size];
-    }
-};
 
 pub inline fn get_system_table() *SystemTable {
     return uefi.system_table;

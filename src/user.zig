@@ -70,7 +70,7 @@ const Lock = struct {
 
     fn assert_status(lock: *volatile Lock, expected: u8) void {
         if (lock.status != expected) {
-            @panic("User lock wtf");
+            @panic("User lock assert failed");
         }
     }
 };

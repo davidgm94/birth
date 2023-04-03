@@ -385,7 +385,7 @@ const VirtualAddress = privileged.VirtualAddress;
 const stopCPU = privileged.arch.stopCPU;
 const paging = privileged.arch.x86_64.paging;
 
-fn mapSection(bootloader_information: *bootloader.Information, minimal_paging: paging.Specific, comptime section_name: []const u8, flags: Mapping.Flags) !void {
+fn mapSection(minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, comptime section_name: []const u8, flags: Mapping.Flags) !void {
     const section_start_symbol = @extern(*u8, .{ .name = section_name ++ "_section_start" });
     const section_end_symbol = @extern(*u8, .{ .name = section_name ++ "_section_end" });
     const section_start = @ptrToInt(section_start_symbol);
@@ -396,14 +396,7 @@ fn mapSection(bootloader_information: *bootloader.Information, minimal_paging: p
     const virtual_address = VirtualAddress.new(section_start);
     const physical_address = PhysicalAddress.new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
     // log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) for 0x{x} bytes", .{ section_name, physical_address.value(), virtual_address.value(), size });
-    minimal_paging.map(physical_address, virtual_address, section_size, flags, bootloader_information.getPageAllocatorInterface()) catch @panic("Mapping of section failed");
-
-    @field(bootloader_information.cpu_driver_mappings, section_name) = .{
-        .physical = physical_address,
-        .virtual = virtual_address,
-        .size = section_size,
-        .flags = flags,
-    };
+    try minimal_paging.map(physical_address, virtual_address, section_size, flags, page_allocator_interface);
 }
 
 var limine_information = BootloaderInfo.Request{ .revision = 0 };
@@ -445,16 +438,53 @@ pub fn entryPoint() callconv(.C) noreturn {
 }
 
 const Filesystem = extern struct {
+    module_ptr: [*]const File,
+    module_count: usize,
+    index: usize,
+
     fn initialize(context: ?*anyopaque) anyerror!void {
-        _ = context;
-        @panic("TODO: filesystem initialize");
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        const limine_module_response = limine_modules.response.?;
+        filesystem.* = .{
+            .module_ptr = limine_module_response.modules.?.*,
+            .module_count = limine_module_response.module_count,
+            .index = 0,
+        };
+    }
+
+    fn deinitialize(context: ?*anyopaque) anyerror!void {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        filesystem.index = 0;
+    }
+
+    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        if (filesystem.index < filesystem.module_count) {
+            const module = filesystem.module_ptr[filesystem.index];
+            const path = module.path[0..lib.length(module.path)];
+            filesystem.index += 1;
+            return .{
+                .path = path,
+                .size = @intCast(u32, module.size),
+                .type = if (lib.containsAtLeast(u8, path, 1, "cpu")) .cpu_driver else if (lib.containsAtLeast(u8, path, 1, "font")) .font else if (lib.containsAtLeast(u8, path, 1, "init")) .init else @panic("Unexpected file type"),
+            };
+        }
+
+        return null;
     }
 
     fn readFile(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
-        _ = file_buffer;
-        _ = file_path;
-        _ = context;
-        @panic("TODO: readFile");
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        for (filesystem.module_ptr[0..filesystem.module_count]) |module| {
+            const path = module.path[0..lib.length(module.path)];
+            if (lib.equal(u8, file_path, path)) {
+                assert(file_buffer.len >= module.size);
+                lib.copy(u8, file_buffer, @intToPtr([*]const u8, module.address)[0..module.size]);
+                return file_buffer;
+            }
+        }
+
+        @panic("readFile: can't find file with such path");
     }
 
     fn getFileSize(context: ?*anyopaque, file_path: []const u8) anyerror!u32 {
@@ -465,73 +495,156 @@ const Filesystem = extern struct {
 };
 
 const MMap = extern struct {
+    entry_ptr: [*]const MemoryMap.Entry,
+    entry_count: u32,
+    index: u32 = 0,
+
     fn getMemoryMapEntryCount(context: ?*anyopaque) anyerror!u32 {
-        _ = context;
-        @panic("TODO: getMemoryMapEntryCount");
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        return mmap.entry_count;
     }
 
-    fn reset(context: ?*anyopaque) void {
-        _ = context;
-        @panic("TODO: reset");
+    fn initialize(context: ?*anyopaque) anyerror!void {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        const memory_map = limine_memory_map.response.?;
+        const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
+        mmap.* = .{
+            .entry_ptr = memory_map_entries.ptr,
+            .entry_count = @intCast(u32, memory_map_entries.len),
+        };
+    }
+
+    fn deinitialize(context: ?*anyopaque) anyerror!void {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        mmap.index = 0;
     }
 
     fn next(context: ?*anyopaque) anyerror!?bootloader.MemoryMapEntry {
-        _ = context;
-        @panic("TODO: next");
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+
+        if (mmap.index < mmap.entry_count) {
+            const entry = mmap.entry_ptr[mmap.index];
+            mmap.index += 1;
+
+            return .{
+                .region = entry.region,
+                .type = switch (entry.type) {
+                    .usable => .usable,
+                    .framebuffer, .kernel_and_modules, .bootloader_reclaimable, .reserved, .acpi_reclaimable, .acpi_nvs => .reserved,
+                    .bad_memory => @panic("Bad memory"),
+                },
+            };
+        }
+
+        return null;
     }
 };
 
 const FB = extern struct {
     fn initialize(context: ?*anyopaque) anyerror!bootloader.Framebuffer {
         _ = context;
-        @panic("TODO: FB initialize");
+        const framebuffer = &limine_framebuffer.response.?.framebuffers.*[0];
+        return .{
+            .address = framebuffer.address,
+            .pitch = @intCast(u32, framebuffer.pitch),
+            .width = @intCast(u32, framebuffer.width),
+            .height = @intCast(u32, framebuffer.height),
+            .bpp = framebuffer.bpp,
+            .red_mask = .{
+                .shift = framebuffer.red_mask_shift,
+                .size = framebuffer.red_mask_size,
+            },
+            .green_mask = .{
+                .shift = framebuffer.green_mask_shift,
+                .size = framebuffer.green_mask_size,
+            },
+            .blue_mask = .{
+                .shift = framebuffer.blue_mask_shift,
+                .size = framebuffer.blue_mask_size,
+            },
+            .memory_model = framebuffer.memory_model,
+        };
     }
 };
 
+const VirtualAddressSpace = extern struct {};
+
 const VAS = extern struct {
-    fn ensureLoaderIsMapped(minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: privileged.arch.paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
+        _ = bootloader_information;
+        _ = context;
         _ = page_allocator_interface;
         _ = minimal_paging;
-        @panic("TODO: ensureLoaderIsMapped");
+        // const sections = &[_]struct { name: []const u8, flags: Mapping.Flags }{
+        //     .{ .name = "text", .flags = .{ .write = false, .execute = true } },
+        //     .{ .name = "rodata", .flags = .{ .write = false, .execute = false } },
+        //     .{ .name = "data", .flags = .{ .write = true, .execute = false } },
+        // };
+        //
+        // inline for (sections) |section| {
+        //     try mapSection(minimal_paging, page_allocator_interface, section.name, section.flags);
+        // }
     }
-    fn ensureStackIsMapped(minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
-        _ = page_allocator_interface;
-        _ = minimal_paging;
-        @panic("TODO: ensureStackIsMapped");
+
+    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+        _ = context;
+        const rsp = switch (lib.cpu.arch) {
+            .x86_64 => asm volatile (
+                \\mov %rsp, %[result]
+                : [result] "=r" (-> u64),
+            ),
+            .aarch64 => @panic("TODO stack"),
+            else => @compileError("Architecture not supported"),
+        };
+
+        const memory_map = limine_memory_map.response.?;
+        const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
+        for (memory_map_entries) |entry| {
+            if (entry.type == .bootloader_reclaimable) {
+                if (entry.region.address.toHigherHalfVirtualAddress().value() < rsp and entry.region.address.offset(entry.region.size).toHigherHalfVirtualAddress().value() > rsp) {
+                    minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Mapping of bootloader information failed");
+                    break;
+                }
+            }
+        } else @panic("Can't find memory map region for RSP");
     }
 };
 
 pub fn main() !noreturn {
+    log.debug("Limine start", .{});
+    var filesystem: Filesystem = undefined;
+    var memory_map: MMap = undefined;
     const rsdp = @intToPtr(*privileged.ACPI.RSDP.Descriptor1, limine_rsdp.response.?.address);
-    _ = rsdp;
-    // const bootloader_information = try bootloader.Information.initialize(.{
-    //     .context = null,
-    //     .initialize = Filesystem.initialize,
-    //     .read_file = Filesystem.readFile,
-    //     .get_file_size = Filesystem.getFileSize,
-    //     .get_cache_index = null,
-    //     .set_cache_index = null,
-    // }, .{
-    //     .context = null,
-    //     .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
-    //     .reset = MMap.reset,
-    //     .next = MMap.next,
-    // }, .{
-    //     .context = null,
-    //     .initialize = FB.initialize,
-    // }, .{
-    //     .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
-    //     .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
-    // }, rsdp);
-    // _ = bootloader_information;
+    const limine_protocol: bootloader.Protocol = blk: {
+        if (limine_efi_system_table.response != null) break :blk .uefi;
+        if (limine_smbios.response != null) break :blk .bios;
+
+        @panic("undefined protocol");
+    };
+    const bootloader_information = try bootloader.Information.initialize(.{
+        .context = &filesystem,
+        .initialize = Filesystem.initialize,
+        .deinitialize = Filesystem.deinitialize,
+        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .read_file = Filesystem.readFile,
+    }, .{
+        .context = &memory_map,
+        .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
+        .initialize = MMap.initialize,
+        .deinitialize = MMap.deinitialize,
+        .next = MMap.next,
+        .get_host_region = null,
+    }, .{
+        .context = null,
+        .initialize = FB.initialize,
+    }, .{
+        .context = null,
+        .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
+        .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
+    }, rsdp, .limine, limine_protocol);
+    _ = bootloader_information;
     while (true) {}
     // log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
-    // const limine_protocol: bootloader.Protocol = blk: {
-    //     if (limine_efi_system_table.response != null) break :blk .uefi;
-    //     if (limine_smbios.response != null) break :blk .bios;
-    //
-    //     @panic("undefined protocol");
-    // };
     //
     // // TODO: fetch files
     // const module_count = @intCast(u32, limine_modules.response.?.module_count);
@@ -769,33 +882,7 @@ pub fn main() !noreturn {
     // log.debug("Framebuffer: 0x{x}", .{framebuffer_physical_address.value()});
     // minimal_paging.map(framebuffer_physical_address, framebuffer_virtual_address, lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("can't map framebuffer");
     //
-    // const sections = &[_]struct { name: []const u8, flags: Mapping.Flags }{
-    //     .{ .name = "text", .flags = .{ .write = false, .execute = true } },
-    //     .{ .name = "rodata", .flags = .{ .write = false, .execute = false } },
-    //     .{ .name = "data", .flags = .{ .write = true, .execute = false } },
-    // };
-    //
-    // inline for (sections) |section| {
-    //     mapSection(bootloader_information, minimal_paging, section.name, section.flags) catch @panic("Can't map cpu driver section");
-    // }
     // // Hack: map Limine stack to jump properly
-    // const rsp = switch (lib.cpu.arch) {
-    //     .x86_64 => asm volatile (
-    //         \\mov %rsp, %[result]
-    //         : [result] "=r" (-> u64),
-    //     ),
-    //     .aarch64 => @panic("TODO stack"),
-    //     else => @compileError("Architecture not supported"),
-    // };
-    //
-    // for (memory_map_entries) |entry| {
-    //     if (entry.type == .bootloader_reclaimable) {
-    //         if (entry.region.address.toHigherHalfVirtualAddress().value() < rsp and entry.region.address.offset(entry.region.size).toHigherHalfVirtualAddress().value() > rsp) {
-    //             minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Mapping of bootloader information failed");
-    //             break;
-    //         }
-    //     }
-    // } else @panic("Can't find memory map region for RSP");
     //
     // switch (lib.cpu.arch) {
     //     .x86_64 => bootloader.arch.x86_64.jumpToKernel(bootloader_information, minimal_paging),

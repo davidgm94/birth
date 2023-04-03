@@ -86,7 +86,7 @@ pub const Specific = extern struct {
             }
         }
 
-        @panic("Some mapping did not go well");
+        return MapError.no_region_found;
     }
 
     fn mapGeneric(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, page_allocator_interface: PageAllocatorInterface) !void {
@@ -255,6 +255,7 @@ const MapError = error{
     already_present_2mb,
     already_present_1gb,
     validation_failed,
+    no_region_found,
 };
 
 pub const Error = error{

@@ -396,6 +396,13 @@ pub const PhysicalMemoryRegion = extern struct {
         };
     }
 
+    pub inline fn fromSlice(slice: []u8) PMR {
+        return .{
+            .address = PhysicalAddress.new(@ptrToInt(slice.ptr)),
+            .size = slice.len,
+        };
+    }
+
     pub inline fn toIdentityMappedVirtualAddress(physical_memory_region: PMR) VirtualMemoryRegion {
         return .{
             .address = physical_memory_region.address.toIdentityMappedVirtualAddress(),

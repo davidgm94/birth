@@ -613,7 +613,7 @@ const RunSteps = struct {
         try arguments.list.append("-s");
 
         const debugger_process_arguments = switch (common.os) {
-            .linux => .{ "kitty", "gdb", "-x", try getGDBScriptPath(run_steps.configuration) },
+            .linux => .{ "gf2", "-x", try getGDBScriptPath(run_steps.configuration) },
             else => return Error.not_implemented,
         };
 

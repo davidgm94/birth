@@ -123,13 +123,13 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     writer.writeAll("[CPU DRIVER] [PANIC] ") catch unreachable;
     writer.print(format, arguments) catch unreachable;
     writer.writeByte('\n') catch unreachable;
-    privileged.arch.stopCPU();
-
     panic_lock.release();
 
     if (lib.is_test) {
+        log.debug("Exiting from QEMU...", .{});
         privileged.exitFromQEMU(.failure);
     } else {
+        log.debug("Not exiting from QEMU...", .{});
         privileged.arch.stopCPU();
     }
 }
@@ -440,7 +440,7 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
     current_supervisor.?.is_valid = true;
 
     const root_capability_node_slice = capabilityNodeSlice(root_capability_node);
-    Capabilities.new(.l1cnode, (page_allocator.allocate(Capabilities.Size.l2cnode, 0x1000) catch @panic("?WTF")).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, root_capability_node_slice) catch @panic("Cannot create capability root node");
+    Capabilities.new(.l1cnode, (page_allocator.allocate(Capabilities.Size.l2cnode, 0x1000) catch @panic("capability allocation failed")).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, root_capability_node_slice) catch @panic("Cannot create capability root node");
 
     if (bsp) {
         const bsp_kernel_control_block_capability = Capabilities.Capability{
