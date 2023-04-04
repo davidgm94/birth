@@ -37,7 +37,6 @@ pub const Specific = extern struct {
     pub noinline fn map(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags, page_allocator: PageAllocatorInterface) !void {
         const flags = general_flags.toArchitectureSpecific();
         const top_virtual_address = asked_virtual_address.offset(size);
-        log.debug("Mapping 0x{x} -> 0x{x} for 0x{x} bytes", .{ asked_virtual_address.value(), asked_physical_address.value(), size });
 
         inline for (reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_page_index| {
             if (size >= reverse_page_size) {
@@ -213,7 +212,6 @@ pub const Specific = extern struct {
         const masked_cr3 = (@bitCast(u64, specific.cr3) & mask);
         const privileged_or = (@as(u64, @enumToInt(execution_mode)) << 12);
         const new_cr3 = @bitCast(cr3, masked_cr3 | privileged_or);
-        log.debug("Execution mode: {s}. CR3: 0x{x}. Mask: 0x{x}. Masked CR3: 0x{x}. Privileged OR: 0x{x}. New CR3: 0x{x}", .{ @tagName(execution_mode), @bitCast(u64, specific.cr3), mask, masked_cr3, privileged_or, @bitCast(u64, new_cr3) });
         specific.cr3 = new_cr3;
     }
 
@@ -227,11 +225,11 @@ pub const Specific = extern struct {
 
     pub fn copyHigherHalfPrivileged(cpu_specific: Specific, pml4_physical_address: PhysicalAddress) void {
         cpu_specific.copyHigherHalfCommon(pml4_physical_address);
-        const pml4_table = pml4_physical_address.toHigherHalfVirtualAddress().access(*PML4Table);
-        const pml4_entry = pml4_table[0x1ff];
-        const pml4_entry_address = PhysicalAddress.new(unpackAddress(pml4_entry));
-        const pdp_table = pml4_entry_address.toHigherHalfVirtualAddress().access(*PDPTable);
-        log.debug("[PRIVILEGED] PDP [0x1fd]: {}. CR3: 0x{x}", .{ pdp_table[0x1fd], @ptrToInt(pml4_table) });
+        // const pml4_table = pml4_physical_address.toHigherHalfVirtualAddress().access(*PML4Table);
+        // const pml4_entry = pml4_table[0x1ff];
+        // const pml4_entry_address = PhysicalAddress.new(unpackAddress(pml4_entry));
+        // const pdp_table = pml4_entry_address.toHigherHalfVirtualAddress().access(*PDPTable);
+        // log.debug("[PRIVILEGED] PDP [0x1fd]: {}. CR3: 0x{x}", .{ pdp_table[0x1fd], @ptrToInt(pml4_table) });
     }
 
     pub fn copyHigherHalfUser(cpu_specific: Specific, pml4_physical_address: PhysicalAddress, page_allocator: *PageAllocator) !void {
@@ -244,7 +242,6 @@ pub const Specific = extern struct {
         const new_pdp_table_allocation = try page_allocator.allocate(0x1000, 0x1000);
         const new_pdp_table = new_pdp_table_allocation.toHigherHalfVirtualAddress().access(PDPTE);
         lib.copy(PDPTE, new_pdp_table, pdp_table);
-        log.debug("[USER] PDP [0x1fd]: {}. CR3: 0x{x}", .{ pdp_table[0x1fd], @ptrToInt(pml4_table) });
         new_pdp_table[0x1fd] = @bitCast(PDPTE, @as(u64, 0));
     }
 };
@@ -679,7 +676,6 @@ pub const PTable = [512]PTE;
 
 pub fn translateAddress(specific: Specific, virtual_address: VirtualAddress) TranslateError!PhysicalAddress {
     const indices = computeIndices(virtual_address.value());
-    log.debug("Indices: {any}", .{indices});
 
     const pml4_table = getPML4Table(specific.cr3) catch @panic("translateAddress"); //catch privileged.panic("[translateAddress] PML4 access failed when translating 0x{x}", .{virtual_address.value()});
     const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];

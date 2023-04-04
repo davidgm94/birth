@@ -742,8 +742,20 @@ const RunSteps = struct {
             if (arguments.log) |log_configuration| {
                 var log_what = std.ArrayList(u8).init(b.allocator);
 
-                if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
-                if (log_configuration.interrupts) try log_what.appendSlice("int,");
+                if (log_configuration.guest_errors) {
+                    // In CI, only log guest_errors for Linux
+                    if (!ci or common.os == .linux) {
+                        try log_what.appendSlice("guest_errors,");
+                    }
+                }
+
+                if (log_configuration.interrupts) {
+                    // In CI, only log interrupts for Linux
+                    if (!ci or common.os == .linux) {
+                        try log_what.appendSlice("int,");
+                    }
+                }
+
                 if (!ci and log_configuration.assembly) try log_what.appendSlice("in_asm,");
 
                 if (log_what.items.len > 0) {

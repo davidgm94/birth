@@ -960,7 +960,6 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) lib.Syscall.Result
     const options = @bitCast(lib.Syscall.Options, regs.syscall_number);
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
 
-    log.debug("Options general: 0x{x}, {}", .{ @bitCast(u64, options.general), options.general });
     switch (options.general.convention) {
         .rise => {
             const root_capability = &cpu.current_director.?.cspace.capability;
@@ -1161,7 +1160,7 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     assert(cpu.bsp);
 
     const init_director = cpu.spawnInitModule(spawn_state) catch |err| panic("Can't init module: {}", .{err});
-    log.debug("Init director: 0x{x}", .{@ptrToInt(init_director)});
+    //log.debug("Init director: 0x{x}", .{@ptrToInt(init_director)});
 
     init_director.disabled = true;
     const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
@@ -1232,12 +1231,10 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
 
     const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
     const entry_point = init_elf.getEntryPoint();
-    log.debug("Entry point: 0x{x}", .{entry_point});
     const program_headers = init_elf.getProgramHeaders();
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
-            log.debug("Segment: 0x{x}, 0x{x}", .{ program_header.virtual_address, program_header.size_in_memory });
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
             const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
             const segment_physical_address = segment_physical_region.address;
