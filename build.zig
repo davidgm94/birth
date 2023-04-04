@@ -248,6 +248,7 @@ pub fn build(b_arg: *Build) !void {
                         .optimize_mode = optimize_mode,
                         .modules = &.{ .lib, .user },
                     });
+                    user_module.strip = false;
 
                     user_module.setLinkerScriptPath(user_linker_script_path);
 

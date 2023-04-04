@@ -20,7 +20,7 @@ pub inline fn syscall(options: Syscall.Options, arguments: Syscall.Arguments) Sy
           [arg3] "{r10}" (arguments[3]),
           [arg4] "{r8}" (arguments[4]),
           [arg5] "{r9}" (arguments[5]),
-        : "rcx", "rsp", "memory"
+        : "rcx", "r11", "rsp", "memory"
     );
 
     return .{
