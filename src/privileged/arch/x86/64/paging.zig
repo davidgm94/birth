@@ -37,6 +37,21 @@ pub const Specific = extern struct {
     pub noinline fn map(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags, page_allocator: PageAllocatorInterface) !void {
         const flags = general_flags.toArchitectureSpecific();
         const top_virtual_address = asked_virtual_address.offset(size);
+        // if (lib.cpu.arch == .x86_64 and lib.os == .freestanding) {
+        //     const allocator_context = @ptrToInt(page_allocator.context);
+        //     if (allocator_context & 0x0000_8000_0000_0000 != 0) {
+        //         // log.debug("context: 0x{x}", .{@ptrCast(*const u64, &page_allocator.allocate).*});
+        //         assert(@ptrToInt(page_allocator.context) & 0x8000_0000_0000_0000 != 0);
+        //         assert(page_allocator.context != null);
+        //     }
+        //
+        //     const allocator_allocate = @ptrToInt(page_allocator.allocate);
+        //     if (allocator_allocate & 0x0000_8000_0000_0000 != 0) {
+        //         // log.debug("allocate: 0x{x}", .{@ptrCast(*const u64, &page_allocator.context).*});
+        //         assert(@ptrToInt(&page_allocator.allocate) & 0x8000_0000_0000_0000 != 0);
+        //         assert(@ptrToInt(page_allocator.allocate) != 0);
+        //     }
+        // }
 
         inline for (reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_page_index| {
             if (size >= reverse_page_size) {

@@ -220,7 +220,15 @@ pub const VirtualAddressSpace = extern struct {
             return paging.Error.invalid_physical;
         }
 
-        try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, virtual_address_space.getPageAllocatorInterface());
+        const page_allocator_interface = PageAllocatorInterface{
+            .allocate = VirtualAddressSpace.callbackAllocatePages,
+            .context = virtual_address_space,
+            .context_type = .cpu,
+        };
+        // log.debug("Page allocator interface: 0x{x}, 0x{x}", .{ @ptrToInt(page_allocator_interface.allocate), @ptrToInt(page_allocator_interface.context) });
+        // assert(@ptrToInt(page_allocator_interface.allocate) & 0x8000_0000_0000_0000 != 0);
+        // assert(@ptrToInt(page_allocator_interface.context) & 0x8000_0000_0000_0000 != 0);
+        try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, page_allocator_interface);
     }
 
     pub inline fn mapDevice(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, size: u64) !VirtualAddress {
@@ -269,7 +277,8 @@ pub const VirtualAddressSpace = extern struct {
 
         return allocation_result;
     }
-    fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+
+    pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
         return try virtual_address_space.allocatePages(size, alignment);
     }
@@ -307,14 +316,6 @@ pub const VirtualAddressSpace = extern struct {
     pub inline fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) !PhysicalAddress {
         const physical_address = try paging.translateAddress(virtual_address_space.arch, virtual_address);
         return physical_address;
-    }
-
-    pub fn getPageAllocatorInterface(virtual_address_space: *VirtualAddressSpace) PageAllocatorInterface {
-        return .{
-            .allocate = VirtualAddressSpace.callbackAllocatePages,
-            .context = virtual_address_space,
-            .context_type = .cpu,
-        };
     }
 };
 
@@ -495,7 +496,7 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
 
     // TODO @ArchIndependent
     if (bsp) {
-        log.warn("todo: bootloader information", .{});
+        // log.warn("todo: bootloader information", .{});
     }
 
     const kernel_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
@@ -528,7 +529,8 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
     init_dispatcher_data.disabled = true;
     Scheduler.make_runnable(init_dispatcher_data);
 
-    log.warn("todo: args", .{});
+    // TODO:
+    // log.warn("todo: args", .{});
 
     const base_page_cn_cte = Capabilities.locateSlot(spawn_state.cnodes.base_page.?.getNode(), 0);
     try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0], core_id, capabilityNodeSlice(base_page_cn_cte));

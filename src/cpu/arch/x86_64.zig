@@ -137,8 +137,6 @@ pub fn entryPoint() callconv(.Naked) noreturn {
 }
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    log.debug("Hello! Bootloader information address: 0x{x}", .{@ptrToInt(bootloader_information)});
-
     const cpuid = lib.arch.x86_64.cpuid;
     if (pcid) {
         if (cpuid(1).ecx & (1 << 17) == 0) @panic("PCID not available");
@@ -257,16 +255,11 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         : "memory"
     );
 
-    log.debug("Loaded IDT", .{});
-
     // Mask PIC
     privileged.arch.io.write(u8, 0xa1, 0xff);
     privileged.arch.io.write(u8, 0x21, 0xff);
 
-    log.debug("Masked PIC", .{});
-
     asm volatile ("sti" ::: "memory");
-    log.debug("Enabled interrupts", .{});
 
     const ia32_apic_base = IA32_APIC_BASE.read();
     cpu.bsp = ia32_apic_base.bsp;
@@ -286,15 +279,12 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
     // TODO: figure out what this does
     const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
-    log.debug("Syscall mask: 0x{x}", .{syscall_mask});
     IA32_FMASK.write(syscall_mask);
 
     // Enable syscall extensions
     var efer = IA32_EFER.read();
     efer.SCE = true;
     efer.write();
-
-    log.debug("Enabled syscalls", .{});
 
     var my_cr4 = cr4.read();
     my_cr4.operating_system_support_for_fx_save_restore = true;
@@ -303,16 +293,12 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     my_cr4.performance_monitoring_counter_enable = true;
     my_cr4.write();
 
-    log.debug("Set up CR4", .{});
-
     var my_cr0 = cr0.read();
     my_cr0.monitor_coprocessor = true;
     my_cr0.emulation = false;
     my_cr0.numeric_error = true;
     my_cr0.task_switched = false;
     my_cr0.write();
-
-    log.debug("Set up CR0", .{});
 
     asm volatile (
         \\fninit
@@ -321,18 +307,14 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         :: //[mxcsr] "m" (@as(u32, 0x1f80)),
         : "memory");
 
-    log.debug("Enabled FPU", .{});
-
     // TODO: configure PAT
 
     // TODO:
     kernelStartup(bootloader_information);
-    log.debug("Is test: {}", .{lib.is_test});
     bootloader_information.draw_context.clearScreen(0xff005000);
     if (lib.is_test) {
         cpu.test_runner.runAllTests() catch @panic("Tests failed");
     }
-    log.debug("Starting...", .{});
 
     todoEndEntryPoint();
 }
@@ -1207,7 +1189,6 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
-    log.debug("CPU PML4: 0x{x}. User PML4: 0x{x}", .{ cpu_side_pml4_physical_address.value(), user_side_pml4_physical_address.value() });
 
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
@@ -1282,15 +1263,14 @@ pub inline fn nextTimer(ms: u32) void {
 }
 
 pub fn initAPIC() void {
-    log.debug("Initializing APIC", .{});
     var ia32_apic_base = IA32_APIC_BASE.read();
     const apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
-    log.debug("Mapping APIC", .{});
+
+    // log.debug("Mapping APIC. Allocate: 0x{x}. Context: 0x{x}", .{ @ptrToInt(&VirtualAddressSpace.callbackAllocatePages), @ptrToInt(&cpu.address_space) });
     const apic_base = cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
-    log.debug("Mapped APIC", .{});
 
     const spurious_vector: u8 = 0xFF;
     apic_base.offset(@enumToInt(APIC.Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;
@@ -1303,7 +1283,6 @@ pub fn initAPIC() void {
 
     ia32_apic_base.global_enable = true;
     ia32_apic_base.write();
-    log.debug("APIC enabled", .{});
 
     ticks_per_ms = APIC.calibrateTimer();
 

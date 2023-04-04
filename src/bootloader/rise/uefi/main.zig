@@ -267,7 +267,6 @@ const MMap = extern struct {
                 },
             };
 
-            log.debug("Result: 0x{x}, 0x{x}, {s}", .{ result.region.address.value(), result.region.size, @tagName(entry.type) });
             return result;
         }
 
@@ -453,33 +452,6 @@ pub fn main() noreturn {
     _ = bootloader_information;
 
     while (true) {}
-
-    // // Map the trampoline code (part of the UEFI executable).
-    // // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
-    // log.debug("Mapping trampoline code...", .{});
-    // switch (lib.cpu.arch) {
-    //     .x86_64 => {
-    //         const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
-    //
-    //         memory_map.reset();
-    //         while (memory_map.next()) |entry| {
-    //             const entry_size = entry.number_of_pages * UEFI.page_size;
-    //             if (entry.physical_start < trampoline_code_start and trampoline_code_start < entry.physical_start + entry_size) {
-    //                 log.debug("Entry: 0x{x}-0x{x}", .{ entry.physical_start, entry.physical_start + entry.number_of_pages * UEFI.page_size });
-    //
-    //                 const code_physical_region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry_size);
-    //                 const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-    //                 minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
-    //                 break;
-    //             }
-    //         }
-    //     },
-    //     .aarch64, .riscv64 => @panic("TODO map trampoline"),
-    //     else => @compileError("Architecture not supported"),
-    // }
-    //
-    // Map the bootloader information
-    //
 }
 
 pub fn file_to_higher_half(file: []const u8) []const u8 {

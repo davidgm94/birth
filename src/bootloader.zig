@@ -331,13 +331,11 @@ pub const Information = extern struct {
                 try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
             }
         }
-        lib.log.debug("Mapped usable memory", .{});
 
         try minimal_paging.map(host_entry_region.address, host_entry_region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface);
 
         try virtual_address_space.ensure_loader_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface, bootloader_information);
 
-        lib.log.debug("{s} bootloader framebuffer: 0x{x}", .{ @tagName(bootloader_information.bootloader), bootloader_information.framebuffer.address });
         const framebuffer_physical_address = PhysicalAddress.new(if (bootloader_information.bootloader == .limine) bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address else bootloader_information.framebuffer.address);
         try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
         bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
@@ -737,7 +735,6 @@ pub const Information = extern struct {
 
     pub fn fetchFileByType(bootloader_information: *Information, file_type: File.Type) ?[]const u8 {
         const files = bootloader_information.getFiles();
-        lib.log.debug("File count: {}", .{files.len});
         for (files) |file_descriptor| {
             if (file_descriptor.type == file_type) {
                 return file_descriptor.getContent(bootloader_information);

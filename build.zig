@@ -614,7 +614,7 @@ const RunSteps = struct {
         try arguments.list.append("-s");
 
         const debugger_process_arguments = switch (common.os) {
-            .linux => .{ "gf2", "-x", try getGDBScriptPath(run_steps.configuration) },
+            .linux => .{ "kitty", "gdb", "-x", try getGDBScriptPath(run_steps.configuration) },
             else => return Error.not_implemented,
         };
 
@@ -639,6 +639,7 @@ const RunSteps = struct {
 
         try gdb_script_buffer.appendSlice(try std.mem.concat(b.allocator, u8, &.{ "symbol-file zig-cache/cpu_driver_", try Suffix.cpu_driver.fromConfiguration(b.allocator, run_steps.configuration, null), "\n" }));
         try gdb_script_buffer.appendSlice("target remote localhost:1234\n");
+        try gdb_script_buffer.appendSlice("layout split\n");
 
         const base_gdb_script = try std.fs.cwd().readFileAlloc(b.allocator, "config/gdb_script", common.maxInt(usize));
         try gdb_script_buffer.appendSlice(base_gdb_script);
