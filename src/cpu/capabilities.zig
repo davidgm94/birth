@@ -17,14 +17,17 @@ const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 
+pub const Address = lib.Capabilities.Address;
+pub const Slot = lib.Capabilities.Slot;
+
 extern var core_id: u8;
 
 pub const Rights = packed struct(u8) {
-    read: bool,
-    write: bool,
-    execute: bool,
-    grant: bool,
-    identify: bool,
+    read: bool = false,
+    write: bool = false,
+    execute: bool = false,
+    grant: bool = false,
+    identify: bool = false,
     reserved: u3 = 0,
 
     pub const all = Rights{
@@ -40,26 +43,26 @@ pub const Capability = extern struct {
     object: extern union {
         null: void align(1),
         physical_address: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
             bytes: usize align(1),
             pasid: PassId align(1),
         } align(1),
         ram: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
             bytes: usize align(1),
             pasid: PassId align(1),
         } align(1),
         l1cnode: extern struct {
-            cnode: PhysicalAddress(.local) align(1),
+            cnode: PhysicalAddress align(1),
             rights: Rights align(1),
             allocated_bytes: usize align(1),
         } align(1),
         l2cnode: extern struct {
-            cnode: PhysicalAddress(.local) align(1),
+            cnode: PhysicalAddress align(1),
             rights: Rights align(1),
         } align(1),
         fcnode: extern struct {
-            cnode: PhysicalAddress(.global),
+            cnode: PhysicalAddress,
             rights: Rights align(1),
             core_id: CoreId align(1),
             guard_size: u8 align(1),
@@ -70,12 +73,12 @@ pub const Capability = extern struct {
         } align(1),
         end_point_lmp: extern struct {
             listener: *CoreDirectorData align(1),
-            epoffset: VirtualAddress(.local) align(1),
+            epoffset: VirtualAddress align(1),
             epbufflen: u32 align(1),
             iftype: u16 align(1),
         } align(1),
         frame: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
             bytes: usize align(1),
             pasid: PassId align(1),
         } align(1),
@@ -86,7 +89,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         end_point_ump: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
             bytes: usize align(1),
             pasid: PassId align(1),
             iftype: u16 align(1),
@@ -98,7 +101,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         device_frame: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
             bytes: usize align(1),
             pasid: PassId align(1),
         } align(1),
@@ -110,7 +113,7 @@ pub const Capability = extern struct {
         } align(1),
         kernel: void align(1),
         vnode_x86_64_pml5: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_pml5_mapping: extern struct {
             capability: *Capability align(1),
@@ -119,7 +122,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_pml4: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_pml4_mapping: extern struct {
             capability: *Capability align(1),
@@ -128,7 +131,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_pdpt: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_pdpt_mapping: extern struct {
             capability: *Capability align(1),
@@ -137,7 +140,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_pdir: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_pdir_mapping: extern struct {
             capability: *Capability align(1),
@@ -146,7 +149,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_ptable: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_ptable_mapping: extern struct {
             capability: *Capability align(1),
@@ -155,7 +158,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_ept_pml4: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_ept_pml4_mapping: extern struct {
             capability: *Capability align(1),
@@ -164,7 +167,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_ept_pdpt: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_ept_pdpt_mapping: extern struct {
             capability: *Capability align(1),
@@ -173,7 +176,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_ept_pdir: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_ept_pdir_mapping: extern struct {
             capability: *Capability align(1),
@@ -182,7 +185,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_64_ept_ptable: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_64_ept_ptable_mapping: extern struct {
             capability: *Capability align(1),
@@ -191,7 +194,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_vtd_root_table: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_vtd_root_table_mapping: extern struct {
             capability: *Capability align(1),
@@ -200,7 +203,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_vtd_context_table: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_vtd_context_table_mapping: extern struct {
             capability: *Capability align(1),
@@ -209,7 +212,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_32_pdpt: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_32_pdpt_mapping: extern struct {
             capability: *Capability align(1),
@@ -218,7 +221,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_32_pdir: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_32_pdir_mapping: extern struct {
             capability: *Capability align(1),
@@ -227,7 +230,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_x86_32_ptable: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_x86_32_ptable_mapping: extern struct {
             capability: *Capability align(1),
@@ -236,7 +239,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_arm_l1: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_arm_l1_mapping: extern struct {
             capability: *Capability align(1),
@@ -245,7 +248,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_arm_l2: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_arm_l2_mapping: extern struct {
             capability: *Capability align(1),
@@ -254,7 +257,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_aarch64_l0: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_aarch64_l0_mapping: extern struct {
             capability: *Capability align(1),
@@ -263,7 +266,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_aarch64_l1: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_aarch64_l1_mapping: extern struct {
             capability: *Capability align(1),
@@ -272,7 +275,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_aarch64_l2: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_aarch64_l2_mapping: extern struct {
             capability: *Capability align(1),
@@ -281,7 +284,7 @@ pub const Capability = extern struct {
             pte_count: u16 align(1),
         } align(1),
         vnode_aarch64_l3: extern struct {
-            base: PhysicalAddress(.global) align(1),
+            base: PhysicalAddress align(1),
         } align(1),
         vnode_aarch64_l3_mapping: extern struct {
             capability: *Capability align(1),
@@ -331,25 +334,26 @@ pub const Capability = extern struct {
     type: Type align(1),
     rights: Rights align(1),
 
-    pub fn get_address(capability: Capability) PhysicalAddress(.global) {
+    pub fn getAddress(capability: Capability) PhysicalAddress {
         switch (capability.type) {
             // TODO: returning global for a local makes no sense here?
-            .l1cnode => return capability.object.l1cnode.cnode.toGlobal(),
-            .l2cnode => return capability.object.l2cnode.cnode.toGlobal(),
-            .dispatcher => return VirtualAddress(.global).new(@ptrToInt(capability.object.dispatcher.current)).toPhysicalAddress(),
+            .l1cnode => return capability.object.l1cnode.cnode,
+            .l2cnode => return capability.object.l2cnode.cnode,
+            .dispatcher => return PhysicalAddress.new(@ptrToInt(capability.object.dispatcher.current) - lib.config.cpu_driver_higher_half_address),
             .frame => return capability.object.frame.base,
             .kernel,
             .performance_monitor,
             .irq_table,
             .ipi,
             .process_manager,
-            => return .null,
+            .io,
+            => return PhysicalAddress.maybeInvalid(0),
             .ram => return capability.object.ram.base,
-            else => panic("get_address: {s}", .{@tagName(capability.type)}),
+            else => panic("getAddress: {s}", .{@tagName(capability.type)}),
         }
     }
 
-    pub fn get_size(capability: Capability) usize {
+    pub fn getSize(capability: Capability) usize {
         switch (capability.type) {
             .l1cnode => return capability.object.l1cnode.allocated_bytes,
             .l2cnode => return 16384,
@@ -360,9 +364,10 @@ pub const Capability = extern struct {
             .irq_table,
             .ipi,
             .process_manager,
+            .io,
             => return 0,
             .ram => return capability.object.ram.bytes,
-            else => panic("get_size: {s}", .{@tagName(capability.type)}),
+            else => panic("getSize: {s}", .{@tagName(capability.type)}),
         }
     }
 
@@ -377,8 +382,8 @@ pub const Capability = extern struct {
             }
         }
 
-        const address_a = a.get_address().value();
-        const address_b = b.get_address().value();
+        const address_a = a.getAddress().value();
+        const address_b = b.getAddress().value();
         if (address_a != address_b) {
             if (address_a < address_b) {
                 return -1;
@@ -387,8 +392,8 @@ pub const Capability = extern struct {
             }
         }
 
-        const size_a = a.get_size();
-        const size_b = b.get_size();
+        const size_a = a.getSize();
+        const size_b = b.getSize();
         if (size_a != size_b) {
             if (size_a < size_b) {
                 return -1;
@@ -420,7 +425,77 @@ pub const Capability = extern struct {
 
         return 0;
     }
+
+    pub fn lookupCapability(capability: *Capability, cptr: lib.Capabilities.Address, level: u16, rights: Rights) !*Capability {
+        const cte = try capability.lookupSlot(cptr, level, rights);
+        return &cte.capability;
+    }
+
+    pub fn lookupSlot(capability: *Capability, cptr: lib.Capabilities.Address, level: u16, rights: Rights) !*CTE {
+        const l1_index = @intCast(u16, (cptr >> l2_cnode_bits) & comptime mask(@bitSizeOf(Address) - l2_cnode_bits));
+        const l2_index = @intCast(u16, cptr & comptime mask(l2_cnode_bits));
+        log.debug("CPTR: 0x{x}. Level: 0x{x}. L1: {}. L2: {}", .{ cptr, level, l1_index, l2_index });
+
+        if (level > 2) {
+            @panic("level > 2");
+        }
+
+        if (level == 0) {
+            @panic("unexpected");
+        }
+
+        if (capability.type != .l1cnode) {
+            @panic("unexpected != l1cnode");
+        }
+
+        if (l1_index >= capability.getSlots()) {
+            @panic("getSlots");
+        }
+
+        const right_mask = @bitCast(u8, rights);
+        if (@bitCast(u8, capability.rights) & right_mask != right_mask) {
+            @panic("rights");
+        }
+
+        const l2cnode = locateSlot(capability.getAddress(), l1_index);
+
+        log.debug("Level: {}", .{level});
+        if (level == 1) {
+            @panic("TODO: level 1");
+        }
+
+        switch (l2cnode.capability.type) {
+            .null => @panic("TODO: null"),
+            .l2cnode => {
+                assert(l2_index < l2_cnode_slots);
+
+                if (@bitCast(u8, l2cnode.capability.rights) & right_mask != right_mask) {
+                    @panic("rights l2cnode");
+                }
+
+                const cte = locateSlot(l2cnode.capability.getAddress(), l2_index);
+                if (cte.capability.type == .null) {
+                    @panic("cte null");
+                }
+
+                return cte;
+            },
+            else => @panic("TODO: else"),
+        }
+    }
+
+    inline fn getSlots(capability: *Capability) usize {
+        return switch (capability.type) {
+            .l1cnode => @divExact(capability.object.l1cnode.allocated_bytes, 1 << objbits_cte),
+            .l2cnode => l2_cnode_slots,
+            else => unreachable,
+        };
+    }
 };
+
+fn mask(comptime n: comptime_int) u64 {
+    return (1 << n) - 1;
+}
 
 pub const Type = enum(u8) {
     null = 0,
@@ -831,14 +906,15 @@ pub const CTE = extern struct {
             alignForward(@sizeOf(Capability), 8)
     ]u8,
 
-    pub fn get_cnode(cte: *CTE) PhysicalAddress(.global) {
-        return cte.capability.get_address();
+    pub fn getNode(cte: *CTE) PhysicalAddress {
+        return cte.capability.getAddress();
     }
 
     const Error = error{
         dest_type_invalid,
         cap_not_found,
     };
+
     pub fn copy_to_cnode(source: *const CTE, destiny: *CTE, destiny_slot: Slot, mint: bool, param1: usize, param2: usize) !void {
         assert(destiny.capability.type == .l1cnode or destiny.capability.type == .l2cnode);
 
@@ -846,7 +922,7 @@ pub const CTE = extern struct {
             return Error.dest_type_invalid;
         }
 
-        const dst = locate_slot(destiny.capability.get_address().to_local(), destiny_slot);
+        const dst = locateSlot(destiny.capability.getAddress(), destiny_slot);
         try source.copy_to_cte(dst, mint, param1, param2);
     }
 
@@ -926,25 +1002,25 @@ const DeleteList = extern struct {
 };
 
 comptime {
-    const total_size = alignForward(@sizeOf(Capability), 8) + alignForward(@sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
-    assert(total_size <= (1 << objbits_cte));
+    // const total_size = alignForward(@sizeOf(Capability), 8) + alignForward(@sizeOf(MappingDatabase.Node), 8) + @sizeOf(DeleteList);
+    // assert(total_size <= (1 << objbits_cte));
 }
 
-pub fn new(capability_type: Type, address: PhysicalAddress(.local), bytes: usize, object_size: usize, owner: CoreId, capabilities: [*]CTE) !void {
+pub fn new(capability_type: Type, address: PhysicalAddress, bytes: usize, object_size: usize, owner: CoreId, capabilities: [*]CTE) !void {
     assert(capability_type != .end_point_lmp);
 
-    assert(check_arguments(capability_type, bytes, object_size, false));
-    assert(address == .null or check_arguments(capability_type, bytes, object_size, true));
+    assert(checkArguments(capability_type, bytes, object_size, false));
+    assert(@enumToInt(address) == 0 or checkArguments(capability_type, bytes, object_size, true));
 
     const object_count = capability_type.get_max_object_count(bytes, object_size);
     assert(object_count > 0);
 
     try create(capability_type, address, bytes, object_size, object_count, owner, capabilities);
 
-    MappingDatabase.set_init_mapping(capabilities[0..object_count]);
+    MappingDatabase.setInitMapping(capabilities[0..object_count]);
 }
 
-fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_size: u64, count: usize) !void {
+fn zerObjects(capability_type: Type, address: PhysicalAddress, object_size: u64, count: usize) !void {
     const virtual_address = address.toHigherHalfVirtualAddress();
 
     switch (capability_type) {
@@ -991,14 +1067,13 @@ fn zero_objects(capability_type: Type, address: PhysicalAddress(.local), object_
     }
 }
 
-fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, object_size: u64, count: usize, owner: CoreId, cte_ptr: [*]CTE) !void {
+fn create(capability_type: Type, address: PhysicalAddress, size: u64, object_size: u64, count: usize, owner: CoreId, cte_ptr: [*]CTE) !void {
     assert(capability_type != .null);
     assert(!capability_type.is_mapping());
-    const global_physical_address = address.toGlobal();
     const global_address = address.toHigherHalfVirtualAddress();
 
     if (owner == core_id) {
-        try zero_objects(capability_type, address, object_size, count);
+        try zerObjects(capability_type, address, object_size, count);
     }
 
     const ctes = cte_ptr[0..count];
@@ -1057,7 +1132,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                 cte.capability = .{
                     .object = .{
                         .frame = .{
-                            .base = global_physical_address.offset(i * object_size),
+                            .base = address.offset(i * object_size),
                             .bytes = object_size,
                             .pasid = 0,
                         },
@@ -1066,7 +1141,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                     .type = capability_type,
                 };
 
-                assert(cte.capability.get_size() & base_page_mask == 0);
+                assert(cte.capability.getSize() & base_page_mask == 0);
             }
         },
         .kernel,
@@ -1080,7 +1155,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
         .device_id,
         .device_id_manager,
         => {
-            assert(address == .null);
+            assert(address.value() == 0);
             assert(size == 0);
             assert(object_size == 0);
             assert(count == 1);
@@ -1095,7 +1170,7 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                 cte.capability = .{
                     .object = .{
                         .frame = .{
-                            .base = global_physical_address.offset(i * object_size),
+                            .base = address.offset(i * object_size),
                             .bytes = object_size,
                             .pasid = 0,
                         },
@@ -1104,6 +1179,19 @@ fn create(capability_type: Type, address: PhysicalAddress(.local), size: u64, ob
                     .type = capability_type,
                 };
             }
+        },
+        .io => {
+            assert(ctes.len == 1);
+            ctes[0].capability = .{
+                .object = .{
+                    .io = .{
+                        .start = 0,
+                        .end = lib.maxInt(u16),
+                    },
+                },
+                .rights = Rights.all,
+                .type = capability_type,
+            };
         },
         else => panic("create: {s}", .{@tagName(capability_type)}),
     }
@@ -1120,7 +1208,7 @@ const early_cnode_allocated_bits = l2_cnode_bits - 2;
 pub const early_cnode_allocated_slots = 1 << early_cnode_allocated_bits;
 const base_page_mask = page_mask(valid_page_sizes[0]);
 
-pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
+pub fn checkArguments(capability_type: Type, bytes: usize, object_size: usize, exact: bool) bool {
     const base_mask = if (capability_type.is_vnode()) capability_type.vnode_objsize() - 1 else base_page_mask;
 
     if (capability_type.is_mappable()) {
@@ -1147,14 +1235,11 @@ pub fn check_arguments(capability_type: Type, bytes: usize, object_size: usize, 
     @panic("todo: capabilities check arguments");
 }
 
-pub const Address = u32;
-pub const Slot = Address;
-
 pub const dispatcher_frame_size = 1 << 19;
 pub const args_bits = 17;
 pub const args_size = 1 << args_bits;
 
-pub fn locate_slot(cnode: PhysicalAddress(.local), offset: Slot) *CTE {
+pub fn locateSlot(cnode: PhysicalAddress, offset: Slot) *CTE {
     const total_offset = (1 << objbits_cte) * offset;
     return cnode.toHigherHalfVirtualAddress().offset(total_offset).access(*CTE);
 }

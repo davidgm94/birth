@@ -35,11 +35,13 @@ const user_code_selector = @offsetOf(GDT, "user_code_64") | user_dpl;
 const user_data_selector = @offsetOf(GDT, "user_data_64") | user_dpl;
 
 const cpu = @import("cpu");
+const Heap = cpu.Heap;
 const VirtualAddressSpace = cpu.VirtualAddressSpace;
 
 pub const kpti = true;
 pub const pcid = false;
 pub const smap = false;
+pub const invariant_tsc = false;
 
 export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
 export var gdt = GDT{};
@@ -52,8 +54,6 @@ pub const capability_address_space_start = capability_address_space_stack_top - 
 pub const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
 pub const capability_address_space_stack_size = 0x1000;
 pub const capability_address_space_stack_address = capability_address_space_stack_top - capability_address_space_stack_size;
-
-var bsp = false;
 
 pub const GDT = extern struct {
     null: Entry = GDT.Entry.null_entry, // 0x00
@@ -121,8 +121,10 @@ const interrupt_descriptions: lib.AutoEnumArray(Interrupt, []const u8) = undefin
 
 pub fn entryPoint() callconv(.Naked) noreturn {
     asm volatile (
-        \\lea stack(%%rip), %%rsp
-        \\add %[stack_len], %%rsp
+        \\lea stack(%rip), %rsp
+        \\add %[stack_len], %rsp
+        \\pushq $0
+        \\mov %rsp, %rbp
         \\jmp *%[entry_point]
         \\cli
         \\hlt
@@ -142,8 +144,8 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         if (cpuid(1).ecx & (1 << 17) == 0) @panic("PCID not available");
     }
 
-    {
-        // if (cpuid(0x80000007).edx & (1 << 8) == 0) @panic("Invariant TSC not available");
+    if (invariant_tsc) {
+        if (cpuid(0x80000007).edx & (1 << 8) == 0) @panic("Invariant TSC not available");
     }
 
     // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
@@ -161,7 +163,6 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
 
     // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
     // TODO: figure out the best way to create page allocators for the APP cores
-    cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
 
     cpu.address_space = .{
         .arch = .{
@@ -181,15 +182,15 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     };
     asm volatile (
         \\lgdt %[gdt]
-        \\mov %[ds], %%rax
-        \\movq %%rax, %%ds
-        \\movq %%rax, %%es
-        \\movq %%rax, %%fs
-        \\movq %%rax, %%gs
-        \\movq %%rax, %%ss
+        \\mov %[ds], %rax
+        \\movq %rax, %ds
+        \\movq %rax, %es
+        \\movq %rax, %fs
+        \\movq %rax, %gs
+        \\movq %rax, %ss
         \\pushq %[cs]
-        \\lea 1f(%%rip), %%rax
-        \\pushq %%rax
+        \\lea 1f(%rip), %rax
+        \\pushq %rax
         \\lretq
         \\1:
         :
@@ -268,9 +269,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     log.debug("Enabled interrupts", .{});
 
     const ia32_apic_base = IA32_APIC_BASE.read();
-    bsp = ia32_apic_base.bsp;
-
-    initAPIC();
+    cpu.bsp = ia32_apic_base.bsp;
 
     const star = IA32_STAR{
         .kernel_cs = code_64,
@@ -367,11 +366,17 @@ pub const IDT = extern struct {
     pub const entry_count = 256;
 };
 
+pub const dispatch_count = IDT.entry_count;
+
 export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
-    _ = interrupt_number;
     _ = regs;
-    APIC.lapicWrite(.eoi, 0);
-    nextTimer(10);
+    switch (interrupt_number) {
+        local_timer_vector => {
+            APIC.lapicWrite(.eoi, 0);
+            nextTimer(10);
+        },
+        else => panic("Fault: 0x{x}", .{interrupt_number}),
+    }
 }
 
 pub const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
@@ -749,12 +754,12 @@ pub export fn syscallEntryPoint() callconv(.Naked) void {
     asm volatile (
         \\endbr64
         \\swapgs
-        \\movq %%rsp, user_stack(%%rip)
+        \\movq %rsp, user_stack(%rip)
     );
 
     if (kpti) {
         asm volatile (
-            \\mov %%cr3, %%rsp
+            \\mov %cr3, %rsp
             ::: "memory");
 
         if (pcid) {
@@ -851,9 +856,11 @@ pub export fn syscallEntryPoint() callconv(.Naked) void {
         \\popq %r10
         \\popq %r9
         \\popq %r8
-        \\popq %rax
         \\popq %rcx
-        \\popq %rdx
+        // RAX
+        \\popq %rcx
+        // RDX
+        \\popq %rsi 
         \\popq %rsi
         \\popq %rdi
         ::: "memory");
@@ -879,7 +886,7 @@ pub export fn syscallEntryPoint() callconv(.Naked) void {
 
     // Restore RSP
     asm volatile (
-        \\mov user_stack(%%rip), %rsp
+        \\mov user_stack(%rip), %rsp
         ::: "memory");
 
     asm volatile (
@@ -918,9 +925,29 @@ const SyscallRegisters = extern struct {
     ss: u64,
 };
 
+inline fn ok(result: struct {
+    value: u64,
+    another_value: u32 = 0,
+    another_more_value: u8 = 0,
+    flags: u7 = 0,
+}) lib.Syscall.Result {
+    return .{
+        .rise = .{
+            .first = .{
+                .padding1 = result.another_value,
+                .@"error" = 0,
+                .padding2 = result.another_more_value,
+                .padding3 = result.flags,
+                .convention = .rise,
+            },
+            .second = result.value,
+        },
+    };
+}
+
 /// SYSCALL documentation
 /// ABI:
-/// - RAX: System call number
+/// - RAX: System call options (number for Linux)
 /// - RCX: Return address
 /// - R11: Saved rflags
 /// - RDI: argument 0
@@ -929,36 +956,56 @@ const SyscallRegisters = extern struct {
 /// - R10: argument 3
 /// - R8:  argument 4
 /// - R9:  argument 5
-export fn syscall(regs: *const SyscallRegisters) callconv(.C) void {
-    const syscall_arguments = lib.Syscall.Arguments{
-        .number = @bitCast(lib.Syscall.Number, regs.syscall_number),
-        .arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 },
-    };
+export fn syscall(regs: *const SyscallRegisters) callconv(.C) lib.Syscall.Result {
+    const options = @bitCast(lib.Syscall.Options, regs.syscall_number);
+    const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
 
-    switch (syscall_arguments.number.convention) {
-        .rise => riseSyscall(@intToEnum(lib.Syscall.Rise, syscall_arguments.number.number), syscall_arguments.arguments),
+    log.debug("Options general: 0x{x}, {}", .{ @bitCast(u64, options.general), options.general });
+    switch (options.general.convention) {
+        .rise => {
+            const root_capability = &cpu.current_director.?.cspace.capability;
+            const to = root_capability.lookupCapability(options.rise.address, options.rise.slot, .{ .read = true }) catch @panic("root_capability error");
+            switch (to.type) {
+                .kernel => {
+                    const kernel_invocation = lib.intToEnum(lib.Capabilities.Command.Kernel, options.rise.invocation) catch @panic("invocation");
+                    switch (kernel_invocation) {
+                        .get_core_id => {
+                            return ok(.{
+                                .value = cpu.core_id,
+                            });
+                        },
+                        else => panic("Not implemented yet: {s}", .{@tagName(kernel_invocation)}),
+                    }
+                },
+                .io => {
+                    const io_invocation = lib.intToEnum(lib.Capabilities.Command.IO, options.rise.invocation) catch @panic("invocation");
+                    switch (io_invocation) {
+                        .log_message => {
+                            writerStart();
+                            const message_ptr = @intToPtr(?[*]u8, arguments[0]) orelse @panic("Null message ptr");
+                            const message_len = arguments[1];
+                            if (message_len == 0) @panic("Message len 0");
+                            const message = message_ptr[0..message_len];
+                            writer.writeAll(message) catch unreachable;
+                            writerEnd();
+
+                            // return ok(.{
+                            //     .value = 0,
+                            // });
+                            // TODO: replace this with proper content
+                            privileged.exitFromQEMU(.success);
+                        },
+                        else => panic("Not implemented yet: {s}", .{@tagName(io_invocation)}),
+                    }
+                },
+                else => panic("To type: {}", .{to.type}),
+            }
+        },
         .linux => @panic("TODO: linux syscall"),
     }
-
-    log.debug("Received syscall: {}", .{syscall_arguments});
 }
 
-inline fn riseSyscall(number: lib.Syscall.Rise, arguments: [6]u64) void {
-    switch (number) {
-        .qemu_exit => {
-            const exit_code = @intToEnum(lib.QEMU.ExitCode, arguments[0]);
-            log.debug("Exiting QEMU with {s} code", .{@tagName(exit_code)});
-            privileged.exitFromQEMU(exit_code);
-        },
-        .print => {
-            const message = @intToPtr([*]const u8, arguments[0])[0..arguments[1]];
-            writerStart();
-            writer.writeAll(message) catch unreachable;
-            writerEnd();
-        },
-        //else => panic("Unknown syscall: {s}", .{@tagName(number)}),
-    }
-}
+fn getCoreId() void {}
 
 const pcid_bit = 11;
 const pcid_mask = 1 << pcid_bit;
@@ -966,8 +1013,15 @@ const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
 const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
 
 fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
-    const init_director = switch (bsp) {
-        true => dispatch(spawnBSPInit(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"))),
+    const init_director = switch (cpu.bsp) {
+        true => {
+            cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
+            cpu.heap_allocator = Heap.fromPageAllocator(&cpu.page_allocator) catch @panic("Core heap initialization failed");
+            cpu.current_supervisor = cpu.heap_allocator.create(cpu.CoreSupervisorData) catch @panic("Core supervisor allocation failed");
+            initAPIC();
+            const init_module = spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
+            dispatch(init_module);
+        },
         false => @panic("APP"),
     };
     _ = init_director;
@@ -975,11 +1029,12 @@ fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
     @panic("TODO: kernel startup");
 }
 
-var current_director: ?*CoreDirectorData = null;
+var current_director: ?*cpu.CoreDirectorData = null;
 
-fn dispatch(director: *CoreDirectorData) noreturn {
+fn dispatch(director: *cpu.CoreDirectorData) noreturn {
     switch (director.disabled) {
         true => {
+            cpu.current_director = director;
             // log.debug("FXRSTOR: 0x{x}", .{@ptrToInt(&director.shared.getDisabledSaveArea().fxsave_area)});
             resumeExecution(director.shared.getDisabledSaveArea());
         },
@@ -988,6 +1043,18 @@ fn dispatch(director: *CoreDirectorData) noreturn {
         },
     }
 }
+
+pub const CoreDirectorShared = extern struct {
+    base: cpu.CoreDirectorSharedGeneric,
+    crit_pc_low: VirtualAddress,
+    crit_pc_high: VirtualAddress,
+    ldt_base: VirtualAddress,
+    ldt_page_count: usize,
+
+    enabled_save_area: Registers,
+    disabled_save_area: Registers,
+    trap_save_area: Registers,
+};
 
 noinline fn resumeExecution(state: *align(16) Registers) noreturn {
     const regs = state;
@@ -998,25 +1065,25 @@ noinline fn resumeExecution(state: *align(16) Registers) noreturn {
         \\pushq %[cs]
         \\pushq 16*8(%[registers])
         \\fxrstor %[fxsave_area]
-        \\mov %[fs], %%fs
-        \\mov %[gs], %%gs
-        \\mov 17*8(%[registers]), %%rax
-        \\mov %%rax, %%cr3
-        \\mov 0*8(%[registers]), %%rax
-        \\mov 2*8(%[registers]), %%rcx
-        \\mov 3*8(%[registers]), %%rdx
-        \\mov 4*8(%[registers]), %%rsi
-        \\mov 5*8(%[registers]), %%rdi
-        \\mov 6*8(%[registers]), %%rbp
-        \\mov 8*8(%[registers]), %%r8
-        \\mov 9*8(%[registers]), %%r9
-        \\mov 10*8(%[registers]), %%r10
-        \\mov 11*8(%[registers]), %%r11
-        \\mov 12*8(%[registers]), %%r12
-        \\mov 13*8(%[registers]), %%r13
-        \\mov 14*8(%[registers]), %%r14
-        \\mov 15*8(%[registers]), %%r15
-        \\mov 1*8(%[registers]), %%rbx
+        \\mov %[fs], %fs
+        \\mov %[gs], %gs
+        \\mov 17*8(%[registers]), %rax
+        \\mov %rax, %cr3
+        \\mov 0*8(%[registers]), %rax
+        \\mov 2*8(%[registers]), %rcx
+        \\mov 3*8(%[registers]), %rdx
+        \\mov 4*8(%[registers]), %rsi
+        \\mov 5*8(%[registers]), %rdi
+        \\mov 6*8(%[registers]), %rbp
+        \\mov 8*8(%[registers]), %r8
+        \\mov 9*8(%[registers]), %r9
+        \\mov 10*8(%[registers]), %r10
+        \\mov 11*8(%[registers]), %r11
+        \\mov 12*8(%[registers]), %r12
+        \\mov 13*8(%[registers]), %r13
+        \\mov 14*8(%[registers]), %r14
+        \\mov 15*8(%[registers]), %r15
+        \\mov 1*8(%[registers]), %rbx
         \\iretq
         :
         : [rsp] "{rsp}" (@ptrToInt(&interrupt_stack) + interrupt_stack.len),
@@ -1031,70 +1098,6 @@ noinline fn resumeExecution(state: *align(16) Registers) noreturn {
 
     while (true) {}
 }
-
-pub const CoreDirectorData = extern struct {
-    shared: *CoreDirectorSharedGeneric,
-    disabled: bool,
-    //cspace: CTE,
-    virtual_address_space: ?*VirtualAddressSpace,
-    //dispatcher_cte: CTE,
-    faults_taken: u32,
-    is_vm_guest: bool,
-    // TODO: guest desc
-    domain_id: u64,
-    // TODO: wakeup time
-    wakeup_previous: ?*CoreDirectorData,
-    wakeup_next: ?*CoreDirectorData,
-    next: ?*CoreDirectorData,
-    previous: ?*CoreDirectorData,
-
-    // pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
-    //     if (core_director_data.virtual_address_space) |virtual_address_space| {
-    //         if (!virtual_address_space.options.mapped_page_tables) @panic("Page tables are not mapped before context switching");
-    //         privileged.arch.paging.contextSwitch(virtual_address_space);
-    //         context_switch_counter += 1;
-    //     } else {
-    //         @panic("VAS null");
-    //     }
-    //     // TODO: implement LDT
-    // }
-    //
-    var context_switch_counter: usize = 0;
-};
-
-pub const CoreDirectorShared = extern struct {
-    base: CoreDirectorSharedGeneric,
-    crit_pc_low: VirtualAddress,
-    crit_pc_high: VirtualAddress,
-    ldt_base: VirtualAddress,
-    ldt_page_count: usize,
-
-    enabled_save_area: Registers,
-    disabled_save_area: Registers,
-    trap_save_area: Registers,
-};
-
-pub const CoreDirectorSharedGeneric = extern struct {
-    disabled: u32,
-    haswork: u32,
-    udisp: VirtualAddress,
-    lmp_delivered: u32,
-    lmp_seen: u32,
-    lmp_hint: VirtualAddress,
-    dispatcher_run: VirtualAddress,
-    dispatcher_lrpc: VirtualAddress,
-    dispatcher_page_fault: VirtualAddress,
-    dispatcher_page_fault_disabled: VirtualAddress,
-    dispatcher_trap: VirtualAddress,
-    // TODO: time
-    systime_frequency: u64,
-    core_id: u32,
-
-    pub fn getDisabledSaveArea(core_director_shared_generic: *CoreDirectorSharedGeneric) *Registers {
-        const core_director_shared_arch = @fieldParentPtr(CoreDirectorShared, "base", core_director_shared_generic);
-        return &core_director_shared_arch.disabled_save_area;
-    }
-};
 
 pub const Registers = extern struct {
     rax: u64,
@@ -1149,19 +1152,35 @@ pub const Registers = extern struct {
 
 const ELF = lib.ELF(64);
 
+fn spawnInitBSP(init_file: []const u8) *cpu.CoreDirectorData {
+    return spawnInitCommon(&cpu.spawn_state, init_file);
+}
+
 // TODO: make this work with no KPTI
-fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
-    assert(bsp);
+fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.CoreDirectorData {
+    assert(cpu.bsp);
 
-    const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
-    const entry_point = init_elf.getEntryPoint();
-    log.debug("Entry point: 0x{x}", .{entry_point});
-    const program_headers = init_elf.getProgramHeaders();
+    const init_director = cpu.spawnInitModule(spawn_state) catch |err| panic("Can't init module: {}", .{err});
+    log.debug("Init director: 0x{x}", .{@ptrToInt(init_director)});
 
-    const aligned_init_director_size = lib.alignForward(@sizeOf(CoreDirectorData), 0x1000);
-    const aligned_init_director_shared_size = lib.alignForward(@sizeOf(CoreDirectorShared), 0x1000);
-    const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
-    const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
+    init_director.disabled = true;
+    const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
+    init_director_shared.base.disabled = lib.maxInt(u32);
+    init_director_shared.disabled_save_area.rdi = 0x20000;
+    init_director_shared.disabled_save_area.fs = 0;
+    init_director_shared.disabled_save_area.gs = 0;
+    init_director_shared.disabled_save_area.rflags = .{
+        .IF = true,
+    };
+    init_director_shared.disabled_save_area.fxsave_area.fcw = 0x037f;
+    init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
+
+    // const aligned_init_director_size = lib.alignForward(@sizeOf(cpu.CoreDirectorData), 0x1000);
+    // _ = aligned_init_director_size;
+    // const aligned_init_director_shared_size = lib.alignForward(@sizeOf(cpu.CoreDirectorShared), 0x1000);
+    // _ = aligned_init_director_shared_size;
+    // const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
+    // const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
 
     const capability_address_space_stack_physical_region = cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000) catch @panic("Capability");
     cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
@@ -1171,7 +1190,7 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
         .cache_disable = true,
     }) catch @panic("Capability address space");
 
-    log.debug("Init director allocation: 0x{x}. init_director_shared_allocation: 0x{x}", .{ init_director_allocation.address.value(), init_director_shared_allocation.address.value() });
+    // log.debug("Init director allocation: 0x{x}. init_director_shared_allocation: 0x{x}", .{ init_director_allocation.address.value(), init_director_shared_allocation.address.value() });
 
     // TODO: don't waste this much space
     const virtual_address_space_allocation = cpu.page_allocator.allocate(0x1000, 0x1000) catch @panic("virtual_address_space");
@@ -1192,10 +1211,10 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     log.debug("CPU PML4: 0x{x}. User PML4: 0x{x}", .{ cpu_side_pml4_physical_address.value(), user_side_pml4_physical_address.value() });
 
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
-    log.debug("Higher half start", .{});
     cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
     cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator) catch @panic("higher half user");
-    log.debug("Higher half end", .{});
+
+    init_director.virtual_address_space = virtual_address_space;
 
     // First map vital parts for context switch
     virtual_address_space.arch = .{
@@ -1203,17 +1222,18 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
     };
 
     // Identity map dispatcher
-    virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
-
-    const init_director = init_director_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorData);
-    const init_director_shared = init_director_shared_allocation.address.toHigherHalfVirtualAddress().access(*CoreDirectorShared);
-    init_director.shared = &init_director_shared.base;
+    // virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
+    // virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
 
     virtual_address_space.arch.switchTo(.user);
 
     const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
     virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
+
+    const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
+    const entry_point = init_elf.getEntryPoint();
+    log.debug("Entry point: 0x{x}", .{entry_point});
+    const program_headers = init_elf.getProgramHeaders();
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
@@ -1233,30 +1253,8 @@ fn spawnBSPInit(init_file: []const u8) *CoreDirectorData {
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
             lib.copy(u8, dst, src);
-
-            // virtual_address_space.arch.switchTo(.privileged);
-            //
-            // virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch |err| {
-            //     const physical_address = virtual_address_space.translateAddress(segment_virtual_address) catch @panic("cannot be translated");
-            //     log.debug("Translated address: 0x{x}", .{physical_address.value()});
-            //     panic("Segment mapping failed cpu: {}", .{err});
-            // };
-            //
-            // virtual_address_space.arch.switchTo(.user);
         }
     }
-
-    init_director.virtual_address_space = virtual_address_space;
-    init_director.disabled = true;
-    init_director_shared.base.disabled = lib.maxInt(u32);
-    init_director_shared.disabled_save_area.rdi = 0x20000;
-    init_director_shared.disabled_save_area.fs = 0;
-    init_director_shared.disabled_save_area.gs = 0;
-    init_director_shared.disabled_save_area.rflags = .{
-        .IF = true,
-    };
-    init_director_shared.disabled_save_area.fxsave_area.fcw = 0x037f;
-    init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
 
     init_director_shared.disabled_save_area.rip = entry_point;
     init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();

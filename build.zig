@@ -248,6 +248,7 @@ pub fn build(b_arg: *Build) !void {
                         .optimize_mode = optimize_mode,
                         .modules = &.{ .lib, .user },
                     });
+                    user_module.strip = false;
 
                     user_module.setLinkerScriptPath(user_linker_script_path);
 
@@ -613,7 +614,7 @@ const RunSteps = struct {
         try arguments.list.append("-s");
 
         const debugger_process_arguments = switch (common.os) {
-            .linux => .{ "kitty", "gdb", "-x", try getGDBScriptPath(run_steps.configuration) },
+            .linux => .{ "gf2", "-x", try getGDBScriptPath(run_steps.configuration) },
             else => return Error.not_implemented,
         };
 

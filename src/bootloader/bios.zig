@@ -28,7 +28,7 @@ pub const loader_start = 0x1000;
 pub const Disk = extern struct {
     disk: lib.Disk,
 
-    var buffer = [1]u8{0} ** (0x200 * 1);
+    var buffer = [1]u8{0} ** (0x200 * 0x10);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
@@ -185,9 +185,8 @@ const max_memory_entry_count = 32;
 
 pub const E820Iterator = extern struct {
     registers: Registers = .{},
-    index: u32 = 0,
 
-    pub fn next(iterator: *E820Iterator) ?struct { descriptor: MemoryMapEntry, index: usize } {
+    pub fn next(iterator: *E820Iterator) ?MemoryMapEntry {
         var memory_map_entry: MemoryMapEntry = undefined;
 
         comptime assert(@sizeOf(MemoryMapEntry) == 24);
@@ -199,9 +198,7 @@ pub const E820Iterator = extern struct {
         interrupt(0x15, &iterator.registers, &iterator.registers);
 
         if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
-            const entry_index = iterator.index;
-            iterator.index += 1;
-            return .{ .index = entry_index, .descriptor = memory_map_entry };
+            return memory_map_entry;
         } else {
             return null;
         }
@@ -349,9 +346,9 @@ pub const VBE = extern struct {
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
                 if (isValidVideoMode(&mode) and mode.resolution_x == desired_width and mode.resolution_y == desired_height and mode.bpp == edid_bpp) {
-                    lib.log.debug("Video mode setting", .{});
+                    // lib.log.debug("Video mode setting", .{});
                     setVideoMode(video_mode_number) catch continue;
-                    lib.log.debug("Video mode set", .{});
+                    // lib.log.debug("Video mode set", .{});
                     return mode;
                 }
             }

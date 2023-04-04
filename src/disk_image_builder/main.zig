@@ -85,7 +85,7 @@ pub fn main() anyerror!void {
                         .cpu_driver, .init => try lib.Suffix.cpu_driver.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "_"),
                         else => "",
                     } });
-                    log.debug("Host relative path: {s}", .{host_relative_path});
+                    // log.debug("Host relative path: {s}", .{host_relative_path});
                     const file_content = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), host_relative_path, max_file_length);
                     try fat_partition_cache.makeNewFile(file_descriptor.guest, file_content, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                 }
@@ -99,9 +99,9 @@ pub fn main() anyerror!void {
 
             switch (configuration.bootloader) {
                 .limine => {
-                    log.debug("Installing Limine HDD", .{});
+                    // log.debug("Installing Limine HDD", .{});
                     try limine.Installer.install(disk_image.get_buffer(), false, null);
-                    log.debug("Ended installing Limine HDD", .{});
+                    // log.debug("Ended installing Limine HDD", .{});
                     const limine_installable_path = "src/bootloader/limine/installables";
                     const limine_installable_dir = try host.cwd().openDir(limine_installable_path, .{});
 
@@ -137,7 +137,7 @@ pub fn main() anyerror!void {
                 .rise => switch (configuration.boot_protocol) {
                     .bios => {
                         const loader_file_path = try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "zig-cache/", try lib.Suffix.bootloader.fromConfiguration(wrapped_allocator.unwrap_zig(), configuration, "bootloader_") });
-                        log.debug("trying to load file: {s}", .{loader_file_path});
+                        // log.debug("trying to load file: {s}", .{loader_file_path});
                         const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
                         const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
                         assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
@@ -146,14 +146,15 @@ pub fn main() anyerror!void {
                         // Build our own assembler
                         const boot_disk_mbr_lba = 0;
                         const boot_disk_mbr = try disk.read_typed_sectors(BootDisk, boot_disk_mbr_lba, null, .{});
-                        const dap_offset = @offsetOf(BootDisk, "dap");
-                        lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
+                        // const dap_offset = @offsetOf(BootDisk, "dap");
+                        // _ = dap_offset;
+                        // lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
                         const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("unexpected size");
                         const dap_top = bootloader.BIOS.stack_top - bootloader.BIOS.stack_size;
                         if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
-                        log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
+                        // log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
                         const dap = MBR.DAP{
                             .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
                             .offset = dap_file_read,
@@ -370,7 +371,7 @@ pub const BootDisk = extern struct {
         assembler.addInstruction(&.{ 0x8b, 0x5d, 0x18 });
         //d8:	ff e3                	jmp    rbx
         assembler.addInstruction(&.{ 0xff, 0xe3 });
-        log.debug("MBR code length: 0x{x}/0x{x}", .{ assembler.code_index, assembler.boot_disk.code.len });
+        // log.debug("MBR code length: 0x{x}/0x{x}", .{ assembler.code_index, assembler.boot_disk.code.len });
     }
 
     const Label = enum {
@@ -416,11 +417,11 @@ pub const BootDisk = extern struct {
 
         pub inline fn addInstruction(assembler: *Assembler, instruction_bytes: []const u8) void {
             assert(assembler.code_index + instruction_bytes.len <= assembler.boot_disk.code.len);
-            lib.print("[0x{x:0>4}] ", .{bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + assembler.code_index});
-            for (instruction_bytes) |byte| {
-                lib.print("{x:0>2} ", .{byte});
-            }
-            lib.print("\n", .{});
+            // lib.print("[0x{x:0>4}] ", .{bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + assembler.code_index});
+            // for (instruction_bytes) |byte| {
+            //     lib.print("{x:0>2} ", .{byte});
+            // }
+            // lib.print("\n", .{});
             lib.copy(u8, assembler.boot_disk.code[assembler.code_index .. assembler.code_index + instruction_bytes.len], instruction_bytes);
             assembler.code_index += @intCast(u8, instruction_bytes.len);
         }
@@ -557,21 +558,21 @@ pub const BootDisk = extern struct {
                             .relative => @panic("unreachable relative"),
                         }
 
-                        log.debug("Patched instruction:", .{});
-                        const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
-                        lib.print("[0x{x:0>4}] ", .{instruction_start});
-                        const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
-                        for (instruction_bytes) |byte| {
-                            lib.print("{x:0>2} ", .{byte});
-                        }
-                        lib.print("\n", .{});
+                        // log.debug("Patched instruction:", .{});
+                        // const instruction_start = bootloader.BIOS.mbr_offset + @offsetOf(BootDisk, "code") + patch_descriptor.instruction_starting_offset;
+                        // lib.print("[0x{x:0>4}] ", .{instruction_start});
+                        // const instruction_bytes = assembler.boot_disk.code[patch_descriptor.instruction_starting_offset .. patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len];
+                        // for (instruction_bytes) |byte| {
+                        //     lib.print("{x:0>2} ", .{byte});
+                        // }
+                        // lib.print("\n", .{});
 
                         patched += 1;
                         continue :next_patch;
                     },
                 }
 
-                log.debug("Patch count: {}. Patched count: {}", .{ assembler.patches.items.len, patched });
+                // log.debug("Patch count: {}. Patched count: {}", .{ assembler.patches.items.len, patched });
                 assert(patched == assembler.patches.items.len);
             }
         }

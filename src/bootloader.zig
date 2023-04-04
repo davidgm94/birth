@@ -1,3 +1,5 @@
+const bootloader = @This();
+
 pub const BIOS = @import("bootloader/bios.zig");
 pub const UEFI = @import("bootloader/uefi.zig");
 pub const limine = @import("bootloader/limine/limine.zig");
@@ -108,19 +110,6 @@ pub const Information = extern struct {
         }
     };
 
-    // TODO:
-    const PA = PhysicalAddress;
-    const PMR = PhysicalMemoryRegion;
-
-    // const Heap = extern struct {
-    //     allocator: Allocator = .{
-    //         .callbacks = .{
-    //             .allocate = heapAllocate,
-    //         },
-    //     },
-    //     regions: [6]PMR = lib.zeroes([6]PMR),
-    // };
-
     pub const SMP = extern struct {
         acpi_id: u32,
         lapic_id: u32,
@@ -160,6 +149,316 @@ pub const Information = extern struct {
                 },
                 else => {},
             };
+        };
+    };
+
+    fn initializeMemoryMap(bootloader_information: *bootloader.Information, memory_map: Initialization.MemoryMap) !usize {
+        try memory_map.deinitialize(memory_map.context);
+
+        const memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
+        var entry_index: usize = 0;
+        while (try memory_map.next(memory_map.context)) |entry| : (entry_index += 1) {
+            memory_map_entries[entry_index] = entry;
+        }
+
+        return entry_index;
+    }
+
+    pub fn initialize(filesystem: Initialization.Filesystem, memory_map: Initialization.MemoryMap, framebuffer: Initialization.Framebuffer, virtual_address_space: Initialization.VirtualAddressSpace, rsdp: *ACPI.RSDP.Descriptor1, bootloader_tag: lib.Bootloader, protocol: Protocol) anyerror!*bootloader.Information {
+        const framebuffer_data = try framebuffer.initialize(framebuffer.context);
+        try filesystem.initialize(filesystem.context);
+
+        var total_file_size: usize = 0;
+        var total_aligned_file_size: u32 = 0;
+        var total_file_name_size: usize = 0;
+        var total_file_count: u32 = 0;
+        var maybe_cpu_driver_index: ?u32 = null;
+        const file_alignment = 0x200;
+
+        while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (total_file_count += 1) {
+            if (file_descriptor.type == .cpu_driver) {
+                if (maybe_cpu_driver_index != null) @panic("Two cpu drivers");
+                maybe_cpu_driver_index = total_file_count;
+            }
+            const file_path = file_descriptor.path;
+            const file_size = file_descriptor.size;
+
+            total_file_size += file_size;
+            total_aligned_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
+            total_file_name_size += file_path.len;
+        }
+
+        try filesystem.deinitialize(filesystem.context);
+        const cpu_driver_index = maybe_cpu_driver_index orelse @panic("No CPU driver found");
+
+        try memory_map.initialize(memory_map.context);
+        var memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
+        const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
+        const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
+        const cpu_count = madt.getCPUCount();
+
+        const length_size_tuples = bootloader.LengthSizeTuples.new(.{
+            .bootloader_information = .{
+                .length = 1,
+                .alignment = @alignOf(bootloader.Information),
+            },
+            .file_names = .{
+                .length = @intCast(u32, total_file_name_size),
+                .alignment = 1,
+            },
+            .files = .{
+                .length = total_file_count,
+                .alignment = @alignOf(bootloader.File),
+            },
+            .memory_map_entries = .{
+                .length = memory_map_entry_count,
+                .alignment = @alignOf(bootloader.MemoryMapEntry),
+            },
+            .page_counters = .{
+                .length = memory_map_entry_count,
+                .alignment = @alignOf(u32),
+            },
+            .smps = .{
+                .length = cpu_count,
+                .alignment = lib.max(8, @alignOf(bootloader.Information.SMP.Information)),
+            },
+            .file_contents = .{
+                .length = total_aligned_file_size,
+                .alignment = file_alignment,
+            },
+        });
+
+        var host_entry_index: usize = 0;
+        const host_entry_region = blk: {
+            if (bootloader_tag == .rise and protocol == .uefi) {
+                const host_region = try (memory_map.get_host_region orelse unreachable)(memory_map.context, length_size_tuples);
+                break :blk host_region;
+            } else {
+                const host_entry = while (try memory_map.next(memory_map.context)) |entry| : (host_entry_index += 1) {
+                    if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
+                        break :blk entry.region;
+                    }
+                } else @panic("No memory map entry is suitable for hosting bootloader information");
+                _ = host_entry;
+            }
+        };
+
+        const bootloader_information = host_entry_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
+        bootloader_information.* = .{
+            .protocol = protocol,
+            .bootloader = bootloader_tag,
+            .version = .{ .major = 0, .minor = 1, .patch = 0 },
+            .total_size = length_size_tuples.total_size,
+            .entry_point = 0,
+            .higher_half = lib.config.cpu_driver_higher_half_address,
+            .stage = .early,
+            .configuration = .{
+                .memory_map_diff = 0,
+            },
+            .framebuffer = framebuffer_data,
+            .draw_context = .{},
+            .font = undefined,
+            .cpu_driver_mappings = .{},
+            .smp = switch (lib.cpu.arch) {
+                .x86, .x86_64 => .{
+                    .cpu_count = cpu_count,
+                    .bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*,
+                },
+                else => @compileError("Architecture not supported"),
+            },
+            .slices = length_size_tuples.createSlices(),
+            .architecture = .{
+                .rsdp_address = @ptrToInt(rsdp),
+            },
+        };
+
+        const page_counters = bootloader_information.getSlice(.page_counters);
+        for (page_counters) |*page_counter| {
+            page_counter.* = 0;
+        }
+
+        {
+            // Make sure pages are allocated to host the bootloader information and fetch memory entries from firmware (only non-UEFI
+            if (bootloader_tag != .rise or protocol != .uefi) {
+                page_counters[host_entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+
+                const new_memory_map_entry_count = try bootloader_information.initializeMemoryMap(memory_map);
+
+                if (new_memory_map_entry_count != memory_map_entry_count) @panic("Memory map entry count mismatch");
+            }
+
+            const file_content_buffer = bootloader_information.getSlice(.file_contents);
+            const file_name_buffer = bootloader_information.getSlice(.file_names);
+            const file_slice = bootloader_information.getSlice(.files);
+
+            var file_content_offset: u32 = 0;
+            var file_name_offset: u32 = 0;
+            var file_index: usize = 0;
+
+            while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (file_index += 1) {
+                const path_len = @intCast(u32, file_descriptor.path.len);
+                lib.copy(u8, file_name_buffer[file_name_offset .. file_name_offset + path_len], file_descriptor.path);
+                const aligned_file_size = lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
+                const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
+                const file = try filesystem.read_file(filesystem.context, file_descriptor.path, file_buffer);
+                _ = file;
+                file_slice[file_index] = .{
+                    .content_offset = file_content_offset,
+                    .content_size = file_descriptor.size,
+                    .path_offset = file_name_offset,
+                    .path_size = path_len,
+                    .type = file_descriptor.type,
+                };
+                file_content_offset += aligned_file_size;
+                file_name_offset += path_len;
+            }
+
+            if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
+            if (file_name_offset != file_name_buffer.len) @panic("File name slice size mismatch");
+            if (file_index != total_file_count) @panic("File count mismatch");
+
+            if (bootloader_tag == .rise and protocol == .uefi) {
+                // Check if the memory map entry count matches here is not useful because probably it's going to be less as exiting boot services seems
+                // like making some deallocations
+                memory_map_entry_count = @intCast(u32, try bootloader_information.initializeMemoryMap(memory_map));
+            }
+        }
+
+        const minimal_paging = try bootloader_information.initializeVirtualAddressSpace();
+        const page_allocator_interface = bootloader_information.getPageAllocatorInterface();
+        for (bootloader_information.getMemoryMapEntries()[0..memory_map_entry_count]) |entry| {
+            if (entry.type == .usable) {
+                try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
+            }
+        }
+        lib.log.debug("Mapped usable memory", .{});
+
+        try minimal_paging.map(host_entry_region.address, host_entry_region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface);
+
+        try virtual_address_space.ensure_loader_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface, bootloader_information);
+
+        lib.log.debug("{s} bootloader framebuffer: 0x{x}", .{ @tagName(bootloader_information.bootloader), bootloader_information.framebuffer.address });
+        const framebuffer_physical_address = PhysicalAddress.new(if (bootloader_information.bootloader == .limine) bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address else bootloader_information.framebuffer.address);
+        try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
+        bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
+
+        try virtual_address_space.ensure_stack_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface);
+
+        const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[cpu_driver_index];
+        const cpu_driver_file_content = cpu_driver_file_descriptor.getContent(bootloader_information);
+        var elf_parser = try lib.ELF(64).Parser.init(cpu_driver_file_content);
+        const program_headers = elf_parser.getProgramHeaders();
+
+        for (program_headers) |*ph| {
+            switch (ph.type) {
+                .load => {
+                    if (ph.size_in_memory == 0) continue;
+
+                    if (!ph.flags.readable) {
+                        @panic("ELF program segment is marked as non-readable");
+                    }
+
+                    if (ph.size_in_file != ph.size_in_memory) {
+                        @panic("ELF program segment file size is smaller than memory size");
+                    }
+
+                    const aligned_size = lib.alignForwardGeneric(u64, ph.size_in_memory, lib.arch.valid_page_sizes[0]);
+                    const physical_allocation = bootloader_information.allocatePages(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("WTDASD");
+                    const physical_address = physical_allocation.address;
+                    const virtual_address = VirtualAddress.new(ph.virtual_address);
+                    const flags = Mapping.Flags{ .write = ph.flags.writable, .execute = ph.flags.executable };
+
+                    switch (ph.flags.executable) {
+                        true => switch (ph.flags.writable) {
+                            true => @panic("Text section is not supposed to be writable"),
+                            false => {
+                                bootloader_information.cpu_driver_mappings.text = .{
+                                    .physical = physical_address,
+                                    .virtual = virtual_address,
+                                    .size = ph.size_in_memory,
+                                    .flags = flags,
+                                };
+                            },
+                        },
+                        false => switch (ph.flags.writable) {
+                            true => bootloader_information.cpu_driver_mappings.data = .{
+                                .physical = physical_address,
+                                .virtual = virtual_address,
+                                .size = ph.size_in_memory,
+                                .flags = flags,
+                            },
+                            false => bootloader_information.cpu_driver_mappings.rodata = .{
+                                .physical = physical_address,
+                                .virtual = virtual_address,
+                                .size = ph.size_in_memory,
+                                .flags = flags,
+                            },
+                        },
+                    }
+
+                    // log.debug("Started mapping kernel section", .{});
+                    try minimal_paging.map(physical_address, virtual_address, aligned_size, flags, page_allocator_interface);
+                    // log.debug("Ended mapping kernel section", .{});
+
+                    const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
+                    const src_slice = cpu_driver_file_content[lib.safeArchitectureCast(ph.offset)..][0..lib.safeArchitectureCast(ph.size_in_file)];
+                    // log.debug("Src slice: [0x{x}, 0x{x}]. Dst slice: [0x{x}, 0x{x}]", .{ @ptrToInt(src_slice.ptr), @ptrToInt(src_slice.ptr) + src_slice.len, @ptrToInt(dst_slice.ptr), @ptrToInt(dst_slice.ptr) + dst_slice.len });
+                    if (!(dst_slice.len >= src_slice.len)) {
+                        @panic("bios: segment allocated memory must be equal or greater than especified");
+                    }
+
+                    lib.copy(u8, dst_slice, src_slice);
+                },
+                else => {
+                    //log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
+                },
+            }
+        }
+
+        // bootloader_information.initializeSMP(madt);
+
+        bootloader_information.entry_point = elf_parser.getEntryPoint();
+
+        if (bootloader_information.entry_point != 0) {
+            bootloader.arch.x86_64.jumpToKernel(bootloader_information, minimal_paging);
+        }
+
+        @panic("TODO: initialize");
+    }
+
+    pub const Initialization = struct {
+        pub const Filesystem = extern struct {
+            context: ?*anyopaque,
+            initialize: *const fn (context: ?*anyopaque) anyerror!void,
+            deinitialize: *const fn (context: ?*anyopaque) anyerror!void,
+            get_next_file_descriptor: *const fn (context: ?*anyopaque) anyerror!?Descriptor,
+            read_file: *const fn (context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8,
+
+            pub const Descriptor = struct {
+                path: []const u8,
+                size: u32,
+                type: File.Type,
+            };
+        };
+
+        pub const MemoryMap = extern struct {
+            context: ?*anyopaque,
+            get_memory_map_entry_count: *const fn (context: ?*anyopaque) anyerror!u32,
+            initialize: *const fn (context: ?*anyopaque) anyerror!void,
+            deinitialize: *const fn (context: ?*anyopaque) anyerror!void,
+            next: *const fn (context: ?*anyopaque) anyerror!?MemoryMapEntry,
+            get_host_region: ?*const fn (context: ?*anyopaque, length_size_tuples: LengthSizeTuples) anyerror!PhysicalMemoryRegion,
+        };
+
+        pub const Framebuffer = extern struct {
+            context: ?*anyopaque,
+            initialize: *const fn (context: ?*anyopaque) anyerror!bootloader.Framebuffer,
+        };
+
+        pub const VirtualAddressSpace = extern struct {
+            context: ?*anyopaque,
+            ensure_loader_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void,
+            ensure_stack_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void,
         };
     };
 
@@ -383,8 +682,6 @@ pub const Information = extern struct {
                     if (result.address.offset(result.size).value() <= lib.maxInt(usize)) {
                         lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
 
-                        lib.log.debug("Allocating 0x{x}-0x{x}", .{ result.address.value(), result.address.offset(result.size).value() });
-
                         page_counters[entry_index] += four_kb_pages;
 
                         return result;
@@ -419,7 +716,7 @@ pub const Information = extern struct {
                 if (region.size == 0) {
                     const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
                     region.* = .{
-                        .address = PA.new(allocated_region.address),
+                        .address = PhysicalAddress.new(allocated_region.address),
                         .size = allocated_region.size,
                     };
                     const result = .{
@@ -442,7 +739,6 @@ pub const Information = extern struct {
         const files = bootloader_information.getFiles();
         lib.log.debug("File count: {}", .{files.len});
         for (files) |file_descriptor| {
-            lib.log.debug("File type: {}", .{file_descriptor.type});
             if (file_descriptor.type == file_type) {
                 return file_descriptor.getContent(bootloader_information);
             }
@@ -451,8 +747,8 @@ pub const Information = extern struct {
         return null;
     }
 
-    pub fn initializeVirtualAddressSpace(bootloader_information: *Information) paging.Specific {
-        return privileged.arch.paging.initKernelBSP(bootloader_information) catch @panic("Virtual address space creation");
+    pub fn initializeVirtualAddressSpace(bootloader_information: *Information) !paging.Specific {
+        return try privileged.arch.paging.initKernelBSP(bootloader_information);
     }
 
     pub fn getPageAllocatorInterface(bootloader_information: *Information) privileged.PageAllocatorInterface {
@@ -521,14 +817,20 @@ pub const File = extern struct {
         init,
     };
 
-    pub const Parser = struct {
-        text: []const u8,
+    pub const Parser = extern struct {
+        text_ptr: [*]const u8,
+        text_len: usize,
         index: u32 = 0,
 
         pub fn init(text: []const u8) File.Parser {
             return .{
-                .text = text,
+                .text_ptr = text.ptr,
+                .text_len = text.len,
             };
+        }
+
+        pub fn reset(parser: *Parser) void {
+            parser.index = 0;
         }
 
         const Error = error{
@@ -557,17 +859,16 @@ pub const File = extern struct {
             const left_curly_brace = 0x7b;
             const right_curly_brace = 0x7d;
 
-            while (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
                 try parser.expectChar('.');
                 try parser.expectChar(left_curly_brace);
 
-                if (parser.index < parser.text.len and parser.text[parser.index] != right_curly_brace) {
+                if (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
                     const host_path_field = try parser.parseField("host_path");
                     const host_base_field = try parser.parseField("host_base");
                     const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.suffix_type;
                     const guest_field = try parser.parseField("guest");
                     const file_type_str = try parser.parseField("type");
-                    lib.log.debug("File type str: {s}", .{file_type_str});
                     const file_type = lib.stringToEnum(File.Type, file_type_str) orelse {
                         if (@hasDecl(@import("root"), "writer")) {
                             @import("root").writer.writeAll(file_type_str) catch unreachable;
@@ -608,8 +909,8 @@ pub const File = extern struct {
         }
 
         inline fn skipSpace(parser: *File.Parser) void {
-            while (parser.index < parser.text.len) {
-                const char = parser.text[parser.index];
+            while (parser.index < parser.text_len) {
+                const char = parser.text_ptr[parser.index];
                 const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
                 if (!is_space) break;
                 parser.consume();
@@ -618,14 +919,14 @@ pub const File = extern struct {
 
         inline fn maybeExpectChar(parser: *File.Parser, char: u8) void {
             parser.skipSpace();
-            if (parser.text[parser.index] == char) {
+            if (parser.text_ptr[parser.index] == char) {
                 parser.consume();
             }
         }
 
         fn expectChar(parser: *File.Parser, expected_char: u8) !void {
             parser.skipSpace();
-            const char = parser.text[parser.index];
+            const char = parser.text_ptr[parser.index];
             if (char != expected_char) {
                 return Error.expect_char;
             }
@@ -635,7 +936,7 @@ pub const File = extern struct {
 
         fn expectString(parser: *File.Parser, string: []const u8) !void {
             parser.skipSpace();
-            if (!lib.equal(u8, parser.text[parser.index..][0..string.len], string)) {
+            if (!lib.equal(u8, parser.text_ptr[parser.index..parser.text_len][0..string.len], string)) {
                 return Error.expect_string;
             }
 
@@ -649,13 +950,13 @@ pub const File = extern struct {
             parser.skipSpace();
             try parser.expectChar('"');
             const start_index = parser.index;
-            while (parser.index < parser.text.len and parser.text[parser.index] != '"') {
+            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != '"') {
                 parser.consume();
             }
             const end_index = parser.index;
             try parser.expectChar('"');
 
-            const string = parser.text[start_index..end_index];
+            const string = parser.text_ptr[start_index..end_index];
             return string;
         }
     };

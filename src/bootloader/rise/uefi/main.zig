@@ -52,40 +52,246 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 pub var draw_writer: bootloader.DrawContext.Writer = undefined;
 
 pub var maybe_bootloader_information: ?*bootloader.Information = null;
+pub var boot_services_on = true;
 
-pub fn main() noreturn {
-    const system_table = UEFI.get_system_table();
-    const handle = UEFI.get_handle();
-    const boot_services = system_table.boot_services orelse @panic("boot services");
-    const out = system_table.con_out orelse @panic("con out");
-    UEFI.result(@src(), out.reset(true));
-    UEFI.result(@src(), out.clearScreen());
-    writer.writeByte('\n') catch unreachable;
+// pub const File = struct {
+//     handle: *FileProtocol,
+//     size: u32,
+//
+//     pub fn get(filesystem_root: *FileProtocol, name: []const u8) !File {
+//         var file: *FileProtocol = undefined;
+//         var name_buffer: [256:0]u16 = undefined;
+//         const length = try lib.unicode.utf8ToUtf16Le(&name_buffer, name);
+//         name_buffer[length] = 0;
+//         const filename = name_buffer[0..length :0];
+//         try UEFIError(filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
+//         const file_size = blk: {
+//             // TODO: figure out why it is succeeding with 16 and not with 8
+//             var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(filename)) + 0x100]u8 align(@alignOf(FileInfo)) = undefined;
+//             var file_info_size = buffer.len;
+//             try UEFIError(file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
+//             const file_info = @ptrCast(*FileInfo, &buffer);
+//             log.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
+//             break :blk @intCast(u32, alignForward(file_info.file_size + page_size, page_size));
+//         };
+//
+//         return File{
+//             .handle = file,
+//             .size = file_size,
+//         };
+//     }
+//
+//     pub fn read(file: File, buffer: []u8) []u8 {
+//         var size: u64 = file.size;
+//         result(@src(), file.handle.read(&size, buffer.ptr));
+//         assert(size != buffer.len);
+//         return buffer[0..size];
+//     }
+// };
 
-    log.debug("EFI revision: 0x{x}", .{system_table.hdr.revision});
+const Filesystem = extern struct {
+    boot_services: *UEFI.BootServices,
+    handle: UEFI.Handle,
+    root: *FileProtocol,
+    file_buffer: [512]u8,
+    parser: bootloader.File.Parser,
 
-    const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
-    const rsdp_physical_address = blk: {
-        for (configuration_tables) |configuration_table| {
-            if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
-                break :blk PhysicalAddress.new(@ptrToInt(configuration_table.vendor_table));
-            }
+    fn initialize(context: ?*anyopaque) anyerror!void {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        const loaded_image = Protocol.open(LoadedImageProtocol, filesystem.boot_services, filesystem.handle);
+        const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, filesystem.boot_services, loaded_image.device_handle orelse unreachable);
+        try UEFI.Try(filesystem_protocol.openVolume(&filesystem.root));
+        const file_list = try filesystem.readFileFast("files", &filesystem.file_buffer);
+        filesystem.parser = bootloader.File.Parser.init(file_list);
+    }
+
+    fn deinitialize(context: ?*anyopaque) anyerror!void {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        filesystem.parser.index = 0;
+    }
+
+    fn readFileFast(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+        const file = try filesystem.openFile(file_path);
+        var size: u64 = file_buffer.len;
+        try UEFI.Try(file.handle.read(&size, file_buffer.ptr));
+        assert(size < file_buffer.len);
+        return file_buffer[0..size];
+    }
+
+    const FileDescriptor = struct {
+        handle: *FileProtocol,
+        path_size: u32,
+    };
+
+    fn getFileSize(filesystem: *Filesystem, file_path: []const u8) anyerror!u64 {
+        const file = try filesystem.openFile(file_path);
+        var file_info_buffer: [@sizeOf(UEFI.FileInfo) + 0x100]u8 align(@alignOf(UEFI.FileInfo)) = undefined;
+        var file_info_size = file_info_buffer.len;
+        try UEFI.Try(file.handle.getInfo(&UEFI.FileInfo.guid, &file_info_size, &file_info_buffer));
+        assert(file_info_size < file_info_buffer.len);
+        const file_info = @ptrCast(*UEFI.FileInfo, &file_info_buffer);
+        return file_info.file_size;
+    }
+
+    fn openFile(filesystem: *Filesystem, file_path: []const u8) anyerror!FileDescriptor {
+        var file: *FileProtocol = undefined;
+        var path_buffer: [256:0]u16 = undefined;
+        const length = try lib.unicode.utf8ToUtf16Le(&path_buffer, file_path);
+        path_buffer[length] = 0;
+        const path = path_buffer[0..length :0];
+        try UEFI.Try(filesystem.root.open(&file, if (path[0] == '/') path[1..] else path, FileProtocol.efi_file_mode_read, 0));
+
+        return .{
+            .handle = file,
+            .path_size = @intCast(u32, path.len * @sizeOf(u16)),
+        };
+    }
+
+    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+
+        if (try filesystem.parser.next()) |next| {
+            const path = next.guest;
+            const file_size = try filesystem.getFileSize(path);
+            return .{
+                .path = path,
+                .size = @intCast(u32, file_size),
+                .type = next.type,
+            };
         }
 
-        @panic("Unable to find RSDP");
-    };
+        return null;
+    }
 
-    const madt = blk: {
-        const rsdp_descriptor = rsdp_physical_address.toIdentityMappedVirtualAddress().access(*ACPI.RSDP.Descriptor1);
-        const madt_header = rsdp_descriptor.findTable(.APIC) orelse @panic("Can't find MADT");
-        const madt = @fieldParentPtr(ACPI.MADT, "header", madt_header);
-        break :blk madt;
-    };
+    fn readFileCallback(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        const file = try filesystem.readFileFast(file_path, file_buffer);
+        return file;
+    }
+};
 
-    const cpu_count = madt.getCPUCount();
+const MMap = extern struct {
+    boot_services: *UEFI.BootServices,
+    handle: UEFI.Handle,
+    size: usize,
+    key: usize,
+    descriptor_size: usize,
+    descriptor_version: u32,
+    buffer: [practical_memory_map_descriptor_size * practical_memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
+    offset: usize = 0,
 
-    framebuffer = blk: {
-        const gop = Protocol.locate(UEFI.GraphicsOutputProtocol, boot_services) catch @panic("Can't locate GOP");
+    // pub inline fn reset(it: *MemoryMap) void {
+    //     it.offset = 0;
+    // }
+
+    fn initialize(context: ?*anyopaque) anyerror!void {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        _ = mmap.boot_services.getMemoryMap(&mmap.size, null, &mmap.key, &mmap.descriptor_size, &mmap.descriptor_version);
+    }
+
+    fn deinitialize(context: ?*anyopaque) anyerror!void {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        if (boot_services_on) {
+            defer boot_services_on = false;
+
+            // Add the region for the bootloader information
+            mmap.size += mmap.descriptor_size;
+            const expected_memory_map_size = mmap.size;
+            const expected_memory_map_descriptor_size = mmap.descriptor_size;
+            const expected_memory_map_descriptor_version = mmap.descriptor_version;
+
+            log.debug("Getting memory map before exiting boot services...", .{});
+
+            // // Get the debugging font since we actually can't use UEFI logging here
+            // bootloader_information.font = blk: {
+            //     const font_file = for (bootloader_information.getFiles()) |file| {
+            //         if (file.type == .font) break file.getContent(bootloader_information);
+            //     } else @panic("No debugging font found");
+            //
+            //     break :blk bootloader.Font.fromPSF1(font_file) catch @panic("Can't load font");
+            // };
+            // draw_writer = .{
+            //     .context = &bootloader_information.draw_context,
+            // };
+            // bootloader_information.draw_context.clearScreen(0);
+            // bootloader_information.stage = .only_graphics;
+            //
+            try UEFI.Try(mmap.boot_services.getMemoryMap(&mmap.size, @ptrCast([*]MemoryDescriptor, &mmap.buffer), &mmap.key, &mmap.descriptor_size, &mmap.descriptor_version));
+            if (expected_memory_map_size != mmap.size) {
+                log.warn("Old memory map size: {}. New memory map size: {}", .{ expected_memory_map_size, mmap.size });
+            }
+            if (expected_memory_map_descriptor_size != mmap.descriptor_size) {
+                @panic("Descriptor size change");
+            }
+            if (expected_memory_map_descriptor_version != mmap.descriptor_version) {
+                @panic("Descriptor version change");
+            }
+            const real_memory_map_entry_count = @divExact(mmap.size, mmap.descriptor_size);
+            const expected_memory_map_entry_count = @divExact(expected_memory_map_size, expected_memory_map_descriptor_size);
+            log.debug("Real: {}. Mine: {}", .{ real_memory_map_entry_count, expected_memory_map_entry_count });
+            const diff = @intCast(i16, expected_memory_map_entry_count) - @intCast(i16, real_memory_map_entry_count);
+            if (diff < 0) {
+                @panic("Memory map entry count diff < 0");
+            }
+
+            // bootloader_information.configuration.memory_map_diff = @intCast(u8, diff);
+
+            log.debug("Exiting boot services...", .{});
+            try UEFI.Try(mmap.boot_services.exitBootServices(mmap.handle, mmap.key));
+
+            privileged.arch.disableInterrupts();
+        }
+
+        mmap.offset = 0;
+    }
+
+    fn getMemoryMapEntryCount(context: ?*anyopaque) anyerror!u32 {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        // Return one more since we are expected to allocate a region for the bootloader information
+        return @intCast(u32, @divExact(mmap.size, mmap.descriptor_size) + 1);
+    }
+
+    fn next(context: ?*anyopaque) anyerror!?bootloader.MemoryMapEntry {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+
+        if (mmap.offset < mmap.size) {
+            const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), mmap.buffer[mmap.offset..].ptr)).*;
+            mmap.offset += mmap.descriptor_size;
+            const result = bootloader.MemoryMapEntry{
+                .region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry.number_of_pages << UEFI.page_shifter),
+                .type = switch (entry.type) {
+                    .ReservedMemoryType, .LoaderCode, .LoaderData, .BootServicesCode, .BootServicesData, .RuntimeServicesCode, .RuntimeServicesData, .ACPIReclaimMemory, .ACPIMemoryNVS, .MemoryMappedIO, .MemoryMappedIOPortSpace, .PalCode, .PersistentMemory => .reserved,
+                    .ConventionalMemory => .usable,
+                    .UnusableMemory => .bad_memory,
+                    else => @panic("Unknown type"),
+                },
+            };
+
+            log.debug("Result: 0x{x}, 0x{x}, {s}", .{ result.region.address.value(), result.region.size, @tagName(entry.type) });
+            return result;
+        }
+
+        return null;
+    }
+
+    fn getHostRegion(context: ?*anyopaque, length_size_tuples: bootloader.LengthSizeTuples) anyerror!PhysicalMemoryRegion {
+        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+        var memory: []align(UEFI.page_size) u8 = undefined;
+        const memory_size = length_size_tuples.getAlignedTotalSize();
+        try UEFI.Try(mmap.boot_services.allocatePages(.AllocateAnyPages, .LoaderData, memory_size >> UEFI.page_shifter, &memory.ptr));
+        memory.len = memory_size;
+        lib.zero(memory);
+
+        return PhysicalMemoryRegion.fromSlice(memory);
+    }
+};
+
+const Framebuffer = extern struct {
+    boot_services: *UEFI.BootServices,
+
+    fn initialize(context: ?*anyopaque) anyerror!bootloader.Framebuffer {
+        const fb = @ptrCast(*Framebuffer, @alignCast(@alignOf(Framebuffer), context));
+        const gop = Protocol.locate(UEFI.GraphicsOutputProtocol, fb.boot_services) catch @panic("Can't locate GOP");
         const pixel_format_info: struct {
             red_color_mask: bootloader.Framebuffer.ColorMask,
             blue_color_mask: bootloader.Framebuffer.ColorMask,
@@ -108,7 +314,8 @@ pub fn main() noreturn {
             .PixelFormatMax => @panic("Corrupted pixel format"),
         };
 
-        const fb = bootloader.Framebuffer{
+        log.debug("Initialized framebuffer", .{});
+        return bootloader.Framebuffer{
             .address = gop.mode.frame_buffer_base,
             .pitch = @divExact(gop.mode.info.pixels_per_scan_line * pixel_format_info.bpp, @bitSizeOf(u8)),
             .width = gop.mode.info.horizontal_resolution,
@@ -119,406 +326,160 @@ pub fn main() noreturn {
             .blue_mask = pixel_format_info.blue_color_mask,
             .memory_model = 0x06,
         };
-        log.debug("Width: {}. Height: {}. Pixels per scanline: {}. BPP: {}. Pitch: {}", .{ fb.width, fb.height, gop.mode.info.pixels_per_scan_line, pixel_format_info.bpp, fb.pitch });
-        break :blk fb;
-    };
+    }
+};
 
-    const filesystem_root = blk: {
-        const loaded_image = Protocol.open(LoadedImageProtocol, boot_services, handle);
-        const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, boot_services, loaded_image.device_handle orelse unreachable);
-        var root: *FileProtocol = undefined;
-        UEFI.result(@src(), filesystem_protocol.openVolume(&root));
-        break :blk root;
-    };
+const VAS = extern struct {
+    mmap: *anyopaque,
 
-    var file_list_file = UEFI.File.get(filesystem_root, "files") catch @panic("Can't read file list");
-    var file_list_buffer: [512]u8 = undefined;
-    const file_list = file_list_file.read(&file_list_buffer);
-    var file_parser = bootloader.File.Parser.init(file_list);
-    const cpu_driver_file_index = blk: {
-        var maybe_cpu_driver_file_index: ?u32 = null;
-        while (file_parser.next() catch @panic("parser error")) |file_descriptor| {
-            if (file_count == files.len) @panic("max files");
-            const filename = file_descriptor.guest[1..];
+    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
+        const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
+        // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
+        log.debug("Mapping trampoline code...", .{});
+        switch (lib.cpu.arch) {
+            .x86_64 => {
+                {
+                    const physical_address = PhysicalAddress.new(@ptrToInt(bootloader_information));
+                    const size = bootloader_information.getAlignedTotalSize();
+                    // minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
+                    minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
+                }
+                const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
 
-            if (file_descriptor.type == .cpu_driver) {
-                if (maybe_cpu_driver_file_index != null) @panic("Two cpu drivers");
-                maybe_cpu_driver_file_index = file_count;
-            }
-
-            files[file_count] = .{
-                .type = file_descriptor.type,
-                .path = filename,
-                .uefi = UEFI.File.get(filesystem_root, filename) catch @panic("Can't get file"),
-            };
-
-            file_count += 1;
-        }
-
-        break :blk maybe_cpu_driver_file_index orelse @panic("No CPU driver specified in the configuration");
-    };
-
-    const total_file_size = blk: {
-        var total: u32 = 0;
-        for (files[0..file_count]) |file| {
-            total += lib.alignForwardGeneric(u32, file.uefi.size, lib.arch.valid_page_sizes[0]);
-        }
-        break :blk total;
-    };
-
-    const total_file_name_size = blk: {
-        var total: u32 = 0;
-        for (files[0..file_count]) |file| {
-            total += @intCast(u32, file.path.len);
-        }
-        break :blk total;
-    };
-
-    const memory_map_entry_count = blk: {
-        _ = boot_services.getMemoryMap(&memory_map_size, null, &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version);
-        break :blk @intCast(u32, @divExact(memory_map_size, memory_map_descriptor_size) + 1);
-    };
-
-    memory_map_size += memory_map_descriptor_size;
-
-    const length_size_tuples = bootloader.LengthSizeTuples.new(.{
-        .bootloader_information = .{
-            .length = 1,
-            .alignment = lib.arch.valid_page_sizes[0],
-        },
-        .file_contents = .{
-            .length = total_file_size,
-            .alignment = lib.arch.valid_page_sizes[0],
-        },
-        .file_names = .{
-            .length = total_file_name_size,
-            .alignment = 8,
-        },
-        .files = .{
-            .length = file_count,
-            .alignment = @alignOf(bootloader.File),
-        },
-        .memory_map_entries = .{
-            .length = memory_map_entry_count,
-            .alignment = @alignOf(bootloader.MemoryMapEntry),
-        },
-        .page_counters = .{
-            .length = memory_map_entry_count,
-            .alignment = @alignOf(u32),
-        },
-        .smps = .{
-            .length = cpu_count,
-            .alignment = @alignOf(bootloader.Information.SMP.Information),
-        },
-    });
-
-    const bootstrap_memory = blk: {
-        log.debug("Expected size: {}. Actual size: {}. Descriptor version: {}", .{ memory_map_descriptor_size, @sizeOf(MemoryDescriptor), memory_map_descriptor_version });
-
-        var memory: []align(UEFI.page_size) u8 = undefined;
-        UEFI.result(@src(), boot_services.allocatePages(.AllocateAnyPages, .LoaderData, length_size_tuples.getAlignedTotalSize() >> UEFI.page_shifter, &memory.ptr));
-        memory.len = length_size_tuples.getAlignedTotalSize();
-        lib.zero(memory);
-        break :blk memory;
-    };
-
-    const bootloader_information = @ptrCast(*bootloader.Information, bootstrap_memory.ptr);
-    maybe_bootloader_information = bootloader_information;
-    bootloader_information.* = .{
-        .entry_point = 0,
-        .higher_half = lib.config.cpu_driver_higher_half_address,
-        .total_size = length_size_tuples.total_size,
-        .version = .{ .major = 0, .minor = 1, .patch = 0 },
-        .protocol = .uefi,
-        .bootloader = .rise,
-        .stage = .early,
-        .configuration = .{ .memory_map_diff = 0 },
-        .cpu_driver_mappings = .{},
-        .smp = switch (lib.cpu.arch) {
-            .x86_64 => .{
-                .cpu_count = cpu_count,
-                .bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*,
+                try MMap.deinitialize(vas.mmap);
+                while (try MMap.next(vas.mmap)) |entry| {
+                    if (entry.region.address.value() < trampoline_code_start and trampoline_code_start < entry.region.address.offset(entry.region.size).value()) {
+                        const code_physical_region = entry.region;
+                        const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
+                        minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
+                        return;
+                    }
+                }
             },
-            .aarch64 => .{
-                .cpu_count = cpu_count,
-            },
-            .riscv64 => .{
-                .cpu_count = cpu_count,
-            },
+            .aarch64, .riscv64 => @panic("TODO map trampoline"),
             else => @compileError("Architecture not supported"),
-        },
-        .framebuffer = framebuffer,
-        .draw_context = .{},
-        .font = undefined,
-        .architecture = switch (lib.cpu.arch) {
-            .x86_64 => .{ .rsdp_address = rsdp_physical_address.value() },
-            .aarch64, .riscv64 => .{},
-            else => @compileError("Architecture not supported"),
-        },
-        .slices = length_size_tuples.createSlices(),
-    };
-
-    for (bootloader_information.getSlice(.page_counters)) |*page_counter| {
-        page_counter.* = 0;
-    }
-
-    const file_contents_slice = bootloader_information.slices.fields.file_contents;
-    const file_content_buffer = @intToPtr([*]u8, @ptrToInt(bootloader_information) + file_contents_slice.offset)[0..file_contents_slice.size];
-    const file_names_slice = bootloader_information.slices.fields.file_names;
-    const file_name_buffer = @intToPtr([*]u8, @ptrToInt(bootloader_information) + file_names_slice.offset)[0..file_names_slice.size];
-    const files_slice = bootloader_information.getFiles();
-    var name_offset: u32 = 0;
-    var content_offset: u32 = 0;
-
-    for (files[0..file_count], 0..) |file, file_index| {
-        const file_content = file.uefi.read(file_content_buffer[content_offset .. content_offset + file.uefi.size]);
-        _ = file_content;
-        const file_name = file.path;
-        const file_slice = &files_slice[file_index];
-        file_slice.* = .{
-            .content_offset = content_offset,
-            .content_size = file.uefi.size,
-            .path_offset = name_offset + file_names_slice.offset,
-            .path_size = @intCast(u32, file_name.len),
-            .type = file.type,
-        };
-        lib.copy(u8, file_name_buffer[name_offset .. name_offset + file_name.len], file_name);
-        name_offset += @intCast(u32, file_name.len);
-        content_offset += lib.alignForwardGeneric(u32, file.uefi.size, lib.arch.valid_page_sizes[0]);
-    }
-
-    const expected_memory_map_descriptor_size = memory_map_descriptor_size;
-    const expected_memory_map_descriptor_version = memory_map_descriptor_version;
-    const expected_memory_map_size = memory_map_size;
-
-    log.debug("Getting memory map before exiting boot services...", .{});
-
-    // Get the debugging font since we actually can't use UEFI logging here
-    bootloader_information.font = blk: {
-        const font_file = for (bootloader_information.getFiles()) |file| {
-            if (file.type == .font) break file.getContent(bootloader_information);
-        } else @panic("No debugging font found");
-
-        break :blk bootloader.Font.fromPSF1(font_file) catch @panic("Can't load font");
-    };
-    draw_writer = .{
-        .context = &bootloader_information.draw_context,
-    };
-    bootloader_information.draw_context.clearScreen(0);
-    bootloader_information.stage = .only_graphics;
-
-    UEFI.result(@src(), boot_services.getMemoryMap(&memory_map_size, @ptrCast([*]MemoryDescriptor, &memory_map.buffer), &memory_map_key, &memory_map_descriptor_size, &memory_map_descriptor_version));
-    if (expected_memory_map_size != memory_map_size) {
-        log.debug("Old memory map size: {}. New memory map size: {}", .{ expected_memory_map_size, memory_map_size });
-    }
-    if (expected_memory_map_descriptor_size != memory_map_descriptor_size) {
-        @panic("Descriptor size change");
-    }
-    if (expected_memory_map_descriptor_version != memory_map_descriptor_version) {
-        @panic("Descriptor size change");
-    }
-    const real_memory_map_entry_count = @divExact(memory_map_size, memory_map_descriptor_size);
-    log.debug("Real: {}. Mine: {}", .{ real_memory_map_entry_count, memory_map_entry_count });
-    const diff = @intCast(i16, memory_map_entry_count) - @intCast(i16, real_memory_map_entry_count);
-    if (diff < 0) {
-        @panic("Memory map entry count diff < 0");
-    }
-
-    bootloader_information.configuration.memory_map_diff = @intCast(u8, diff);
-
-    log.debug("Exiting boot services...", .{});
-    UEFI.result(@src(), boot_services.exitBootServices(handle, memory_map_key));
-
-    memory_map.reset();
-
-    var entry_index: usize = 0;
-    const memory_map_entries = bootloader_information.getMemoryMapEntries();
-    while (memory_map.next()) |entry| : (entry_index += 1) {
-        memory_map_entries[entry_index] = .{
-            .region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry.number_of_pages << UEFI.page_shifter),
-            .type = switch (entry.type) {
-                .ReservedMemoryType, .LoaderCode, .LoaderData, .BootServicesCode, .BootServicesData, .RuntimeServicesCode, .RuntimeServicesData, .ACPIReclaimMemory, .ACPIMemoryNVS, .MemoryMappedIO, .MemoryMappedIOPortSpace, .PalCode, .PersistentMemory => .reserved,
-                .ConventionalMemory => .usable,
-                .UnusableMemory => .bad_memory,
-                else => @panic("Unknown type"),
-            },
-        };
-    }
-
-    const minimal_paging = bootloader_information.initializeVirtualAddressSpace();
-    const page_allocator_interface = bootloader_information.getPageAllocatorInterface();
-
-    const cpu_driver_executable = files_slice[cpu_driver_file_index].getContent(bootloader_information);
-    var elf_parser = ELF.Parser.init(cpu_driver_executable) catch |err| UEFI.panic("Failed to initialize ELF parser: {}", .{err});
-
-    const program_headers = elf_parser.getProgramHeaders();
-    bootloader_information.entry_point = elf_parser.getEntryPoint();
-
-    var segment_count: u32 = 0;
-    for (program_headers) |*ph| {
-        switch (ph.type) {
-            .load => {
-                if (ph.size_in_memory == 0) continue;
-                if (segment_count == 3) @panic("Exceeded segments");
-
-                log.debug("Checking for PT_LOAD segment...", .{});
-
-                const address_misalignment = ph.virtual_address & (UEFI.page_size - 1);
-
-                if (address_misalignment != 0) {
-                    @panic("ELF PH segment size is supposed to be page-aligned");
-                }
-
-                if (!lib.isAligned(ph.offset, UEFI.page_size)) {
-                    @panic("ELF PH offset is supposed to be page-aligned");
-                }
-
-                if (!ph.flags.readable) {
-                    @panic("ELF program segment is marked as non-readable");
-                }
-
-                if (ph.size_in_file != ph.size_in_memory) {
-                    @panic("ELF program segment file size is smaller than memory size");
-                }
-
-                const segment_index = segment_count;
-                _ = segment_index;
-                segment_count += 1;
-                const virtual_address_value = ph.virtual_address & 0xffff_ffff_ffff_f000;
-                const aligned_segment_size = @intCast(u32, lib.alignForward(ph.size_in_memory + address_misalignment, UEFI.page_size));
-                log.debug("Trying to allocate: 0x{x} bytes for segment", .{aligned_segment_size});
-                const segment_allocation = bootloader_information.allocatePages(aligned_segment_size, UEFI.page_size) catch @panic("segment allocation failed");
-                log.debug("Allocated 0x{x} bytes for segment at 0x{x}", .{ segment_allocation.size, segment_allocation.address });
-                const physical_address = segment_allocation.address;
-                const aligned_physical_address = physical_address.offset(address_misalignment);
-                const dst_slice = aligned_physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..ph.size_in_memory];
-                const src_slice = cpu_driver_executable[ph.offset..][0..ph.size_in_memory];
-
-                if (!(dst_slice.len >= src_slice.len)) {
-                    @panic("uefi: segment allocated memory must be equal or greater than especified");
-                }
-                assert(dst_slice.len >= src_slice.len);
-                lib.copy(u8, dst_slice, src_slice);
-
-                const virtual_address = VirtualAddress.new(virtual_address_value);
-                const size = aligned_segment_size;
-                const flags = .{ .write = ph.flags.writable, .execute = ph.flags.executable };
-                log.debug("trying to map cpu driver section: 0x{x} -> 0x{x}, 0x{x}", .{ physical_address.value(), virtual_address.value(), size });
-                minimal_paging.map(physical_address, virtual_address, size, flags, page_allocator_interface) catch |err| UEFI.panic("unable to map program segment: {}", .{err});
-                log.debug("mapped cpu driver section: 0x{x} -> 0x{x}, 0x{x}", .{ physical_address.value(), virtual_address.value(), size });
-
-                const mapping_ptr =
-                    if (ph.flags.writable and !ph.flags.executable)
-                    // data section
-                    &bootloader_information.cpu_driver_mappings.data
-                else if (!ph.flags.writable and !ph.flags.executable)
-                    // rodata
-                    &bootloader_information.cpu_driver_mappings.rodata
-                else if (!ph.flags.writable and ph.flags.executable)
-                    // text section
-                    &bootloader_information.cpu_driver_mappings.text
-                else
-                    @panic("unreachable flags");
-                mapping_ptr.physical = physical_address;
-                mapping_ptr.virtual = virtual_address;
-                mapping_ptr.size = size;
-                mapping_ptr.flags = flags;
-            },
-            else => {
-                log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
-            },
         }
+
+        @panic("ensureLoaderIsMapped failed");
     }
 
-    // Map the trampoline code (part of the UEFI executable).
-    // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
-    log.debug("Mapping trampoline code...", .{});
-    switch (lib.cpu.arch) {
-        .x86_64 => {
-            const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
-
-            memory_map.reset();
-            while (memory_map.next()) |entry| {
-                const entry_size = entry.number_of_pages * UEFI.page_size;
-                if (entry.physical_start < trampoline_code_start and trampoline_code_start < entry.physical_start + entry_size) {
-                    log.debug("Entry: 0x{x}-0x{x}", .{ entry.physical_start, entry.physical_start + entry.number_of_pages * UEFI.page_size });
-
-                    const code_physical_region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry_size);
-                    const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-                    minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
-                    break;
-                }
+    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+        const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
+        const rsp = asm volatile (
+            \\mov %rsp, %[rsp]
+            : [rsp] "=r" (-> u64),
+        );
+        log.debug("stack: 0x{x}", .{rsp});
+        while (try MMap.next(vas.mmap)) |entry| {
+            if (entry.region.address.value() < rsp and rsp < entry.region.address.offset(entry.region.size).value()) {
+                const rsp_region_physical_address = entry.region.address;
+                const rsp_region_virtual_address = rsp_region_physical_address.toIdentityMappedVirtualAddress();
+                log.debug("mapping {s} 0x{x} - 0x{x}", .{ @tagName(entry.type), entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
+                assert(entry.region.size > 0);
+                try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface);
+                return;
             }
-        },
-        .aarch64, .riscv64 => @panic("TODO map trampoline"),
-        else => @compileError("Architecture not supported"),
-    }
+        }
 
+        @panic("ensureStackIsMapped failed");
+    }
+};
+
+pub fn main() noreturn {
+    const system_table = UEFI.get_system_table();
+    const handle = UEFI.get_handle();
+    const boot_services = system_table.boot_services orelse @panic("boot services");
+    const out = system_table.con_out orelse @panic("con out");
+    UEFI.result(@src(), out.reset(true));
+    UEFI.result(@src(), out.clearScreen());
+
+    const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
+    const rsdp_physical_address = for (configuration_tables) |configuration_table| {
+        if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
+            break PhysicalAddress.new(@ptrToInt(configuration_table.vendor_table));
+        }
+    } else @panic("Unable to find RSDP");
+    const rsdp_descriptor = rsdp_physical_address.toIdentityMappedVirtualAddress().access(*ACPI.RSDP.Descriptor1);
+
+    var filesystem: Filesystem = .{
+        .boot_services = boot_services,
+        .handle = handle,
+        .root = undefined,
+        .file_buffer = undefined,
+        .parser = undefined,
+    };
+    var mmap: MMap = .{
+        .boot_services = boot_services,
+        .handle = handle,
+        .size = 0,
+        .key = 0,
+        .descriptor_size = 0,
+        .descriptor_version = 0,
+    };
+    var fb = Framebuffer{
+        .boot_services = boot_services,
+    };
+    var vas = VAS{
+        .mmap = &mmap,
+    };
+    const bootloader_information = bootloader.Information.initialize(.{
+        .context = &filesystem,
+        .initialize = Filesystem.initialize,
+        .deinitialize = Filesystem.deinitialize,
+        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .read_file = Filesystem.readFileCallback,
+    }, .{
+        .context = &mmap,
+        .initialize = MMap.initialize,
+        .deinitialize = MMap.deinitialize,
+        .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
+        .next = MMap.next,
+        .get_host_region = MMap.getHostRegion,
+    }, .{
+        .context = &fb,
+        .initialize = Framebuffer.initialize,
+    }, .{
+        .context = &vas,
+        .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
+        .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
+    }, rsdp_descriptor, .rise, .uefi) catch |err| {
+        if (@errorReturnTrace()) |stack_trace| {
+            @import("std").debug.dumpStackTrace(stack_trace);
+        } else {
+            log.err("No stack trace", .{});
+        }
+        @panic(@errorName(err));
+    };
+    _ = bootloader_information;
+
+    while (true) {}
+
+    // // Map the trampoline code (part of the UEFI executable).
+    // // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
+    // log.debug("Mapping trampoline code...", .{});
+    // switch (lib.cpu.arch) {
+    //     .x86_64 => {
+    //         const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
+    //
+    //         memory_map.reset();
+    //         while (memory_map.next()) |entry| {
+    //             const entry_size = entry.number_of_pages * UEFI.page_size;
+    //             if (entry.physical_start < trampoline_code_start and trampoline_code_start < entry.physical_start + entry_size) {
+    //                 log.debug("Entry: 0x{x}-0x{x}", .{ entry.physical_start, entry.physical_start + entry.number_of_pages * UEFI.page_size });
+    //
+    //                 const code_physical_region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry_size);
+    //                 const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
+    //                 minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
+    //                 break;
+    //             }
+    //         }
+    //     },
+    //     .aarch64, .riscv64 => @panic("TODO map trampoline"),
+    //     else => @compileError("Architecture not supported"),
+    // }
+    //
     // Map the bootloader information
-    log.debug("Mapping bootloader information...", .{});
-    {
-        const physical_address = PhysicalAddress.new(@ptrToInt(bootloader_information));
-        const size = bootloader_information.getAlignedTotalSize();
-        minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
-        minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
-    }
-
-    // Map all usable memory to avoid kernel delays later
-    // TODO:
-    // 1. Divide memory per CPU to avoid shared memory
-    // 2. User manager
-    log.debug("Mapping usable memory...", .{});
-    memory_map.reset();
-    while (memory_map.next()) |entry| {
-        if (entry.type == .ConventionalMemory) {
-            const physical_address = PhysicalAddress.new(entry.physical_start);
-            const size = entry.number_of_pages * lib.arch.valid_page_sizes[0];
-            log.debug("Identity", .{});
-            // bootloader_information.virtual_address_space.map(.local, physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }) catch @panic("Unable to map page tables");
-            log.debug("Higher half", .{});
-            minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Unable to map page tables");
-        }
-    }
-
-    // Hack to map UEFI stack
-    log.debug("Mapping UEFI stack...", .{});
-    memory_map.reset();
-    const rsp = asm volatile (
-        \\mov %rsp, %[rsp]
-        : [rsp] "=r" (-> u64),
-    );
-    log.debug("stack: 0x{x}", .{rsp});
-    while (memory_map.next()) |entry| {
-        const region_size = entry.number_of_pages * UEFI.page_size;
-        if (entry.physical_start < rsp and rsp < entry.physical_start + region_size) {
-            const rsp_physical_address = PhysicalAddress.new(entry.physical_start);
-            const rsp_virtual_address = rsp_physical_address.toIdentityMappedVirtualAddress();
-            log.debug("mapping {s} 0x{x} - 0x{x}", .{ @tagName(entry.type), entry.physical_start, entry.physical_start + region_size });
-            assert(region_size > 0);
-            minimal_paging.map(rsp_physical_address, rsp_virtual_address, region_size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Unable to map page tables");
-            break;
-        }
-    }
-
-    // Map framebuffer
-    log.debug("Mapping framebuffer...", .{});
-    {
-        const physical_address = PhysicalAddress.new(bootloader_information.framebuffer.address);
-        const virtual_address = physical_address.toIdentityMappedVirtualAddress();
-        const size = bootloader_information.framebuffer.getSize();
-        minimal_paging.map(physical_address, virtual_address, size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Unable to map page tables");
-    }
-
-    //log.debug("Initialize SMP", .{});
-    //bootloader_information.initializeSMP(madt);
-    //log.debug("Ended SMP initialization", .{});
-
-    log.debug("Jumping to trampoline...", .{});
-    switch (lib.cpu.arch) {
-        .x86_64 => bootloader.arch.x86_64.jumpToKernel(bootloader_information, minimal_paging),
-        .aarch64 => @panic("TODO trampoline"),
-        else => @compileError("Architecture not supported"),
-    }
+    //
 }
 
 pub fn file_to_higher_half(file: []const u8) []const u8 {
@@ -560,49 +521,5 @@ pub const std_options = struct {
     }
 };
 
-fn flush_new_line() !void {
-    switch (lib.cpu.arch) {
-        .x86_64 => {
-            if (!config.real_hardware) {
-                try writer.writeByte('\n');
-            }
-        },
-        else => @compileError("arch not supported"),
-    }
-}
-
-const File = struct {
-    type: bootloader.File.Type,
-    path: []const u8,
-    uefi: UEFI.File,
-};
-
-var files: [16]File = undefined;
-var file_count: u32 = 0;
-
 const practical_memory_map_descriptor_size = 0x30;
-const memory_map_descriptor_count = 256;
-var memory_map_key: usize = 0;
-var memory_map_descriptor_size: usize = 0;
-var memory_map_descriptor_version: u32 = 0;
-var memory_map_size: usize = 0;
-var memory_map = MemoryMap{};
-
-pub const MemoryMap = struct {
-    buffer: [practical_memory_map_descriptor_size * memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
-    offset: usize = 0,
-
-    pub fn next(it: *MemoryMap) ?*MemoryDescriptor {
-        if (it.offset < memory_map_size) {
-            const descriptor = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[it.offset..].ptr));
-            it.offset += memory_map_descriptor_size;
-            return descriptor;
-        }
-
-        return null;
-    }
-
-    pub inline fn reset(it: *MemoryMap) void {
-        it.offset = 0;
-    }
-};
+const practical_memory_map_descriptor_count = 256;

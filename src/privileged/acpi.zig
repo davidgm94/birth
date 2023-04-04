@@ -10,20 +10,20 @@ pub const RSDP = extern struct {
         revision: u8,
         RSDT_address: u32,
 
-        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) ?*const Header {
+        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) ?*align(1) const Header {
             // TODO: checksum
             const root_table_address = switch (rsdp.revision) {
                 0 => rsdp.RSDT_address,
                 2 => @fieldParentPtr(RSDP.Descriptor2, "descriptor1", rsdp).XSDT_address,
                 else => @panic("Unexpected value"),
             };
-            const root_table_header = @intToPtr(*Header, lib.safeArchitectureCast(root_table_address));
+            const root_table_header = @intToPtr(*align(1) Header, lib.safeArchitectureCast(root_table_address));
 
             const entry_count = @divExact(root_table_header.length - @sizeOf(Header), @sizeOf(u32));
             // TODO: this code is badly written
-            const entries = @intToPtr([*]const u32, rsdp.RSDT_address + @sizeOf(Header))[0..entry_count];
+            const entries = @intToPtr([*]align(1) const u32, rsdp.RSDT_address + @sizeOf(Header))[0..entry_count];
             for (entries) |entry| {
-                const table_header = @intToPtr(*const Header, entry);
+                const table_header = @intToPtr(*align(1) const Header, entry);
                 if (table_signature == table_header.signature) {
                     return table_header;
                 }
@@ -80,13 +80,13 @@ pub const MADT = extern struct {
         assert(@sizeOf(@This()) == 0x2c);
     }
 
-    pub fn getIterator(madt: *const MADT) Iterator {
+    pub fn getIterator(madt: *align(1) const MADT) Iterator {
         return .{
             .madt = madt,
         };
     }
 
-    pub fn getCPUCount(madt: *const MADT) u32 {
+    pub fn getCPUCount(madt: *align(1) const MADT) u32 {
         var cpu_count: u32 = 0;
         var iterator = madt.getIterator();
         while (iterator.next()) |entry| {
@@ -128,7 +128,7 @@ pub const MADT = extern struct {
     };
 
     pub const Iterator = extern struct {
-        madt: *const MADT,
+        madt: *align(1) const MADT,
         index: usize = 0,
         offset: usize = @sizeOf(MADT),
 

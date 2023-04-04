@@ -12,7 +12,6 @@ pub const io = @import("x86/64/io.zig");
 pub const paging = @import("x86/64/paging.zig");
 pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
-pub const Syscall = @import("x86/64/syscall.zig");
 
 pub const valid_page_sizes = privileged.arch.valid_page_sizes;
 pub const page_size = valid_page_sizes[0];
