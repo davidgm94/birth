@@ -138,7 +138,6 @@ pub fn calibrateTimer() privileged.arch.x86_64.TicksPerMS {
     const ticks_per_ms = (maxInt(u32) - lapicRead(.timer_current_count)) >> 4;
     const timer_calibration_end = lib.arch.x86_64.readTimestamp();
     const timestamp_ticks_per_ms = @intCast(u32, (timer_calibration_end - timer_calibration_start) >> 3);
-    log.debug("LAPIC ticks per ms: {}. Timestamp ticks per ms: {}", .{ ticks_per_ms, timestamp_ticks_per_ms });
 
     return .{
         .tsc = timestamp_ticks_per_ms,

@@ -7,6 +7,7 @@ const MemoryManager = privileged.MemoryManager;
 const PhysicalHeap = privileged.PhyicalHeap;
 const writer = privileged.writer;
 
+const stopCPU = privileged.arch.stopCPU;
 const GDT = privileged.arch.x86_64.GDT;
 const Mapping = privileged.Mapping;
 const PhysicalAddress = privileged.PhysicalAddress;
@@ -57,19 +58,19 @@ pub const std_options = struct {
 
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
         _ = level;
-        writer.writeByte('[') catch unreachable;
-        writer.writeAll(@tagName(scope)) catch unreachable;
-        writer.writeAll("] ") catch unreachable;
-        lib.format(writer, format, args) catch unreachable;
-        writer.writeByte('\n') catch unreachable;
+        writer.writeByte('[') catch stopCPU();
+        writer.writeAll(@tagName(scope)) catch stopCPU();
+        writer.writeAll("] ") catch stopCPU();
+        lib.format(writer, format, args) catch stopCPU();
+        writer.writeByte('\n') catch stopCPU();
     }
 };
 
 pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     privileged.arch.disableInterrupts();
-    writer.writeAll("[PANIC] ") catch unreachable;
-    writer.writeAll(message) catch unreachable;
-    writer.writeByte('\n') catch unreachable;
+    writer.writeAll("[PANIC] ") catch stopCPU();
+    writer.writeAll(message) catch stopCPU();
+    writer.writeByte('\n') catch stopCPU();
 
     if (lib.is_test) {
         privileged.exitFromQEMU(.failure);

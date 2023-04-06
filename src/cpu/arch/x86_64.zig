@@ -137,8 +137,7 @@ pub fn entryPoint() callconv(.Naked) noreturn {
 }
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    log.debug("Hello! Bootloader information address: 0x{x}", .{@ptrToInt(bootloader_information)});
-
+    log.info("Hello! CPU driver initializing from {s} with boot protocol {s}", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
     const cpuid = lib.arch.x86_64.cpuid;
     if (pcid) {
         if (cpuid(1).ecx & (1 << 17) == 0) @panic("PCID not available");
@@ -257,16 +256,11 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         : "memory"
     );
 
-    log.debug("Loaded IDT", .{});
-
     // Mask PIC
     privileged.arch.io.write(u8, 0xa1, 0xff);
     privileged.arch.io.write(u8, 0x21, 0xff);
 
-    log.debug("Masked PIC", .{});
-
     asm volatile ("sti" ::: "memory");
-    log.debug("Enabled interrupts", .{});
 
     const ia32_apic_base = IA32_APIC_BASE.read();
     cpu.bsp = ia32_apic_base.bsp;
@@ -286,15 +280,12 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
     // TODO: figure out what this does
     const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
-    log.debug("Syscall mask: 0x{x}", .{syscall_mask});
     IA32_FMASK.write(syscall_mask);
 
     // Enable syscall extensions
     var efer = IA32_EFER.read();
     efer.SCE = true;
     efer.write();
-
-    log.debug("Enabled syscalls", .{});
 
     var my_cr4 = cr4.read();
     my_cr4.operating_system_support_for_fx_save_restore = true;
@@ -303,16 +294,12 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     my_cr4.performance_monitoring_counter_enable = true;
     my_cr4.write();
 
-    log.debug("Set up CR4", .{});
-
     var my_cr0 = cr0.read();
     my_cr0.monitor_coprocessor = true;
     my_cr0.emulation = false;
     my_cr0.numeric_error = true;
     my_cr0.task_switched = false;
     my_cr0.write();
-
-    log.debug("Set up CR0", .{});
 
     asm volatile (
         \\fninit
@@ -321,18 +308,14 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         :: //[mxcsr] "m" (@as(u32, 0x1f80)),
         : "memory");
 
-    log.debug("Enabled FPU", .{});
-
     // TODO: configure PAT
 
     // TODO:
     kernelStartup(bootloader_information);
-    log.debug("Is test: {}", .{lib.is_test});
     bootloader_information.draw_context.clearScreen(0xff005000);
     if (lib.is_test) {
         cpu.test_runner.runAllTests() catch @panic("Tests failed");
     }
-    log.debug("Starting...", .{});
 
     todoEndEntryPoint();
 }
@@ -960,7 +943,6 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) lib.Syscall.Result
     const options = @bitCast(lib.Syscall.Options, regs.syscall_number);
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
 
-    log.debug("Options general: 0x{x}, {}", .{ @bitCast(u64, options.general), options.general });
     switch (options.general.convention) {
         .rise => {
             const root_capability = &cpu.current_director.?.cspace.capability;
@@ -1035,7 +1017,6 @@ fn dispatch(director: *cpu.CoreDirectorData) noreturn {
     switch (director.disabled) {
         true => {
             cpu.current_director = director;
-            // log.debug("FXRSTOR: 0x{x}", .{@ptrToInt(&director.shared.getDisabledSaveArea().fxsave_area)});
             resumeExecution(director.shared.getDisabledSaveArea());
         },
         false => {
@@ -1161,7 +1142,6 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     assert(cpu.bsp);
 
     const init_director = cpu.spawnInitModule(spawn_state) catch |err| panic("Can't init module: {}", .{err});
-    log.debug("Init director: 0x{x}", .{@ptrToInt(init_director)});
 
     init_director.disabled = true;
     const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
@@ -1190,8 +1170,6 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
         .cache_disable = true,
     }) catch @panic("Capability address space");
 
-    // log.debug("Init director allocation: 0x{x}. init_director_shared_allocation: 0x{x}", .{ init_director_allocation.address.value(), init_director_shared_allocation.address.value() });
-
     // TODO: don't waste this much space
     const virtual_address_space_allocation = cpu.page_allocator.allocate(0x1000, 0x1000) catch @panic("virtual_address_space");
     const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
@@ -1208,7 +1186,6 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
-    log.debug("CPU PML4: 0x{x}. User PML4: 0x{x}", .{ cpu_side_pml4_physical_address.value(), user_side_pml4_physical_address.value() });
 
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
@@ -1232,12 +1209,10 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
 
     const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
     const entry_point = init_elf.getEntryPoint();
-    log.debug("Entry point: 0x{x}", .{entry_point});
     const program_headers = init_elf.getProgramHeaders();
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
-            log.debug("Segment: 0x{x}, 0x{x}", .{ program_header.virtual_address, program_header.size_in_memory });
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
             const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
             const segment_physical_address = segment_physical_region.address;
@@ -1285,15 +1260,12 @@ pub inline fn nextTimer(ms: u32) void {
 }
 
 pub fn initAPIC() void {
-    log.debug("Initializing APIC", .{});
     var ia32_apic_base = IA32_APIC_BASE.read();
     const apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
-    log.debug("Mapping APIC", .{});
     const apic_base = cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
-    log.debug("Mapped APIC", .{});
 
     const spurious_vector: u8 = 0xFF;
     apic_base.offset(@enumToInt(APIC.Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;
@@ -1306,7 +1278,6 @@ pub fn initAPIC() void {
 
     ia32_apic_base.global_enable = true;
     ia32_apic_base.write();
-    log.debug("APIC enabled", .{});
 
     ticks_per_ms = APIC.calibrateTimer();
 

@@ -95,7 +95,6 @@ pub const PageAllocator = extern struct {
             //
             // ptr = page_allocator.head;
             while (ptr) |entry| : (ptr = entry.next) {
-                log.debug("Entry(1): address: 0x{x}. size: 0x{x}", .{ entry.region.address.value(), entry.region.size });
                 if (lib.isAligned(entry.region.size, alignment) and entry.region.size > size) {
                     const result = PhysicalMemoryRegion{
                         .address = entry.region.address,
@@ -106,7 +105,6 @@ pub const PageAllocator = extern struct {
 
                     page_allocator.total_allocated_size += @intCast(u32, size);
                     // log.debug("Allocated 0x{x}", .{size});
-                    log.debug("Result(1): address: 0x{x}. size: 0x{x}", .{ result.address.value(), result.size });
 
                     break :blk result;
                 }
@@ -115,7 +113,6 @@ pub const PageAllocator = extern struct {
             ptr = page_allocator.head;
 
             while (ptr) |entry| : (ptr = entry.next) {
-                log.debug("Entry(2): address: 0x{x}. size: 0x{x}", .{ entry.region.address.value(), entry.region.size });
                 const aligned_address = lib.alignForward(entry.region.address.value(), alignment);
                 const top = entry.region.address.offset(entry.region.size).value();
                 if (aligned_address < top and top - aligned_address > size) {
@@ -158,7 +155,6 @@ pub const PageAllocator = extern struct {
                     // page_allocator.total_allocated_size += @intCast(u32, size);
                     // log.debug("Allocated 0x{x}", .{size});
 
-                    log.debug("Result(2): address: 0x{x}. size: 0x{x}", .{ result.address.value(), result.size });
                     break :blk result;
                 }
             }

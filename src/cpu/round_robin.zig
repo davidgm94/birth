@@ -14,11 +14,8 @@ pub fn make_runnable(core_director_data: *CoreDirectorData) void {
             core_director_data.next = core_director_data;
         }
 
-        log.debug("Here", .{});
         core_director_data.previous = cpu.current_supervisor.?.scheduler_state.current;
-        log.debug("Here", .{});
         core_director_data.next = cpu.current_supervisor.?.scheduler_state.current.?.next;
-        log.debug("Here", .{});
         cpu.current_supervisor.?.scheduler_state.current.?.next.?.previous = core_director_data;
         cpu.current_supervisor.?.scheduler_state.current.?.next = core_director_data;
     }

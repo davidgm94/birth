@@ -197,7 +197,6 @@ pub const VirtualAddressSpace = extern struct {
 
     pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags) !void {
         // TODO: use flags
-        log.debug("Mapping 0x{x}-0x{x} to 0x{x}-0x{x}", .{ asked_physical_address.value(), asked_physical_address.offset(size).value(), asked_virtual_address.value(), asked_virtual_address.offset(size).value() });
 
         // if (!asked_physical_address.isValid()) return Error.invalid_physical;
         // if (!asked_virtual_address.isValid()) return Error.invalid_virtual;
@@ -221,8 +220,6 @@ pub const VirtualAddressSpace = extern struct {
             return paging.Error.invalid_physical;
         }
 
-        log.debug("Mapping 0x{x} -> 0x{x} for 0x{x} bytes in 0x{x}", .{ asked_virtual_address.value(), asked_physical_address.value(), size, virtual_address_space.arch.cr3.getAddress().value() });
-
         try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, virtual_address_space.getPageAllocatorInterface());
     }
 
@@ -237,7 +234,6 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        log.debug("allocatePages: size: 0x{x}, alignment: 0x{x}", .{ size, alignment });
         if (virtual_address_space.page.context.size == 0) {
             if (alignment > lib.arch.valid_page_sizes[1]) return Allocator.Allocate.Error.OutOfMemory;
             // Try to allocate a bigger bulk so we don't have to use the backing allocator (slower) everytime a page is needed
@@ -253,8 +249,6 @@ pub const VirtualAddressSpace = extern struct {
                 .region_base = page_bulk_allocation.address.value(),
                 .size = page_bulk_allocation.size,
             };
-
-            log.debug("Page context: 0x{x}, size: 0x{x}", .{ virtual_address_space.page.context.region_base, page_bulk_allocation.size });
 
             if (virtual_address_space.options.log_pages) {
                 try virtual_address_space.addPage(page_bulk_allocation);
@@ -283,7 +277,6 @@ pub const VirtualAddressSpace = extern struct {
     pub fn mapPageTables(virtual_address_space: *VirtualAddressSpace) !void {
         assert(virtual_address_space.options.log_pages);
 
-        log.debug("log count: {}", .{virtual_address_space.page.log_count});
         var maybe_page_table_entry = virtual_address_space.page.log;
         while (maybe_page_table_entry) |page_table_entry| : (maybe_page_table_entry = page_table_entry.next) {
             try virtual_address_space.map(page_table_entry.region.address, page_table_entry.region.address.toIdentityMappedVirtualAddress(), page_table_entry.region.size, .{
@@ -292,7 +285,6 @@ pub const VirtualAddressSpace = extern struct {
             });
         }
         assert(virtual_address_space.page.log.?.next == null);
-        log.debug("log count: {}", .{virtual_address_space.page.log_count});
 
         virtual_address_space.options.mapped_page_tables = true;
     }
@@ -309,7 +301,6 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub inline fn validate(virtual_address_space: *VirtualAddressSpace) !void {
-        log.debug("Performing virtual address space validation...", .{});
         try paging.validate(virtual_address_space);
     }
 
@@ -456,46 +447,36 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
         bsp_kernel_control_block.capability = bsp_kernel_control_block_capability;
     }
 
-    log.debug("cnode: task", .{});
     spawn_state.cnodes.task = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.task));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.task orelse unreachable));
 
-    log.debug("cnode: page", .{});
     spawn_state.cnodes.page = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.page));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.page orelse unreachable));
 
-    log.debug("cnode: base_page", .{});
     spawn_state.cnodes.base_page = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.base_page));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.base_page orelse unreachable));
 
-    log.debug("cnode: early_cnode", .{});
     spawn_state.cnodes.early_cnode = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.early_cnode));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.early_cnode orelse unreachable));
 
-    log.debug("cnode: super", .{});
     spawn_state.cnodes.super = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.super));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.super orelse unreachable));
 
-    log.debug("cnode: slot_alloc", .{});
     spawn_state.cnodes.slot_alloc0 = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.slot_alloc0));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(4 * Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, 4 * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.slot_alloc0 orelse unreachable));
 
-    log.debug("cnode: seg", .{});
     spawn_state.cnodes.seg = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.seg));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.seg orelse unreachable));
 
-    log.debug("cnode: physical_address", .{});
     spawn_state.cnodes.physical_address = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.physical_address));
     try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.physical_address orelse unreachable));
 
     // TODO @ArchIndependent
     if (bsp) {
-        log.debug("cnode: module", .{});
         spawn_state.cnodes.module = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.module));
         try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.module orelse unreachable));
     }
 
-    log.debug("cnode: init dcb", .{});
     const init_dcb_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
     try Capabilities.new(.dispatcher, (try page_allocator.allocate(Capabilities.Size.dispatcher, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.dispatcher, 0, core_id, capabilityNodeSlice(init_dcb_cte));
 
@@ -514,7 +495,7 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
 
     // TODO @ArchIndependent
     if (bsp) {
-        log.warn("todo: bootloader information", .{});
+        //log.warn("todo: bootloader information", .{});
     }
 
     const kernel_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
@@ -547,15 +528,11 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
     init_dispatcher_data.disabled = true;
     Scheduler.make_runnable(init_dispatcher_data);
 
-    log.warn("todo: args", .{});
-
     const base_page_cn_cte = Capabilities.locateSlot(spawn_state.cnodes.base_page.?.getNode(), 0);
     try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0], core_id, capabilityNodeSlice(base_page_cn_cte));
-    log.debug("base page", .{});
 
     const early_cnode_cn_cte = Capabilities.locateSlot(spawn_state.cnodes.early_cnode.?.getNode(), 0);
     try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(early_cnode_cn_cte));
-    log.debug("early cnode", .{});
 
     return init_dispatcher_data;
 }

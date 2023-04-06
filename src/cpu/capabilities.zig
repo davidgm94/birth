@@ -434,7 +434,6 @@ pub const Capability = extern struct {
     pub fn lookupSlot(capability: *Capability, cptr: lib.Capabilities.Address, level: u16, rights: Rights) !*CTE {
         const l1_index = @intCast(u16, (cptr >> l2_cnode_bits) & comptime mask(@bitSizeOf(Address) - l2_cnode_bits));
         const l2_index = @intCast(u16, cptr & comptime mask(l2_cnode_bits));
-        log.debug("CPTR: 0x{x}. Level: 0x{x}. L1: {}. L2: {}", .{ cptr, level, l1_index, l2_index });
 
         if (level > 2) {
             @panic("level > 2");
@@ -459,7 +458,6 @@ pub const Capability = extern struct {
 
         const l2cnode = locateSlot(capability.getAddress(), l1_index);
 
-        log.debug("Level: {}", .{level});
         if (level == 1) {
             @panic("TODO: level 1");
         }
@@ -1063,7 +1061,7 @@ fn zerObjects(capability_type: Type, address: PhysicalAddress, object_size: u64,
         .kernel_control_block => {
             @panic("kernel_control_block");
         },
-        else => log.debug("not zeroing {} bytes for type: {}", .{ object_size * count, capability_type }),
+        else => {},
     }
 }
 

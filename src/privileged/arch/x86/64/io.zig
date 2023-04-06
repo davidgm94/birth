@@ -29,12 +29,12 @@ pub const Ports = struct {
 
 pub inline fn writeBytes(port: u16, bytes: []const u8) usize {
     const bytes_left = asm volatile (
-        \\cld
         \\rep outsb
         : [ret] "={rcx}" (-> usize),
         : [dest] "{dx}" (port),
           [src] "{rsi}" (bytes.ptr),
           [len] "{rcx}" (bytes.len),
+        : "rsi", "rcx"
     );
 
     return bytes.len - bytes_left;
