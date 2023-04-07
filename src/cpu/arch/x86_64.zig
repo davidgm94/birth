@@ -179,6 +179,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
         .limit = @sizeOf(GDT) - 1,
         .address = @ptrToInt(&gdt),
     };
+
     asm volatile (
         \\lgdt %[gdt]
         \\mov %[ds], %rax
@@ -311,7 +312,7 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     // TODO: configure PAT
 
     // TODO:
-    kernelStartup(bootloader_information);
+    startup(bootloader_information) catch |err| panic("Failed to initialize CPU: {}", .{err});
     bootloader_information.draw_context.clearScreen(0xff005000);
     if (lib.is_test) {
         cpu.test_runner.runAllTests() catch @panic("Tests failed");
@@ -994,21 +995,19 @@ const pcid_mask = 1 << pcid_bit;
 const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
 const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
 
-fn kernelStartup(bootloader_information: *bootloader.Information) noreturn {
-    const init_director = switch (cpu.bsp) {
+fn startup(bootloader_information: *bootloader.Information) !noreturn {
+    switch (cpu.bsp) {
         true => {
-            cpu.page_allocator = PageAllocator.fromBSP(bootloader_information);
-            cpu.heap_allocator = Heap.fromPageAllocator(&cpu.page_allocator) catch @panic("Core heap initialization failed");
-            cpu.current_supervisor = cpu.heap_allocator.create(cpu.CoreSupervisorData) catch @panic("Core supervisor allocation failed");
-            initAPIC();
-            const init_module = spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
+            if (true) privileged.exitFromQEMU(.success);
+            cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
+            cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
+            cpu.current_supervisor = try cpu.heap_allocator.create(cpu.CoreSupervisorData);
+            try initAPIC();
+            const init_module = try spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
             dispatch(init_module);
         },
         false => @panic("APP"),
-    };
-    _ = init_director;
-
-    @panic("TODO: kernel startup");
+    }
 }
 
 var current_director: ?*cpu.CoreDirectorData = null;
@@ -1133,15 +1132,15 @@ pub const Registers = extern struct {
 
 const ELF = lib.ELF(64);
 
-fn spawnInitBSP(init_file: []const u8) *cpu.CoreDirectorData {
-    return spawnInitCommon(&cpu.spawn_state, init_file);
+fn spawnInitBSP(init_file: []const u8) !*cpu.CoreDirectorData {
+    return try spawnInitCommon(&cpu.spawn_state, init_file);
 }
 
 // TODO: make this work with no KPTI
-fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.CoreDirectorData {
+fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) !*cpu.CoreDirectorData {
     assert(cpu.bsp);
 
-    const init_director = cpu.spawnInitModule(spawn_state) catch |err| panic("Can't init module: {}", .{err});
+    const init_director = try cpu.spawnInitModule(spawn_state);
 
     init_director.disabled = true;
     const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
@@ -1162,16 +1161,16 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     // const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
     // const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
 
-    const capability_address_space_stack_physical_region = cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000) catch @panic("Capability");
-    cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
+    const capability_address_space_stack_physical_region = try cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000);
+    try cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
         .write = true,
         .user = false,
         .global = true,
         .cache_disable = true,
-    }) catch @panic("Capability address space");
+    });
 
     // TODO: don't waste this much space
-    const virtual_address_space_allocation = cpu.page_allocator.allocate(0x1000, 0x1000) catch @panic("virtual_address_space");
+    const virtual_address_space_allocation = try cpu.page_allocator.allocate(0x1000, 0x1000);
     const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
     virtual_address_space.* = .{
         .arch = undefined,
@@ -1183,13 +1182,13 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     };
 
     // One for privileged mode, one for user
-    const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
+    const pml4_table_regions = try virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .{});
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
 
     // Copy the higher half address mapping from cpu address space to user cpu-side address space
     cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
-    cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator) catch @panic("higher half user");
+    try cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator);
 
     init_director.virtual_address_space = virtual_address_space;
 
@@ -1204,17 +1203,17 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
 
     virtual_address_space.arch.switchTo(.user);
 
-    const user_stack_allocation = cpu.page_allocator.allocate(0x4000, 0x1000) catch @panic("user stack");
+    const user_stack_allocation = try cpu.page_allocator.allocate(0x4000, 0x1000);
     virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
 
-    const init_elf = ELF.Parser.init(init_file) catch @panic("can't parse elf");
+    const init_elf = try ELF.Parser.init(init_file);
     const entry_point = init_elf.getEntryPoint();
     const program_headers = init_elf.getProgramHeaders();
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
-            const segment_physical_region = cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]) catch @panic("Segment allocation failed");
+            const segment_physical_region = try cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]);
             const segment_physical_address = segment_physical_region.address;
             const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
             const segment_flags = .{
@@ -1223,7 +1222,7 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
                 .user = true,
             };
 
-            virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags) catch @panic("Segment mapping failed user");
+            try virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags);
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
@@ -1235,7 +1234,7 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
     init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
 
-    virtual_address_space.mapPageTables() catch |err| panic("Unable to map page tables: {}", .{err});
+    try virtual_address_space.mapPageTables();
 
     const cpu_pml4 = cpu_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
     const user_pml4 = user_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
@@ -1259,13 +1258,14 @@ pub inline fn nextTimer(ms: u32) void {
     APIC.lapicWrite(.timer_initcnt, ticks_per_ms.lapic * ms);
 }
 
-pub fn initAPIC() void {
+pub fn initAPIC() !void {
     var ia32_apic_base = IA32_APIC_BASE.read();
     const apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
-    const apic_base = cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]) catch @panic("mapping apic failed");
+
+    const apic_base = try cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]);
 
     const spurious_vector: u8 = 0xFF;
     apic_base.offset(@enumToInt(APIC.Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;

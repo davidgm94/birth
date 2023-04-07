@@ -15,6 +15,7 @@ pub const current = switch (lib.cpu.arch) {
 };
 
 pub const CoreDirectorShared = current.CoreDirectorShared;
+pub const CPUPageTables = current.paging.CPUPageTables;
 pub const stopCPU = current.stopCPU;
 pub const paging = current.paging;
 pub const Registers = current.Registers;

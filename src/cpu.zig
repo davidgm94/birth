@@ -233,7 +233,8 @@ pub const VirtualAddressSpace = extern struct {
         return asked_physical_address.toHigherHalfVirtualAddress();
     }
 
-    pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        _ = options;
         if (virtual_address_space.page.context.size == 0) {
             if (alignment > lib.arch.valid_page_sizes[1]) return Allocator.Allocate.Error.OutOfMemory;
             // Try to allocate a bigger bulk so we don't have to use the backing allocator (slower) everytime a page is needed
@@ -269,9 +270,9 @@ pub const VirtualAddressSpace = extern struct {
 
         return allocation_result;
     }
-    fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
-        return try virtual_address_space.allocatePages(size, alignment);
+        return try virtual_address_space.allocatePages(size, alignment, options);
     }
 
     pub fn mapPageTables(virtual_address_space: *VirtualAddressSpace) !void {

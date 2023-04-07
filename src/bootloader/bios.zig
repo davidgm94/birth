@@ -409,7 +409,6 @@ pub const VBE = extern struct {
         reserved0: [189]u8,
 
         comptime {
-            //@compileLog(@sizeOf(Mode));
             assert(@sizeOf(Mode) == 0x100);
         }
 
