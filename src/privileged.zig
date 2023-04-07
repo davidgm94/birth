@@ -493,10 +493,15 @@ pub const Mapping = extern struct {
 };
 
 pub const PageAllocatorInterface = struct {
-    allocate: *const fn (context: ?*anyopaque, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion,
+    allocate: *const fn (context: ?*anyopaque, size: u64, alignment: u64, allocate_options: AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion,
     context: ?*anyopaque,
     context_type: ContextType,
     reserved: u32 = 0,
+
+    pub const AllocateOptions = packed struct(u32) {
+        space_waste_allowed_to_guarantee_alignment: u8 = 0,
+        reserved: u24 = 0,
+    };
 
     const ContextType = enum(u32) {
         invalid = 0,

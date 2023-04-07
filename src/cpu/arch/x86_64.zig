@@ -1183,7 +1183,7 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) *cpu.Cor
     };
 
     // One for privileged mode, one for user
-    const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2) catch @panic("pml4 regions");
+    const pml4_table_regions = virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .{}) catch @panic("pml4 regions");
     const cpu_side_pml4_physical_address = pml4_table_regions.address;
     const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
 
