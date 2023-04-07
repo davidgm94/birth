@@ -4,6 +4,7 @@ const assert = lib.assert;
 const log = lib.log;
 
 const privileged = @import("privileged");
+const stopCPU = privileged.arch.stopCPU;
 const Mapping = privileged.Mapping;
 const PageAllocator = privileged.PageAllocator;
 const PageAllocatorInterface = privileged.PageAllocatorInterface;
@@ -116,13 +117,16 @@ pub const Heap = extern struct {
 pub const writer = arch.writer;
 var panic_lock = arch.Spinlock.released;
 
-pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+inline fn panicPrologue(comptime format: []const u8, arguments: anytype) void {
     privileged.arch.disableInterrupts();
-
     panic_lock.acquire();
-    writer.writeAll("[CPU DRIVER] [PANIC] ") catch unreachable;
-    writer.print(format, arguments) catch unreachable;
-    writer.writeByte('\n') catch unreachable;
+
+    writer.writeAll("[CPU DRIVER] [PANIC] ") catch stopCPU();
+    writer.print(format, arguments) catch stopCPU();
+    writer.writeByte('\n') catch stopCPU();
+}
+
+inline fn panicEpilogue() noreturn {
     panic_lock.release();
 
     if (lib.is_test) {
@@ -132,6 +136,45 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
         log.debug("Not exiting from QEMU...", .{});
         privileged.arch.stopCPU();
     }
+}
+
+inline fn panicPrintStackTrace(maybe_stack_trace: ?*lib.StackTrace) void {
+    if (maybe_stack_trace) |stack_trace| {
+        writer.writeAll("Stack trace:\n") catch stopCPU();
+        var frame_index: usize = 0;
+        var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
+
+        while (frames_left != 0) : ({
+            frames_left -= 1;
+            frame_index = (frame_index + 1) % stack_trace.instruction_addresses.len;
+        }) {
+            const return_address = stack_trace.instruction_addresses[frame_index];
+            writer.print("[{}] 0x{x}\n", .{ frame_index, return_address }) catch stopCPU();
+        }
+    } else {
+        writer.writeAll("Stack trace not available\n") catch stopCPU();
+    }
+}
+
+inline fn panicPrintStackTraceFromStackIterator(return_address: usize, frame_address: usize) void {
+    var stack_iterator = lib.StackIterator.init(return_address, frame_address);
+    var frame_index: usize = 0;
+    writer.writeAll("Stack trace:\n") catch stopCPU();
+    while (stack_iterator.next()) |ra| : (frame_index += 1) {
+        writer.print("[{}] 0x{x}\n", .{ frame_index, ra }) catch stopCPU();
+    }
+}
+
+pub fn panicWithStackTrace(stack_trace: ?*lib.StackTrace, comptime format: []const u8, arguments: anytype) noreturn {
+    panicPrologue(format, arguments);
+    panicPrintStackTrace(stack_trace);
+    panicEpilogue();
+}
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    panicPrologue(format, arguments);
+    panicPrintStackTraceFromStackIterator(@returnAddress(), @frameAddress());
+    panicEpilogue();
 }
 
 pub const UserVirtualAddressSpace = extern struct {
