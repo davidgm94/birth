@@ -131,6 +131,7 @@ pub fn entryPoint() callconv(.Naked) noreturn {
         :
         : [entry_point] "r" (main),
           [stack_len] "i" (cpu.stack.len),
+        : "rsp", "rbp"
     );
 
     unreachable;
@@ -312,8 +313,10 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     // TODO: configure PAT
 
     // TODO:
-    startup(bootloader_information) catch |err| panic("Failed to initialize CPU: {}", .{err});
     bootloader_information.draw_context.clearScreen(0xff005000);
+    startup(bootloader_information) catch |err| {
+        cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
+    };
     if (lib.is_test) {
         cpu.test_runner.runAllTests() catch @panic("Tests failed");
     }
@@ -998,11 +1001,11 @@ const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
 fn startup(bootloader_information: *bootloader.Information) !noreturn {
     switch (cpu.bsp) {
         true => {
-            if (true) privileged.exitFromQEMU(.success);
             cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
             cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
             cpu.current_supervisor = try cpu.heap_allocator.create(cpu.CoreSupervisorData);
             try initAPIC();
+            if (true) privileged.exitFromQEMU(.success);
             const init_module = try spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
             dispatch(init_module);
         },
