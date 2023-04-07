@@ -283,7 +283,10 @@ pub const Specific = extern struct {
         const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator_interface) catch @panic("2M pdp"); //catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
         const pd_table = getPDTable(pdp_table, indices, flags, page_allocator_interface) catch @panic("2m pd"); //catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
-        try mapPageTable2MB(pd_table, indices, physical_address, flags);
+        mapPageTable2MB(pd_table, indices, physical_address, flags) catch |err| {
+            log.err("Virtual address: 0x{x}. Physical address: 0x{x}", .{ virtual_address, physical_address });
+            return err;
+        };
 
         // const translated_physical_address = translateAddress(virtual_address_space, VirtualAddress.new(virtual_address)) catch |err| {
         //     log.err("Error when mapping 2MB page (0x{x} -> 0x{x}): {}", .{ virtual_address, physical_address, err });
@@ -470,7 +473,10 @@ fn mapPageTable2MB(pd_table: *volatile PDTable, indices: Indices, physical_addre
     const entry_pointer = &pd_table[entry_index];
     const entry_value = entry_pointer.*;
 
-    if (entry_value.present) return MapError.already_present_2mb;
+    if (entry_value.present) {
+        log.err("Already mapped to: 0x{x}", .{unpackAddress(entry_value)});
+        return MapError.already_present_2mb;
+    }
 
     assert(isAlignedGeneric(u64, physical_address, valid_page_sizes[1]));
 

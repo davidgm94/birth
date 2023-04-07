@@ -203,7 +203,12 @@ pub const PageAllocator = extern struct {
         next: ?*Entry,
     };
 
-    pub inline fn fromBSP(bootloader_information: *bootloader.Information) PageAllocator {
+    const InitializationError = error{
+        bootstrap_region_not_found,
+        memory_exceeded,
+    };
+
+    pub inline fn fromBSP(bootloader_information: *bootloader.Information) InitializationError!PageAllocator {
         const memory_map_entries = bootloader_information.getMemoryMapEntries();
         const page_counters = bootloader_information.getPageCounters();
 
@@ -232,9 +237,7 @@ pub const PageAllocator = extern struct {
                 page_counter.* += 1;
                 break entry.region.address.offset(occupied_size);
             }
-        } else {
-            @panic("Can't find bootstraping region");
-        };
+        } else return InitializationError.bootstrap_region_not_found;
 
         var memory_taken: usize = 0;
         var backing_4k_page_memory_allocated: usize = 0;
@@ -268,7 +271,7 @@ pub const PageAllocator = extern struct {
                     .size = memory_taken_from_region,
                 };
 
-                if (backing_4k_page_memory_allocated >= lib.arch.valid_page_sizes[0]) @panic("Exceeded memory");
+                if (backing_4k_page_memory_allocated >= lib.arch.valid_page_sizes[0]) return InitializationError.memory_exceeded;
                 const entry_address = backing_4k_page.offset(backing_4k_page_memory_allocated);
                 const new_entry = entry_address.toHigherHalfVirtualAddress().access(*Entry);
                 backing_4k_page_memory_allocated += @sizeOf(Entry);
@@ -305,6 +308,7 @@ pub const PageAllocator = extern struct {
                 .primitive = true,
             },
         };
+
         return result;
     }
 };

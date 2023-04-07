@@ -267,7 +267,6 @@ const MMap = extern struct {
                 },
             };
 
-            log.debug("Result: 0x{x}, 0x{x}, {s}", .{ result.region.address.value(), result.region.size, @tagName(entry.type) });
             return result;
         }
 
@@ -314,7 +313,6 @@ const Framebuffer = extern struct {
             .PixelFormatMax => @panic("Corrupted pixel format"),
         };
 
-        log.debug("Initialized framebuffer", .{});
         return bootloader.Framebuffer{
             .address = gop.mode.frame_buffer_base,
             .pitch = @divExact(gop.mode.info.pixels_per_scan_line * pixel_format_info.bpp, @bitSizeOf(u8)),
@@ -335,7 +333,6 @@ const VAS = extern struct {
     fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
         const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
         // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
-        log.debug("Mapping trampoline code...", .{});
         switch (lib.cpu.arch) {
             .x86_64 => {
                 {
@@ -369,12 +366,10 @@ const VAS = extern struct {
             \\mov %rsp, %[rsp]
             : [rsp] "=r" (-> u64),
         );
-        log.debug("stack: 0x{x}", .{rsp});
         while (try MMap.next(vas.mmap)) |entry| {
             if (entry.region.address.value() < rsp and rsp < entry.region.address.offset(entry.region.size).value()) {
                 const rsp_region_physical_address = entry.region.address;
                 const rsp_region_virtual_address = rsp_region_physical_address.toIdentityMappedVirtualAddress();
-                log.debug("mapping {s} 0x{x} - 0x{x}", .{ @tagName(entry.type), entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
                 assert(entry.region.size > 0);
                 try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface);
                 return;
@@ -422,7 +417,7 @@ pub fn main() noreturn {
     var vas = VAS{
         .mmap = &mmap,
     };
-    const bootloader_information = bootloader.Information.initialize(.{
+    bootloader.Information.initialize(.{
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
@@ -450,36 +445,6 @@ pub fn main() noreturn {
         }
         @panic(@errorName(err));
     };
-    _ = bootloader_information;
-
-    while (true) {}
-
-    // // Map the trampoline code (part of the UEFI executable).
-    // // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
-    // log.debug("Mapping trampoline code...", .{});
-    // switch (lib.cpu.arch) {
-    //     .x86_64 => {
-    //         const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
-    //
-    //         memory_map.reset();
-    //         while (memory_map.next()) |entry| {
-    //             const entry_size = entry.number_of_pages * UEFI.page_size;
-    //             if (entry.physical_start < trampoline_code_start and trampoline_code_start < entry.physical_start + entry_size) {
-    //                 log.debug("Entry: 0x{x}-0x{x}", .{ entry.physical_start, entry.physical_start + entry.number_of_pages * UEFI.page_size });
-    //
-    //                 const code_physical_region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry_size);
-    //                 const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-    //                 minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
-    //                 break;
-    //             }
-    //         }
-    //     },
-    //     .aarch64, .riscv64 => @panic("TODO map trampoline"),
-    //     else => @compileError("Architecture not supported"),
-    // }
-    //
-    // Map the bootloader information
-    //
 }
 
 pub fn file_to_higher_half(file: []const u8) []const u8 {
