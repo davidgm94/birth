@@ -304,7 +304,7 @@ pub const Allocator = extern struct {
 
 pub fn ELF(comptime bits: comptime_int) type {
     const is_64 = switch (bits) {
-        32 => false,
+        32 => @compileError("ELF file is not supported"),
         64 => true,
         else => @compileError("ELF is not supported for those bits"),
     };
@@ -335,6 +335,11 @@ pub fn ELF(comptime bits: comptime_int) type {
             pub fn getProgramHeaders(parser: *const Parser) []const ProgramHeader {
                 const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(parser.file_header) + @intCast(usize, parser.file_header.program_header_offset))[0..parser.file_header.program_header_entry_count];
                 return program_headers;
+            }
+
+            pub fn getSectionHeaders(parser: *const Parser) []const SectionHeader {
+                const section_headers = @intToPtr([*]const SectionHeader, @ptrToInt(parser.file_header) + @intCast(usize, parser.file_header.section_header_offset))[0..parser.file_header.section_header_entry_count];
+                return section_headers;
             }
 
             pub const Error = error{
@@ -589,4 +594,96 @@ pub fn ErrorSet(comptime error_list: type) type {
         pub const Error = ErrorType;
         pub const Enum = EnumType;
     };
+}
+
+pub fn getDebugInformation(allocator: common.ZigAllocator, elf_file: []align(0x200) const u8) !common.ModuleDebugInfo {
+    const elf = common.elf;
+    var module_debug_info: common.ModuleDebugInfo = undefined;
+    _ = module_debug_info;
+    const hdr = @ptrCast(*const elf.Ehdr, &elf_file[0]);
+    if (!common.equal(u8, hdr.e_ident[0..4], elf.MAGIC)) return error.InvalidElfMagic;
+    if (hdr.e_ident[elf.EI_VERSION] != 1) return error.InvalidElfVersion;
+
+    const endian = .Little;
+
+    const shoff = hdr.e_shoff;
+    const str_section_off = shoff + @as(u64, hdr.e_shentsize) * @as(u64, hdr.e_shstrndx);
+    const str_shdr = @ptrCast(
+        *const elf.Shdr,
+        @alignCast(@alignOf(elf.Shdr), &elf_file[common.cast(usize, str_section_off) orelse return error.Overflow]),
+    );
+    const header_strings = elf_file[str_shdr.sh_offset .. str_shdr.sh_offset + str_shdr.sh_size];
+    const shdrs = @ptrCast(
+        [*]const elf.Shdr,
+        @alignCast(@alignOf(elf.Shdr), &elf_file[shoff]),
+    )[0..hdr.e_shnum];
+
+    var opt_debug_info: ?[]const u8 = null;
+    var opt_debug_abbrev: ?[]const u8 = null;
+    var opt_debug_str: ?[]const u8 = null;
+    var opt_debug_str_offsets: ?[]const u8 = null;
+    var opt_debug_line: ?[]const u8 = null;
+    var opt_debug_line_str: ?[]const u8 = null;
+    var opt_debug_ranges: ?[]const u8 = null;
+    var opt_debug_loclists: ?[]const u8 = null;
+    var opt_debug_rnglists: ?[]const u8 = null;
+    var opt_debug_addr: ?[]const u8 = null;
+    var opt_debug_names: ?[]const u8 = null;
+    var opt_debug_frame: ?[]const u8 = null;
+
+    for (shdrs) |*shdr| {
+        if (shdr.sh_type == elf.SHT_NULL) continue;
+
+        const name = common.sliceTo(header_strings[shdr.sh_name..], 0);
+        if (common.equal(u8, name, ".debug_info")) {
+            opt_debug_info = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_abbrev")) {
+            opt_debug_abbrev = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_str")) {
+            opt_debug_str = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_str_offsets")) {
+            opt_debug_str_offsets = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_line")) {
+            opt_debug_line = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_line_str")) {
+            opt_debug_line_str = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_ranges")) {
+            opt_debug_ranges = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_loclists")) {
+            opt_debug_loclists = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_rnglists")) {
+            opt_debug_rnglists = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_addr")) {
+            opt_debug_addr = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_names")) {
+            opt_debug_names = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        } else if (common.equal(u8, name, ".debug_frame")) {
+            opt_debug_frame = try chopSlice(elf_file, shdr.sh_offset, shdr.sh_size);
+        }
+    }
+
+    var di = common.dwarf.DwarfInfo{
+        .endian = endian,
+        .debug_info = opt_debug_info orelse return error.MissingDebugInfo,
+        .debug_abbrev = opt_debug_abbrev orelse return error.MissingDebugInfo,
+        .debug_str = opt_debug_str orelse return error.MissingDebugInfo,
+        .debug_str_offsets = opt_debug_str_offsets,
+        .debug_line = opt_debug_line orelse return error.MissingDebugInfo,
+        .debug_line_str = opt_debug_line_str,
+        .debug_ranges = opt_debug_ranges,
+        .debug_loclists = opt_debug_loclists,
+        .debug_rnglists = opt_debug_rnglists,
+        .debug_addr = opt_debug_addr,
+        .debug_names = opt_debug_names,
+        .debug_frame = opt_debug_frame,
+    };
+
+    try common.dwarf.openDwarfDebugInfo(&di, allocator);
+    return di;
+}
+
+fn chopSlice(ptr: []const u8, offset: u64, size: u64) error{Overflow}![]const u8 {
+    const start = common.cast(usize, offset) orelse return error.Overflow;
+    const end = start + (common.cast(usize, size) orelse return error.Overflow);
+    return ptr[start..end];
 }

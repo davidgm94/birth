@@ -157,10 +157,6 @@ pub export fn main(bootloader_information: *bootloader.Information) callconv(.C)
     // functionality is not available anymore
     bootloader_information.stage = .cpu;
 
-    cpu.mappings.text = bootloader_information.cpu_driver_mappings.text;
-    cpu.mappings.rodata = bootloader_information.cpu_driver_mappings.rodata;
-    cpu.mappings.data = bootloader_information.cpu_driver_mappings.data;
-
     // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
     // TODO: figure out the best way to create page allocators for the APP cores
 
@@ -1004,8 +1000,16 @@ fn startup(bootloader_information: *bootloader.Information) !noreturn {
             cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
             cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
             cpu.current_supervisor = try cpu.heap_allocator.create(cpu.CoreSupervisorData);
+            cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
+                if (file_descriptor.type == .cpu_driver) {
+                    break file_descriptor.getContent(bootloader_information);
+                }
+            } else @panic("Debug info not found");
             try initAPIC();
-            if (true) privileged.exitFromQEMU(.success);
+            if (true) {
+                privileged.exitFromQEMU(.success);
+                //@panic("test stack trace");
+            }
             const init_module = try spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
             dispatch(init_module);
         },
@@ -1247,7 +1251,6 @@ fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) !*cpu.Co
     _ = virtual_address_space.translateAddress(VirtualAddress.new(0xffff_ffff_8000_0000 - 0x1000)) catch |err| {
         log.err("error: {}", .{err});
     };
-    //if (true) panic("Physical: 0x{x}", .{physical.value()});
     virtual_address_space.arch.switchTo(.user);
 
     return init_director;

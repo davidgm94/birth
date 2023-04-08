@@ -31,6 +31,7 @@ pub const CompactDate = packed struct(u16) {
     day: u5,
 };
 
+const file_alignment = 0x200;
 const last_struct_offset = @offsetOf(Information, "slices");
 pub const Information = extern struct {
     entry_point: u64 align(8),
@@ -174,7 +175,6 @@ pub const Information = extern struct {
         var total_file_name_size: usize = 0;
         var total_file_count: u32 = 0;
         var maybe_cpu_driver_index: ?u32 = null;
-        const file_alignment = 0x200;
 
         while (try filesystem.get_next_file_descriptor(filesystem.context)) |file_descriptor| : (total_file_count += 1) {
             if (file_descriptor.type == .cpu_driver) {
@@ -819,13 +819,13 @@ pub const File = extern struct {
     type: Type,
     reserved: u32 = 0,
 
-    pub fn getContent(file: File, bootloader_information: *Information) []const u8 {
+    pub fn getContent(file: File, bootloader_information: *Information) []align(0x200) const u8 {
         return file.getContentSlice(bootloader_information);
     }
 
-    inline fn getContentSlice(file: File, bootloader_information: *Information) []u8 {
+    inline fn getContentSlice(file: File, bootloader_information: *Information) []align(0x200) u8 {
         const content_slice_offset = bootloader_information.getSliceOffset(.file_contents);
-        return @intToPtr([*]u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
+        return @intToPtr([*]align(0x200) u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
     }
 
     pub fn copyContent(file: File, bootloader_information: *Information, src_slice: []const u8) void {

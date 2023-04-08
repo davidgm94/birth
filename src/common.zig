@@ -30,6 +30,10 @@ const debug = std.debug;
 pub const assert = debug.assert;
 pub const print = debug.print;
 pub const StackIterator = debug.StackIterator;
+pub const dwarf = std.dwarf;
+pub const ModuleDebugInfo = std.debug.ModuleDebugInfo;
+
+pub const elf = std.elf;
 
 const fmt = std.fmt;
 pub const format = std.fmt.format;
@@ -38,6 +42,9 @@ pub const bufPrint = fmt.bufPrint;
 pub const allocPrint = fmt.allocPrint;
 pub const comptimePrint = fmt.comptimePrint;
 pub const parseUnsigned = fmt.parseUnsigned;
+
+const heap = std.heap;
+pub const FixedBufferAllocator = heap.FixedBufferAllocator;
 
 pub const json = std.json;
 
@@ -67,6 +74,7 @@ pub const isAlignedGeneric = mem.isAlignedGeneric;
 pub const reverse = mem.reverse;
 pub const tokenize = mem.tokenize;
 pub const containsAtLeast = mem.containsAtLeast;
+pub const sliceTo = mem.sliceTo;
 
 pub const random = std.rand;
 
@@ -142,6 +150,7 @@ pub const divCeil = math.divCeil;
 pub const clamp = math.clamp;
 pub const isPowerOfTwo = math.isPowerOfTwo;
 pub const mul = math.mul;
+pub const cast = math.cast;
 
 pub const unicode = std.unicode;
 

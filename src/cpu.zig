@@ -41,11 +41,7 @@ pub export var spawn_state = SpawnState{};
 
 pub var bsp = false;
 
-pub export var mappings: extern struct {
-    text: privileged.Mapping = .{},
-    rodata: privileged.Mapping = .{},
-    data: privileged.Mapping = .{},
-} = .{};
+pub var file: []align(0x200) const u8 = undefined;
 
 pub export var page_allocator = PageAllocator{
     .head = null,
@@ -68,6 +64,8 @@ pub const Heap = extern struct {
         .size = 0,
     },
 
+    var allocated: u64 = 0;
+
     pub fn fromPageAllocator(pa: *PageAllocator) !Heap {
         const physical_allocation = try pa.allocate(lib.arch.valid_page_sizes[1], lib.arch.valid_page_sizes[1]);
         const virtual_allocation = physical_allocation.toHigherHalfVirtualAddress();
@@ -87,29 +85,90 @@ pub const Heap = extern struct {
     }
 
     pub noinline fn allocateBytes(heap: *Heap, size: u64, alignment: u64) Allocator.Allocate.Error!VirtualMemoryRegion {
-        if (heap.region.size == 0) {
-            const region_allocation = try page_allocator.allocate(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]);
+        if (heap.region.size == 0) {}
+
+        const target_address = lib.alignForward(heap.region.address.value(), alignment);
+        const alignment_diff = target_address - heap.region.address.value();
+        const aligned_size = size + alignment_diff;
+
+        allocated += size;
+
+        if (heap.region.size >= aligned_size) {
+            const result_address = VirtualAddress.new(target_address);
+            heap.region.size -= aligned_size;
+            heap.region.address = heap.region.address.offset(aligned_size);
+
+            return .{
+                .address = result_address,
+                .size = size,
+            };
+        } else {
+            assert(alignment < lib.arch.valid_page_sizes[0]);
+            const region_allocation_size = if (lib.arch.valid_page_sizes[0] >= size) lib.arch.valid_page_sizes[0] else lib.alignForward(size, lib.arch.valid_page_sizes[0]);
+            const region_allocation = try page_allocator.allocate(region_allocation_size, lib.arch.valid_page_sizes[0]);
             const virtual_region = region_allocation.toHigherHalfVirtualAddress();
             heap.region = virtual_region;
+
+            const result_address = heap.region.address;
+
+            heap.region.size -= size;
+            heap.region.address = heap.region.address.offset(size);
+
+            return .{
+                .address = result_address,
+                .size = size,
+            };
         }
+    }
 
-        if (heap.region.size < size) {
-            @panic("size too big");
-        }
-
-        if (!lib.isAligned(heap.region.address.value(), alignment)) {
-            @panic("alignment too big");
-        }
-
-        const result_address = heap.region.address;
-        heap.region.size -= size;
-        heap.region.address = heap.region.address.offset(size);
-
+    pub inline fn toZig(heap: *Heap) lib.ZigAllocator {
         return .{
-            .address = result_address,
-            .size = size,
+            .ptr = heap,
+            .vtable = &zig_vtable,
         };
     }
+
+    fn zigAllocate(ctx: *anyopaque, n: usize, log2_ptr_align: u8, ra: usize) ?[*]u8 {
+        _ = log2_ptr_align;
+        _ = ra;
+        const heap = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
+        const virtual_memory_region = heap.allocateBytes(n, 8) catch return null;
+        return virtual_memory_region.address.access(?[*]u8);
+    }
+
+    fn zigResize(
+        ctx: *anyopaque,
+        buf: []u8,
+        log2_buf_align: u8,
+        new_size: usize,
+        return_address: usize,
+    ) bool {
+        _ = return_address;
+        _ = new_size;
+        _ = log2_buf_align;
+        _ = buf;
+        _ = ctx;
+
+        return false;
+    }
+
+    fn zigFree(
+        ctx: *anyopaque,
+        buf: []u8,
+        log2_buf_align: u8,
+        return_address: usize,
+    ) void {
+        _ = return_address;
+        _ = log2_buf_align;
+        _ = buf;
+        _ = ctx;
+    }
+
+    pub const zig_vtable = lib.ZigAllocator.VTable{
+        .alloc = zigAllocate,
+        .free = zigFree,
+        .resize = zigResize,
+    };
 
     pub const Entry = PageAllocator.Entry;
 };
@@ -130,16 +189,17 @@ inline fn panicEpilogue() noreturn {
     panic_lock.release();
 
     if (lib.is_test) {
-        log.debug("Exiting from QEMU...", .{});
+        log.err("Exiting from QEMU...", .{});
         privileged.exitFromQEMU(.failure);
     } else {
-        log.debug("Not exiting from QEMU...", .{});
+        log.err("Not exiting from QEMU...", .{});
         privileged.arch.stopCPU();
     }
 }
 
-inline fn panicPrintStackTrace(maybe_stack_trace: ?*lib.StackTrace) void {
+inline fn printStackTrace(maybe_stack_trace: ?*lib.StackTrace) !void {
     if (maybe_stack_trace) |stack_trace| {
+        var debug_info = try getDebugInformation();
         writer.writeAll("Stack trace:\n") catch stopCPU();
         var frame_index: usize = 0;
         var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
@@ -149,31 +209,49 @@ inline fn panicPrintStackTrace(maybe_stack_trace: ?*lib.StackTrace) void {
             frame_index = (frame_index + 1) % stack_trace.instruction_addresses.len;
         }) {
             const return_address = stack_trace.instruction_addresses[frame_index];
-            writer.print("[{}] 0x{x}\n", .{ frame_index, return_address }) catch stopCPU();
+            try writer.print("[{}] ", .{frame_index});
+            try printSourceAtAddress(&debug_info, return_address);
         }
     } else {
         writer.writeAll("Stack trace not available\n") catch stopCPU();
     }
 }
 
-inline fn panicPrintStackTraceFromStackIterator(return_address: usize, frame_address: usize) void {
+inline fn printStackTraceFromStackIterator(return_address: usize, frame_address: usize) !void {
+    var debug_info = try getDebugInformation();
     var stack_iterator = lib.StackIterator.init(return_address, frame_address);
     var frame_index: usize = 0;
-    writer.writeAll("Stack trace:\n") catch stopCPU();
-    while (stack_iterator.next()) |ra| : (frame_index += 1) {
-        writer.print("[{}] 0x{x}\n", .{ frame_index, ra }) catch stopCPU();
+    try writer.writeAll("Stack trace:\n");
+
+    try printSourceAtAddress(&debug_info, return_address);
+    while (stack_iterator.next()) |address| : (frame_index += 1) {
+        try writer.print("[{}] ", .{frame_index});
+        try printSourceAtAddress(&debug_info, address);
+    }
+}
+
+fn printSourceAtAddress(debug_info: *lib.ModuleDebugInfo, address: usize) !void {
+    if (debug_info.findCompileUnit(address)) |compile_unit| {
+        const symbol = .{
+            .symbol_name = debug_info.getSymbolName(address) orelse "???",
+            .compile_unit_name = compile_unit.die.getAttrString(debug_info, lib.dwarf.AT.name, debug_info.debug_str, compile_unit.*) catch "???",
+            .line_info = debug_info.getLineNumberInfo(heap_allocator.toZig(), compile_unit.*, address) catch null,
+        };
+        try writer.print("0x{x}: {s}!{s} {s}:{}:{}\n", .{ address, symbol.symbol_name, symbol.compile_unit_name, symbol.line_info.?.file_name, symbol.line_info.?.line, symbol.line_info.?.column });
+    } else |err| {
+        return err;
     }
 }
 
 pub fn panicWithStackTrace(stack_trace: ?*lib.StackTrace, comptime format: []const u8, arguments: anytype) noreturn {
     panicPrologue(format, arguments);
-    panicPrintStackTrace(stack_trace);
+    printStackTrace(stack_trace) catch {};
     panicEpilogue();
 }
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     panicPrologue(format, arguments);
-    panicPrintStackTraceFromStackIterator(@returnAddress(), @frameAddress());
+    printStackTraceFromStackIterator(@returnAddress(), @frameAddress()) catch {};
     panicEpilogue();
 }
 
@@ -579,4 +657,13 @@ pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
     try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(early_cnode_cn_cte));
 
     return init_dispatcher_data;
+}
+
+fn getDebugInformation() !lib.ModuleDebugInfo {
+    const debug_info = lib.getDebugInformation(heap_allocator.toZig(), file) catch |err| {
+        writer.print("Failed to get debug information: {}", .{err}) catch stopCPU();
+        return err;
+    };
+
+    return debug_info;
 }
