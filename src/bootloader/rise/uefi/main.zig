@@ -24,6 +24,7 @@ const SystemTable = UEFI.SystemTable;
 
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
+const PageAllocator = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
@@ -330,7 +331,7 @@ const Framebuffer = extern struct {
 const VAS = extern struct {
     mmap: *anyopaque,
 
-    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
+    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
         const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
         // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
         switch (lib.cpu.arch) {
@@ -338,8 +339,8 @@ const VAS = extern struct {
                 {
                     const physical_address = PhysicalAddress.new(@ptrToInt(bootloader_information));
                     const size = bootloader_information.getAlignedTotalSize();
-                    // minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
-                    minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator_interface) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
+                    // minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
+                    minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
                 }
                 const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
 
@@ -348,7 +349,7 @@ const VAS = extern struct {
                     if (entry.region.address.value() < trampoline_code_start and trampoline_code_start < entry.region.address.offset(entry.region.size).value()) {
                         const code_physical_region = entry.region;
                         const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-                        minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator_interface) catch @panic("Unable to map cpu trampoline code");
+                        minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator) catch @panic("Unable to map cpu trampoline code");
                         return;
                     }
                 }
@@ -360,7 +361,7 @@ const VAS = extern struct {
         @panic("ensureLoaderIsMapped failed");
     }
 
-    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator) anyerror!void {
         const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
         const rsp = asm volatile (
             \\mov %rsp, %[rsp]
@@ -371,7 +372,7 @@ const VAS = extern struct {
                 const rsp_region_physical_address = entry.region.address;
                 const rsp_region_virtual_address = rsp_region_physical_address.toIdentityMappedVirtualAddress();
                 assert(entry.region.size > 0);
-                try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface);
+                try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator);
                 return;
             }
         }
@@ -438,23 +439,9 @@ pub fn main() noreturn {
         .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
         .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
     }, rsdp_descriptor, .rise, .uefi) catch |err| {
-        if (@errorReturnTrace()) |stack_trace| {
-            @import("std").debug.dumpStackTrace(stack_trace);
-        } else {
-            log.err("No stack trace", .{});
-        }
         @panic(@errorName(err));
     };
 }
-
-pub fn file_to_higher_half(file: []const u8) []const u8 {
-    var result = file;
-    result.ptr = file.ptr + lib.config.kernel_higher_half_address;
-    return result;
-}
-
-extern const kernel_trampoline_start: *volatile u8;
-extern const kernel_trampoline_end: *volatile u8;
 
 pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;

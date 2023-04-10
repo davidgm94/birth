@@ -15,7 +15,6 @@ const Allocator = lib.Allocator;
 const privileged = @import("privileged");
 const Heap = privileged.Heap;
 const PageAllocator = privileged.PageAllocator;
-const PageAllocatorInterface = privileged.PageAllocatorInterface;
 
 const valid_page_sizes = lib.arch.x86_64.valid_page_sizes;
 const reverse_valid_page_sizes = lib.arch.x86_64.reverse_valid_page_sizes;
@@ -57,8 +56,8 @@ pub const CPUPageTables = extern struct {
         assert(top + (left_ptables * lib.arch.valid_page_sizes[0]) == base + lib.arch.valid_page_sizes[1]);
     }
 
-    pub fn initialize(page_allocator_interface: PageAllocatorInterface) !CPUPageTables {
-        const page_table_allocation = try page_allocator_interface.allocate(page_allocator_interface.context, allocated_size, lib.arch.valid_page_sizes[0], .{});
+    pub fn initialize(page_allocator: PageAllocator) !CPUPageTables {
+        const page_table_allocation = try page_allocator.allocate(page_allocator.context, allocated_size, lib.arch.valid_page_sizes[0], .{});
 
         const page_tables = CPUPageTables{
             .pml4_table = page_table_allocation.address,
@@ -146,13 +145,21 @@ pub const CPUPageTables = extern struct {
 pub const Specific = extern struct {
     cr3: cr3 align(8),
 
+    pub fn new(page_allocator: PageAllocator) !Specific {
+        const pml4_physical_memory = try page_allocator.allocate(page_allocator.context, @sizeOf(PML4Table), lib.arch.valid_page_sizes[0], .{});
+        // Already zeroed
+        return .{
+            .cr3 = cr3.fromAddress(pml4_physical_memory.address),
+        };
+    }
+
     pub fn fromPageTables(cpu_page_tables: CPUPageTables) Specific {
         return .{
             .cr3 = cr3.fromAddress(cpu_page_tables.pml4_table),
         };
     }
 
-    pub noinline fn map(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags, page_allocator: PageAllocatorInterface) !void {
+    pub noinline fn map(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags, page_allocator: PageAllocator) !void {
         const flags = general_flags.toArchitectureSpecific();
         const top_virtual_address = asked_virtual_address.offset(size);
 
@@ -207,7 +214,7 @@ pub const Specific = extern struct {
         return MapError.no_region_found;
     }
 
-    fn mapGeneric(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, page_allocator_interface: PageAllocatorInterface) !void {
+    fn mapGeneric(specific: Specific, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, comptime asked_page_size: comptime_int, flags: MemoryFlags, page_allocator: PageAllocator) !void {
         if (!isAlignedGeneric(u64, asked_physical_address.value(), asked_page_size)) {
             //log.debug("PA: {}. Page size: 0x{x}", .{ asked_physical_address, asked_page_size });
             @panic("Misaligned physical address in mapGeneric");
@@ -232,7 +239,7 @@ pub const Specific = extern struct {
                     physical_address += asked_page_size;
                     virtual_address += asked_page_size;
                 }) {
-                    try specific.map1GBPage(physical_address, virtual_address, flags, page_allocator_interface);
+                    try specific.map1GBPage(physical_address, virtual_address, flags, page_allocator);
                 }
             },
             // 2 MB
@@ -241,7 +248,7 @@ pub const Specific = extern struct {
                     physical_address += asked_page_size;
                     virtual_address += asked_page_size;
                 }) {
-                    try specific.map2MBPage(physical_address, virtual_address, flags, page_allocator_interface);
+                    try specific.map2MBPage(physical_address, virtual_address, flags, page_allocator);
                 }
             },
             // Smallest: 4 KB
@@ -250,18 +257,18 @@ pub const Specific = extern struct {
                     physical_address += asked_page_size;
                     virtual_address += asked_page_size;
                 }) {
-                    try specific.map4KPage(physical_address, virtual_address, flags, page_allocator_interface);
+                    try specific.map4KPage(physical_address, virtual_address, flags, page_allocator);
                 }
             },
             else => @compileError("Invalid reverse valid page size"),
         }
     }
 
-    fn map1GBPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator_interface: PageAllocatorInterface) !void {
+    fn map1GBPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator: PageAllocator) !void {
         const indices = computeIndices(virtual_address);
 
         const pml4_table = getPML4Table(specific.cr3) catch @panic("1G PML4"); //privileged.panic("[1G] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator_interface) catch @panic("1G PDP"); //privileged.panic("[1G] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+        const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator) catch @panic("1G PDP"); //privileged.panic("[1G] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
         try mapPageTable1GB(pdp_table, indices, physical_address, flags);
 
@@ -276,12 +283,12 @@ pub const Specific = extern struct {
         // }
     }
 
-    fn map2MBPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator_interface: PageAllocatorInterface) !void {
+    fn map2MBPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator: PageAllocator) !void {
         const indices = computeIndices(virtual_address);
 
         const pml4_table = getPML4Table(specific.cr3) catch @panic("2M pml4"); //privileged.panic("[2M] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator_interface) catch @panic("2M pdp"); //catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        const pd_table = getPDTable(pdp_table, indices, flags, page_allocator_interface) catch @panic("2m pd"); //catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+        const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator) catch @panic("2M pdp"); //catch privileged.panic("[2M] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
+        const pd_table = getPDTable(pdp_table, indices, flags, page_allocator) catch @panic("2m pd"); //catch privileged.panic("[2M] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
 
         mapPageTable2MB(pd_table, indices, physical_address, flags) catch |err| {
             log.err("Virtual address: 0x{x}. Physical address: 0x{x}", .{ virtual_address, physical_address });
@@ -299,33 +306,17 @@ pub const Specific = extern struct {
         // }
     }
 
-    fn map4KPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator_interface: PageAllocatorInterface) MapError!void {
+    fn map4KPage(specific: Specific, physical_address: u64, virtual_address: u64, flags: MemoryFlags, page_allocator: PageAllocator) !void {
         const indices = computeIndices(virtual_address);
 
-        // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("Before PML4", .{});
-        const pml4_table = getPML4Table(specific.cr3) catch @panic("4k pml4"); //privileged.panic("[4K] PML4 access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        // if (virtual_address >= 0xffff_ffff_8000_0000) log.debug("PML4Table: 0x{x}", .{@ptrToInt(pml4_table)});
-        const pdp_table = getPDPTable(pml4_table, indices, flags, page_allocator_interface) catch @panic("4k pdp"); //privileged.panic("[4K] PDP table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        // if (virtual_address >= 0xffff_ffff_8000_0000)
-        // log.debug("PDP table: 0x{x}", .{@ptrToInt(pdp_table)});
-        const pd_table = getPDTable(pdp_table, indices, flags, page_allocator_interface) catch @panic("4k pd"); //privileged.panic("[4K] PD table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        // if (virtual_address >= 0xffff_ffff_8000_0000)
-        // log.debug("PD table: 0x{x}", .{@ptrToInt(pd_table)});
-        const p_table = getPTable(pd_table, indices, flags, page_allocator_interface) catch @panic("4k p"); //privileged.panic("[4K] P table access failed when mapping 0x{x} -> 0x{x}", .{ virtual_address, physical_address });
-        // if (virtual_address >= 0xffff_ffff_8000_0000)
-        // log.debug("P table: 0x{x}", .{@ptrToInt(p_table)});
-
-        try mapPageTable4KB(p_table, indices, physical_address, flags);
-
-        // const translated_physical_address = translateAddress(virtual_address_space, VirtualAddress.new(virtual_address)) catch |err| {
-        //     log.err("Error when mapping 4KB page (0x{x} -> 0x{x}): {}", .{ virtual_address, physical_address, err });
-        //     return MapError.validation_failed;
-        // };
-        //
-        // if (physical_address != translated_physical_address.value()) {
-        //     log.err("Given: 0x{x}. Have: 0x{x}", .{ physical_address, translated_physical_address.value() });
-        //     return MapError.validation_failed;
+        const pml4_table = try getPML4Table(specific.cr3);
+        // for (pml4_table) |pml4e| {
+        //     log.debug("PML4 table: 0x{x}", .{@bitCast(u64, pml4e)});
         // }
+        const pdp_table = try getPDPTable(pml4_table, indices, flags, page_allocator);
+        const pd_table = try getPDTable(pdp_table, indices, flags, page_allocator);
+        const p_table = try getPTable(pd_table, indices, flags, page_allocator);
+        try mapPageTable4KB(p_table, indices, physical_address, flags);
     }
 
     pub inline fn switchTo(specific: *Specific, execution_mode: lib.TraditionalExecutionMode) void {
@@ -410,10 +401,11 @@ pub fn accessPageTable(physical_address: PhysicalAddress, comptime Pointer: type
 }
 
 fn getPML4Table(cr3r: cr3) !*volatile PML4Table {
-    return try accessPageTable(cr3r.getAddress(), *volatile PML4Table);
+    const pml4_table = try accessPageTable(cr3r.getAddress(), *volatile PML4Table);
+    return pml4_table;
 }
 
-fn getPDPTable(pml4_table: *volatile PML4Table, indices: Indices, flags: MemoryFlags, maybe_page_allocator: ?PageAllocatorInterface) !*volatile PDPTable {
+fn getPDPTable(pml4_table: *volatile PML4Table, indices: Indices, flags: MemoryFlags, maybe_page_allocator: ?PageAllocator) !*volatile PDPTable {
     const index = indices[@enumToInt(PageIndex.PML4)];
     const entry_pointer = &pml4_table[index];
 
@@ -497,7 +489,7 @@ fn mapPageTable4KB(p_table: *volatile PTable, indices: Indices, physical_address
     entry_pointer.* = @bitCast(PTE, getPageEntry(PTE, physical_address, flags));
 }
 
-fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocatorInterface) !*volatile PDTable {
+fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*volatile PDTable {
     const entry_index = indices[@enumToInt(PageIndex.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
@@ -527,7 +519,7 @@ fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlag
     return try accessPageTable(table_physical_address, *volatile PDTable);
 }
 
-fn getPTable(pd_table: *volatile PDTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocatorInterface) !*volatile PTable {
+fn getPTable(pd_table: *volatile PDTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*volatile PTable {
     const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
     const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
@@ -895,28 +887,3 @@ pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.
     pt_entry.global = flags.global;
     pt_entry.execute_disable = !flags.execute;
 }
-
-const MakeSureError = error{
-    translate_identity,
-    translate_higher_half,
-};
-
-// fn makeSurePageIsMapped(virtual_address_space: *VirtualAddressSpace, physical_address: PhysicalAddress) !void {
-//     const translated_identity_physical_address = try virtual_address_space.translateAddress(physical_address.toIdentityMappedVirtualAddress());
-//     if (translated_identity_physical_address.value() != physical_address.value()) {
-//         return MakeSureError.translate_identity;
-//     }
-//     const translated_higher_half_physical_address = try virtual_address_space.translateAddress(physical_address.toHigherHalfVirtualAddress());
-//     if (translated_higher_half_physical_address.value() != physical_address.value()) {
-//         return MakeSureError.translate_higher_half;
-//     }
-// }
-
-// pub fn unmapCapabilitySpace(pml4_physical_address: PhysicalAddress) void {
-//     const cap_space_start = @intCast(u64, @as(u65, lib.maxInt(u64)) + 1 - 2 * lib.gb);
-//     @panic("unmapCapabilitySpace");
-// }
-
-const UnmapError = error{
-    size_bigger,
-};

@@ -13,6 +13,8 @@ pub const Protocol = lib.Bootloader.Protocol;
 
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
+const CPUPageTables = privileged.arch.CPUPageTables;
+const PageAllocator = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
@@ -59,6 +61,7 @@ pub const Information = extern struct {
     smp: SMP.Information,
     //virtual_address_space: VirtualAddressSpace,
     architecture: Architecture,
+    cpu_page_tables: CPUPageTables,
     slices: lib.EnumStruct(Slice.Name, Slice),
 
     pub const Architecture = switch (lib.cpu.arch) {
@@ -260,6 +263,7 @@ pub const Information = extern struct {
             .draw_context = .{},
             .font = undefined,
             .cpu_driver_mappings = .{},
+            .cpu_page_tables = undefined,
             .smp = switch (lib.cpu.arch) {
                 .x86, .x86_64 => .{
                     .cpu_count = cpu_count,
@@ -325,10 +329,14 @@ pub const Information = extern struct {
             }
         }
 
-        const page_allocator_interface = bootloader_information.getPageAllocatorInterface();
-        const cpu_page_tables = try privileged.arch.CPUPageTables.initialize(page_allocator_interface);
+        const page_allocator = PageAllocator{
+            .allocate = Information.callbackAllocatePages,
+            .context = bootloader_information,
+            .context_type = .bootloader,
+        };
+        bootloader_information.cpu_page_tables = try CPUPageTables.initialize(page_allocator);
 
-        const minimal_paging = privileged.arch.paging.Specific.fromPageTables(cpu_page_tables);
+        const minimal_paging = privileged.arch.paging.Specific.fromPageTables(bootloader_information.cpu_page_tables);
 
         const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[cpu_driver_index];
         const cpu_driver_file_content = cpu_driver_file_descriptor.getContent(bootloader_information);
@@ -383,7 +391,7 @@ pub const Information = extern struct {
                     }
 
                     // log.debug("Started mapping kernel section", .{});
-                    try cpu_page_tables.map(physical_address, virtual_address, aligned_size, flags);
+                    try bootloader_information.cpu_page_tables.map(physical_address, virtual_address, aligned_size, flags);
                     // log.debug("Ended mapping kernel section", .{});
 
                     const dst_slice = physical_address.toIdentityMappedVirtualAddress().access([*]u8)[0..lib.safeArchitectureCast(ph.size_in_memory)];
@@ -403,19 +411,19 @@ pub const Information = extern struct {
 
         for (bootloader_information.getMemoryMapEntries()[0..memory_map_entry_count]) |entry| {
             if (entry.type == .usable) {
-                try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
+                try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
             }
         }
 
-        try minimal_paging.map(host_entry_region.address, host_entry_region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator_interface);
+        try minimal_paging.map(host_entry_region.address, host_entry_region.address.toIdentityMappedVirtualAddress(), bootloader_information.getAlignedTotalSize(), .{ .write = true, .execute = false }, page_allocator);
 
-        try virtual_address_space.ensure_loader_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface, bootloader_information);
+        try virtual_address_space.ensure_loader_is_mapped(virtual_address_space.context, minimal_paging, page_allocator, bootloader_information);
 
         const framebuffer_physical_address = PhysicalAddress.new(if (bootloader_information.bootloader == .limine) bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address else bootloader_information.framebuffer.address);
-        try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface);
+        try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
         bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
-        try virtual_address_space.ensure_stack_is_mapped(virtual_address_space.context, minimal_paging, page_allocator_interface);
+        try virtual_address_space.ensure_stack_is_mapped(virtual_address_space.context, minimal_paging, page_allocator);
 
         // bootloader_information.initializeSMP(madt);
 
@@ -458,8 +466,8 @@ pub const Information = extern struct {
 
         pub const VirtualAddressSpace = extern struct {
             context: ?*anyopaque,
-            ensure_loader_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void,
-            ensure_stack_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void,
+            ensure_loader_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void,
+            ensure_stack_is_mapped: *const fn (context: ?*anyopaque, paging: paging.Specific, page_allocator: PageAllocator) anyerror!void,
         };
     };
 
@@ -661,7 +669,7 @@ pub const Information = extern struct {
         if (total_size != original_total_size) return IntegrityError.bad_total_size;
     }
 
-    pub fn allocatePages(bootloader_information: *Information, size: u64, alignment: u64, options: privileged.PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    pub fn allocatePages(bootloader_information: *Information, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
         if (bootloader_information.stage != .cpu) {
             if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
             if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
@@ -722,7 +730,7 @@ pub const Information = extern struct {
         return Allocator.Allocate.Error.OutOfMemory;
     }
 
-    pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: privileged.PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+    pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
         const bootloader_information = @ptrCast(*Information, @alignCast(@alignOf(Information), context));
         return try bootloader_information.allocatePages(size, alignment, options);
     }
@@ -777,14 +785,6 @@ pub const Information = extern struct {
 
     pub fn initializeVirtualAddressSpace(bootloader_information: *Information) !paging.Specific {
         return try privileged.arch.paging.initKernelBSP(bootloader_information);
-    }
-
-    pub fn getPageAllocatorInterface(bootloader_information: *Information) privileged.PageAllocatorInterface {
-        return .{
-            .allocate = Information.callbackAllocatePages,
-            .context = bootloader_information,
-            .context_type = .bootloader,
-        };
     }
 };
 

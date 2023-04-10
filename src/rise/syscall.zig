@@ -1,7 +1,6 @@
 const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.Syscall);
-const Capabilities = lib.Capabilities;
 
 pub const Convention = enum(u1) {
     linux = 0,

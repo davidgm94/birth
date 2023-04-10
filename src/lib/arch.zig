@@ -7,15 +7,11 @@ comptime {
 }
 
 pub const current = switch (@import("builtin").cpu.arch) {
-    .aarch64 => aarch64,
-    .riscv64 => riscv64,
     .x86 => x86,
     .x86_64 => x86_64,
     else => @compileError("Architecture not supported"),
 };
 
-pub const aarch64 = @import("arch/aarch64.zig");
-pub const riscv64 = @import("arch/riscv64.zig");
 pub const x86 = @import("arch/x86.zig");
 pub const x86_64 = @import("arch/x86_64.zig");
 

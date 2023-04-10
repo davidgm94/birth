@@ -2,21 +2,15 @@ const common = @import("common.zig");
 pub usingnamespace common;
 
 pub const arch = @import("lib/arch.zig");
-pub const Capabilities = @import("lib/capabilities.zig");
 /// This is done so the allocator can respect allocating from different address spaces
 pub const config = @import("lib/config.zig");
 pub const CRC32 = @import("lib/crc32.zig");
 const disk_file = @import("lib/disk.zig");
 pub const Disk = disk_file.Disk;
 pub const Filesystem = @import("lib/filesystem.zig");
-pub const List = @import("lib/list.zig");
-pub const Message = @import("lib/message.zig");
 pub const NLS = @import("lib/nls.zig");
 pub const PartitionTable = @import("lib/partition_table.zig");
 pub const PSF1 = @import("lib/psf1.zig");
-pub const Syscall = @import("lib/syscall.zig");
-pub const Graphics = @import("lib/graphics.zig");
-pub const Window = @import("lib/window.zig");
 
 const extern_enum_array = @import("lib/extern_enum_array.zig");
 pub const EnumArray = extern_enum_array.EnumArray;
@@ -555,19 +549,6 @@ pub inline fn tryDereferenceAddress(value: anytype) DereferenceError!usize {
     common.assert(@sizeOf(@TypeOf(value)) > @sizeOf(usize));
     return if (value <= common.maxInt(usize)) @truncate(usize, value) else return DereferenceError.address_bigger_than_usize;
 }
-
-pub fn TargetUsize(comptime architecture: common.Target.Cpu.Arch) type {
-    return switch (architecture) {
-        .x86 => u32,
-        .x86_64 => u64,
-        else => @compileError("Architecture not supported"),
-    };
-}
-
-pub const RiseStage = enum {
-    bootloader,
-    cpu,
-};
 
 pub fn ErrorSet(comptime error_list: type) type {
     comptime var error_fields: []const common.Type.Error = &.{};
