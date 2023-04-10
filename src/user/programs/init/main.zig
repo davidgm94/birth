@@ -36,10 +36,10 @@ export fn entryPoint() callconv(.Naked) noreturn {
 }
 
 export fn main() callconv(.C) noreturn {
-    const core_id = user.Syscall.getCoreId() catch @panic("Core id syscall failed");
-    var buffer: [512]u8 = undefined;
-
-    user.Syscall.logMessage(lib.bufPrint(&buffer, "Core id: {}\n", .{core_id}) catch @panic("format for log message failed")) catch @panic("log message failed");
+    // const core_id = user.Syscall.getCoreId() catch @panic("Core id syscall failed");
+    // var buffer: [512]u8 = undefined;
+    //
+    // user.Syscall.logMessage(lib.bufPrint(&buffer, "Core id: {}\n", .{core_id}) catch @panic("format for log message failed")) catch @panic("log message failed");
     while (true) {}
 
     unreachable;

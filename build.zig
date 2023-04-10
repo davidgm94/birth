@@ -69,9 +69,10 @@ pub fn build(b_arg: *Build) !void {
         try mods.setDependencies(.host, &.{.lib});
         try mods.setDependencies(.bootloader, &.{ .lib, .privileged });
         try mods.setDependencies(.privileged, &.{ .lib, .bootloader });
-        try mods.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader });
+        try mods.setDependencies(.cpu, &.{ .privileged, .lib, .bootloader, .rise });
+        try mods.setDependencies(.rise, &.{.lib});
+        try mods.setDependencies(.user, &.{ .lib, .rise });
         try mods.setDependencies(.disk_image_builder, &.{ .lib, .host });
-        try mods.setDependencies(.user, &.{.lib});
 
         break :blk mods;
     };
@@ -202,7 +203,7 @@ pub fn build(b_arg: *Build) !void {
                     .root_project_path = cpu_driver_path,
                     .target = target,
                     .optimize_mode = optimize_mode,
-                    .modules = &.{ .lib, .bootloader, .privileged, .cpu },
+                    .modules = &.{ .lib, .bootloader, .privileged, .cpu, .rise },
                 });
 
                 cpu_driver.force_pic = true;
@@ -488,12 +489,21 @@ fn canVirtualizeWithQEMU(architecture: Cpu.Arch) bool {
 }
 
 const ModuleID = enum {
+    /// This module has typical common stuff used everywhere
     lib,
+    /// This module contains code that is used by host programs when building and trying to run the OS
     host,
+    /// This module contains code related to the bootloaders
     bootloader,
+    /// This module contains code that is used by Rise privileged programs
     privileged,
+    /// This module contains code that is unique to Rise CPU drivers
     cpu,
+    /// This module contains code that is used by userspace programs
     user,
+    /// This module contains code that is interacting between userspace and cpu in Rise
+    rise,
+    /// This module contains code related with disk image creation
     disk_image_builder,
 };
 

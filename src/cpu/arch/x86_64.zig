@@ -1,11 +1,12 @@
 const lib = @import("lib");
 const Allocator = lib.Allocator;
 const assert = lib.assert;
+const ELF = lib.ELF(64);
 const log = lib.log;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const panic = cpu.panic;
-const PageAllocator = privileged.PageAllocator;
+const PageAllocator = cpu.PageAllocator;
 const x86_64 = privileged.arch.x86_64;
 const APIC = x86_64.APIC;
 const paging = x86_64.paging;
@@ -24,345 +25,34 @@ const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
 
-const user_dpl = 3;
-
-const code_64 = @offsetOf(GDT, "code_64");
-const data_64 = @offsetOf(GDT, "data_64");
-const user_code_64 = @offsetOf(GDT, "user_code_64");
-const user_data_64 = @offsetOf(GDT, "user_data_64");
-const tss_selector = @offsetOf(GDT, "tss_descriptor");
-const user_code_selector = @offsetOf(GDT, "user_code_64") | user_dpl;
-const user_data_selector = @offsetOf(GDT, "user_data_64") | user_dpl;
-
 const cpu = @import("cpu");
 const Heap = cpu.Heap;
 const VirtualAddressSpace = cpu.VirtualAddressSpace;
+
+const rise = @import("rise");
 
 pub const kpti = true;
 pub const pcid = false;
 pub const smap = false;
 pub const invariant_tsc = false;
 
-export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
-export var gdt = GDT{};
-export var tss = TSS{};
-export var idt = IDT{};
-export var user_stack: u64 = 0;
+pub const writer = privileged.E9Writer{ .context = {} };
+var writer_lock: Spinlock = .released;
+var apic_base_physical_address = PhysicalAddress.maybeInvalid(0);
 
-pub const capability_address_space_size = 1 * lib.gb;
-pub const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
-pub const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
-pub const capability_address_space_stack_size = 0x1000;
-pub const capability_address_space_stack_address = capability_address_space_stack_top - capability_address_space_stack_size;
+const capability_address_space_size = 1 * lib.gb;
+const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
+const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
+const capability_address_space_stack_size = 0x1000;
+const capability_address_space_stack_address = capability_address_space_stack_top - capability_address_space_stack_size;
 
-pub const GDT = extern struct {
-    null: Entry = GDT.Entry.null_entry, // 0x00
-    code_16: Entry = GDT.Entry.code_16, // 0x08
-    data_16: Entry = GDT.Entry.data_16, // 0x10
-    code_32: Entry = GDT.Entry.code_32, // 0x18
-    data_32: Entry = GDT.Entry.data_32, // 0x20
-    code_64: Entry = GDT.Entry.code_64, // 0x28
-    data_64: Entry = GDT.Entry.data_64, // 0x30
-    user_data_64: Entry = GDT.Entry.user_data_64, // 0x38
-    user_code_64: Entry = GDT.Entry.user_code_64, // 0x40
-    tss_descriptor: TSS.Descriptor = undefined, // 0x48
+const local_timer_vector = 0xef;
+const pcid_bit = 11;
+const pcid_mask = 1 << pcid_bit;
+const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
+const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
 
-    const Entry = x86_64.GDT.Entry;
-
-    const Descriptor = x86_64.GDT.Descriptor;
-
-    comptime {
-        const entry_count = 9;
-        const target_size = entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor);
-
-        assert(@sizeOf(GDT) == target_size);
-        assert(@offsetOf(GDT, "code_64") == 0x28);
-        assert(@offsetOf(GDT, "data_64") == 0x30);
-        assert(@offsetOf(GDT, "user_data_64") == 0x38);
-        assert(@offsetOf(GDT, "user_code_64") == 0x40);
-        assert(@offsetOf(GDT, "tss_descriptor") == entry_count * @sizeOf(Entry));
-    }
-
-    pub fn getDescriptor(global_descriptor_table: *const GDT) GDT.Descriptor {
-        return .{
-            .limit = @sizeOf(GDT) - 1,
-            .address = @ptrToInt(global_descriptor_table),
-        };
-    }
-};
-
-const Interrupt = enum(u5) {
-    DE = 0x00,
-    DB = 0x01,
-    NMI = 0x02,
-    BP = 0x03,
-    OF = 0x04,
-    BR = 0x05,
-    UD = 0x06,
-    NM = 0x07,
-    DF = 0x08,
-    CSO = 0x09, // Not used anymore
-    TS = 0x0A,
-    NP = 0x0B,
-    SS = 0x0C,
-    GP = 0x0D,
-    PF = 0x0E,
-    MF = 0x10,
-    AC = 0x11,
-    MC = 0x12,
-    XM = 0x13,
-    VE = 0x14,
-    CP = 0x15,
-    _,
-};
-
-const interrupt_kind: u32 = 0;
-const interrupt_descriptions: lib.AutoEnumArray(Interrupt, []const u8) = undefined;
-
-pub fn entryPoint() callconv(.Naked) noreturn {
-    asm volatile (
-        \\lea stack(%rip), %rsp
-        \\add %[stack_len], %rsp
-        \\pushq $0
-        \\mov %rsp, %rbp
-        \\jmp *%[entry_point]
-        \\cli
-        \\hlt
-        :
-        : [entry_point] "r" (main),
-          [stack_len] "i" (cpu.stack.len),
-        : "rsp", "rbp"
-    );
-
-    unreachable;
-}
-
-pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    log.info("Hello! CPU driver initializing from {s} with boot protocol {s}", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
-    const cpuid = lib.arch.x86_64.cpuid;
-    if (pcid) {
-        if (cpuid(1).ecx & (1 << 17) == 0) @panic("PCID not available");
-    }
-
-    if (invariant_tsc) {
-        if (cpuid(0x80000007).edx & (1 << 8) == 0) @panic("Invariant TSC not available");
-    }
-
-    // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
-    // This is mainly due to the transition from a 32-bit bootloader to a 64-bit CPU driver in the x86-64 architecture.
-    bootloader_information.checkIntegrity() catch |err| cpu.panic("Bootloader information size doesn't match: {}", .{err});
-    // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
-    if (bootloader_information.getSlice(.files).len == 0) @panic("Files must be loaded by the bootloader");
-    // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
-    // functionality is not available anymore
-    bootloader_information.stage = .cpu;
-
-    // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
-    // TODO: figure out the best way to create page allocators for the APP cores
-
-    cpu.address_space = .{
-        .arch = .{
-            .cr3 = cr3.read(),
-        },
-        .options = .{
-            .user = false,
-            .mapped_page_tables = true,
-            .log_pages = false,
-        },
-    };
-
-    // Initialize GDT
-    const gdt_descriptor = GDT.Descriptor{
-        .limit = @sizeOf(GDT) - 1,
-        .address = @ptrToInt(&gdt),
-    };
-
-    asm volatile (
-        \\lgdt %[gdt]
-        \\mov %[ds], %rax
-        \\movq %rax, %ds
-        \\movq %rax, %es
-        \\movq %rax, %fs
-        \\movq %rax, %gs
-        \\movq %rax, %ss
-        \\pushq %[cs]
-        \\lea 1f(%rip), %rax
-        \\pushq %rax
-        \\lretq
-        \\1:
-        :
-        : [gdt] "*p" (&gdt_descriptor),
-          [ds] "i" (data_64),
-          [cs] "i" (code_64),
-        : "memory"
-    );
-
-    const tss_address = @ptrToInt(&tss);
-    gdt.tss_descriptor = .{
-        .limit_low = @truncate(u16, @sizeOf(TSS)),
-        .base_low = @truncate(u16, tss_address),
-        .base_mid_low = @truncate(u8, tss_address >> 16),
-        .access = .{
-            .type = .tss_available,
-            .dpl = 0,
-            .present = true,
-        },
-        .attributes = .{
-            .limit = @truncate(u4, @sizeOf(TSS) >> 16),
-            .available_for_system_software = false,
-            .granularity = false,
-        },
-        .base_mid_high = @truncate(u8, tss_address >> 24),
-        .base_high = @truncate(u32, tss_address >> 32),
-    };
-
-    tss.rsp[0] = @ptrToInt(&interrupt_stack) + interrupt_stack.len;
-    asm volatile (
-        \\ltr %[tss_selector]
-        :
-        : [tss_selector] "r" (@as(u16, tss_selector)),
-        : "memory"
-    );
-
-    // Initialize IDT
-
-    for (&idt.descriptors, interrupt_handlers, 0..) |*descriptor, interrupt_handler, i| {
-        const interrupt_address = @ptrToInt(interrupt_handler);
-        descriptor.* = .{
-            .offset_low = @truncate(u16, interrupt_address),
-            .segment_selector = code_64,
-            .flags = .{
-                .ist = 0,
-                .type = if (i < 32) .trap_gate else .interrupt_gate,
-                .dpl = 0,
-                .present = true,
-            },
-            .offset_mid = @truncate(u16, interrupt_address >> 16),
-            .offset_high = @truncate(u32, interrupt_address >> 32),
-        };
-    }
-
-    const idt_descriptor = IDT.Descriptor{
-        .limit = @sizeOf(IDT) - 1,
-        .address = @ptrToInt(&idt),
-    };
-
-    asm volatile (
-        \\lidt %[idt_descriptor]
-        :
-        : [idt_descriptor] "*p" (&idt_descriptor),
-        : "memory"
-    );
-
-    // Mask PIC
-    privileged.arch.io.write(u8, 0xa1, 0xff);
-    privileged.arch.io.write(u8, 0x21, 0xff);
-
-    asm volatile ("sti" ::: "memory");
-
-    const ia32_apic_base = IA32_APIC_BASE.read();
-    cpu.bsp = ia32_apic_base.bsp;
-
-    const star = IA32_STAR{
-        .kernel_cs = code_64,
-        .user_cs_anchor = data_64,
-    };
-    comptime {
-        assert(data_64 == star.kernel_cs + 8);
-        assert(star.user_cs_anchor == user_data_64 - 8);
-        assert(star.user_cs_anchor == user_code_64 - 16);
-    }
-
-    star.write();
-
-    IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
-    // TODO: figure out what this does
-    const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
-    IA32_FMASK.write(syscall_mask);
-
-    // Enable syscall extensions
-    var efer = IA32_EFER.read();
-    efer.SCE = true;
-    efer.write();
-
-    var my_cr4 = cr4.read();
-    my_cr4.operating_system_support_for_fx_save_restore = true;
-    my_cr4.operating_system_support_for_unmasked_simd_fp_exceptions = true;
-    my_cr4.page_global_enable = true;
-    my_cr4.performance_monitoring_counter_enable = true;
-    my_cr4.write();
-
-    var my_cr0 = cr0.read();
-    my_cr0.monitor_coprocessor = true;
-    my_cr0.emulation = false;
-    my_cr0.numeric_error = true;
-    my_cr0.task_switched = false;
-    my_cr0.write();
-
-    asm volatile (
-        \\fninit
-        // TODO: figure out why this crashes with KVM
-        //\\ldmxcsr %[mxcsr]
-        :: //[mxcsr] "m" (@as(u32, 0x1f80)),
-        : "memory");
-
-    // TODO: configure PAT
-
-    // TODO:
-    bootloader_information.draw_context.clearScreen(0xff005000);
-    startup(bootloader_information) catch |err| {
-        cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
-    };
-    if (lib.is_test) {
-        cpu.test_runner.runAllTests() catch @panic("Tests failed");
-    }
-
-    todoEndEntryPoint();
-}
-
-fn todoEndEntryPoint() noreturn {
-    @panic("end of entry point");
-}
-
-pub const IDT = extern struct {
-    descriptors: [entry_count]GateDescriptor = undefined,
-    pub const Descriptor = x86_64.SegmentDescriptor;
-    pub const GateDescriptor = extern struct {
-        offset_low: u16,
-        segment_selector: u16,
-        flags: packed struct(u16) {
-            ist: u3,
-            reserved: u5 = 0,
-            type: x86_64.SystemSegmentDescriptor.Type,
-            reserved1: u1 = 0,
-            dpl: u2,
-            present: bool,
-        },
-        offset_mid: u16,
-        offset_high: u32,
-        reserved: u32 = 0,
-
-        comptime {
-            assert(@sizeOf(@This()) == 0x10);
-        }
-    };
-    pub const entry_count = 256;
-};
-
-pub const dispatch_count = IDT.entry_count;
-
-export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
-    _ = regs;
-    switch (interrupt_number) {
-        local_timer_vector => {
-            APIC.lapicWrite(.eoi, 0);
-            nextTimer(10);
-        },
-        else => panic("Fault: 0x{x}", .{interrupt_number}),
-    }
-}
-
-pub const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
+const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
     InterruptHandler(@enumToInt(Interrupt.DE), false),
     InterruptHandler(@enumToInt(Interrupt.DB), false),
     InterruptHandler(@enumToInt(Interrupt.NMI), false),
@@ -620,6 +310,343 @@ pub const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
     InterruptHandler(0xfe, false),
     InterruptHandler(0xff, false),
 };
+
+const interrupt_kind: u32 = 0;
+const dispatch_count = IDT.entry_count;
+
+const code_64 = @offsetOf(GDT, "code_64");
+const data_64 = @offsetOf(GDT, "data_64");
+const user_code_64 = @offsetOf(GDT, "user_code_64");
+const user_data_64 = @offsetOf(GDT, "user_data_64");
+const tss_selector = @offsetOf(GDT, "tss_descriptor");
+const user_code_selector = @offsetOf(GDT, "user_code_64") | user_dpl;
+const user_data_selector = @offsetOf(GDT, "user_data_64") | user_dpl;
+
+const user_dpl = 3;
+
+export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
+export var gdt = GDT{};
+export var tss = TSS{};
+export var idt = IDT{};
+export var user_stack: u64 = 0;
+export var ticks_per_ms: privileged.arch.x86_64.TicksPerMS = undefined;
+
+pub const GDT = extern struct {
+    null: Entry = GDT.Entry.null_entry, // 0x00
+    code_16: Entry = GDT.Entry.code_16, // 0x08
+    data_16: Entry = GDT.Entry.data_16, // 0x10
+    code_32: Entry = GDT.Entry.code_32, // 0x18
+    data_32: Entry = GDT.Entry.data_32, // 0x20
+    code_64: Entry = GDT.Entry.code_64, // 0x28
+    data_64: Entry = GDT.Entry.data_64, // 0x30
+    user_data_64: Entry = GDT.Entry.user_data_64, // 0x38
+    user_code_64: Entry = GDT.Entry.user_code_64, // 0x40
+    tss_descriptor: TSS.Descriptor = undefined, // 0x48
+
+    const Entry = x86_64.GDT.Entry;
+
+    const Descriptor = x86_64.GDT.Descriptor;
+
+    comptime {
+        const entry_count = 9;
+        const target_size = entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor);
+
+        assert(@sizeOf(GDT) == target_size);
+        assert(@offsetOf(GDT, "code_64") == 0x28);
+        assert(@offsetOf(GDT, "data_64") == 0x30);
+        assert(@offsetOf(GDT, "user_data_64") == 0x38);
+        assert(@offsetOf(GDT, "user_code_64") == 0x40);
+        assert(@offsetOf(GDT, "tss_descriptor") == entry_count * @sizeOf(Entry));
+    }
+
+    pub fn getDescriptor(global_descriptor_table: *const GDT) GDT.Descriptor {
+        return .{
+            .limit = @sizeOf(GDT) - 1,
+            .address = @ptrToInt(global_descriptor_table),
+        };
+    }
+};
+
+const Interrupt = enum(u5) {
+    DE = 0x00,
+    DB = 0x01,
+    NMI = 0x02,
+    BP = 0x03,
+    OF = 0x04,
+    BR = 0x05,
+    UD = 0x06,
+    NM = 0x07,
+    DF = 0x08,
+    CSO = 0x09, // Not used anymore
+    TS = 0x0A,
+    NP = 0x0B,
+    SS = 0x0C,
+    GP = 0x0D,
+    PF = 0x0E,
+    MF = 0x10,
+    AC = 0x11,
+    MC = 0x12,
+    XM = 0x13,
+    VE = 0x14,
+    CP = 0x15,
+    _,
+};
+
+pub fn entryPoint() callconv(.Naked) noreturn {
+    asm volatile (
+        \\lea stack(%rip), %rsp
+        \\add %[stack_len], %rsp
+        \\pushq $0
+        \\mov %rsp, %rbp
+        \\jmp main
+        \\cli
+        \\hlt
+        :
+        : [stack_len] "i" (cpu.stack.len),
+        : "rsp", "rbp"
+    );
+
+    unreachable;
+}
+
+const InitializationError = error{
+    feature_requested_and_not_available,
+    no_files,
+    cpu_file_not_found,
+    init_file_not_found,
+};
+
+pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
+    log.info("Hello! CPU driver initializing from {s} with boot protocol {s}", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
+    initialize(bootloader_information) catch |err| {
+        cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
+    };
+}
+
+pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
+    const cpuid = lib.arch.x86_64.cpuid;
+    if (pcid) {
+        if (cpuid(1).ecx & (1 << 17) == 0) return InitializationError.feature_requested_and_not_available;
+    }
+
+    if (invariant_tsc) {
+        if (cpuid(0x80000007).edx & (1 << 8) == 0) return InitializationError.feature_requested_and_not_available;
+    }
+
+    // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
+    // This is mainly due to the transition from a 32-bit bootloader to a 64-bit CPU driver in the x86-64 architecture.
+    try bootloader_information.checkIntegrity();
+    // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
+    if (bootloader_information.getSlice(.files).len == 0) return InitializationError.no_files;
+    // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
+    // functionality is not available anymore
+    bootloader_information.stage = .cpu;
+
+    // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
+    // TODO: figure out the best way to create page allocators for the APP cores
+
+    cpu.page_tables = bootloader_information.cpu_page_tables;
+    cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
+    cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
+    cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
+        if (file_descriptor.type == .cpu_driver) break file_descriptor.getContent(bootloader_information);
+    } else return InitializationError.cpu_file_not_found;
+
+    // Initialize GDT
+    const gdt_descriptor = GDT.Descriptor{
+        .limit = @sizeOf(GDT) - 1,
+        .address = @ptrToInt(&gdt),
+    };
+
+    asm volatile (
+        \\lgdt %[gdt]
+        \\mov %[ds], %rax
+        \\movq %rax, %ds
+        \\movq %rax, %es
+        \\movq %rax, %fs
+        \\movq %rax, %gs
+        \\movq %rax, %ss
+        \\pushq %[cs]
+        \\lea 1f(%rip), %rax
+        \\pushq %rax
+        \\lretq
+        \\1:
+        :
+        : [gdt] "*p" (&gdt_descriptor),
+          [ds] "i" (data_64),
+          [cs] "i" (code_64),
+        : "memory"
+    );
+
+    const tss_address = @ptrToInt(&tss);
+    gdt.tss_descriptor = .{
+        .limit_low = @truncate(u16, @sizeOf(TSS)),
+        .base_low = @truncate(u16, tss_address),
+        .base_mid_low = @truncate(u8, tss_address >> 16),
+        .access = .{
+            .type = .tss_available,
+            .dpl = 0,
+            .present = true,
+        },
+        .attributes = .{
+            .limit = @truncate(u4, @sizeOf(TSS) >> 16),
+            .available_for_system_software = false,
+            .granularity = false,
+        },
+        .base_mid_high = @truncate(u8, tss_address >> 24),
+        .base_high = @truncate(u32, tss_address >> 32),
+    };
+
+    tss.rsp[0] = @ptrToInt(&interrupt_stack) + interrupt_stack.len;
+    asm volatile (
+        \\ltr %[tss_selector]
+        :
+        : [tss_selector] "r" (@as(u16, tss_selector)),
+        : "memory"
+    );
+
+    // Initialize IDT
+
+    for (&idt.descriptors, interrupt_handlers, 0..) |*descriptor, interrupt_handler, i| {
+        const interrupt_address = @ptrToInt(interrupt_handler);
+        descriptor.* = .{
+            .offset_low = @truncate(u16, interrupt_address),
+            .segment_selector = code_64,
+            .flags = .{
+                .ist = 0,
+                .type = if (i < 32) .trap_gate else .interrupt_gate,
+                .dpl = 0,
+                .present = true,
+            },
+            .offset_mid = @truncate(u16, interrupt_address >> 16),
+            .offset_high = @truncate(u32, interrupt_address >> 32),
+        };
+    }
+
+    const idt_descriptor = IDT.Descriptor{
+        .limit = @sizeOf(IDT) - 1,
+        .address = @ptrToInt(&idt),
+    };
+
+    asm volatile (
+        \\lidt %[idt_descriptor]
+        :
+        : [idt_descriptor] "*p" (&idt_descriptor),
+        : "memory"
+    );
+
+    // Mask PIC
+    privileged.arch.io.write(u8, 0xa1, 0xff);
+    privileged.arch.io.write(u8, 0x21, 0xff);
+
+    asm volatile ("sti" ::: "memory");
+
+    const ia32_apic_base = IA32_APIC_BASE.read();
+    cpu.bsp = ia32_apic_base.bsp;
+
+    const star = IA32_STAR{
+        .kernel_cs = code_64,
+        .user_cs_anchor = data_64,
+    };
+
+    comptime {
+        assert(data_64 == star.kernel_cs + 8);
+        assert(star.user_cs_anchor == user_data_64 - 8);
+        assert(star.user_cs_anchor == user_code_64 - 16);
+    }
+
+    star.write();
+
+    IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
+    // TODO: figure out what this does
+    const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
+    IA32_FMASK.write(syscall_mask);
+
+    // Enable syscall extensions
+    var efer = IA32_EFER.read();
+    efer.SCE = true;
+    efer.write();
+
+    var my_cr4 = cr4.read();
+    my_cr4.operating_system_support_for_fx_save_restore = true;
+    my_cr4.operating_system_support_for_unmasked_simd_fp_exceptions = true;
+    my_cr4.page_global_enable = true;
+    my_cr4.performance_monitoring_counter_enable = true;
+    my_cr4.write();
+
+    var my_cr0 = cr0.read();
+    my_cr0.monitor_coprocessor = true;
+    my_cr0.emulation = false;
+    my_cr0.numeric_error = true;
+    my_cr0.task_switched = false;
+    my_cr0.write();
+
+    asm volatile (
+        \\fninit
+        // TODO: figure out why this crashes with KVM
+        //\\ldmxcsr %[mxcsr]
+        :: //[mxcsr] "m" (@as(u32, 0x1f80)),
+        : "memory");
+
+    // TODO: configure PAT
+
+    // TODO:
+    bootloader_information.draw_context.clearScreen(0xffff7f50);
+    assert(cpu.bsp);
+    try initAPIC();
+    cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
+    const init_user_scheduler = switch (cpu.bsp) {
+        true => blk: {
+            const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
+            const scheduler = try spawnInitBSP(init_module);
+            break :blk scheduler;
+        },
+        false => return error.TODO,
+    };
+    _ = init_user_scheduler;
+    return error.TODO;
+    // const init_module = switch (cpu.bsp) {
+    //     false => try spawnInitBSP(),
+    //     true => return error.TODO,
+    // };
+    //
+    // dispatch(init_module);
+}
+
+pub const IDT = extern struct {
+    descriptors: [entry_count]GateDescriptor = undefined,
+    pub const Descriptor = x86_64.SegmentDescriptor;
+    pub const GateDescriptor = extern struct {
+        offset_low: u16,
+        segment_selector: u16,
+        flags: packed struct(u16) {
+            ist: u3,
+            reserved: u5 = 0,
+            type: x86_64.SystemSegmentDescriptor.Type,
+            reserved1: u1 = 0,
+            dpl: u2,
+            present: bool,
+        },
+        offset_mid: u16,
+        offset_high: u32,
+        reserved: u32 = 0,
+
+        comptime {
+            assert(@sizeOf(@This()) == 0x10);
+        }
+    };
+    pub const entry_count = 256;
+};
+
+export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
+    switch (interrupt_number) {
+        local_timer_vector => {
+            APIC.lapicWrite(.eoi, 0);
+            nextTimer(10);
+        },
+        else => cpu.panicFromInstructionPointerAndFramePointer(regs.rip, regs.rbp, "Exception: 0x{x}", .{interrupt_number}),
+    }
+}
 
 pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code: bool) fn () callconv(.Naked) noreturn {
     return struct {
@@ -939,85 +966,18 @@ inline fn ok(result: struct {
 /// - R10: argument 3
 /// - R8:  argument 4
 /// - R9:  argument 5
-export fn syscall(regs: *const SyscallRegisters) callconv(.C) lib.Syscall.Result {
-    const options = @bitCast(lib.Syscall.Options, regs.syscall_number);
+export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Result {
+    const options = @bitCast(rise.syscall.Options, regs.syscall_number);
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
+    _ = arguments;
 
     switch (options.general.convention) {
         .rise => {
-            const root_capability = &cpu.current_director.?.cspace.capability;
-            const to = root_capability.lookupCapability(options.rise.address, options.rise.slot, .{ .read = true }) catch @panic("root_capability error");
-            switch (to.type) {
-                .kernel => {
-                    const kernel_invocation = lib.intToEnum(lib.Capabilities.Command.Kernel, options.rise.invocation) catch @panic("invocation");
-                    switch (kernel_invocation) {
-                        .get_core_id => {
-                            return ok(.{
-                                .value = cpu.core_id,
-                            });
-                        },
-                        else => panic("Not implemented yet: {s}", .{@tagName(kernel_invocation)}),
-                    }
-                },
-                .io => {
-                    const io_invocation = lib.intToEnum(lib.Capabilities.Command.IO, options.rise.invocation) catch @panic("invocation");
-                    switch (io_invocation) {
-                        .log_message => {
-                            writerStart();
-                            const message_ptr = @intToPtr(?[*]u8, arguments[0]) orelse @panic("Null message ptr");
-                            const message_len = arguments[1];
-                            if (message_len == 0) @panic("Message len 0");
-                            const message = message_ptr[0..message_len];
-                            writer.writeAll(message) catch unreachable;
-                            writerEnd();
-
-                            // return ok(.{
-                            //     .value = 0,
-                            // });
-                            // TODO: replace this with proper content
-                            privileged.exitFromQEMU(.success);
-                        },
-                        else => panic("Not implemented yet: {s}", .{@tagName(io_invocation)}),
-                    }
-                },
-                else => panic("To type: {}", .{to.type}),
-            }
+            @panic("TODO: rise");
         },
         .linux => @panic("TODO: linux syscall"),
     }
 }
-
-fn getCoreId() void {}
-
-const pcid_bit = 11;
-const pcid_mask = 1 << pcid_bit;
-const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
-const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
-
-fn startup(bootloader_information: *bootloader.Information) !noreturn {
-    switch (cpu.bsp) {
-        true => {
-            cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
-            cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
-            cpu.current_supervisor = try cpu.heap_allocator.create(cpu.CoreSupervisorData);
-            cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
-                if (file_descriptor.type == .cpu_driver) {
-                    break file_descriptor.getContent(bootloader_information);
-                }
-            } else @panic("Debug info not found");
-            try initAPIC();
-            if (true) {
-                privileged.exitFromQEMU(.success);
-                //@panic("test stack trace");
-            }
-            const init_module = try spawnInitBSP(bootloader_information.fetchFileByType(.init) orelse @panic("No init module found"));
-            dispatch(init_module);
-        },
-        false => @panic("APP"),
-    }
-}
-
-var current_director: ?*cpu.CoreDirectorData = null;
 
 fn dispatch(director: *cpu.CoreDirectorData) noreturn {
     switch (director.disabled) {
@@ -1137,144 +1097,58 @@ pub const Registers = extern struct {
     }
 };
 
-const ELF = lib.ELF(64);
-
-fn spawnInitBSP(init_file: []const u8) !*cpu.CoreDirectorData {
-    return try spawnInitCommon(&cpu.spawn_state, init_file);
+fn spawnInitBSP(init_file: []const u8) !*cpu.UserScheduler {
+    return try spawnInitCommon(init_file);
 }
-
-// TODO: make this work with no KPTI
-fn spawnInitCommon(spawn_state: *cpu.SpawnState, init_file: []const u8) !*cpu.CoreDirectorData {
-    assert(cpu.bsp);
-
-    const init_director = try cpu.spawnInitModule(spawn_state);
-
-    init_director.disabled = true;
-    const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
-    init_director_shared.base.disabled = lib.maxInt(u32);
-    init_director_shared.disabled_save_area.rdi = 0x20000;
-    init_director_shared.disabled_save_area.fs = 0;
-    init_director_shared.disabled_save_area.gs = 0;
-    init_director_shared.disabled_save_area.rflags = .{
-        .IF = true,
-    };
-    init_director_shared.disabled_save_area.fxsave_area.fcw = 0x037f;
-    init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
-
-    // const aligned_init_director_size = lib.alignForward(@sizeOf(cpu.CoreDirectorData), 0x1000);
-    // _ = aligned_init_director_size;
-    // const aligned_init_director_shared_size = lib.alignForward(@sizeOf(cpu.CoreDirectorShared), 0x1000);
-    // _ = aligned_init_director_shared_size;
-    // const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
-    // const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
-
-    const capability_address_space_stack_physical_region = try cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000);
-    try cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
-        .write = true,
-        .user = false,
-        .global = true,
-        .cache_disable = true,
-    });
-
-    // TODO: don't waste this much space
-    const virtual_address_space_allocation = try cpu.page_allocator.allocate(0x1000, 0x1000);
-    const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
-    virtual_address_space.* = .{
-        .arch = undefined,
-        .options = .{
-            .user = true,
-            .mapped_page_tables = false,
-            .log_pages = true,
-        },
-    };
-
-    // One for privileged mode, one for user
-    const pml4_table_regions = try virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .{});
-    const cpu_side_pml4_physical_address = pml4_table_regions.address;
-    const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
-
-    // Copy the higher half address mapping from cpu address space to user cpu-side address space
-    cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
-    try cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator);
-
-    init_director.virtual_address_space = virtual_address_space;
-
-    // First map vital parts for context switch
-    virtual_address_space.arch = .{
-        .cr3 = cr3.fromAddress(cpu_side_pml4_physical_address),
-    };
-
-    // Identity map dispatcher
-    // virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    // virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
-
-    virtual_address_space.arch.switchTo(.user);
-
-    const user_stack_allocation = try cpu.page_allocator.allocate(0x4000, 0x1000);
-    virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true }) catch @panic("User stack");
-
-    const init_elf = try ELF.Parser.init(init_file);
-    const entry_point = init_elf.getEntryPoint();
-    const program_headers = init_elf.getProgramHeaders();
-
-    for (program_headers) |program_header| {
-        if (program_header.type == .load) {
-            const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
-            const segment_physical_region = try cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]);
-            const segment_physical_address = segment_physical_region.address;
-            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
-            const segment_flags = .{
-                .execute = program_header.flags.executable,
-                .write = program_header.flags.writable,
-                .user = true,
-            };
-
-            try virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags);
-
-            const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
-            const src = init_file[program_header.offset..][0..program_header.size_in_memory];
-            lib.copy(u8, dst, src);
-        }
-    }
-
-    init_director_shared.disabled_save_area.rip = entry_point;
-    init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
-    init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
-
-    try virtual_address_space.mapPageTables();
-
-    const cpu_pml4 = cpu_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
-    const user_pml4 = user_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
-    lib.copy(@TypeOf(user_pml4[0]), cpu_pml4[0..0x100], user_pml4[0..0x100]);
-
-    virtual_address_space.arch.switchTo(.privileged);
-    _ = virtual_address_space.translateAddress(VirtualAddress.new(0xffff_ffff_8000_0000 - 0x1000)) catch |err| {
-        log.err("error: {}", .{err});
-    };
-    virtual_address_space.arch.switchTo(.user);
-
-    return init_director;
-}
-
-var ticks_per_ms: privileged.arch.x86_64.TicksPerMS = undefined;
-const local_timer_vector = 0xef;
 
 pub inline fn nextTimer(ms: u32) void {
     APIC.lapicWrite(.lvt_timer, local_timer_vector | (1 << 17));
     APIC.lapicWrite(.timer_initcnt, ticks_per_ms.lapic * ms);
 }
 
+const ApicPageAllocator = extern struct {
+    page: PhysicalAddress = PhysicalAddress.maybeInvalid(0),
+    times: usize = 0,
+
+    fn allocate(context: ?*anyopaque, size: u64, alignment: u64, options: privileged.PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        _ = options;
+        const apic_allocator = @ptrCast(?*ApicPageAllocator, @alignCast(@alignOf(ApicPageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
+        defer apic_allocator.times += 1;
+        assert(apic_allocator.times == 0);
+        assert(size == lib.arch.valid_page_sizes[0]);
+        assert(alignment == lib.arch.valid_page_sizes[0]);
+        const physical_memory = try cpu.page_allocator.allocate(size, alignment);
+        apic_allocator.page = physical_memory.address;
+        return physical_memory;
+    }
+};
+
+var apic_page_allocator = ApicPageAllocator{};
+const apic_page_allocator_interface = privileged.PageAllocator{
+    .allocate = ApicPageAllocator.allocate,
+    .context = &apic_page_allocator,
+    .context_type = .cpu,
+};
+
 pub fn initAPIC() !void {
     var ia32_apic_base = IA32_APIC_BASE.read();
-    const apic_base_physical_address = ia32_apic_base.getAddress();
+    apic_base_physical_address = ia32_apic_base.getAddress();
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
 
-    const apic_base = try cpu.address_space.mapDevice(apic_base_physical_address, lib.arch.valid_page_sizes[0]);
+    const minimal_paging = paging.Specific{
+        .cr3 = cr3.read(),
+    };
+
+    try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
+        .write = true,
+        .cache_disable = true,
+        .global = false,
+    }, apic_page_allocator_interface);
 
     const spurious_vector: u8 = 0xFF;
-    apic_base.offset(@enumToInt(APIC.Register.spurious)).access(*volatile u32).* = @as(u32, 0x100) | spurious_vector;
+    APIC.lapicWrite(.spurious, @as(u32, 0x100) | spurious_vector);
 
     const tpr = APIC.TaskPriorityRegister{};
     tpr.write();
@@ -1289,13 +1163,6 @@ pub fn initAPIC() !void {
 
     // nextTimer(1);
 }
-
-extern const text_section_start: *u8;
-extern const data_section_start: *u8;
-extern const user_text_start: *u8;
-extern const user_text_end: *u8;
-extern const user_data_start: *u8;
-extern const user_data_end: *u8;
 
 pub const Spinlock = enum(u8) {
     released = 0,
@@ -1327,13 +1194,136 @@ pub const Spinlock = enum(u8) {
     }
 };
 
-pub const writer = privileged.E9Writer{ .context = {} };
-var writer_lock: Spinlock = .released;
-
 pub inline fn writerStart() void {
     writer_lock.acquire();
 }
 
 pub inline fn writerEnd() void {
     writer_lock.release();
+}
+
+// TODO: make this work with no KPTI
+fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
+    assert(cpu.bsp);
+
+    const init_scheduler = try cpu.heap_allocator.create(cpu.UserScheduler);
+    _ = init_scheduler;
+    const init_scheduler_common_physical_allocation = try cpu.page_allocator.allocate(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]);
+    const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    const init_scheduler_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
+    _ = init_scheduler_arch_higher_half;
+    const init_elf = try ELF.Parser.init(init_file);
+    const entry_point = init_elf.getEntryPoint();
+    _ = entry_point;
+    const program_headers = init_elf.getProgramHeaders();
+
+    const virtual_address_space = try VirtualAddressSpace.new();
+
+    for (program_headers) |program_header| {
+        if (program_header.type == .load) {
+            const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
+            const segment_physical_region = try cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]);
+            const segment_physical_address = segment_physical_region.address;
+            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
+            const segment_flags = .{
+                .execute = program_header.flags.executable,
+                .write = program_header.flags.writable,
+                .user = true,
+            };
+
+            try virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags);
+
+            const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
+            const src = init_file[program_header.offset..][0..program_header.size_in_memory];
+            lib.copy(u8, dst, src);
+        }
+    }
+
+    privileged.exitFromQEMU(.success);
+    //return error.TODO;
+
+    // const init_director = try cpu.spawnInitModule(spawn_state);
+    //
+    // init_director.disabled = true;
+    // const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
+    // init_director_shared.base.disabled = lib.maxInt(u32);
+    // init_director_shared.disabled_save_area.rdi = 0x20000;
+    // init_director_shared.disabled_save_area.fs = 0;
+    // init_director_shared.disabled_save_area.gs = 0;
+    // init_director_shared.disabled_save_area.rflags = .{
+    //     .IF = true,
+    // };
+    // init_director_shared.disabled_save_area.fxsave_area.fcw = 0x037f;
+    // init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
+    //
+    // // const aligned_init_director_size = lib.alignForward(@sizeOf(cpu.CoreDirectorData), 0x1000);
+    // // _ = aligned_init_director_size;
+    // // const aligned_init_director_shared_size = lib.alignForward(@sizeOf(cpu.CoreDirectorShared), 0x1000);
+    // // _ = aligned_init_director_shared_size;
+    // // const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
+    // // const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
+    //
+    // const capability_address_space_stack_physical_region = try cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000);
+    // try cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
+    //     .write = true,
+    //     .user = false,
+    //     .global = true,
+    //     .cache_disable = true,
+    // });
+    //
+    // // TODO: don't waste this much space
+    // const virtual_address_space_allocation = try cpu.page_allocator.allocate(0x1000, 0x1000);
+    // const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
+    // virtual_address_space.* = .{
+    //     .arch = undefined,
+    //     .options = .{
+    //         .user = true,
+    //         .mapped_page_tables = false,
+    //         .log_pages = true,
+    //     },
+    // };
+    //
+    // // One for privileged mode, one for user
+    // const pml4_table_regions = try virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .{});
+    // const cpu_side_pml4_physical_address = pml4_table_regions.address;
+    // const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
+    //
+    // // Copy the higher half address mapping from cpu address space to user cpu-side address space
+    // cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
+    // try cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator);
+    //
+    // init_director.virtual_address_space = virtual_address_space;
+    //
+    // // First map vital parts for context switch
+    // virtual_address_space.arch = .{
+    //     .cr3 = cr3.fromAddress(cpu_side_pml4_physical_address),
+    // };
+    //
+    // // Identity map dispatcher
+    // // virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
+    // // virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
+    //
+    // virtual_address_space.arch.switchTo(.user);
+    //
+    // const user_stack_allocation = try cpu.page_allocator.allocate(0x4000, 0x1000);
+    // try virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true });
+    //
+    //
+    // init_director_shared.disabled_save_area.rip = entry_point;
+    // init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
+    // init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
+    //
+    // try virtual_address_space.mapPageTables();
+    //
+    // const cpu_pml4 = cpu_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
+    // const user_pml4 = user_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
+    // lib.copy(@TypeOf(user_pml4[0]), cpu_pml4[0..0x100], user_pml4[0..0x100]);
+    //
+    // virtual_address_space.arch.switchTo(.privileged);
+    // _ = virtual_address_space.translateAddress(VirtualAddress.new(0xffff_ffff_8000_0000 - 0x1000)) catch |err| {
+    //     log.err("error: {}", .{err});
+    // };
+    // virtual_address_space.arch.switchTo(.user);
+    //
+    // return init_director;
 }

@@ -379,13 +379,14 @@ const bootloader = @import("bootloader");
 
 const privileged = @import("privileged");
 const Mapping = privileged.Mapping;
+const PageAllocator = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
 const stopCPU = privileged.arch.stopCPU;
 const paging = privileged.arch.x86_64.paging;
 
-fn mapSection(minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, comptime section_name: []const u8, flags: Mapping.Flags) !void {
+fn mapSection(minimal_paging: paging.Specific, page_allocator: PageAllocator, comptime section_name: []const u8, flags: Mapping.Flags) !void {
     const section_start_symbol = @extern(*u8, .{ .name = section_name ++ "_section_start" });
     const section_end_symbol = @extern(*u8, .{ .name = section_name ++ "_section_end" });
     const section_start = @ptrToInt(section_start_symbol);
@@ -396,7 +397,7 @@ fn mapSection(minimal_paging: paging.Specific, page_allocator_interface: privile
     const virtual_address = VirtualAddress.new(section_start);
     const physical_address = PhysicalAddress.new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
     // log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) for 0x{x} bytes", .{ section_name, physical_address.value(), virtual_address.value(), size });
-    try minimal_paging.map(physical_address, virtual_address, section_size, flags, page_allocator_interface);
+    try minimal_paging.map(physical_address, virtual_address, section_size, flags, page_allocator);
 }
 
 var limine_information = BootloaderInfo.Request{ .revision = 0 };
@@ -570,10 +571,10 @@ const FB = extern struct {
 const VirtualAddressSpace = extern struct {};
 
 const VAS = extern struct {
-    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: privileged.arch.paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
+    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: privileged.arch.paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
+        _ = page_allocator;
         _ = bootloader_information;
         _ = context;
-        _ = page_allocator_interface;
         _ = minimal_paging;
         // const sections = &[_]struct { name: []const u8, flags: Mapping.Flags }{
         //     .{ .name = "text", .flags = .{ .write = false, .execute = true } },
@@ -582,11 +583,11 @@ const VAS = extern struct {
         // };
         //
         // inline for (sections) |section| {
-        //     try mapSection(minimal_paging, page_allocator_interface, section.name, section.flags);
+        //     try mapSection(minimal_paging, page_allocator, section.name, section.flags);
         // }
     }
 
-    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator) anyerror!void {
         _ = context;
         const rsp = switch (lib.cpu.arch) {
             .x86_64 => asm volatile (
@@ -602,7 +603,7 @@ const VAS = extern struct {
         for (memory_map_entries) |entry| {
             if (entry.type == .bootloader_reclaimable) {
                 if (entry.region.address.toHigherHalfVirtualAddress().value() < rsp and entry.region.address.offset(entry.region.size).toHigherHalfVirtualAddress().value() > rsp) {
-                    minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), entry.region.size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Mapping of bootloader information failed");
+                    minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), entry.region.size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of bootloader information failed");
                     break;
                 }
             }
@@ -621,7 +622,8 @@ pub fn main() !noreturn {
 
         @panic("undefined protocol");
     };
-    const bootloader_information = try bootloader.Information.initialize(.{
+
+    try bootloader.Information.initialize(.{
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
@@ -642,251 +644,4 @@ pub fn main() !noreturn {
         .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
         .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
     }, rsdp, .limine, limine_protocol);
-    _ = bootloader_information;
-    while (true) {}
-    // log.debug("Hello from Limine {s}!", .{limine_information.response.?.version});
-    //
-    // // TODO: fetch files
-    // const module_count = @intCast(u32, limine_modules.response.?.module_count);
-    // log.warn("TODO: fetch files", .{});
-    //
-    // const limine_module_response = limine_modules.response.?;
-    // const limine_module_slice = limine_module_response.modules.?.*[0..limine_module_response.module_count];
-    // const file_alignment = 0x200;
-    // var aligned_total_file_size: u32 = 0;
-    // var total_name_size: u32 = 0;
-    // {
-    //     for (limine_module_slice) |module_descriptor| {
-    //         const file_size = @intCast(u32, module_descriptor.size);
-    //         aligned_total_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
-    //
-    //         total_name_size += @intCast(u32, lib.length(module_descriptor.path));
-    //
-    //         log.debug("Path: {s}", .{module_descriptor.path});
-    //     }
-    // }
-    //
-    // const framebuffer = &limine_framebuffer.response.?.framebuffers.*[0];
-    // assert(limine_stack_size.response != null);
-    // log.debug("CPU count: {}", .{limine_smp.response.?.cpu_count});
-    // const memory_map = limine_memory_map.response.?;
-    // log.debug("Memory map entry count: {}", .{memory_map.entry_count});
-    // const memory_map_entries = memory_map.entries.?.*[0..memory_map.entry_count];
-    //
-    // const cpu_count = @intCast(u32, limine_smp.response.?.cpu_count);
-    // const memory_map_entry_count = @intCast(u32, memory_map_entries.len);
-    //
-    // const length_size_tuples = bootloader.LengthSizeTuples.new(.{
-    //     .bootloader_information = .{
-    //         .length = 1,
-    //         .alignment = @alignOf(bootloader.Information),
-    //     },
-    //     .file_contents = .{
-    //         .length = aligned_total_file_size,
-    //         .alignment = file_alignment,
-    //     },
-    //     .file_names = .{
-    //         .length = total_name_size,
-    //         .alignment = 1,
-    //     },
-    //     .files = .{
-    //         .length = module_count,
-    //         .alignment = @alignOf(bootloader.File),
-    //     },
-    //     .memory_map_entries = .{
-    //         .length = memory_map_entry_count,
-    //         .alignment = @alignOf(bootloader.MemoryMapEntry),
-    //     },
-    //     .page_counters = .{
-    //         .length = memory_map_entry_count,
-    //         .alignment = @alignOf(u32),
-    //     },
-    //     .smps = .{
-    //         .length = cpu_count,
-    //         .alignment = @alignOf(bootloader.Information.SMP.Information),
-    //     },
-    // });
-    //
-    // var entry_index: usize = 0;
-    // const bootloader_information = for (memory_map_entries, 0..) |entry, index| {
-    //     if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
-    //         const bootloader_information_region = entry.region.takeSlice(length_size_tuples.getAlignedTotalSize());
-    //         log.debug("Bootloader information region: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
-    //         log.debug("Bootloader information region slice: 0x{x}-0x{x}", .{ bootloader_information_region.address.value(), bootloader_information_region.address.offset(bootloader_information_region.size).value() });
-    //         const bootloader_information = bootloader_information_region.address.toIdentityMappedVirtualAddress().access(*bootloader.Information);
-    //         bootloader_information.* = .{
-    //             .total_size = length_size_tuples.total_size,
-    //             .entry_point = @ptrToInt(&@import("root").entryPoint),
-    //             .higher_half = lib.config.cpu_driver_higher_half_address,
-    //             .version = version: {
-    //                 const limine_version = limine_information.response.?.version[0..lib.length(limine_information.response.?.version)];
-    //                 var token_iterator = lib.tokenize(u8, limine_version, ".");
-    //                 const version_major_string = token_iterator.next() orelse @panic("Limine version major");
-    //                 const version_minor_string = token_iterator.next() orelse @panic("Limine version minor");
-    //                 const version_patch_string = token_iterator.next() orelse @panic("Limine version patch");
-    //                 if (token_iterator.next() != null) @panic("Unexpected token in Limine version");
-    //
-    //                 const version_major = lib.parseUnsigned(u8, version_major_string, 10) catch @panic("Limine version major parsing");
-    //                 if (version_minor_string.len != 4 + 2 + 2) @panic("Unexpected version minor length");
-    //                 const version_minor_year_string = version_minor_string[0..4];
-    //                 const version_minor_month_string = version_minor_string[4..6];
-    //                 const version_minor_day_string = version_minor_string[6..8];
-    //                 const version_minor_year = @intCast(u7, (lib.parseUnsigned(u16, version_minor_year_string, 10) catch @panic("Limine version minor year parsing")) - 1970);
-    //                 const version_minor_month = lib.parseUnsigned(u4, version_minor_month_string, 10) catch @panic("Limine version minor month parsing");
-    //                 const version_minor_day = lib.parseUnsigned(u5, version_minor_day_string, 10) catch @panic("Limine version minor day parsing");
-    //                 const version_patch = lib.parseUnsigned(u8, version_patch_string, 10) catch @panic("Limine version patch parsing");
-    //
-    //                 const version_minor = bootloader.CompactDate{
-    //                     .year = version_minor_year,
-    //                     .month = version_minor_month,
-    //                     .day = version_minor_day,
-    //                 };
-    //
-    //                 break :version .{
-    //                     .major = version_major,
-    //                     .minor = @bitCast(u16, version_minor),
-    //                     .patch = version_patch,
-    //                 };
-    //             },
-    //             .protocol = limine_protocol,
-    //             .bootloader = .limine,
-    //             .stage = .early,
-    //             .configuration = .{
-    //                 .memory_map_diff = 0,
-    //             },
-    //             .cpu_driver_mappings = .{},
-    //             .smp = switch (lib.cpu.arch) {
-    //                 .x86_64 => .{
-    //                     .cpu_count = cpu_count,
-    //                     .bsp_lapic_id = limine_smp.response.?.bsp_lapic_id,
-    //                 },
-    //                 .aarch64 => .{
-    //                     .cpu_count = cpu_count,
-    //                 },
-    //                 else => @compileError("Architecture not supported"),
-    //             },
-    //             .framebuffer = .{
-    //                 .address = framebuffer.address,
-    //                 .pitch = @intCast(u32, framebuffer.pitch),
-    //                 .width = @intCast(u32, framebuffer.width),
-    //                 .height = @intCast(u32, framebuffer.height),
-    //                 .bpp = framebuffer.bpp,
-    //                 .red_mask = .{
-    //                     .shift = framebuffer.red_mask_shift,
-    //                     .size = framebuffer.red_mask_size,
-    //                 },
-    //                 .green_mask = .{
-    //                     .shift = framebuffer.green_mask_shift,
-    //                     .size = framebuffer.green_mask_size,
-    //                 },
-    //                 .blue_mask = .{
-    //                     .shift = framebuffer.blue_mask_shift,
-    //                     .size = framebuffer.blue_mask_size,
-    //                 },
-    //                 .memory_model = framebuffer.memory_model,
-    //             },
-    //             .draw_context = .{},
-    //             .font = undefined,
-    //             .architecture = switch (lib.cpu.arch) {
-    //                 .x86_64 => .{
-    //                     .rsdp_address = limine_rsdp.response.?.address,
-    //                 },
-    //                 .aarch64 => .{
-    //                     .foo = 0,
-    //                 },
-    //                 else => @compileError("Architecture not supported"),
-    //             },
-    //             .slices = length_size_tuples.createSlices(),
-    //         };
-    //
-    //         entry_index = index;
-    //
-    //         break bootloader_information;
-    //     }
-    // } else @panic("Unable to get bootloader information");
-    //
-    // const page_counters = bootloader_information.getSlice(.page_counters);
-    //
-    // for (page_counters) |*page_counter| {
-    //     page_counter.* = 0;
-    // }
-    //
-    // page_counters[entry_index] = bootloader_information.getAlignedTotalSize() >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
-    //
-    // const bootloader_memory_map_entries = bootloader_information.getSlice(.memory_map_entries);
-    // for (memory_map_entries, 0..) |entry, index| {
-    //     bootloader_memory_map_entries[index] = .{
-    //         .region = entry.region,
-    //         .type = switch (entry.type) {
-    //             .usable => .usable,
-    //             .framebuffer, .kernel_and_modules, .bootloader_reclaimable, .reserved, .acpi_reclaimable, .acpi_nvs => .reserved,
-    //             .bad_memory => @panic("Bad memory"),
-    //         },
-    //     };
-    //
-    //     const entry_page_count = @intCast(u32, entry.region.size >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]));
-    //     if (entry.type != .usable) {
-    //         // Reserved
-    //         page_counters[index] = entry_page_count;
-    //     }
-    // }
-    //
-    // // Copy files
-    // {
-    //     var file_content_offset: u32 = 0;
-    //     var file_name_offset: u32 = 0;
-    //     // var file_index: usize = 0;
-    //     // _ = file_index;
-    //     const file_slice = bootloader_information.getSliceOffset(.files);
-    //     const file_name_buffer = bootloader_information.getSlice(.file_names);
-    //     _ = file_slice;
-    //     var files = bootloader_information.getFiles();
-    //     for (files, limine_module_slice) |*file, limine_file| {
-    //         const file_size = @intCast(u32, limine_file.size);
-    //         const limine_path = limine_file.path[0..lib.length(limine_file.path)];
-    //         file.* = .{
-    //             .content_offset = file_content_offset,
-    //             .content_size = file_size,
-    //             .path_offset = file_name_offset,
-    //             .path_size = @intCast(u32, limine_path.len),
-    //             .type = if (lib.containsAtLeast(u8, limine_path, 1, "cpu")) .cpu_driver else if (lib.containsAtLeast(u8, limine_path, 1, "font")) .font else if (lib.containsAtLeast(u8, limine_path, 1, "init")) .init else @panic("Unexpected file type"),
-    //         };
-    //
-    //         const limine_file_slice = @intToPtr([*]const u8, limine_file.address)[0..limine_file.size];
-    //         file.copyContent(bootloader_information, limine_file_slice);
-    //
-    //         const dst_file_name = file_name_buffer[file_name_offset .. file_name_offset + limine_path.len];
-    //         lib.copy(u8, dst_file_name, limine_path);
-    //
-    //         file_content_offset += lib.alignForwardGeneric(u32, file_size, file_alignment);
-    //         file_name_offset += @intCast(u32, limine_path.len);
-    //     }
-    // }
-    //
-    // const minimal_paging = bootloader_information.initializeVirtualAddressSpace();
-    // // bootloader_information.initializeVirtualAddressSpace();
-    //
-    // const page_allocator_interface = bootloader_information.getPageAllocatorInterface();
-    //
-    // for (bootloader_information.getMemoryMapEntries()) |entry| {
-    //     if (entry.type == .usable) {
-    //         log.debug("Usable memory map entry: 0x{x}-0x{x}", .{ entry.region.address.value(), entry.region.address.offset(entry.region.size).value() });
-    //         minimal_paging.map(entry.region.address, entry.region.address.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator_interface) catch @panic("Mapping of usable memory map entry failed");
-    //         minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator_interface) catch @panic("Mapping of usable memory map entry failed");
-    //     }
-    // }
-    //
-    // // Trust the Limine bootloader to merely use the higher half offset
-    // const framebuffer_physical_address = PhysicalAddress.new(bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address);
-    // const framebuffer_virtual_address = VirtualAddress.new(bootloader_information.framebuffer.address);
-    // log.debug("Framebuffer: 0x{x}", .{framebuffer_physical_address.value()});
-    // minimal_paging.map(framebuffer_physical_address, framebuffer_virtual_address, lib.alignForwardGeneric(u64, bootloader_information.framebuffer.pitch * bootloader_information.framebuffer.height, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("can't map framebuffer");
-    //
-    // // Hack: map Limine stack to jump properly
-    //
-    // switch (lib.cpu.arch) {
-    //     .x86_64 => bootloader.arch.x86_64.jumpToKernel(bootloader_information, minimal_paging),
-    //     .aarch64 => while (true) {},
-    //     else => @compileError("Architecture not supported"),
-    // }
 }

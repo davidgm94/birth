@@ -3,46 +3,27 @@ const Allocator = lib.Allocator;
 const assert = lib.assert;
 const log = lib.log;
 
+const bootloader = @import("bootloader");
+
 const privileged = @import("privileged");
-const stopCPU = privileged.arch.stopCPU;
+const CPUPageTables = privileged.arch.CPUPageTables;
 const Mapping = privileged.Mapping;
-const PageAllocator = privileged.PageAllocator;
-const PageAllocatorInterface = privileged.PageAllocatorInterface;
+const PageAllocatorInterface = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const stopCPU = privileged.arch.stopCPU;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
-pub const scheduler_type = SchedulerType.round_robin;
+const rise = @import("rise");
 
-pub const Scheduler = switch (scheduler_type) {
-    .round_robin => @import("cpu/round_robin.zig"),
-    else => @compileError("other scheduler is not supported right now"),
-};
-
-pub const SchedulerType = enum(u8) {
-    round_robin,
-    rate_based_earliest_deadline,
-};
-
-const bootloader = @import("bootloader");
-
+pub const writer = arch.writer;
 pub const test_runner = @import("cpu/test_runner.zig");
-
 pub const arch = @import("cpu/arch.zig");
-pub const Capabilities = @import("cpu/capabilities.zig");
-pub const MappingDatabase = @import("cpu/mapping_database.zig");
 
 pub export var stack: [0x4000]u8 align(0x1000) = undefined;
-pub export var address_space: VirtualAddressSpace = undefined;
-pub export var core_id: u8 = 0;
-pub export var spawn_state = SpawnState{};
-
-pub var bsp = false;
-
-pub var file: []align(0x200) const u8 = undefined;
-
+pub export var heap_allocator = Heap{};
 pub export var page_allocator = PageAllocator{
     .head = null,
     .list_allocator = .{
@@ -55,8 +36,22 @@ pub export var page_allocator = PageAllocator{
         .primitive = true,
     },
 };
+pub export var driver: *Driver = undefined;
+pub export var page_tables: CPUPageTables = undefined;
+pub var file: []align(0x200) const u8 = undefined;
+pub export var core_id: u32 = 0;
+pub export var bsp = false;
+var panic_lock = arch.Spinlock.released;
 
-pub export var heap_allocator = Heap{};
+/// This data structure holds the information needed to run a core
+pub const Driver = extern struct {
+    valid: bool = false,
+};
+
+/// This data structure holds the information needed to run a program in a core (cpu side)
+pub const UserScheduler = extern struct {
+    common: *rise.UserScheduler,
+};
 
 pub const Heap = extern struct {
     region: VirtualMemoryRegion = .{
@@ -66,7 +61,7 @@ pub const Heap = extern struct {
 
     var allocated: u64 = 0;
 
-    pub fn fromPageAllocator(pa: *PageAllocator) !Heap {
+    pub inline fn fromPageAllocator(pa: *PageAllocator) !Heap {
         const physical_allocation = try pa.allocate(lib.arch.valid_page_sizes[1], lib.arch.valid_page_sizes[1]);
         const virtual_allocation = physical_allocation.toHigherHalfVirtualAddress();
         return Heap{
@@ -173,16 +168,13 @@ pub const Heap = extern struct {
     pub const Entry = PageAllocator.Entry;
 };
 
-pub const writer = arch.writer;
-var panic_lock = arch.Spinlock.released;
-
-inline fn panicPrologue(comptime format: []const u8, arguments: anytype) void {
+inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
     privileged.arch.disableInterrupts();
     panic_lock.acquire();
 
-    writer.writeAll("[CPU DRIVER] [PANIC] ") catch stopCPU();
-    writer.print(format, arguments) catch stopCPU();
-    writer.writeByte('\n') catch stopCPU();
+    try writer.writeAll("[CPU DRIVER] [PANIC] ");
+    try writer.print(format, arguments);
+    try writer.writeByte('\n');
 }
 
 inline fn panicEpilogue() noreturn {
@@ -200,7 +192,7 @@ inline fn panicEpilogue() noreturn {
 inline fn printStackTrace(maybe_stack_trace: ?*lib.StackTrace) !void {
     if (maybe_stack_trace) |stack_trace| {
         var debug_info = try getDebugInformation();
-        writer.writeAll("Stack trace:\n") catch stopCPU();
+        try writer.writeAll("Stack trace:\n");
         var frame_index: usize = 0;
         var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
 
@@ -213,7 +205,7 @@ inline fn printStackTrace(maybe_stack_trace: ?*lib.StackTrace) !void {
             try printSourceAtAddress(&debug_info, return_address);
         }
     } else {
-        writer.writeAll("Stack trace not available\n") catch stopCPU();
+        try writer.writeAll("Stack trace not available\n");
     }
 }
 
@@ -244,15 +236,19 @@ fn printSourceAtAddress(debug_info: *lib.ModuleDebugInfo, address: usize) !void 
 }
 
 pub fn panicWithStackTrace(stack_trace: ?*lib.StackTrace, comptime format: []const u8, arguments: anytype) noreturn {
-    panicPrologue(format, arguments);
+    panicPrologue(format, arguments) catch {};
     printStackTrace(stack_trace) catch {};
     panicEpilogue();
 }
 
-pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
-    panicPrologue(format, arguments);
-    printStackTraceFromStackIterator(@returnAddress(), @frameAddress()) catch {};
+pub fn panicFromInstructionPointerAndFramePointer(return_address: usize, frame_address: usize, comptime format: []const u8, arguments: anytype) noreturn {
+    panicPrologue(format, arguments) catch {};
+    printStackTraceFromStackIterator(return_address, frame_address) catch {};
     panicEpilogue();
+}
+
+pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
+    @call(.always_inline, panicFromInstructionPointerAndFramePointer, .{ @returnAddress(), @frameAddress(), format, arguments });
 }
 
 pub const UserVirtualAddressSpace = extern struct {
@@ -263,12 +259,11 @@ pub const VirtualAddressSpace = extern struct {
     arch: paging.Specific,
     page: Page = .{},
     heap: Heap = .{},
-    options: packed struct(u64) {
-        user: bool,
-        mapped_page_tables: bool,
-        log_pages: bool,
-        reserved: u61 = 0,
-    },
+    // options: packed struct(u64) {
+    //     mapped_page_tables: bool,
+    //     log_pages: bool,
+    //     reserved: u61 = 0,
+    // },
 
     const Context = extern struct {
         region_base: u64 = 0,
@@ -281,12 +276,20 @@ pub const VirtualAddressSpace = extern struct {
         log_count: u64 = 0,
     };
 
-    const VAS = @This();
-
     pub const paging = switch (lib.cpu.arch) {
         .x86 => privileged.arch.x86_64.paging,
         else => privileged.arch.current.paging,
     };
+
+    pub fn new() !*VirtualAddressSpace {
+        const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
+
+        virtual_address_space.* = .{
+            .arch = try paging.Specific.new(page_allocator.getPageAllocatorInterface()),
+        };
+
+        return virtual_address_space;
+    }
 
     fn callbackHeapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         _ = alignment;
@@ -294,25 +297,12 @@ pub const VirtualAddressSpace = extern struct {
         if (lib.cpu.arch != .x86) {
             const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", @fieldParentPtr(Heap, "allocator", allocator));
             _ = virtual_address_space;
-        } else {
-            return Allocator.Allocate.Error.OutOfMemory;
         }
-    }
-    //
 
-    pub fn user(physical_address_space: *PhysicalAddressSpace) VAS {
-        // TODO: defer memory free when this produces an error
-        // TODO: Maybe consume just the necessary space? We are doing this to avoid branches in the kernel heap allocator
-        var vas = VAS{
-            .arch = undefined,
-        };
-
-        paging.init_user(&vas, physical_address_space);
-
-        return vas;
+        return Allocator.Allocate.Error.OutOfMemory;
     }
 
-    pub inline fn makeCurrent(vas: *const VAS) void {
+    pub inline fn makeCurrent(vas: *const VirtualAddressSpace) void {
         paging.makeCurrent(vas);
     }
 
@@ -372,9 +362,7 @@ pub const VirtualAddressSpace = extern struct {
                 .size = page_bulk_allocation.size,
             };
 
-            if (virtual_address_space.options.log_pages) {
-                try virtual_address_space.addPage(page_bulk_allocation);
-            }
+            try virtual_address_space.addPage(page_bulk_allocation);
         }
 
         assert(virtual_address_space.page.context.region_base != 0);
@@ -391,6 +379,7 @@ pub const VirtualAddressSpace = extern struct {
 
         return allocation_result;
     }
+
     fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
         return try virtual_address_space.allocatePages(size, alignment, options);
@@ -440,230 +429,262 @@ pub const VirtualAddressSpace = extern struct {
     }
 };
 
-pub const CoreSupervisorData = extern struct {
-    is_valid: bool,
-    next: ?*CoreSupervisorData,
-    previous: ?*CoreSupervisorData,
-    mdb_root: VirtualAddress,
-    init_root_capability_node: Capabilities.CTE,
-    scheduler_state: Scheduler.State,
-    kernel_offset: i64,
-    irq_in_use: [arch.dispatch_count]u8, // bitmap of handed out caps
-    irq_dispatch: [arch.dispatch_count]Capabilities.CTE,
-    pending_ram_in_use: u8,
-    pending_ram: [4]RAM,
-};
+pub const PageAllocator = extern struct {
+    head: ?*Entry,
+    list_allocator: ListAllocator,
+    total_allocated_size: u32 = 0,
 
-const RAM = extern struct {
-    base: u64,
-    bytes: u64,
-};
-
-pub const PassId = u32;
-pub const CoreId = u8;
-pub const CapAddr = u32;
-
-const CTE = Capabilities.CTE;
-pub const SpawnState = extern struct {
-    cnodes: extern struct {
-        task: ?*CTE = null,
-        seg: ?*CTE = null,
-        super: ?*CTE = null,
-        physical_address: ?*CTE = null,
-        module: ?*CTE = null,
-        page: ?*CTE = null,
-        base_page: ?*CTE = null,
-        early_cnode: ?*CTE = null,
-        slot_alloc0: ?*CTE = null,
-        slot_alloc1: ?*CTE = null,
-        slot_alloc2: ?*CTE = null,
-    } = .{},
-    slots: extern struct {
-        seg: Capabilities.Slot = 0,
-        super: Capabilities.Slot = 0,
-        physical_address: Capabilities.Slot = 0,
-        module: Capabilities.Slot = 0,
-    } = .{},
-    argument_page_address: PhysicalAddress = PhysicalAddress.maybeInvalid(0),
-};
-
-pub var current_supervisor: ?*CoreSupervisorData = null;
-pub var current_director: ?*CoreDirectorData = null;
-
-pub const CoreDirectorData = extern struct {
-    shared: *CoreDirectorSharedGeneric,
-    disabled: bool,
-    cspace: CTE,
-    virtual_address_space: ?*VirtualAddressSpace,
-    dispatcher_cte: CTE,
-    faults_taken: u32,
-    is_vm_guest: bool,
-    // TODO: guest desc
-    domain_id: u64,
-    // TODO: wakeup time
-    wakeup_previous: ?*CoreDirectorData,
-    wakeup_next: ?*CoreDirectorData,
-    next: ?*CoreDirectorData,
-    previous: ?*CoreDirectorData,
-
-    // pub fn contextSwitch(core_director_data: *CoreDirectorData) void {
-    //     if (core_director_data.virtual_address_space) |virtual_address_space| {
-    //         if (!virtual_address_space.options.mapped_page_tables) @panic("Page tables are not mapped before context switching");
-    //         privileged.arch.paging.contextSwitch(virtual_address_space);
-    //         context_switch_counter += 1;
-    //     } else {
-    //         @panic("VAS null");
-    //     }
-    //     // TODO: implement LDT
-    // }
-    //
-    var context_switch_counter: usize = 0;
-};
-
-pub const CoreDirectorSharedGeneric = extern struct {
-    disabled: u32,
-    haswork: u32,
-    udisp: VirtualAddress,
-    lmp_delivered: u32,
-    lmp_seen: u32,
-    lmp_hint: VirtualAddress,
-    dispatcher_run: VirtualAddress,
-    dispatcher_lrpc: VirtualAddress,
-    dispatcher_page_fault: VirtualAddress,
-    dispatcher_page_fault_disabled: VirtualAddress,
-    dispatcher_trap: VirtualAddress,
-    // TODO: time
-    systime_frequency: u64,
-    core_id: u32,
-
-    pub fn getDisabledSaveArea(core_director_shared_generic: *CoreDirectorSharedGeneric) *arch.Registers {
-        const core_director_shared_arch = @fieldParentPtr(arch.CoreDirectorShared, "base", core_director_shared_generic);
-        return &core_director_shared_arch.disabled_save_area;
-    }
-};
-
-fn capabilityNodeSlice(node: *Capabilities.CTE) *[1]Capabilities.CTE {
-    return @ptrCast(*[1]Capabilities.CTE, node);
-}
-
-pub inline fn spawnInitModule(spawn: *SpawnState) !*CoreDirectorData {
-    _ = spawn;
-    assert(current_supervisor != null);
-    const root_capability_node = &current_supervisor.?.init_root_capability_node;
-    MappingDatabase.init(current_supervisor.?) catch @panic("Unable to initialize mapping database");
-    current_supervisor.?.is_valid = true;
-
-    const root_capability_node_slice = capabilityNodeSlice(root_capability_node);
-    Capabilities.new(.l1cnode, (page_allocator.allocate(Capabilities.Size.l2cnode, 0x1000) catch @panic("capability allocation failed")).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, root_capability_node_slice) catch @panic("Cannot create capability root node");
-
-    if (bsp) {
-        const bsp_kernel_control_block_capability = Capabilities.Capability{
-            .object = .{
-                .kernel_control_block = current_supervisor.?,
-            },
-            .rights = Capabilities.Rights.all,
-            .type = .kernel_control_block,
+    fn getPageAllocatorInterface(pa: *PageAllocator) PageAllocatorInterface {
+        return .{
+            .allocate = callbackAllocate,
+            .context = pa,
+            .context_type = .cpu,
         };
-        const bsp_kernel_control_block = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.bsp_kernel_control_block));
-        assert(bsp_kernel_control_block.capability.type == .null);
-        bsp_kernel_control_block.capability = bsp_kernel_control_block_capability;
     }
 
-    spawn_state.cnodes.task = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.task));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.task orelse unreachable));
-
-    spawn_state.cnodes.page = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.page));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.page orelse unreachable));
-
-    spawn_state.cnodes.base_page = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.base_page));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.base_page orelse unreachable));
-
-    spawn_state.cnodes.early_cnode = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.early_cnode));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.early_cnode orelse unreachable));
-
-    spawn_state.cnodes.super = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.super));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.super orelse unreachable));
-
-    spawn_state.cnodes.slot_alloc0 = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.slot_alloc0));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(4 * Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, 4 * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.slot_alloc0 orelse unreachable));
-
-    spawn_state.cnodes.seg = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.seg));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.seg orelse unreachable));
-
-    spawn_state.cnodes.physical_address = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.physical_address));
-    try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.physical_address orelse unreachable));
-
-    // TODO @ArchIndependent
-    if (bsp) {
-        spawn_state.cnodes.module = Capabilities.locateSlot(root_capability_node.getNode(), @enumToInt(Capabilities.RootCNodeSlot.module));
-        try Capabilities.new(.l2cnode, (try page_allocator.allocate(Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(spawn_state.cnodes.module orelse unreachable));
+    fn callbackAllocate(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        _ = options;
+        const pa = @ptrCast(?*PageAllocator, @alignCast(@alignOf(PageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
+        const result = try pa.allocate(size, alignment);
+        return result;
     }
 
-    const init_dcb_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher));
-    try Capabilities.new(.dispatcher, (try page_allocator.allocate(Capabilities.Size.dispatcher, lib.arch.valid_page_sizes[0])).address, Capabilities.Size.dispatcher, 0, core_id, capabilityNodeSlice(init_dcb_cte));
+    pub fn allocate(pa: *PageAllocator, size: u64, alignment: u64) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        if (pa.head == null) {
+            @panic("head null");
+        }
 
-    const init_dispatcher_data = init_dcb_cte.capability.object.dispatcher.current;
+        const allocation = blk: {
+            var ptr = pa.head;
+            while (ptr) |entry| : (ptr = entry.next) {
+                if (lib.isAligned(entry.region.size, alignment) and entry.region.size > size) {
+                    const result = PhysicalMemoryRegion{
+                        .address = entry.region.address,
+                        .size = size,
+                    };
+                    entry.region.address = entry.region.address.offset(size);
+                    entry.region.size -= size;
 
-    try root_capability_node.copy_to_cnode(spawn_state.cnodes.task orelse unreachable, @enumToInt(Capabilities.TaskCNodeSlot.root), false, 0, 0);
+                    pa.total_allocated_size += @intCast(u32, size);
+                    // log.debug("Allocated 0x{x}", .{size});
 
-    const init_dispatcher_frame_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.dispatcher_frame));
-    try Capabilities.new(.frame, (try page_allocator.allocate(Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size)).address, Capabilities.dispatcher_frame_size, Capabilities.dispatcher_frame_size, core_id, capabilityNodeSlice(init_dispatcher_frame_cte));
+                    break :blk result;
+                }
+            }
 
-    try init_dispatcher_frame_cte.copy_to_cte(&init_dispatcher_data.dispatcher_cte, false, 0, 0);
+            ptr = pa.head;
 
-    const init_args_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.args_space));
-    try Capabilities.new(.frame, (try page_allocator.allocate(Capabilities.args_size, Capabilities.args_size)).address, Capabilities.args_size, Capabilities.args_size, core_id, capabilityNodeSlice(init_args_cte));
-    spawn_state.argument_page_address = init_args_cte.capability.object.frame.base;
+            while (ptr) |entry| : (ptr = entry.next) {
+                const aligned_address = lib.alignForward(entry.region.address.value(), alignment);
+                const top = entry.region.address.offset(entry.region.size).value();
+                if (aligned_address < top and top - aligned_address > size) {
+                    // log.debug("Found region which we should be splitting: (0x{x}, 0x{x})", .{ entry.region.address.value(), entry.region.size });
+                    // log.debug("User asked for 0x{x} bytes with alignment 0x{x}", .{ size, alignment });
+                    // Split the addresses to obtain the desired result
+                    const first_region_size = aligned_address - entry.region.address.value();
+                    const first_region_address = entry.region.address;
+                    const first_region_next = entry.next;
 
-    // TODO @ArchIndependent
-    if (bsp) {
-        //log.warn("todo: bootloader information", .{});
+                    const second_region_address = aligned_address + size;
+                    const second_region_size = top - aligned_address + size;
+
+                    const result = PhysicalMemoryRegion{
+                        .address = PhysicalAddress.new(aligned_address),
+                        .size = size,
+                    };
+
+                    // log.debug("\nFirst region: (Address: 0x{x}. Size: 0x{x}).\nRegion in the middle (allocated): (Address: 0x{x}. Size: 0x{x}).\nSecond region: (Address: 0x{x}. Size: 0x{x})", .{ first_region_address, first_region_size, result.address.value(), result.size, second_region_address, second_region_size });
+
+                    const new_entry = pa.list_allocator.get();
+                    entry.* = .{
+                        .region = .{
+                            .address = first_region_address,
+                            .size = first_region_size,
+                        },
+                        .next = new_entry,
+                    };
+
+                    new_entry.* = .{
+                        .region = .{
+                            .address = PhysicalAddress.new(second_region_address),
+                            .size = second_region_size,
+                        },
+                        .next = first_region_next,
+                    };
+                    // log.debug("First entry: (Address: 0x{x}. Size: 0x{x})", .{ entry.region.address.value(), entry.region.size });
+                    // log.debug("Second entry: (Address: 0x{x}. Size: 0x{x})", .{ new_entry.region.address.value(), new_entry.region.size });
+
+                    // pa.total_allocated_size += @intCast(u32, size);
+                    // log.debug("Allocated 0x{x}", .{size});
+
+                    break :blk result;
+                }
+            }
+
+            log.err("Allocate error. Size: 0x{x}. Alignment: 0x{x}. Total allocated size: 0x{x}", .{ size, alignment, pa.total_allocated_size });
+            return Allocator.Allocate.Error.OutOfMemory;
+        };
+
+        lib.zero(allocation.toHigherHalfVirtualAddress().access(u8));
+
+        return allocation;
     }
 
-    const kernel_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.kernel_cap));
-    try Capabilities.new(.kernel, .null, 0, 0, core_id, capabilityNodeSlice(kernel_cap_cte));
+    pub inline fn fromBSP(bootloader_information: *bootloader.Information) InitializationError!PageAllocator {
+        const memory_map_entries = bootloader_information.getMemoryMapEntries();
+        const page_counters = bootloader_information.getPageCounters();
 
-    const performance_monitor_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.performance_monitor));
-    try Capabilities.new(.performance_monitor, .null, 0, 0, core_id, capabilityNodeSlice(performance_monitor_cap_cte));
+        var total_size: usize = 0;
+        const page_shifter = lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
-    const irq_table_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.irq));
-    try Capabilities.new(.irq_table, .null, 0, 0, core_id, capabilityNodeSlice(irq_table_cap_cte));
+        for (memory_map_entries, page_counters) |entry, page_counter| {
+            if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) {
+                continue;
+            }
 
-    const ipi_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.ipi));
-    try Capabilities.new(.ipi, .null, 0, 0, core_id, capabilityNodeSlice(ipi_cap_cte));
+            total_size += entry.region.size - (page_counter << page_shifter);
+        }
 
-    const process_manager_cap_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.process_manager));
-    try Capabilities.new(.process_manager, .null, 0, 0, core_id, capabilityNodeSlice(process_manager_cap_cte));
+        const cpu_count = bootloader_information.smp.cpu_count;
+        const total_memory_to_take = total_size / cpu_count;
 
-    const io_cte = Capabilities.locateSlot(spawn_state.cnodes.task.?.getNode(), @enumToInt(Capabilities.TaskCNodeSlot.io));
-    try Capabilities.new(.io, .null, 0, 0, core_id, capabilityNodeSlice(io_cte));
+        // Look for a 4K page to host the memory map
+        const backing_4k_page = for (memory_map_entries, page_counters) |entry, *page_counter| {
+            const occupied_size = page_counter.* << page_shifter;
+            const entry_size_left = entry.region.size - occupied_size;
+            if (entry_size_left != 0) {
+                if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
 
-    const init_handle = init_dispatcher_frame_cte.capability.object.frame.base.toHigherHalfVirtualAddress();
-    //const &init_handle.access(*arch.Dispatcher).base;
-    const init_core_director = init_handle.access(*CoreDirectorSharedGeneric);
-    init_core_director.disabled = @boolToInt(true);
-    init_core_director.core_id = core_id;
+                assert(lib.isAligned(entry_size_left, lib.arch.valid_page_sizes[0]));
+                page_counter.* += 1;
+                break entry.region.address.offset(occupied_size);
+            }
+        } else return InitializationError.bootstrap_region_not_found;
 
-    try root_capability_node.copy_to_cte(&init_dispatcher_data.cspace, false, 0, 0);
+        var memory_taken: usize = 0;
+        var backing_4k_page_memory_allocated: usize = 0;
 
-    init_dispatcher_data.shared = init_handle.access(*CoreDirectorSharedGeneric);
-    init_dispatcher_data.disabled = true;
-    Scheduler.make_runnable(init_dispatcher_data);
+        var last_entry: ?*Entry = null;
+        var first_entry: ?*Entry = null;
 
-    const base_page_cn_cte = Capabilities.locateSlot(spawn_state.cnodes.base_page.?.getNode(), 0);
-    try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0])).address, Capabilities.l2_cnode_slots * lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0], core_id, capabilityNodeSlice(base_page_cn_cte));
+        for (memory_map_entries, page_counters) |entry, *page_counter| {
+            if (entry.type != .usable or !lib.isAligned(entry.region.size, lib.arch.valid_page_sizes[0]) or entry.region.address.value() < lib.mb) continue;
 
-    const early_cnode_cn_cte = Capabilities.locateSlot(spawn_state.cnodes.early_cnode.?.getNode(), 0);
-    try Capabilities.new(.ram, (try page_allocator.allocate(Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, lib.arch.valid_page_sizes[0])).address, Capabilities.early_cnode_allocated_slots * Capabilities.Size.l2cnode, Capabilities.Size.l2cnode, core_id, capabilityNodeSlice(early_cnode_cn_cte));
+            const occupied_size = page_counter.* << page_shifter;
 
-    return init_dispatcher_data;
-}
+            if (occupied_size < entry.region.size) {
+                var entry_size_left = entry.region.size - occupied_size;
+
+                var memory_taken_from_region: usize = 0;
+                while (memory_taken + memory_taken_from_region < total_memory_to_take) {
+                    if (entry_size_left == 0) break;
+
+                    const size_to_take = @min(2 * lib.mb, entry_size_left);
+                    //log.debug("Size to take: 0x{x}", .{size_to_take});
+                    entry_size_left -= size_to_take;
+                    memory_taken_from_region += size_to_take;
+                }
+
+                memory_taken += memory_taken_from_region;
+
+                page_counter.* += @intCast(u32, memory_taken_from_region >> page_shifter);
+                const region_descriptor = .{
+                    .address = entry.region.offset(occupied_size).address,
+                    .size = memory_taken_from_region,
+                };
+
+                if (backing_4k_page_memory_allocated >= lib.arch.valid_page_sizes[0]) return InitializationError.memory_exceeded;
+                const entry_address = backing_4k_page.offset(backing_4k_page_memory_allocated);
+                const new_entry = entry_address.toHigherHalfVirtualAddress().access(*Entry);
+                backing_4k_page_memory_allocated += @sizeOf(Entry);
+
+                new_entry.* = .{
+                    .region = .{
+                        .address = region_descriptor.address,
+                        .size = region_descriptor.size,
+                    },
+                    .next = null,
+                };
+
+                if (last_entry) |e| {
+                    e.next = new_entry;
+                } else {
+                    first_entry = new_entry;
+                }
+
+                last_entry = new_entry;
+
+                if (memory_taken >= total_memory_to_take) break;
+            }
+        }
+
+        const result = .{
+            .head = first_entry,
+            .list_allocator = .{
+                .u = .{
+                    .primitive = .{
+                        .backing_4k_page = backing_4k_page,
+                        .allocated = backing_4k_page_memory_allocated,
+                    },
+                },
+                .primitive = true,
+            },
+        };
+
+        return result;
+    }
+
+    const ListAllocator = extern struct {
+        u: extern union {
+            primitive: extern struct {
+                backing_4k_page: PhysicalAddress,
+                allocated: u64,
+            },
+            normal: extern struct {
+                foo: u64,
+            },
+        },
+        primitive: bool,
+
+        pub fn get(list_allocator: *ListAllocator) *Entry {
+            switch (list_allocator.primitive) {
+                true => {
+                    if (list_allocator.u.primitive.allocated < 0x1000) {
+                        const result = list_allocator.u.primitive.backing_4k_page.offset(list_allocator.u.primitive.allocated).toHigherHalfVirtualAddress().access(*Entry);
+                        list_allocator.u.primitive.backing_4k_page = list_allocator.u.primitive.backing_4k_page.offset(@sizeOf(Entry));
+                        return result;
+                    } else {
+                        @panic("reached limit");
+                    }
+                },
+                false => {
+                    @panic("not primitive allocator not implemented");
+                },
+            }
+        }
+    };
+
+    pub const Entry = extern struct {
+        region: PhysicalMemoryRegion,
+        next: ?*Entry,
+    };
+
+    const InitializationError = error{
+        bootstrap_region_not_found,
+        memory_exceeded,
+    };
+};
 
 fn getDebugInformation() !lib.ModuleDebugInfo {
     const debug_info = lib.getDebugInformation(heap_allocator.toZig(), file) catch |err| {
-        writer.print("Failed to get debug information: {}", .{err}) catch stopCPU();
+        try writer.print("Failed to get debug information: {}", .{err});
         return err;
     };
 
     return debug_info;
+}
+
+pub inline fn spawnInitModule() !*UserScheduler {
+    // TODO: use capabilities
+    return error.TODO;
 }

@@ -10,7 +10,6 @@ const privileged = @import("privileged");
 pub const APIC = @import("x86/64/apic.zig");
 pub const io = @import("x86/64/io.zig");
 pub const paging = @import("x86/64/paging.zig");
-pub const PIC = @import("x86/64/pic.zig");
 pub const registers = @import("x86/64/registers.zig");
 
 pub const valid_page_sizes = privileged.arch.valid_page_sizes;

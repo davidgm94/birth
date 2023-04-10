@@ -10,6 +10,7 @@ const writer = privileged.writer;
 const stopCPU = privileged.arch.stopCPU;
 const GDT = privileged.arch.x86_64.GDT;
 const Mapping = privileged.Mapping;
+const PageAllocator = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
@@ -237,19 +238,19 @@ const Framebuffer = extern struct {
 };
 
 const VirtualAddressSpace = extern struct {
-    fn ensureLoaderIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface, bootloader_information: *bootloader.Information) anyerror!void {
+    fn ensureLoaderIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
         _ = bootloader_information;
         _ = context;
         const loader_physical_start = PhysicalAddress.new(lib.alignBackward(@ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
         const loader_size = lib.alignForwardGeneric(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
-        try paging.map(loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator_interface);
+        try paging.map(loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator);
     }
 
-    fn ensureStackIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator_interface: privileged.PageAllocatorInterface) anyerror!void {
+    fn ensureStackIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator) anyerror!void {
         _ = context;
         const loader_stack_size = BIOS.stack_size;
         const loader_stack = PhysicalAddress.new(lib.alignForwardGeneric(u32, BIOS.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
-        paging.map(loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator_interface) catch @panic("Mapping of loader stack failed");
+        paging.map(loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
     }
 };
 
