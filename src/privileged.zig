@@ -36,6 +36,7 @@ pub const ResourceOwner = enum(u2) {
 const panic_logger = lib.log.scoped(.PANIC);
 
 pub inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {
+    log.info("Exiting with {s}", .{@tagName(exit_code)});
     comptime assert(@sizeOf(lib.QEMU.ExitCode) == @sizeOf(u32));
     arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(exit_code));
 
@@ -231,9 +232,19 @@ pub const PageAllocator = struct {
     context_type: ContextType,
     reserved: u32 = 0,
 
+    pub inline fn allocatePageTable(page_allocator: PageAllocator, level: arch.paging.Level) !PhysicalMemoryRegion {
+        const result = try page_allocator.allocate(page_allocator.context, arch.paging.page_table_size, arch.paging.page_table_alignment, .{ .level = .{ .value = level, .valid = true } });
+        return result;
+    }
+
     pub const AllocateOptions = packed struct(u32) {
         space_waste_allowed_to_guarantee_alignment: u8 = 0,
-        reserved: u24 = 0,
+        level: packed struct(u8) {
+            value: arch.paging.Level = undefined,
+            valid: bool = false,
+            reserved: u5 = 0,
+        } = .{},
+        reserved: u16 = 0,
     };
 
     const ContextType = enum(u32) {

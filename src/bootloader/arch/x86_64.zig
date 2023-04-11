@@ -49,6 +49,8 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
     efer.SCE = true;
     efer.write();
 
+    _ = minimal_paging.translateAddress(privileged.VirtualAddress.new(0xffff_ffff_8000_0000)) catch @panic("not mapped");
+
     minimal_paging.cr3.write();
 
     if (lib.cpu.arch == .x86) {

@@ -30,6 +30,8 @@ const Mapping = privileged.Mapping;
 
 const bootloader = @import("bootloader");
 
+const page_table_level_count = 4;
+
 pub const CPUPageTables = extern struct {
     pml4_table: PhysicalAddress,
     pdp_table: PhysicalAddress,
@@ -38,7 +40,7 @@ pub const CPUPageTables = extern struct {
 
     const base = 0xffff_ffff_8000_0000;
     const top = base + pte_count * lib.arch.valid_page_sizes[0];
-    const pte_count = table_element_count - left_ptables;
+    const pte_count = page_table_entry_count - left_ptables;
     const left_ptables = 4;
     const pml4_index = 0x1ff;
     const pdp_index = 0x1fe;
@@ -88,30 +90,22 @@ pub const CPUPageTables = extern struct {
         p_table[0x200 - 4] = .{
             .present = true,
             .read_write = true,
-            .user = false,
             .address = packAddress(PTE, page_tables.pml4_table.value()),
-            .execute_disable = true,
         };
         p_table[0x200 - 3] = .{
             .present = true,
             .read_write = true,
-            .user = false,
             .address = packAddress(PTE, page_tables.pdp_table.value()),
-            .execute_disable = true,
         };
         p_table[0x200 - 2] = .{
             .present = true,
             .read_write = true,
-            .user = false,
             .address = packAddress(PTE, page_tables.pd_table.value()),
-            .execute_disable = true,
         };
         p_table[0x200 - 1] = .{
             .present = true,
             .read_write = true,
-            .user = false,
             .address = packAddress(PTE, page_tables.p_table.value()),
-            .execute_disable = true,
         };
 
         return page_tables;
@@ -146,7 +140,7 @@ pub const Specific = extern struct {
     cr3: cr3 align(8),
 
     pub fn new(page_allocator: PageAllocator) !Specific {
-        const pml4_physical_memory = try page_allocator.allocate(page_allocator.context, @sizeOf(PML4Table), lib.arch.valid_page_sizes[0], .{});
+        const pml4_physical_memory = try page_allocator.allocatePageTable(.PML4);
         // Already zeroed
         return .{
             .cr3 = cr3.fromAddress(pml4_physical_memory.address),
@@ -234,7 +228,7 @@ pub const Specific = extern struct {
         // TODO: batch better
         switch (asked_page_size) {
             // 1 GB
-            lib.arch.valid_page_sizes[0] * table_element_count * table_element_count => {
+            lib.arch.valid_page_sizes[0] * page_table_entry_count * page_table_entry_count => {
                 while (virtual_address < top_virtual_address) : ({
                     physical_address += asked_page_size;
                     virtual_address += asked_page_size;
@@ -243,7 +237,7 @@ pub const Specific = extern struct {
                 }
             },
             // 2 MB
-            lib.arch.valid_page_sizes[0] * table_element_count => {
+            lib.arch.valid_page_sizes[0] * page_table_entry_count => {
                 while (virtual_address < top_virtual_address) : ({
                     physical_address += asked_page_size;
                     virtual_address += asked_page_size;
@@ -351,9 +345,96 @@ pub const Specific = extern struct {
         lib.copy(PDPTE, new_pdp_table, pdp_table);
         new_pdp_table[0x1fd] = @bitCast(PDPTE, @as(u64, 0));
     }
+
+    pub fn translateAddress(specific: Specific, virtual_address: VirtualAddress) !PhysicalAddress {
+        const indices = computeIndices(virtual_address.value());
+
+        const pml4_table = try getPML4Table(specific.cr3);
+        const pml4_entry = pml4_table[indices[@enumToInt(Level.PML4)]];
+        if (!pml4_entry.present) {
+            return TranslateError.pml4_entry_not_present;
+        }
+
+        if (pml4_entry.execute_disable) {
+            @panic("PML4");
+        }
+
+        const pml4_entry_address = PhysicalAddress.new(unpackAddress(pml4_entry));
+        if (pml4_entry_address.value() == 0) {
+            return TranslateError.pml4_entry_address_null;
+        }
+
+        const pdp_table = try getPDPTable(pml4_table, indices, undefined, null);
+        const pdp_entry = &pdp_table[indices[@enumToInt(Level.PDP)]];
+        if (!pdp_entry.present) {
+            return TranslateError.pdp_entry_not_present;
+        }
+        if (pdp_entry.execute_disable) {
+            @panic("PDP");
+        }
+
+        if (pdp_entry.page_size) {
+            const pdp_entry_1gb = @bitCast(PDPTE_1GB, pdp_entry.*);
+            const entry_address_value = unpackAddress(pdp_entry_1gb);
+            const physical_address = PhysicalAddress.new(entry_address_value);
+            if (lib.isAlignedGeneric(u64, virtual_address.value(), lib.gb)) {
+                return physical_address;
+            } else {
+                @panic("unaligned 1gb");
+            }
+        }
+
+        const pdp_entry_address = PhysicalAddress.new(unpackAddress(pdp_entry.*));
+        if (pdp_entry_address.value() == 0) {
+            return TranslateError.pdp_entry_address_null;
+        }
+
+        const pd_table = try accessPageTable(pdp_entry_address, *volatile PDTable);
+        const pd_entry = pd_table[indices[@enumToInt(Level.PD)]];
+        if (!pd_entry.present) {
+            return TranslateError.pd_entry_not_present;
+        }
+        if (pd_entry.execute_disable) {
+            @panic("PD");
+        }
+
+        if (pd_entry.page_size) {
+            const pd_entry_2mb = @bitCast(PDTE_2MB, pd_entry);
+            const entry_address_value = unpackAddress(pd_entry_2mb);
+            const physical_address = PhysicalAddress.new(entry_address_value);
+            if (lib.isAlignedGeneric(u64, virtual_address.value(), 2 * lib.mb)) {
+                return physical_address;
+            } else {
+                @panic("unaligned 2mb");
+            }
+        }
+
+        const pd_entry_address = PhysicalAddress.new(unpackAddress(pd_entry));
+        if (pd_entry_address.value() == 0) {
+            return TranslateError.pd_entry_address_null;
+        }
+
+        const p_table = try accessPageTable(pd_entry_address, *volatile PTable);
+        const pt_entry = &p_table[indices[@enumToInt(Level.PT)]];
+        if (!pt_entry.present) {
+            return TranslateError.pt_entry_not_present;
+        }
+
+        if (pt_entry.execute_disable) {
+            log.debug("PTR: 0x{x}", .{@ptrToInt(pt_entry)});
+            // @panic("PT");
+        }
+
+        const pt_entry_address = PhysicalAddress.new(unpackAddress(pt_entry.*));
+        if (pt_entry_address.value() == 0) {
+            return TranslateError.pt_entry_address_null;
+        }
+
+        return pt_entry_address;
+    }
 };
 
-const Indices = [enumCount(PageIndex)]u16;
+const Indices = [enumCount(Level)]u16;
 
 const MapError = error{
     already_present_4kb,
@@ -406,7 +487,7 @@ fn getPML4Table(cr3r: cr3) !*volatile PML4Table {
 }
 
 fn getPDPTable(pml4_table: *volatile PML4Table, indices: Indices, flags: MemoryFlags, maybe_page_allocator: ?PageAllocator) !*volatile PDPTable {
-    const index = indices[@enumToInt(PageIndex.PML4)];
+    const index = indices[@enumToInt(Level.PML4)];
     const entry_pointer = &pml4_table[index];
 
     const table_physical_address = physical_address_blk: {
@@ -450,7 +531,7 @@ inline fn getPageEntry(comptime Entry: type, physical_address: u64, flags: Memor
 }
 
 fn mapPageTable1GB(pdp_table: *volatile PDPTable, indices: Indices, physical_address: u64, flags: MemoryFlags) MapError!void {
-    const entry_index = indices[@enumToInt(PageIndex.PDP)];
+    const entry_index = indices[@enumToInt(Level.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
     if (entry_pointer.present) return MapError.already_present_1gb;
@@ -461,7 +542,7 @@ fn mapPageTable1GB(pdp_table: *volatile PDPTable, indices: Indices, physical_add
 }
 
 fn mapPageTable2MB(pd_table: *volatile PDTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_index = indices[@enumToInt(PageIndex.PD)];
+    const entry_index = indices[@enumToInt(Level.PD)];
     const entry_pointer = &pd_table[entry_index];
     const entry_value = entry_pointer.*;
 
@@ -476,7 +557,7 @@ fn mapPageTable2MB(pd_table: *volatile PDTable, indices: Indices, physical_addre
 }
 
 fn mapPageTable4KB(p_table: *volatile PTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_index = indices[@enumToInt(PageIndex.PT)];
+    const entry_index = indices[@enumToInt(Level.PT)];
     const entry_pointer = &p_table[entry_index];
 
     if (entry_pointer.present) {
@@ -490,7 +571,7 @@ fn mapPageTable4KB(p_table: *volatile PTable, indices: Indices, physical_address
 }
 
 fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*volatile PDTable {
-    const entry_index = indices[@enumToInt(PageIndex.PDP)];
+    const entry_index = indices[@enumToInt(Level.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
     const table_physical_address = physical_address_blk: {
@@ -520,7 +601,7 @@ fn getPDTable(pdp_table: *volatile PDPTable, indices: Indices, flags: MemoryFlag
 }
 
 fn getPTable(pd_table: *volatile PDTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*volatile PTable {
-    const entry_pointer = &pd_table[indices[@enumToInt(PageIndex.PD)]];
+    const entry_pointer = &pd_table[indices[@enumToInt(Level.PD)]];
     const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
         if (entry_value.present) {
@@ -595,7 +676,7 @@ pub const MemoryFlags = packed struct(u64) {
 
 const address_mask: u64 = 0x0000_00ff_ffff_f000;
 
-const PageIndex = enum(u3) {
+pub const Level = enum(u2) {
     PML4 = 0,
     PDP = 1,
     PD = 2,
@@ -754,85 +835,18 @@ const PTE = packed struct(u64) {
     }
 };
 
-pub const table_element_count = 0x200;
-pub const PML4Table = [table_element_count]PML4TE;
-pub const PDPTable = [table_element_count]PDPTE;
-pub const PDTable = [table_element_count]PDTE;
-pub const PTable = [table_element_count]PTE;
+pub const PML4Table = [page_table_entry_count]PML4TE;
+pub const PDPTable = [page_table_entry_count]PDPTE;
+pub const PDTable = [page_table_entry_count]PDTE;
+pub const PTable = [page_table_entry_count]PTE;
+pub const page_table_entry_size = @sizeOf(u64);
+pub const page_table_size = lib.arch.valid_page_sizes[0];
+pub const page_table_entry_count = @divExact(page_table_size, page_table_entry_size);
+pub const page_table_alignment = page_table_size;
 
-pub fn translateAddress(specific: Specific, virtual_address: VirtualAddress) TranslateError!PhysicalAddress {
-    const indices = computeIndices(virtual_address.value());
-
-    const pml4_table = getPML4Table(specific.cr3) catch @panic("translateAddress"); //catch privileged.panic("[translateAddress] PML4 access failed when translating 0x{x}", .{virtual_address.value()});
-    const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
-    if (!pml4_entry.present) {
-        return TranslateError.pml4_entry_not_present;
-    }
-
-    const pml4_entry_address = PhysicalAddress.new(unpackAddress(pml4_entry));
-    if (pml4_entry_address.value() == 0) {
-        return TranslateError.pml4_entry_address_null;
-    }
-
-    const pdp_table = getPDPTable(pml4_table, indices, undefined, null) catch @panic("translateAddress"); //privileged.panic("[translateAddress] PDP access failed when translating 0x{x}", .{virtual_address.value()});
-    const pdp_entry = &pdp_table[indices[@enumToInt(PageIndex.PDP)]];
-    if (!pdp_entry.present) {
-        return TranslateError.pdp_entry_not_present;
-    }
-
-    if (pdp_entry.page_size) {
-        const pdp_entry_1gb = @bitCast(PDPTE_1GB, pdp_entry.*);
-        const entry_address_value = unpackAddress(pdp_entry_1gb);
-        const physical_address = PhysicalAddress.new(entry_address_value);
-        if (lib.isAlignedGeneric(u64, virtual_address.value(), lib.gb)) {
-            return physical_address;
-        } else {
-            @panic("unaligned 1gb");
-        }
-    }
-
-    const pdp_entry_address = PhysicalAddress.new(unpackAddress(pdp_entry.*));
-    if (pdp_entry_address.value() == 0) {
-        return TranslateError.pdp_entry_address_null;
-    }
-
-    const pd_table = accessPageTable(pdp_entry_address, *volatile PDTable) catch {
-        @panic("translateAddress");
-        //privileged.panic("[translateAddress] PD access failed when translating 0x{x}. Tried to access page at physical address: 0x{x}. Written in 0x{x}", .{ virtual_address.value(), pdp_entry_address.value(), @ptrToInt(pdp_entry) });
-    };
-    const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
-    if (!pd_entry.present) {
-        return TranslateError.pd_entry_not_present;
-    }
-
-    if (pd_entry.page_size) {
-        const pd_entry_2mb = @bitCast(PDTE_2MB, pd_entry);
-        const entry_address_value = unpackAddress(pd_entry_2mb);
-        const physical_address = PhysicalAddress.new(entry_address_value);
-        if (lib.isAlignedGeneric(u64, virtual_address.value(), 2 * lib.mb)) {
-            return physical_address;
-        } else {
-            @panic("unaligned 2mb");
-        }
-    }
-
-    const pd_entry_address = PhysicalAddress.new(unpackAddress(pd_entry));
-    if (pd_entry_address.value() == 0) {
-        return TranslateError.pd_entry_address_null;
-    }
-
-    const p_table = accessPageTable(pd_entry_address, *volatile PTable) catch @panic("translateAddress"); //privileged.panic("[translateAddress] PD access failed when translating 0x{x}", .{virtual_address.value()});
-    const pt_entry = p_table[indices[@enumToInt(PageIndex.PT)]];
-    if (!pt_entry.present) {
-        return TranslateError.pt_entry_not_present;
-    }
-
-    const pt_entry_address = PhysicalAddress.new(unpackAddress(pt_entry));
-    if (pt_entry_address.value() == 0) {
-        return TranslateError.pt_entry_address_null;
-    }
-
-    return pt_entry_address;
+comptime {
+    assert(page_table_alignment == page_table_size);
+    assert(page_table_size == lib.arch.valid_page_sizes[0]);
 }
 
 pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.Flags) !void {
@@ -843,7 +857,7 @@ pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.
     const pml4_physical_address = vas_cr3.getAddress();
 
     const pml4_table = try accessPageTable(pml4_physical_address, *volatile PML4Table);
-    const pml4_entry = pml4_table[indices[@enumToInt(PageIndex.PML4)]];
+    const pml4_entry = pml4_table[indices[@enumToInt(Level.PML4)]];
     if (!pml4_entry.present) {
         return TranslateError.pml4_entry_not_present;
     }
@@ -854,7 +868,7 @@ pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.
     }
 
     const pdp_table = try accessPageTable(pml4_entry_address, *volatile PDPTable);
-    const pdp_entry = pdp_table[indices[@enumToInt(PageIndex.PDP)]];
+    const pdp_entry = pdp_table[indices[@enumToInt(Level.PDP)]];
     if (!pdp_entry.present) {
         return TranslateError.pdp_entry_not_present;
     }
@@ -865,7 +879,7 @@ pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.
     }
 
     const pd_table = try accessPageTable(pdp_entry_address, *volatile PDTable);
-    const pd_entry = pd_table[indices[@enumToInt(PageIndex.PD)]];
+    const pd_entry = pd_table[indices[@enumToInt(Level.PD)]];
     if (!pd_entry.present) {
         return TranslateError.pd_entry_not_present;
     }
@@ -876,7 +890,7 @@ pub fn setMappingFlags(specific: Specific, virtual_address: u64, flags: Mapping.
     }
 
     const pt_table = try accessPageTable(pd_entry_address, *volatile PTable);
-    const pt_entry = &pt_table[indices[@enumToInt(PageIndex.PT)]];
+    const pt_entry = &pt_table[indices[@enumToInt(Level.PT)]];
     if (!pt_entry.present) {
         return TranslateError.pd_entry_not_present;
     }
