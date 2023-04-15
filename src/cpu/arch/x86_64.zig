@@ -11,16 +11,16 @@ const x86_64 = privileged.arch.x86_64;
 const APIC = x86_64.APIC;
 const paging = x86_64.paging;
 const TSS = x86_64.TSS;
-const registers = x86_64.registers;
-const cr0 = registers.cr0;
-const cr3 = registers.cr3;
-const cr4 = registers.cr4;
-const IA32_APIC_BASE = registers.IA32_APIC_BASE;
-const IA32_EFER = registers.IA32_EFER;
-const IA32_FSTAR = registers.IA32_FSTAR;
-const IA32_FMASK = registers.IA32_FMASK;
-const IA32_LSTAR = registers.IA32_LSTAR;
-const IA32_STAR = registers.IA32_STAR;
+const Registers = rise.arch.Registers;
+const cr0 = x86_64.registers.cr0;
+const cr3 = x86_64.registers.cr3;
+const cr4 = x86_64.registers.cr4;
+const IA32_APIC_BASE = x86_64.registers.IA32_APIC_BASE;
+const IA32_EFER = x86_64.registers.IA32_EFER;
+const IA32_FSTAR = x86_64.registers.IA32_FSTAR;
+const IA32_FMASK = x86_64.registers.IA32_FMASK;
+const IA32_LSTAR = x86_64.registers.IA32_LSTAR;
+const IA32_STAR = x86_64.registers.IA32_STAR;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
@@ -43,7 +43,7 @@ var apic_base_physical_address = PhysicalAddress.maybeInvalid(0);
 const capability_address_space_size = 1 * lib.gb;
 const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
 const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
-const capability_address_space_stack_size = 0x1000;
+const capability_address_space_stack_size = privileged.default_stack_size;
 const capability_address_space_stack_address = capability_address_space_stack_top - capability_address_space_stack_size;
 
 const local_timer_vector = 0xef;
@@ -968,15 +968,17 @@ inline fn ok(result: struct {
 /// - R9:  argument 5
 export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Result {
     const options = @bitCast(rise.syscall.Options, regs.syscall_number);
+    _ = options;
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
     _ = arguments;
 
-    switch (options.general.convention) {
-        .rise => {
-            @panic("TODO: rise");
-        },
-        .linux => @panic("TODO: linux syscall"),
-    }
+    privileged.exitFromQEMU(.success);
+    // switch (options.general.convention) {
+    //     .rise => {
+    //         @panic("TODO: rise");
+    //     },
+    //     .linux => @panic("TODO: linux syscall"),
+    // }
 }
 
 fn dispatch(director: *cpu.CoreDirectorData) noreturn {
@@ -1046,56 +1048,56 @@ noinline fn resumeExecution(state: *align(16) Registers) noreturn {
     while (true) {}
 }
 
-pub const Registers = extern struct {
-    rax: u64,
-    rbx: u64,
-    rcx: u64,
-    rdx: u64,
-    rsi: u64,
-    rdi: u64,
-    rbp: u64,
-    rsp: u64,
-    r8: u64,
-    r9: u64,
-    r10: u64,
-    r11: u64,
-    r12: u64,
-    r13: u64,
-    r14: u64,
-    r15: u64,
-    rip: u64,
-    cr3: u64,
-    reserved: u64,
-    rflags: lib.arch.x86_64.registers.RFLAGS,
-    fs: u16,
-    gs: u16,
-    fxsave_area: extern struct {
-        fcw: u16,
-        fsw: u16,
-        ftw: u8,
-        reserved1: u8,
-        fop: u16,
-        fpu_ip1: u32,
-        fpu_ip2: u16,
-        reserved2: u16,
-        fpu_dp1: u32,
-        fpu_dp2: u16,
-        reserved3: u16,
-        mxcsr: u32,
-        mxcsr_mask: u32 = 0,
-        st: [8][2]u64,
-        xmm: [16][2]u64,
-        reserved4: [12]u64,
-    } align(16),
-
-    comptime {
-        assert(@sizeOf(Registers) == 688);
-    }
-
-    pub fn setParameter(regs: *Registers, param: u64) void {
-        regs.rax = param;
-    }
-};
+// pub const Registers = extern struct {
+//     rax: u64,
+//     rbx: u64,
+//     rcx: u64,
+//     rdx: u64,
+//     rsi: u64,
+//     rdi: u64,
+//     rbp: u64,
+//     rsp: u64,
+//     r8: u64,
+//     r9: u64,
+//     r10: u64,
+//     r11: u64,
+//     r12: u64,
+//     r13: u64,
+//     r14: u64,
+//     r15: u64,
+//     rip: u64,
+//     cr3: u64,
+//     reserved: u64,
+//     rflags: lib.arch.x86_64.registers.RFLAGS,
+//     fs: u16,
+//     gs: u16,
+//     fxsave_area: extern struct {
+//         fcw: u16,
+//         fsw: u16,
+//         ftw: u8,
+//         reserved1: u8,
+//         fop: u16,
+//         fpu_ip1: u32,
+//         fpu_ip2: u16,
+//         reserved2: u16,
+//         fpu_dp1: u32,
+//         fpu_dp2: u16,
+//         reserved3: u16,
+//         mxcsr: u32,
+//         mxcsr_mask: u32 = 0,
+//         st: [8][2]u64,
+//         xmm: [16][2]u64,
+//         reserved4: [12]u64,
+//     } align(16),
+//
+//     comptime {
+//         assert(@sizeOf(Registers) == 688);
+//     }
+//
+//     pub fn setParameter(regs: *Registers, param: u64) void {
+//         regs.rax = param;
+//     }
+// };
 
 fn spawnInitBSP(init_file: []const u8) !*cpu.UserScheduler {
     return try spawnInitCommon(init_file);
@@ -1203,18 +1205,93 @@ pub inline fn writerEnd() void {
 }
 
 // TODO: make this work with no KPTI
+
+noinline fn restoreUserContext(registers: *const Registers) noreturn {
+    const fmt = lib.comptimePrint;
+    asm volatile (fmt(
+            "pushq %[ss]\n\t" ++
+                "pushq {}(%[registers])\n\t" ++
+                "pushq {}(%[registers])\n\t" ++
+                "pushq %[cs]\n\t" ++
+                "pushq {}(%[registers])\n\t" ++
+                "mov {}(%[registers]), %r15\n\t" ++
+                "mov {}(%[registers]), %r14\n\t" ++
+                "mov {}(%[registers]), %r13\n\t" ++
+                "mov {}(%[registers]), %r12\n\t" ++
+                "mov {}(%[registers]), %rbp\n\t" ++
+                "mov {}(%[registers]), %rbx\n\t" ++
+                "mov {}(%[registers]), %r11\n\t" ++
+                "mov {}(%[registers]), %r10\n\t" ++
+                "mov {}(%[registers]), %r9\n\t" ++
+                "mov {}(%[registers]), %r8\n\t" ++
+                "mov {}(%[registers]), %rax\n\t" ++
+                "mov {}(%[registers]), %rcx\n\t" ++
+                "mov {}(%[registers]), %rdx\n\t" ++
+                "mov {}(%[registers]), %rsi\n\t" ++
+                "mov {}(%[registers]), %rdi\n\t" ++
+                "iretq\n\t" ++
+                "cli\n\t" ++
+                "hlt\n\t",
+            .{
+                @offsetOf(Registers, "rsp"),
+                @offsetOf(Registers, "rflags"),
+                @offsetOf(Registers, "rip"),
+                @offsetOf(Registers, "r15"),
+                @offsetOf(Registers, "r14"),
+                @offsetOf(Registers, "r13"),
+                @offsetOf(Registers, "r12"),
+                @offsetOf(Registers, "rbp"),
+                @offsetOf(Registers, "rbx"),
+                @offsetOf(Registers, "r11"),
+                @offsetOf(Registers, "r10"),
+                @offsetOf(Registers, "r9"),
+                @offsetOf(Registers, "r8"),
+                @offsetOf(Registers, "rax"),
+                @offsetOf(Registers, "rcx"),
+                @offsetOf(Registers, "rdx"),
+                @offsetOf(Registers, "rsi"),
+                @offsetOf(Registers, "rdi"),
+            },
+        )
+        :
+        : [ss] "i" (user_data_selector),
+          [registers] "{rdi}" (registers),
+          [cs] "i" (user_code_selector),
+        : "memory"
+    );
+
+    @panic("TODO");
+}
+
+/// Architecture-specific implementation of mapping when you already can create user-space virtual address spaces
+pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: privileged.Mapping.Flags) !void {
+    if (general_flags.user) {
+        assert(!general_flags.secret);
+    }
+
+    try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, virtual_address_space.getPageAllocatorInterface());
+    if (!general_flags.secret) {
+        const cpu_pml4 = try virtual_address_space.arch.getCpuPML4Table();
+        const user_pml4 = try virtual_address_space.arch.getUserPML4Table();
+        const first_indices = paging.computeIndices(asked_virtual_address.value());
+        const last_indices = paging.computeIndices(asked_virtual_address.offset(size - lib.arch.valid_page_sizes[0]).value());
+        const first_index = first_indices[@enumToInt(paging.Level.PML4)];
+        const last_index = @intCast(u9, last_indices[@enumToInt(paging.Level.PML4)]) +| 1;
+
+        // TODO: optimize
+        for (cpu_pml4[first_index..last_index], user_pml4[first_index..last_index]) |cpu_pml4te, *user_pml4te| {
+            user_pml4te.* = cpu_pml4te;
+        }
+    }
+}
+
 fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
     assert(cpu.bsp);
 
     const init_scheduler = try cpu.heap_allocator.create(cpu.UserScheduler);
     _ = init_scheduler;
-    const init_scheduler_common_physical_allocation = try cpu.page_allocator.allocate(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]);
-    const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
-    const init_scheduler_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
-    _ = init_scheduler_arch_higher_half;
     const init_elf = try ELF.Parser.init(init_file);
     const entry_point = init_elf.getEntryPoint();
-    _ = entry_point;
     const program_headers = init_elf.getProgramHeaders();
 
     const virtual_address_space = try VirtualAddressSpace.new();
@@ -1222,8 +1299,6 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
             const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
-            const segment_physical_region = try cpu.page_allocator.allocate(aligned_size, lib.arch.valid_page_sizes[0]);
-            const segment_physical_address = segment_physical_region.address;
             const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
             const segment_flags = .{
                 .execute = program_header.flags.executable,
@@ -1231,7 +1306,7 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
                 .user = true,
             };
 
-            try virtual_address_space.map(segment_physical_address, segment_virtual_address, aligned_size, segment_flags);
+            const segment_physical_region = try virtual_address_space.allocateAndMapToAddress(segment_virtual_address, aligned_size, lib.arch.valid_page_sizes[0], segment_flags);
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
             const src = init_file[program_header.offset..][0..program_header.size_in_memory];
@@ -1239,7 +1314,39 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
         }
     }
 
+    const init_scheduler_allocation_size = lib.arch.valid_page_sizes[0];
+    const init_scheduler_common_physical_allocation = try cpu.page_allocator.allocate(init_scheduler_allocation_size, lib.arch.valid_page_sizes[0]);
+    const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
+
+    try virtual_address_space.map(init_scheduler_common_physical_allocation.address, init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress(), init_scheduler_allocation_size, .{
+        .write = true,
+        .user = true,
+    });
+
+    const user_stack_virtual_region = try virtual_address_space.allocateAndMap(privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
+        .write = true,
+        .user = true,
+    });
+
+    const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
+        .write = true,
+        .user = false,
+        .secret = true,
+    });
+    _ = privileged_stack;
+
+    init_scheduler_common_arch_higher_half.disabled_save_area.rip = entry_point;
+    init_scheduler_common_arch_higher_half.disabled_save_area.rsp = user_stack_virtual_region.address.offset(user_stack_virtual_region.size).value();
+    init_scheduler_common_arch_higher_half.disabled_save_area.rflags = .{ .IF = true };
+
+    try virtual_address_space.mapPageTables();
+    virtual_address_space.makeCurrent();
+    const init_scheduler_common_arch_identity = init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler).architectureSpecific();
+    restoreUserContext(&init_scheduler_common_arch_identity.disabled_save_area);
+
     privileged.exitFromQEMU(.success);
+
     //return error.TODO;
 
     // const init_director = try cpu.spawnInitModule(spawn_state);

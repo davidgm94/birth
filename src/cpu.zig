@@ -257,23 +257,19 @@ pub const UserVirtualAddressSpace = extern struct {
 
 pub const VirtualAddressSpace = extern struct {
     arch: paging.Specific,
-    page: Page = .{},
+    first_page_tables: ?*PageEntry = null,
+    last_page_tables: ?*PageEntry = null,
+    page_table_count: usize = 0,
     heap: Heap = .{},
-    // options: packed struct(u64) {
-    //     mapped_page_tables: bool,
-    //     log_pages: bool,
-    //     reserved: u61 = 0,
-    // },
 
-    const Context = extern struct {
-        region_base: u64 = 0,
-        size: u64 = 0,
-    };
-
-    const Page = extern struct {
-        context: Context = .{},
-        log: ?*PageAllocator.Entry = null,
-        log_count: u64 = 0,
+    const PageEntry = extern struct {
+        address: PhysicalAddress,
+        next: ?*PageEntry,
+        options: packed struct(u8) {
+            level: paging.Level,
+            user: bool,
+            reserved: u5 = 0,
+        },
     };
 
     pub const paging = switch (lib.cpu.arch) {
@@ -285,8 +281,10 @@ pub const VirtualAddressSpace = extern struct {
         const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
 
         virtual_address_space.* = .{
-            .arch = try paging.Specific.new(page_allocator.getPageAllocatorInterface()),
+            .arch = undefined,
         };
+
+        virtual_address_space.arch = try paging.Specific.new(virtual_address_space.getPageAllocatorInterface(), page_tables);
 
         return virtual_address_space;
     }
@@ -303,7 +301,19 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub inline fn makeCurrent(vas: *const VirtualAddressSpace) void {
-        paging.makeCurrent(vas);
+        vas.arch.makeCurrent();
+    }
+
+    pub fn allocateAndMap(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64, general_flags: Mapping.Flags) !VirtualMemoryRegion {
+        const physical_region = try page_allocator.allocate(size, alignment);
+        try virtual_address_space.map(physical_region.address, physical_region.address.toIdentityMappedVirtualAddress(), size, general_flags);
+        return physical_region.toIdentityMappedVirtualAddress();
+    }
+
+    pub fn allocateAndMapToAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, size: u64, alignment: u64, general_flags: Mapping.Flags) !PhysicalMemoryRegion {
+        const physical_region = try page_allocator.allocate(size, alignment);
+        try virtual_address_space.map(physical_region.address, virtual_address, size, general_flags);
+        return physical_region;
     }
 
     pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags) !void {
@@ -331,7 +341,7 @@ pub const VirtualAddressSpace = extern struct {
             return paging.Error.invalid_physical;
         }
 
-        try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, virtual_address_space.getPageAllocatorInterface());
+        try arch.map(virtual_address_space, asked_physical_address, asked_virtual_address, size, general_flags);
     }
 
     pub inline fn mapDevice(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, size: u64) !VirtualAddress {
@@ -344,75 +354,67 @@ pub const VirtualAddressSpace = extern struct {
         return asked_physical_address.toHigherHalfVirtualAddress();
     }
 
-    pub fn allocatePages(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        _ = options;
-        if (virtual_address_space.page.context.size == 0) {
-            if (alignment > lib.arch.valid_page_sizes[1]) return Allocator.Allocate.Error.OutOfMemory;
-            // Try to allocate a bigger bulk so we don't have to use the backing allocator (slower) everytime a page is needed
-            const selected_size = @max(size, lib.arch.valid_page_sizes[1]);
-            const selected_alignment = @max(alignment, lib.arch.valid_page_sizes[1]);
-
-            const page_bulk_allocation = page_allocator.allocate(selected_size, selected_alignment) catch blk: {
-                if (alignment > lib.arch.valid_page_sizes[0]) return Allocator.Allocate.Error.OutOfMemory;
-                break :blk try page_allocator.allocate(size, alignment);
-            };
-
-            virtual_address_space.page.context = .{
-                .region_base = page_bulk_allocation.address.value(),
-                .size = page_bulk_allocation.size,
-            };
-
-            try virtual_address_space.addPage(page_bulk_allocation);
-        }
-
-        assert(virtual_address_space.page.context.region_base != 0);
-
-        const allocation_result = .{
-            .address = PhysicalAddress.new(virtual_address_space.page.context.region_base),
-            .size = size,
+    fn allocatePages(virtual_address_space: *VirtualAddressSpace, options: PageAllocatorInterface.AllocatePageTablesOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        // TODO: optimize for other architectures
+        const alignment: u64 = switch (options.count) {
+            2 => 2 * paging.page_table_alignment,
+            0x200 => 0x200 * paging.page_table_alignment,
+            else => paging.page_table_alignment,
+        };
+        const result = try page_allocator.allocate(options.count * paging.page_table_size, alignment);
+        const page_entry = try virtual_address_space.heap.create(PageEntry);
+        page_entry.* = .{
+            .address = result.address,
+            .next = null,
+            .options = .{
+                .level = options.level,
+                .user = options.user,
+            },
         };
 
-        if (!lib.isAlignedGeneric(u64, allocation_result.address.value(), alignment)) return Allocator.Allocate.Error.OutOfMemory;
+        if (virtual_address_space.last_page_tables) |last| {
+            assert(virtual_address_space.page_table_count > 0);
+            last.next = page_entry;
+        } else {
+            assert(virtual_address_space.page_table_count == 0);
+            assert(virtual_address_space.first_page_tables == null);
+            virtual_address_space.first_page_tables = page_entry;
+        }
 
-        virtual_address_space.page.context.region_base += size;
-        virtual_address_space.page.context.size -= size;
+        virtual_address_space.last_page_tables = page_entry;
 
-        return allocation_result;
+        virtual_address_space.page_table_count += options.count;
+
+        return result;
     }
 
     fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
+        if (size != paging.page_table_size) return error.OutOfMemory;
+        if (alignment != paging.page_table_alignment) return error.OutOfMemory;
+        if (!options.level_valid) return error.OutOfMemory;
+
         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
-        return try virtual_address_space.allocatePages(size, alignment, options);
+        return try virtual_address_space.allocatePages(.{
+            .count = options.count,
+            .level = options.level,
+            .user = options.user,
+        });
     }
 
     pub fn mapPageTables(virtual_address_space: *VirtualAddressSpace) !void {
-        assert(virtual_address_space.options.log_pages);
+        var it = virtual_address_space.first_page_tables;
+        while (it != virtual_address_space.last_page_tables) {
+            var last: *PageEntry = undefined;
+            while (it) |page_table_entry| : (it = page_table_entry.next) {
+                try virtual_address_space.map(page_table_entry.address, page_table_entry.address.toHigherHalfVirtualAddress(), paging.page_table_size, .{
+                    .user = page_table_entry.options.user,
+                    .write = true,
+                });
+                last = page_table_entry;
+            }
 
-        var maybe_page_table_entry = virtual_address_space.page.log;
-        while (maybe_page_table_entry) |page_table_entry| : (maybe_page_table_entry = page_table_entry.next) {
-            try virtual_address_space.map(page_table_entry.region.address, page_table_entry.region.address.toIdentityMappedVirtualAddress(), page_table_entry.region.size, .{
-                .user = true,
-                .write = true,
-            });
+            if (it == null) it = last;
         }
-        assert(virtual_address_space.page.log.?.next == null);
-
-        virtual_address_space.options.mapped_page_tables = true;
-    }
-
-    pub fn addPage(virtual_address_space: *VirtualAddressSpace, region: PhysicalMemoryRegion) !void {
-        const new_entry = try virtual_address_space.heap.create(PageAllocator.Entry);
-        new_entry.* = .{
-            .region = region,
-            .next = virtual_address_space.page.log,
-        };
-        virtual_address_space.page.log = new_entry;
-
-        virtual_address_space.page.log_count += 1;
-    }
-
-    pub inline fn validate(virtual_address_space: *VirtualAddressSpace) !void {
-        try paging.validate(virtual_address_space);
     }
 
     pub inline fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) !PhysicalAddress {
@@ -457,7 +459,7 @@ pub const PageAllocator = extern struct {
         const allocation = blk: {
             var ptr = pa.head;
             while (ptr) |entry| : (ptr = entry.next) {
-                if (lib.isAligned(entry.region.size, alignment) and entry.region.size > size) {
+                if (lib.isAligned(entry.region.address.value(), alignment) and entry.region.size > size) {
                     const result = PhysicalMemoryRegion{
                         .address = entry.region.address,
                         .size = size,
@@ -524,6 +526,8 @@ pub const PageAllocator = extern struct {
             log.err("Allocate error. Size: 0x{x}. Alignment: 0x{x}. Total allocated size: 0x{x}", .{ size, alignment, pa.total_allocated_size });
             return Allocator.Allocate.Error.OutOfMemory;
         };
+
+        //log.debug("Physical allocation: 0x{x}, 0x{x}", .{ allocation.address.value(), allocation.size });
 
         lib.zero(allocation.toHigherHalfVirtualAddress().access(u8));
 

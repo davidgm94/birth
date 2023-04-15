@@ -331,6 +331,7 @@ pub fn build(b_arg: *Build) !void {
                             true => &.{ .emulated, .accelerated },
                             false => &.{.emulated},
                         };
+
                         for (execution_types) |execution_type| {
                             for (execution_environments) |execution_environment| {
                                 const configuration = Configuration{
@@ -347,25 +348,23 @@ pub fn build(b_arg: *Build) !void {
                                 const disk_image_builder_run = b.addRunArtifact(disk_image_builder);
                                 const disk_image_path = disk_image_builder_run.addOutputFileArg("disk.hdd");
 
-                                while (disk_argument_parser.next()) |argument_type| {
-                                    switch (argument_type) {
-                                        .configuration => inline for (common.fields(Configuration)) |field| disk_image_builder_run.addArg(@tagName(@field(configuration, field.name))),
-                                        .image_configuration_path => disk_image_builder_run.addArg(common.ImageConfig.default_path),
-                                        .disk_image_path => {
-                                            // Must be first
-                                            assert(@enumToInt(argument_type) == 0);
-                                        },
-                                        .bootloader => {
-                                            if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                                                disk_image_builder_run.addArtifactArg(bootloader_compile_step);
-                                            } else {
-                                                disk_image_builder_run.addArg(common.ArgumentParser.null_specifier);
-                                            }
-                                        },
-                                        .cpu => disk_image_builder_run.addArtifactArg(cpu_driver),
-                                        .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
-                                    }
-                                }
+                                while (disk_argument_parser.next()) |argument_type| switch (argument_type) {
+                                    .configuration => inline for (common.fields(Configuration)) |field| disk_image_builder_run.addArg(@tagName(@field(configuration, field.name))),
+                                    .image_configuration_path => disk_image_builder_run.addArg(common.ImageConfig.default_path),
+                                    .disk_image_path => {
+                                        // Must be first
+                                        assert(@enumToInt(argument_type) == 0);
+                                    },
+                                    .bootloader => {
+                                        if (maybe_bootloader_compile_step) |bootloader_compile_step| {
+                                            disk_image_builder_run.addArtifactArg(bootloader_compile_step);
+                                        } else {
+                                            disk_image_builder_run.addArg(common.ArgumentParser.null_specifier);
+                                        }
+                                    },
+                                    .cpu => disk_image_builder_run.addArtifactArg(cpu_driver),
+                                    .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
+                                };
 
                                 const runner_run = try newRunnerRunArtifact(.{
                                     .configuration = configuration,
@@ -409,6 +408,19 @@ pub fn build(b_arg: *Build) !void {
                                         for (user_module_list.items) |user_module| {
                                             b.default_step.dependOn(&user_module.step);
                                         }
+
+                                        const objdump_cpu = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
+                                        objdump_cpu.addArtifactArg(cpu_driver);
+
+                                        const objdump_cpu_step = b.step("objdump", "Objdump the CPU driver");
+                                        objdump_cpu_step.dependOn(&objdump_cpu.step);
+
+                                        const objdump_init = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
+                                        const user_init = user_module_list.items[0];
+                                        objdump_init.addArtifactArg(user_init);
+
+                                        const objdump_user_step = b.step("objdump_init", "Objdump user init");
+                                        objdump_user_step.dependOn(&objdump_init.step);
                                     }
                                 }
                             }

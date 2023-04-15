@@ -680,64 +680,68 @@ pub const Information = extern struct {
     }
 
     pub fn allocatePages(bootloader_information: *Information, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        if (bootloader_information.stage != .cpu) {
-            if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
-            if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+        const allocation = blk: {
+            if (bootloader_information.stage != .cpu) {
+                if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
+                if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
 
-            const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
+                const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
 
-            const entries = bootloader_information.getMemoryMapEntries();
-            const page_counters = bootloader_information.getPageCounters();
+                const entries = bootloader_information.getMemoryMapEntries();
+                const page_counters = bootloader_information.getPageCounters();
 
-            for (entries, 0..) |entry, entry_index| {
-                const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
-                const size_left = entry.region.size - busy_size;
-                const target_address = entry.region.address.offset(busy_size);
-
-                if (entry.type == .usable and target_address.value() <= lib.maxInt(usize) and size_left > size and entry.region.address.value() != 0) {
-                    if (entry.region.address.isAligned(alignment)) {
-                        const result = PhysicalMemoryRegion{
-                            .address = target_address,
-                            .size = size,
-                        };
-
-                        lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
-
-                        page_counters[entry_index] += four_kb_pages;
-
-                        return result;
-                    }
-                }
-            }
-
-            if (options.space_waste_allowed_to_guarantee_alignment > 0) {
                 for (entries, 0..) |entry, entry_index| {
                     const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
                     const size_left = entry.region.size - busy_size;
                     const target_address = entry.region.address.offset(busy_size);
 
                     if (entry.type == .usable and target_address.value() <= lib.maxInt(usize) and size_left > size and entry.region.address.value() != 0) {
-                        const aligned_address = lib.alignForwardGeneric(u64, target_address.value(), alignment);
-                        const difference = aligned_address - target_address.value();
-                        const allowed_quota = alignment / options.space_waste_allowed_to_guarantee_alignment;
-
-                        if (aligned_address + size < entry.region.address.offset(entry.region.size).value() and difference <= allowed_quota) {
+                        if (entry.region.address.isAligned(alignment)) {
                             const result = PhysicalMemoryRegion{
-                                .address = PhysicalAddress.new(aligned_address),
+                                .address = target_address,
                                 .size = size,
                             };
 
                             lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
-                            page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
-                            return result;
+                            page_counters[entry_index] += four_kb_pages;
+
+                            break :blk result;
+                        }
+                    }
+                }
+
+                if (options.space_waste_allowed_to_guarantee_alignment > 0) {
+                    for (entries, 0..) |entry, entry_index| {
+                        const busy_size = @as(u64, page_counters[entry_index]) * lib.arch.valid_page_sizes[0];
+                        const size_left = entry.region.size - busy_size;
+                        const target_address = entry.region.address.offset(busy_size);
+
+                        if (entry.type == .usable and target_address.value() <= lib.maxInt(usize) and size_left > size and entry.region.address.value() != 0) {
+                            const aligned_address = lib.alignForwardGeneric(u64, target_address.value(), alignment);
+                            const difference = aligned_address - target_address.value();
+                            const allowed_quota = alignment / options.space_waste_allowed_to_guarantee_alignment;
+
+                            if (aligned_address + size < entry.region.address.offset(entry.region.size).value() and difference <= allowed_quota) {
+                                const result = PhysicalMemoryRegion{
+                                    .address = PhysicalAddress.new(aligned_address),
+                                    .size = size,
+                                };
+
+                                lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
+                                page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+
+                                break :blk result;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        return Allocator.Allocate.Error.OutOfMemory;
+            return Allocator.Allocate.Error.OutOfMemory;
+        };
+
+        return allocation;
     }
 
     pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
