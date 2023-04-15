@@ -214,7 +214,8 @@ pub const Mapping = extern struct {
         global: bool = false,
         execute: bool = false,
         user: bool = false,
-        reserved: u27 = 0,
+        secret: bool = false,
+        reserved: u26 = 0,
 
         pub inline fn empty() Flags {
             return .{};
@@ -232,19 +233,28 @@ pub const PageAllocator = struct {
     context_type: ContextType,
     reserved: u32 = 0,
 
-    pub inline fn allocatePageTable(page_allocator: PageAllocator, level: arch.paging.Level) !PhysicalMemoryRegion {
-        const result = try page_allocator.allocate(page_allocator.context, arch.paging.page_table_size, arch.paging.page_table_alignment, .{ .level = .{ .value = level, .valid = true } });
+    pub const AllocatePageTablesOptions = packed struct {
+        count: u16 = 1,
+        level: arch.paging.Level,
+        user: bool,
+    };
+
+    pub inline fn allocatePageTable(page_allocator: PageAllocator, options: AllocatePageTablesOptions) !PhysicalMemoryRegion {
+        const result = try page_allocator.allocate(page_allocator.context, arch.paging.page_table_size, arch.paging.page_table_alignment, .{
+            .count = options.count,
+            .level = options.level,
+            .level_valid = true,
+            .user = options.user,
+        });
         return result;
     }
 
-    pub const AllocateOptions = packed struct(u32) {
+    pub const AllocateOptions = packed struct {
+        count: u16 = 1,
         space_waste_allowed_to_guarantee_alignment: u8 = 0,
-        level: packed struct(u8) {
-            value: arch.paging.Level = undefined,
-            valid: bool = false,
-            reserved: u5 = 0,
-        } = .{},
-        reserved: u16 = 0,
+        level: arch.paging.Level = undefined,
+        level_valid: bool = false,
+        user: bool = false,
     };
 
     const ContextType = enum(u32) {

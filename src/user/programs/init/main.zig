@@ -36,6 +36,7 @@ export fn entryPoint() callconv(.Naked) noreturn {
 }
 
 export fn main() callconv(.C) noreturn {
+    asm volatile ("syscall");
     // const core_id = user.Syscall.getCoreId() catch @panic("Core id syscall failed");
     // var buffer: [512]u8 = undefined;
     //
