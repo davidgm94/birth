@@ -7,7 +7,7 @@ const host = @import("host");
 const bootloader = @import("bootloader");
 const limine = bootloader.limine;
 
-const disk_image_builder = @import("disk_image_builder");
+const disk_image_builder = @import("../disk_image_builder.zig");
 const ImageDescription = disk_image_builder.ImageDescription;
 const DiskImage = disk_image_builder.DiskImage;
 
@@ -114,8 +114,8 @@ const limine_directories = [_][]const u8{
 };
 
 const limine_files = [_]File{
-    .{ .path = "/limine.cfg", .content = @embedFile("../bootloader/limine/installables/limine.cfg") },
-    .{ .path = "/limine.sys", .content = @embedFile("../bootloader/limine/installables/limine.sys") },
+    .{ .path = "/limine.cfg", .content = @embedFile("../../bootloader/limine/installables/limine.cfg") },
+    .{ .path = "/limine.sys", .content = @embedFile("../../bootloader/limine/installables/limine.sys") },
 };
 
 test "Limine barebones" {
@@ -180,8 +180,8 @@ test "Limine barebones" {
             var disk_image = try DiskImage.fromZero(image.disk_sector_count, image.disk_sector_size);
             const gpt_partition_cache = try disk_image.createFAT(image, original_gpt_cache);
 
-            const original_buffer = original_disk_image.get_buffer();
-            const my_buffer = disk_image.get_buffer();
+            const original_buffer = original_disk_image.getBuffer();
+            const my_buffer = disk_image.getBuffer();
 
             if (deploy_limine) {
                 try limine.Installer.install(my_buffer, false, null);

@@ -22,15 +22,6 @@ const BIOS = bootloader.BIOS;
 extern const loader_start: u8;
 extern const loader_end: u8;
 
-// var files: [16]File = undefined;
-// var file_count: u8 = 0;
-//
-// const File = struct {
-//     path: []const u8,
-//     content: []const u8,
-//     type: bootloader.File.Type,
-// };
-
 const FATAllocator = extern struct {
     buffer: [0x2000]u8 = undefined,
     allocated: usize = 0,
@@ -95,35 +86,37 @@ const Filesystem = extern struct {
             .type = .bios,
         },
     },
-    file_parser: bootloader.File.Parser,
-    file_buffer: [512]u8,
-    cache_index: usize = 0,
+    parser_index: usize = 0,
+    cache_index: u32 = 0,
 
     fn initialize(context: ?*anyopaque) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const gpt_cache = try lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&filesystem.disk.disk, 0, &filesystem.fat_allocator.allocator);
         filesystem.fat_cache = try lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&filesystem.fat_allocator.allocator, gpt_cache);
-        const rise_files_file = try filesystem.readFile("/files", &filesystem.file_buffer);
         filesystem.cache_index = filesystem.fat_allocator.allocated;
-        filesystem.file_parser = bootloader.File.Parser.init(rise_files_file);
     }
 
     fn deinitialize(context: ?*anyopaque) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         filesystem.fat_allocator.allocated = filesystem.cache_index;
-        filesystem.file_parser.reset();
     }
 
-    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        if (try filesystem.file_parser.next()) |next| {
-            const file_path = next.guest;
-            return .{
-                .path = file_path,
-                .size = try filesystem.fat_cache.getFileSize(file_path),
-                .type = next.type,
-            };
-        } else return null;
+        filesystem.parser_index += 1;
+        var file_path_buffer = [1]u8{'/'} ** 32;
+        const file_name = @tagName(file_type);
+        lib.copy(u8, file_path_buffer[1..], file_name);
+        const file_path = file_path_buffer[0 .. file_name.len + 1];
+        const file_size = try filesystem.fat_cache.getFileSize(file_path);
+
+        // Reset cache so the allocator memory is not pressured
+        filesystem.fat_allocator.allocated = filesystem.cache_index;
+        return .{
+            .path = file_path,
+            .size = file_size,
+            .type = file_type,
+        };
     }
 
     fn readFile(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
@@ -262,8 +255,6 @@ export fn entryPoint() callconv(.C) noreturn {
 
 var fs = Filesystem{
     .fat_cache = undefined,
-    .file_parser = undefined,
-    .file_buffer = undefined,
 };
 
 var memory_map = MemoryMap{
@@ -279,7 +270,7 @@ fn main() !noreturn {
         .context = &fs,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .get_file_descriptor = Filesystem.getFileDescriptor,
         .read_file = Filesystem.readFileCallback,
     }, .{
         .context = &memory_map,

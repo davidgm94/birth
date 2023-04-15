@@ -48,67 +48,30 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch unreachable;
     writer.writeAll("\r\n") catch unreachable;
 
-    while (true) {}
+    asm volatile ("cli\nhlt");
+    unreachable;
 }
 pub var draw_writer: bootloader.DrawContext.Writer = undefined;
 
 pub var maybe_bootloader_information: ?*bootloader.Information = null;
 pub var boot_services_on = true;
 
-// pub const File = struct {
-//     handle: *FileProtocol,
-//     size: u32,
-//
-//     pub fn get(filesystem_root: *FileProtocol, name: []const u8) !File {
-//         var file: *FileProtocol = undefined;
-//         var name_buffer: [256:0]u16 = undefined;
-//         const length = try lib.unicode.utf8ToUtf16Le(&name_buffer, name);
-//         name_buffer[length] = 0;
-//         const filename = name_buffer[0..length :0];
-//         try UEFIError(filesystem_root.open(&file, filename, FileProtocol.efi_file_mode_read, 0));
-//         const file_size = blk: {
-//             // TODO: figure out why it is succeeding with 16 and not with 8
-//             var buffer: [@sizeOf(FileInfo) + @sizeOf(@TypeOf(filename)) + 0x100]u8 align(@alignOf(FileInfo)) = undefined;
-//             var file_info_size = buffer.len;
-//             try UEFIError(file.getInfo(&uefi.protocols.FileInfo.guid, &file_info_size, &buffer));
-//             const file_info = @ptrCast(*FileInfo, &buffer);
-//             log.debug("Unaligned file {s} size: {}", .{ name, file_info.file_size });
-//             break :blk @intCast(u32, alignForward(file_info.file_size + page_size, page_size));
-//         };
-//
-//         return File{
-//             .handle = file,
-//             .size = file_size,
-//         };
-//     }
-//
-//     pub fn read(file: File, buffer: []u8) []u8 {
-//         var size: u64 = file.size;
-//         result(@src(), file.handle.read(&size, buffer.ptr));
-//         assert(size != buffer.len);
-//         return buffer[0..size];
-//     }
-// };
-
 const Filesystem = extern struct {
     boot_services: *UEFI.BootServices,
     handle: UEFI.Handle,
     root: *FileProtocol,
-    file_buffer: [512]u8,
-    parser: bootloader.File.Parser,
 
     fn initialize(context: ?*anyopaque) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const loaded_image = Protocol.open(LoadedImageProtocol, filesystem.boot_services, filesystem.handle);
         const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, filesystem.boot_services, loaded_image.device_handle orelse unreachable);
         try UEFI.Try(filesystem_protocol.openVolume(&filesystem.root));
-        const file_list = try filesystem.readFileFast("files", &filesystem.file_buffer);
-        filesystem.parser = bootloader.File.Parser.init(file_list);
     }
 
     fn deinitialize(context: ?*anyopaque) anyerror!void {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        filesystem.parser.index = 0;
+        _ = context;
+        // const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        // _ = filesystem;
     }
 
     fn readFileFast(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
@@ -148,20 +111,14 @@ const Filesystem = extern struct {
         };
     }
 
-    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-
-        if (try filesystem.parser.next()) |next| {
-            const path = next.guest;
-            const file_size = try filesystem.getFileSize(path);
-            return .{
-                .path = path,
-                .size = @intCast(u32, file_size),
-                .type = next.type,
-            };
-        }
-
-        return null;
+        const file_name = @tagName(file_type);
+        return .{
+            .path = file_name,
+            .size = @intCast(u32, try filesystem.getFileSize(file_name)),
+            .type = file_type,
+        };
     }
 
     fn readFileCallback(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
@@ -180,10 +137,6 @@ const MMap = extern struct {
     descriptor_version: u32,
     buffer: [practical_memory_map_descriptor_size * practical_memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
     offset: usize = 0,
-
-    // pub inline fn reset(it: *MemoryMap) void {
-    //     it.offset = 0;
-    // }
 
     fn initialize(context: ?*anyopaque) anyerror!void {
         const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
@@ -401,8 +354,6 @@ pub fn main() noreturn {
         .boot_services = boot_services,
         .handle = handle,
         .root = undefined,
-        .file_buffer = undefined,
-        .parser = undefined,
     };
     var mmap: MMap = .{
         .boot_services = boot_services,
@@ -422,7 +373,7 @@ pub fn main() noreturn {
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .get_file_descriptor = Filesystem.getFileDescriptor,
         .read_file = Filesystem.readFileCallback,
     }, .{
         .context = &mmap,
