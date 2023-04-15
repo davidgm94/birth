@@ -122,20 +122,6 @@ pub const Framebuffer = extern struct {
     };
 };
 
-//#define LIMINE_TERMINAL_CB_DEC 10
-//#define LIMINE_TERMINAL_CB_BELL 20
-//#define LIMINE_TERMINAL_CB_PRIVATE_ID 30
-//#define LIMINE_TERMINAL_CB_STATUS_REPORT 40
-//#define LIMINE_TERMINAL_CB_POS_REPORT 50
-//#define LIMINE_TERMINAL_CB_KBD_LEDS 60
-//#define LIMINE_TERMINAL_CB_MODE 70
-//#define LIMINE_TERMINAL_CB_LINUX 80
-
-//#define LIMINE_TERMINAL_CTX_SIZE ((uint64_t)(-1))
-//#define LIMINE_TERMINAL_CTX_SAVE ((uint64_t)(-2))
-//#define LIMINE_TERMINAL_CTX_RESTORE ((uint64_t)(-3))
-//#define LIMINE_TERMINAL_FULL_REFRESH ((uint64_t)(-4))
-
 pub const Terminal = extern struct {
     columns: u64,
     rows: u64,
@@ -458,20 +444,27 @@ const Filesystem = extern struct {
         filesystem.index = 0;
     }
 
-    fn getNextFileDescriptor(context: ?*anyopaque) anyerror!?bootloader.Information.Initialization.Filesystem.Descriptor {
+    const Error = error{
+        not_found,
+    };
+
+    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        if (filesystem.index < filesystem.module_count) {
-            const module = filesystem.module_ptr[filesystem.index];
+        const modules = filesystem.module_ptr[0..filesystem.module_count];
+        for (modules) |module| {
             const path = module.path[0..lib.length(module.path)];
-            filesystem.index += 1;
-            return .{
-                .path = path,
-                .size = @intCast(u32, module.size),
-                .type = if (lib.containsAtLeast(u8, path, 1, "cpu")) .cpu_driver else if (lib.containsAtLeast(u8, path, 1, "font")) .font else if (lib.containsAtLeast(u8, path, 1, "init")) .init else @panic("Unexpected file type"),
-            };
+
+            if (lib.containsAtLeast(u8, path, 1, @tagName(file_type))) {
+                const size = @intCast(u32, module.size);
+                return .{
+                    .path = path,
+                    .size = size,
+                    .type = file_type,
+                };
+            }
         }
 
-        return null;
+        return Error.not_found;
     }
 
     fn readFile(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
@@ -627,7 +620,7 @@ pub fn main() !noreturn {
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_next_file_descriptor = Filesystem.getNextFileDescriptor,
+        .get_file_descriptor = Filesystem.getFileDescriptor,
         .read_file = Filesystem.readFile,
     }, .{
         .context = &memory_map,

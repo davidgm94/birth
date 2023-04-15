@@ -449,7 +449,7 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
     cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
     cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
-        if (file_descriptor.type == .cpu_driver) break file_descriptor.getContent(bootloader_information);
+        if (file_descriptor.type == .cpu) break file_descriptor.getContent(bootloader_information);
     } else return InitializationError.cpu_file_not_found;
 
     // Initialize GDT

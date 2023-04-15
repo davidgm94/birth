@@ -31,7 +31,7 @@ pub const DiskImage = extern struct {
             //assert(disk.disk.disk_size == disk.buffer.items.len);
             const byte_offset = sector_offset * disk_image.disk.sector_size;
             if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.write_error;
-            lib.copy(u8, disk_image.get_buffer()[byte_offset .. byte_offset + bytes.len], bytes);
+            lib.copy(u8, disk_image.getBuffer()[byte_offset .. byte_offset + bytes.len], bytes);
         }
     }
 
@@ -47,7 +47,7 @@ pub const DiskImage = extern struct {
             return Disk.ReadError.read_error;
         }
         return .{
-            .buffer = disk_image.get_buffer()[byte_offset .. byte_offset + byte_count].ptr,
+            .buffer = disk_image.getBuffer()[byte_offset .. byte_offset + byte_count].ptr,
             .sector_count = sector_count,
         };
     }
@@ -102,7 +102,7 @@ pub const DiskImage = extern struct {
         size: usize,
     };
 
-    pub inline fn get_buffer(disk_image: DiskImage) []u8 {
+    pub inline fn getBuffer(disk_image: DiskImage) []u8 {
         return disk_image.buffer_ptr[0..disk_image.disk.disk_size];
     }
 };

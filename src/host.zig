@@ -10,7 +10,7 @@ pub const ChildProcess = std.ChildProcess;
 pub const posix = std.os;
 pub const sync = std.os.sync;
 
-const fs = std.fs;
+pub const fs = std.fs;
 pub const cwd = fs.cwd;
 pub const Dir = fs.Dir;
 pub const basename = fs.path.basename;

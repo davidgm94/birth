@@ -312,6 +312,11 @@ pub const Configuration = struct {
     executable_kind: std.Build.CompileStep.Kind,
 };
 
+pub const QEMUOptions = packed struct {
+    is_test: bool,
+    is_debug: bool,
+};
+
 pub const ExecutionType = enum {
     emulated,
     accelerated,
@@ -386,4 +391,86 @@ pub const RiseProgram = enum {
     cpu,
     user,
     host,
+};
+
+pub fn canVirtualizeWithQEMU(architecture: Cpu.Arch, ci: bool) bool {
+    if (architecture != cpu.arch) return false;
+    if (ci) return false;
+
+    return switch (os) {
+        .linux => true,
+        .macos, .windows => false,
+        else => @compileError("Operating system not supported"),
+    };
+}
+
+pub const default_cpu_name = "/cpu";
+pub const default_init_file = "/init";
+
+pub const ArgumentParser = struct {
+    pub const null_specifier = "-";
+
+    pub const DiskImageBuilder = struct {
+        argument_index: usize = 0,
+
+        pub const ArgumentType = enum {
+            disk_image_path,
+            configuration,
+            image_configuration_path,
+            bootloader,
+            cpu,
+            user_programs,
+        };
+
+        pub const Result = struct {
+            bootloader: ?[]const u8,
+            disk_image_path: []const u8,
+            image_configuration_path: []const u8,
+            cpu: []const u8,
+            user_programs: []const []const u8,
+            configuration: Configuration,
+        };
+
+        pub fn next(argument_parser: *ArgumentParser.DiskImageBuilder) ?ArgumentType {
+            if (argument_parser.argument_index < enumCount(ArgumentType)) {
+                const result = @intToEnum(ArgumentType, argument_parser.argument_index);
+                argument_parser.argument_index += 1;
+                return result;
+            }
+
+            return null;
+        }
+    };
+
+    pub const Runner = struct {
+        argument_index: usize = 0,
+
+        pub fn next(argument_parser: *ArgumentParser.Runner) ?ArgumentType {
+            if (argument_parser.argument_index < enumCount(ArgumentType)) {
+                const result = @intToEnum(ArgumentType, argument_parser.argument_index);
+                argument_parser.argument_index += 1;
+                return result;
+            }
+
+            return null;
+        }
+
+        pub const ArgumentType = enum {
+            configuration,
+            disk_image_path,
+            image_configuration_path,
+            cpu_driver,
+            qemu_options,
+            ci,
+        };
+
+        pub const Result = struct {
+            configuration: Configuration,
+            disk_image_path: []const u8,
+            image_configuration_path: []const u8,
+            cpu_driver: []const u8,
+            qemu_options: QEMUOptions,
+            ci: bool,
+        };
+    };
 };
