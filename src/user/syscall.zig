@@ -9,7 +9,16 @@ const user = @import("user");
 
 pub const rawSyscall = user.arch.syscall;
 
-pub inline fn invoke(comptime capability_type: capabilities.Type, comptime capability_command: capabilities.Command.Generic(capability_type), address: u32, arguments: capabilities.Arguments(capability_type, capability_command)) syscall.Result {
+pub fn shutdown() noreturn {
+    _ = invoke(.cpu, .shutdown, 0, {});
+    unreachable;
+}
+
+pub fn log(message: []const u8) void {
+    _ = invoke(.io, .stdout, 0, [2]usize{ @ptrToInt(message.ptr), message.len });
+}
+
+pub inline fn invoke(comptime capability_type: capabilities.Type, comptime capability_command: capabilities.Command.Generic(capability_type), address: u32, arguments: anytype) syscall.Result {
     const options = syscall.Options{
         .rise = .{
             .type = capability_type,
@@ -19,12 +28,8 @@ pub inline fn invoke(comptime capability_type: capabilities.Type, comptime capab
     };
     const raw_arguments = switch (@TypeOf(arguments)) {
         void => .{0} ** rise.syscall.argument_count,
+        [2]usize => arguments ++ .{0} ** 4,
         else => @compileError("Type not supported"),
     };
     return rawSyscall(options, raw_arguments);
-}
-
-pub fn shutdown() noreturn {
-    _ = invoke(.cpu, .shutdown, 0, {});
-    unreachable;
 }

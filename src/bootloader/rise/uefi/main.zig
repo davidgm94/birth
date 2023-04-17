@@ -218,9 +218,7 @@ const MMap = extern struct {
     fn getHostRegion(context: ?*anyopaque, length_size_tuples: bootloader.LengthSizeTuples) anyerror!PhysicalMemoryRegion {
         const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
         var memory: []align(UEFI.page_size) u8 = undefined;
-        log.debug("getHostRegion start", .{});
         const memory_size = length_size_tuples.getAlignedTotalSize();
-        log.debug("getHostRegion end", .{});
         try UEFI.Try(mmap.boot_services.allocatePages(.AllocateAnyPages, .LoaderData, memory_size >> UEFI.page_shifter, &memory.ptr));
         memory.len = memory_size;
         lib.zero(memory);
@@ -234,7 +232,7 @@ const Framebuffer = extern struct {
 
     fn initialize(context: ?*anyopaque) anyerror!bootloader.Framebuffer {
         const fb = @ptrCast(*Framebuffer, @alignCast(@alignOf(Framebuffer), context));
-        const gop = Protocol.locate(UEFI.GraphicsOutputProtocol, fb.boot_services) catch @panic("Can't locate GOP");
+        const gop = try Protocol.locate(UEFI.GraphicsOutputProtocol, fb.boot_services);
         const pixel_format_info: struct {
             red_color_mask: bootloader.Framebuffer.ColorMask,
             blue_color_mask: bootloader.Framebuffer.ColorMask,
@@ -281,11 +279,9 @@ const VAS = extern struct {
             .x86_64 => {
                 {
                     const physical_address = PhysicalAddress.new(@ptrToInt(bootloader_information));
-                    log.debug("ensureLoaderIsMapped start", .{});
                     const size = bootloader_information.getAlignedTotalSize();
-                    log.debug("ensureLoaderIsMapped end", .{});
                     // minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
-                    minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (higher half): {}", .{err});
+                    try minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator);
                 }
                 const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
 
@@ -294,7 +290,7 @@ const VAS = extern struct {
                     if (entry.region.address.value() < trampoline_code_start and trampoline_code_start < entry.region.address.offset(entry.region.size).value()) {
                         const code_physical_region = entry.region;
                         const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
-                        minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator) catch @panic("Unable to map cpu trampoline code");
+                        try minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator);
                         return;
                     }
                 }
