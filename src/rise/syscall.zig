@@ -96,11 +96,11 @@ pub const Result = extern union {
         second: Second,
 
         pub const First = packed struct(u64) {
-            padding1: u32,
-            @"error": u16,
-            padding2: u8,
-            padding3: u7,
-            convention: Convention,
+            padding1: u32 = 0,
+            @"error": u16 = 0,
+            padding2: u8 = 0,
+            padding3: u7 = 0,
+            convention: Convention = .rise,
         };
 
         pub const Second = u64;

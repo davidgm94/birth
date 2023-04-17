@@ -230,18 +230,13 @@ pub const Information = extern struct {
         var host_entry_index: usize = 0;
         const host_entry_region = blk: {
             if (bootloader_tag == .rise and protocol == .uefi) {
-                lib.log.debug("A", .{});
                 const host_region = try (memory_map.get_host_region orelse @panic("No host region"))(memory_map.context, length_size_tuples);
                 break :blk host_region;
             } else {
-                lib.log.debug("B", .{});
                 const host_entry = while (try memory_map.next(memory_map.context)) |entry| : (host_entry_index += 1) {
-                    lib.log.debug("host_entry_region start", .{});
                     if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
-                        lib.log.debug("host_entry_region end", .{});
                         break :blk entry.region;
                     }
-                    lib.log.debug("host_entry_region end", .{});
                 } else @panic("No memory map entry is suitable for hosting bootloader information");
                 _ = host_entry;
             }
@@ -518,9 +513,7 @@ pub const Information = extern struct {
                 const smp_core_booted_offset = @intCast(u32, @ptrToInt(smp_core_booted_symbol) - smp_trampoline_physical_address.value());
                 if (!lib.isAligned(trampoline_argument_start, @alignOf(SMP.Trampoline.Argument))) @panic("SMP trampoline argument alignment must match");
                 const trampoline_argument_end = @ptrToInt(@extern(*u8, .{ .name = "smp_trampoline_arg_end" }));
-                lib.log.debug("Trampoline arg start: 0x{x}, end: 0x{x}", .{ trampoline_argument_start, trampoline_argument_end });
                 const trampoline_argument_size = trampoline_argument_end - trampoline_argument_start;
-                lib.log.debug("Trampoline argument size: {}", .{trampoline_argument_size});
                 if (trampoline_argument_size != @sizeOf(SMP.Trampoline.Argument)) {
                     @panic("SMP trampoline argument size must match");
                 }
@@ -598,7 +591,6 @@ pub const Information = extern struct {
                             arch.x86_64.delay(10_000_000);
 
                             const icr_low = (smp_trampoline >> 12) | 0x4600;
-                            lib.log.debug("ICR low: 0x{x}", .{icr_low});
                             lapicWrite(.icr_high, lapic_id << 24);
                             lapicWrite(.icr_low, icr_low);
 
@@ -849,7 +841,6 @@ pub const File = extern struct {
 
     pub fn copyContent(file: File, bootloader_information: *Information, src_slice: []const u8) void {
         const dst_slice = file.getContentSlice(bootloader_information);
-        lib.log.debug("Destination slice: {}. Source slice: {}", .{ dst_slice.len, src_slice.len });
         lib.copy(u8, dst_slice, src_slice);
     }
 

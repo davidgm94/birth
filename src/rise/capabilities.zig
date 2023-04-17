@@ -3,6 +3,7 @@ const assert = lib.assert;
 
 pub const Type = enum(DataType) {
     cpu,
+    io,
     _,
     pub const DataType = u8;
 };
@@ -12,12 +13,20 @@ pub const Command = struct {
 
     pub const CPU = enum(DataType) {
         shutdown,
+        _,
+    };
+
+    pub const IO = enum(DataType) {
+        stdout,
+        _,
     };
 
     pub fn Generic(comptime capability_type: Type) type {
         const command_type = switch (capability_type) {
             .cpu => CPU,
-            else => @compileError("Not implemented"),
+            .io => IO,
+            _ => @compileError("Unreachable"),
+            //else => @compileError("Not implemented"),
         };
 
         assert(@sizeOf(command_type) == @sizeOf(Command.DataType));
@@ -25,11 +34,3 @@ pub const Command = struct {
         return command_type;
     }
 };
-
-pub fn Arguments(comptime capability_type: Type, comptime command: Command.Generic(capability_type)) type {
-    _ = command;
-    return switch (capability_type) {
-        .cpu => void,
-        _ => @compileError("Not implemented"),
-    };
-}

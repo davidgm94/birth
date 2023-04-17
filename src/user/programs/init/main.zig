@@ -1,30 +1,7 @@
 const lib = @import("lib");
+const log = lib.log;
 const user = @import("user");
 const syscall = user.syscall;
-
-// inline fn exitQEMU(success: lib.QEMU.ExitCode) void {
-//     _ = syscall(.{
-//         .options = .{
-//             .rise = .{
-//                 .id = .qemu_exit,
-//                 .convention = .rise,
-//             },
-//         },
-//         .arguments = .{ @enumToInt(success), 0, 0, 0, 0, 0 },
-//     });
-// }
-
-// fn log(message: []const u8) void {
-//     _ = syscall(.{
-//         .options = .{
-//             .rise = .{
-//                 .id = .print,
-//                 .convention = .rise,
-//             },
-//         },
-//         .arguments = .{ @ptrToInt(message.ptr), message.len, 0, 0, 0, 0 },
-//     });
-// }
 
 export fn entryPoint() callconv(.Naked) noreturn {
     asm volatile (
@@ -36,6 +13,7 @@ export fn entryPoint() callconv(.Naked) noreturn {
 }
 
 export fn main() callconv(.C) noreturn {
+    log.debug("Hello world!", .{});
     syscall.shutdown();
 }
 
@@ -43,7 +21,7 @@ const Writer = extern struct {
     pub const Error = error{};
 
     pub fn write(_: void, bytes: []const u8) Error!usize {
-        while (true) {}
+        syscall.log(bytes);
         return bytes.len;
     }
 };
@@ -55,6 +33,7 @@ pub const panic = user.zigPanic;
 pub const std_options = struct {
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
         lib.format(writer, format, args) catch {};
+        writer.writeByte('\n') catch {};
         _ = scope;
         _ = level;
     }

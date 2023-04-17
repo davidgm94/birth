@@ -417,7 +417,7 @@ const InitializationError = error{
 };
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    log.info("Initializing...\n\n\t[BUILD MODE]{s}\n\t[BOOTLOADER] {s}\n\t[BOOT PROTOCOL]{s}\n", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol), @tagName(lib.build_mode) });
+    log.info("Initializing...\n\n\t[BUILD MODE] {s}\n\t[BOOTLOADER] {s}\n\t[BOOT PROTOCOL] {s}\n", .{ @tagName(lib.build_mode), @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
     initialize(bootloader_information) catch |err| {
         cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
     };
@@ -969,7 +969,6 @@ inline fn ok(result: struct {
 export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Result {
     const options = @bitCast(rise.syscall.Options, regs.syscall_number);
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
-    _ = arguments;
 
     // TODO: check capability address
     switch (options.general.convention) {
@@ -979,21 +978,33 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
                     const command = @intToEnum(rise.capabilities.Command.CPU, options.rise.command);
                     switch (command) {
                         .shutdown => privileged.exitFromQEMU(.success),
+                        _ => @panic("Unknown cpu command"),
                     }
                 },
-                else => @panic("not implemented"),
+                .io => {
+                    const command = @intToEnum(rise.capabilities.Command.IO, options.rise.command);
+                    switch (command) {
+                        .stdout => {
+                            const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
+                            const message_len = arguments[1];
+                            const message = message_ptr[0..message_len];
+                            writer.writeAll(message) catch unreachable;
+                        },
+                        _ => @panic("Unknown io command"),
+                    }
+                },
+                _ => @panic("not implemented"),
             }
         },
         .linux => @panic("TODO: linux syscall"),
     }
 
-    privileged.exitFromQEMU(.success);
-    // switch (options.general.convention) {
-    //     .rise => {
-    //         @panic("TODO: rise");
-    //     },
-    //     .linux => @panic("TODO: linux syscall"),
-    // }
+    return .{
+        .rise = .{
+            .first = .{},
+            .second = 0,
+        },
+    };
 }
 
 fn dispatch(director: *cpu.CoreDirectorData) noreturn {
