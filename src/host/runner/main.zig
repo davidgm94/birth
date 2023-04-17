@@ -135,13 +135,17 @@ pub fn main() anyerror!void {
 
     if (arguments.memory) |memory| {
         try argument_list.append("-m");
-        const memory_argument = try lib.allocPrint(wrapped_allocator.unwrap_zig(), "{}{c}", .{ memory.amount, @as(u8, switch (memory.unit) {
-            .kilobyte => 'K',
-            .megabyte => 'M',
-            .gigabyte => 'G',
-            else => @panic("Unit too big"),
-        }) });
-        try argument_list.append(memory_argument);
+        if (arguments_result.ci) {
+            try argument_list.append("1G");
+        } else {
+            const memory_argument = try lib.allocPrint(wrapped_allocator.unwrap_zig(), "{}{c}", .{ memory.amount, @as(u8, switch (memory.unit) {
+                .kilobyte => 'K',
+                .megabyte => 'M',
+                .gigabyte => 'G',
+                else => @panic("Unit too big"),
+            }) });
+            try argument_list.append(memory_argument);
+        }
     }
 
     if (lib.canVirtualizeWithQEMU(arguments_result.configuration.architecture, arguments_result.ci) and (arguments_result.configuration.execution_type == .accelerated or (arguments.virtualize orelse false))) {
@@ -170,28 +174,30 @@ pub fn main() anyerror!void {
             }
         }
 
-        if (arguments.log) |log_configuration| {
-            var log_what = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig());
+        if (!arguments_result.ci) {
+            if (arguments.log) |log_configuration| {
+                var log_what = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig());
 
-            if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
-            if (log_configuration.interrupts) try log_what.appendSlice("int,");
-            if (!arguments_result.ci and log_configuration.assembly) try log_what.appendSlice("in_asm,");
+                if (log_configuration.guest_errors) try log_what.appendSlice("guest_errors,");
+                if (log_configuration.interrupts) try log_what.appendSlice("int,");
+                if (!arguments_result.ci and log_configuration.assembly) try log_what.appendSlice("in_asm,");
 
-            if (log_what.items.len > 0) {
-                // Delete the last comma
-                _ = log_what.pop();
+                if (log_what.items.len > 0) {
+                    // Delete the last comma
+                    _ = log_what.pop();
 
-                try argument_list.append("-d");
-                try argument_list.append(log_what.items);
+                    try argument_list.append("-d");
+                    try argument_list.append(log_what.items);
 
-                if (log_configuration.interrupts) {
-                    try argument_list.appendSlice(&.{ "-machine", "smm=off" });
+                    if (log_configuration.interrupts) {
+                        try argument_list.appendSlice(&.{ "-machine", "smm=off" });
+                    }
                 }
-            }
 
-            if (log_configuration.file) |log_file| {
-                try argument_list.append("-D");
-                try argument_list.append(log_file);
+                if (log_configuration.file) |log_file| {
+                    try argument_list.append("-D");
+                    try argument_list.append(log_file);
+                }
             }
         }
     }

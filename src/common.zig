@@ -201,7 +201,7 @@ pub fn architectureIndex(comptime arch: Cpu.Arch) comptime_int {
         if (arch == architecture) return index;
     }
 
-    unreachable;
+    @compileError("Architecture not found");
 }
 
 pub const architecture_bootloader_map = blk: {

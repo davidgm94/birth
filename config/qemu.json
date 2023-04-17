@@ -1,6 +1,6 @@
 {
     "memory": {
-        "amount": "4",
+        "amount": "1",
         "unit": "gigabyte"
     },
     "virtualize": false,

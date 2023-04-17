@@ -6,8 +6,7 @@ const lib = @import("lib");
 const ExecutionMode = lib.Syscall.ExecutionMode;
 
 pub const arch = @import("user/arch.zig");
-pub const syscall = arch.syscall;
-pub const Syscall = @import("user/syscall.zig");
+pub const syscall = @import("user/syscall.zig");
 
 pub fn getCoreId() !u8 {
     @panic("TODO: getCoreId");

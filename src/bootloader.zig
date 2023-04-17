@@ -230,13 +230,18 @@ pub const Information = extern struct {
         var host_entry_index: usize = 0;
         const host_entry_region = blk: {
             if (bootloader_tag == .rise and protocol == .uefi) {
-                const host_region = try (memory_map.get_host_region orelse unreachable)(memory_map.context, length_size_tuples);
+                lib.log.debug("A", .{});
+                const host_region = try (memory_map.get_host_region orelse @panic("No host region"))(memory_map.context, length_size_tuples);
                 break :blk host_region;
             } else {
+                lib.log.debug("B", .{});
                 const host_entry = while (try memory_map.next(memory_map.context)) |entry| : (host_entry_index += 1) {
+                    lib.log.debug("host_entry_region start", .{});
                     if (entry.type == .usable and entry.region.size > length_size_tuples.getAlignedTotalSize()) {
+                        lib.log.debug("host_entry_region end", .{});
                         break :blk entry.region;
                     }
+                    lib.log.debug("host_entry_region end", .{});
                 } else @panic("No memory map entry is suitable for hosting bootloader information");
                 _ = host_entry;
             }
@@ -620,7 +625,7 @@ pub const Information = extern struct {
     }
 
     pub fn getAlignedTotalSize(information: *Information) u32 {
-        assert(information.total_size > 0);
+        if (information.total_size == 0) @panic("Information.getAlignedTotalSize");
         return lib.alignForwardGeneric(u32, information.total_size, lib.arch.valid_page_sizes[0]);
     }
 
@@ -858,150 +863,6 @@ pub const File = extern struct {
         font,
         init,
     };
-
-    pub const Parser = extern struct {
-        text_ptr: [*]const u8,
-        text_len: usize,
-        index: u32 = 0,
-
-        pub fn init(text: []const u8) File.Parser {
-            return .{
-                .text_ptr = text.ptr,
-                .text_len = text.len,
-            };
-        }
-
-        pub fn reset(parser: *Parser) void {
-            parser.index = 0;
-        }
-
-        const Error = error{
-            expect_char,
-            expect_string,
-            suffix_type,
-            type,
-        };
-
-        pub const Unit = struct {
-            host_path: []const u8,
-            host_base: []const u8,
-            suffix_type: SuffixType,
-            guest: []const u8,
-            type: File.Type,
-        };
-
-        pub const SuffixType = enum {
-            none,
-            arch,
-            full,
-        };
-
-        pub fn next(parser: *File.Parser) !?Unit {
-            // Do this to avoid getting the editor crazy about it
-            const left_curly_brace = 0x7b;
-            const right_curly_brace = 0x7d;
-
-            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
-                try parser.expectChar('.');
-                try parser.expectChar(left_curly_brace);
-
-                if (parser.index < parser.text_len and parser.text_ptr[parser.index] != right_curly_brace) {
-                    const host_path_field = try parser.parseField("host_path");
-                    const host_base_field = try parser.parseField("host_base");
-                    const suffix_type = lib.stringToEnum(SuffixType, try parser.parseField("suffix_type")) orelse return Error.suffix_type;
-                    const guest_field = try parser.parseField("guest");
-                    const file_type_str = try parser.parseField("type");
-                    const file_type = lib.stringToEnum(File.Type, file_type_str) orelse {
-                        if (@hasDecl(@import("root"), "writer")) {
-                            @import("root").writer.writeAll(file_type_str) catch unreachable;
-                        }
-                        return Error.type;
-                    };
-                    try parser.expectChar(right_curly_brace);
-                    parser.maybeExpectChar(',');
-                    parser.skipSpace();
-
-                    return .{
-                        .host_path = host_path_field,
-                        .host_base = host_base_field,
-                        .suffix_type = suffix_type,
-                        .guest = guest_field,
-                        .type = file_type,
-                    };
-                } else {
-                    @panic("file parser: unexpected error while parsing files");
-                }
-            }
-
-            return null;
-        }
-
-        inline fn consume(parser: *File.Parser) void {
-            parser.index += 1;
-        }
-
-        fn parseField(parser: *File.Parser, field: []const u8) ![]const u8 {
-            try parser.expectChar('.');
-            try parser.expectString(field);
-            try parser.expectChar('=');
-            const field_value = try parser.expectQuotedString();
-            parser.maybeExpectChar(',');
-
-            return field_value;
-        }
-
-        inline fn skipSpace(parser: *File.Parser) void {
-            while (parser.index < parser.text_len) {
-                const char = parser.text_ptr[parser.index];
-                const is_space = char == ' ' or char == '\n' or char == '\r' or char == '\t';
-                if (!is_space) break;
-                parser.consume();
-            }
-        }
-
-        inline fn maybeExpectChar(parser: *File.Parser, char: u8) void {
-            parser.skipSpace();
-            if (parser.text_ptr[parser.index] == char) {
-                parser.consume();
-            }
-        }
-
-        fn expectChar(parser: *File.Parser, expected_char: u8) !void {
-            parser.skipSpace();
-            const char = parser.text_ptr[parser.index];
-            if (char != expected_char) {
-                return Error.expect_char;
-            }
-
-            parser.consume();
-        }
-
-        fn expectString(parser: *File.Parser, string: []const u8) !void {
-            parser.skipSpace();
-            if (!lib.equal(u8, parser.text_ptr[parser.index..parser.text_len][0..string.len], string)) {
-                return Error.expect_string;
-            }
-
-            for (string, 0..) |_, index| {
-                _ = index;
-                parser.consume();
-            }
-        }
-
-        fn expectQuotedString(parser: *File.Parser) ![]const u8 {
-            parser.skipSpace();
-            try parser.expectChar('"');
-            const start_index = parser.index;
-            while (parser.index < parser.text_len and parser.text_ptr[parser.index] != '"') {
-                parser.consume();
-            }
-            const end_index = parser.index;
-            try parser.expectChar('"');
-
-            const string = parser.text_ptr[start_index..end_index];
-            return string;
-        }
-    };
 };
 
 pub const Framebuffer = extern struct {
@@ -1094,7 +955,7 @@ pub const LengthSizeTuples = extern struct {
     }
 
     pub fn getAlignedTotalSize(tuples: LengthSizeTuples) u32 {
-        assert(tuples.total_size > 0);
+        if (tuples.total_size == 0) @panic("LengthSizeTuples.getAlignedTotalSize");
         return lib.alignForwardGeneric(u32, tuples.total_size, lib.arch.valid_page_sizes[0]);
     }
 };

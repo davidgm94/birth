@@ -2,12 +2,16 @@ const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.Syscall);
 
+const rise = @import("rise");
+const capabilities = rise.capabilities;
+
+pub const argument_count = 6;
+pub const Arguments = [argument_count]usize;
+
 pub const Convention = enum(u1) {
     linux = 0,
     rise = 1,
 };
-
-pub const Arguments = [6]u64;
 
 pub const Options = extern union {
     general: General,
@@ -38,16 +42,14 @@ pub const Options = extern union {
     };
 
     pub const Rise = packed struct(u64) {
-        address: u16,
-        slot: u16,
-        invocation: u16,
-        reserved: u8 = 0,
-        flags: u7 = 0,
-        convention: Convention,
+        address: u32,
+        type: capabilities.Type,
+        command: capabilities.Command.DataType,
+        reserved: u7 = 0,
+        convention: Convention = .rise,
 
         comptime {
             Options.assertSize(@This());
-            assert(@bitOffsetOf(Rise, "address") == 0);
         }
 
         const IDInteger = u16;
