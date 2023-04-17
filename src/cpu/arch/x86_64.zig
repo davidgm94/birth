@@ -641,7 +641,7 @@ pub const IDT = extern struct {
 export fn interruptHandler(regs: *const InterruptRegisters, interrupt_number: u8) void {
     switch (interrupt_number) {
         local_timer_vector => {
-            APIC.lapicWrite(.eoi, 0);
+            APIC.write(.eoi, 0);
             nextTimer(10);
         },
         else => cpu.panicFromInstructionPointerAndFramePointer(regs.rip, regs.rbp, "Exception: 0x{x}", .{interrupt_number}),
@@ -940,7 +940,7 @@ inline fn ok(result: struct {
     another_value: u32 = 0,
     another_more_value: u8 = 0,
     flags: u7 = 0,
-}) lib.Syscall.Result {
+}) rise.syscall.Result {
     return .{
         .rise = .{
             .first = .{
@@ -978,6 +978,9 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
                     const command = @intToEnum(rise.capabilities.Command.CPU, options.rise.command);
                     switch (command) {
                         .shutdown => privileged.exitFromQEMU(.success),
+                        .get_core_id => return ok(.{
+                            .value = cpu.core_id,
+                        }),
                         _ => @panic("Unknown cpu command"),
                     }
                 },
@@ -1130,22 +1133,23 @@ fn spawnInitBSP(init_file: []const u8) !*cpu.UserScheduler {
 }
 
 pub inline fn nextTimer(ms: u32) void {
-    APIC.lapicWrite(.lvt_timer, local_timer_vector | (1 << 17));
-    APIC.lapicWrite(.timer_initcnt, ticks_per_ms.lapic * ms);
+    APIC.write(.lvt_timer, local_timer_vector | (1 << 17));
+    APIC.write(.timer_initcnt, ticks_per_ms.lapic * ms);
 }
 
 const ApicPageAllocator = extern struct {
-    page: PhysicalAddress = PhysicalAddress.maybeInvalid(0),
-    times: usize = 0,
+    pages: [4]PhysicalAddress = .{PhysicalAddress.invalid()} ** 4,
+
+    const PageEntry = cpu.VirtualAddressSpace.PageEntry;
 
     fn allocate(context: ?*anyopaque, size: u64, alignment: u64, options: privileged.PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        _ = options;
         const apic_allocator = @ptrCast(?*ApicPageAllocator, @alignCast(@alignOf(ApicPageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
-        defer apic_allocator.times += 1;
         assert(size == lib.arch.valid_page_sizes[0]);
         assert(alignment == lib.arch.valid_page_sizes[0]);
+        assert(options.count == 1);
+        assert(options.level_valid);
         const physical_memory = try cpu.page_allocator.allocate(size, alignment);
-        apic_allocator.page = physical_memory.address;
+        apic_allocator.pages[@enumToInt(options.level)] = physical_memory.address;
         return physical_memory;
     }
 };
@@ -1171,11 +1175,11 @@ pub fn initAPIC() !void {
     try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
         .write = true,
         .cache_disable = true,
-        .global = false,
+        .global = true,
     }, apic_page_allocator_interface);
 
     const spurious_vector: u8 = 0xFF;
-    APIC.lapicWrite(.spurious, @as(u32, 0x100) | spurious_vector);
+    APIC.write(.spurious, @as(u32, 0x100) | spurious_vector);
 
     const tpr = APIC.TaskPriorityRegister{};
     tpr.write();
@@ -1187,6 +1191,8 @@ pub fn initAPIC() !void {
     ia32_apic_base.write();
 
     ticks_per_ms = APIC.calibrateTimer();
+
+    cpu.core_id = APIC.read(.id);
 
     // nextTimer(1);
 }
@@ -1360,6 +1366,12 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
         .secret = true,
     });
     _ = privileged_stack;
+
+    try virtual_address_space.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
+        .global = false,
+        .cache_disable = true,
+        .write = true,
+    });
 
     init_scheduler_common_arch_higher_half.disabled_save_area.rip = entry_point;
     init_scheduler_common_arch_higher_half.disabled_save_area.rsp = user_stack_virtual_region.address.offset(user_stack_virtual_region.size).value();

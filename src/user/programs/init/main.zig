@@ -12,8 +12,11 @@ export fn entryPoint() callconv(.Naked) noreturn {
     unreachable;
 }
 
+export var core_id: u32 = 0;
+
 export fn main() callconv(.C) noreturn {
-    log.debug("Hello world!", .{});
+    core_id = syscall.getCoreId();
+    log.debug("Hello world! User space initialization from core #{}", .{core_id});
     syscall.shutdown();
 }
 

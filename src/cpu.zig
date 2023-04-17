@@ -262,7 +262,7 @@ pub const VirtualAddressSpace = extern struct {
     page_table_count: usize = 0,
     heap: Heap = .{},
 
-    const PageEntry = extern struct {
+    pub const PageEntry = extern struct {
         address: PhysicalAddress,
         next: ?*PageEntry,
         options: packed struct(u8) {

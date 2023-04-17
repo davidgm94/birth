@@ -18,6 +18,12 @@ pub fn log(message: []const u8) void {
     _ = invoke(.io, .stdout, 0, [2]usize{ @ptrToInt(message.ptr), message.len });
 }
 
+pub fn getCoreId() u32 {
+    const result = invoke(.cpu, .get_core_id, 0, {});
+    const core_id = @truncate(u32, result.rise.second);
+    return core_id;
+}
+
 pub inline fn invoke(comptime capability_type: capabilities.Type, comptime capability_command: capabilities.Command.Generic(capability_type), address: u32, arguments: anytype) syscall.Result {
     const options = syscall.Options{
         .rise = .{

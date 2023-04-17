@@ -13,6 +13,7 @@ pub const Command = struct {
 
     pub const CPU = enum(DataType) {
         shutdown,
+        get_core_id,
         _,
     };
 

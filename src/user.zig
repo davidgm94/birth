@@ -8,23 +8,6 @@ const ExecutionMode = lib.Syscall.ExecutionMode;
 pub const arch = @import("user/arch.zig");
 pub const syscall = @import("user/syscall.zig");
 
-pub fn getCoreId() !u8 {
-    @panic("TODO: getCoreId");
-}
-
-// pub const Writer = struct {
-//     const Error = error{};
-//     const execution_mode = ExecutionMode.blocking;
-//     pub var lock = Lock{};
-//
-//     // TODO: handle errors
-//     fn write(_: void, bytes: []const u8) Error!usize {
-//         _ = syscall_manager.syscall(.log, execution_mode, .{ .message = bytes }) catch unreachable;
-//
-//         return bytes.len;
-//     }
-// };
-
 const Lock = struct {
     status: u8 = 0,
 

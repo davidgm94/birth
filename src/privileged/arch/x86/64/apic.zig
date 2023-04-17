@@ -1,3 +1,5 @@
+const APIC = @This();
+
 const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log.scoped(.APIC);
@@ -17,7 +19,7 @@ const ID = packed struct(u32) {
     apic_id: u8,
 
     pub inline fn read() ID {
-        return lapicRead(.id);
+        return APIC.read(.id);
     }
 };
 
@@ -27,7 +29,7 @@ pub const TaskPriorityRegister = packed struct(u32) {
     reserved: u24 = 0,
 
     pub inline fn write(tpr: TaskPriorityRegister) void {
-        lapicWrite(.tpr, @bitCast(u32, tpr));
+        APIC.write(.tpr, @bitCast(u32, tpr));
     }
 };
 
@@ -47,7 +49,7 @@ pub const LVTTimer = packed struct(u32) {
     };
 
     pub inline fn write(timer: LVTTimer) void {
-        lapicWrite(.lvt_timer, @bitCast(u32, timer));
+        APIC.write(.lvt_timer, @bitCast(u32, timer));
     }
 };
 
@@ -68,11 +70,11 @@ const DivideConfigurationRegister = packed struct(u32) {
     };
 
     inline fn read() DivideConfigurationRegister {
-        return lapicRead(.timer_div);
+        return APIC.read(.timer_div);
     }
 
     inline fn write(dcr: DivideConfigurationRegister) void {
-        lapicWrite(.timer_div, @bitCast(u32, dcr));
+        APIC.write(.timer_div, @bitCast(u32, dcr));
     }
 };
 
@@ -91,11 +93,11 @@ pub inline fn access(register: Register) *volatile u32 {
     return virtual_address.offset(@enumToInt(register)).access(*volatile u32);
 }
 
-pub inline fn lapicRead(register: Register) u32 {
+pub inline fn read(register: Register) u32 {
     return access(register).*;
 }
 
-pub inline fn lapicWrite(register: Register, value: u32) void {
+pub inline fn write(register: Register, value: u32) void {
     access(register).* = value;
 }
 
@@ -122,7 +124,7 @@ pub fn calibrateTimer() privileged.arch.x86_64.TicksPerMS {
     var times_i: u64 = 0;
     const times = 8;
 
-    lapicWrite(.timer_initcnt, lib.maxInt(u32));
+    APIC.write(.timer_initcnt, lib.maxInt(u32));
 
     while (times_i < times) : (times_i += 1) {
         io.write(u8, io.Ports.PIT_command, 0x30);
@@ -135,7 +137,7 @@ pub fn calibrateTimer() privileged.arch.x86_64.TicksPerMS {
         }
     }
 
-    const ticks_per_ms = (maxInt(u32) - lapicRead(.timer_current_count)) >> 4;
+    const ticks_per_ms = (maxInt(u32) - read(.timer_current_count)) >> 4;
     const timer_calibration_end = lib.arch.x86_64.readTimestamp();
     const timestamp_ticks_per_ms = @intCast(u32, (timer_calibration_end - timer_calibration_start) >> 3);
 
