@@ -417,7 +417,7 @@ const InitializationError = error{
 };
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
-    log.info("Hello! CPU driver initializing from {s} with boot protocol {s}", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
+    log.info("Initializing...\n\n\t[BUILD MODE]{s}\n\t[BOOTLOADER] {s}\n\t[BOOT PROTOCOL]{s}\n", .{ @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol), @tagName(lib.build_mode) });
     initialize(bootloader_information) catch |err| {
         cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
     };
@@ -968,9 +968,24 @@ inline fn ok(result: struct {
 /// - R9:  argument 5
 export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Result {
     const options = @bitCast(rise.syscall.Options, regs.syscall_number);
-    _ = options;
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
     _ = arguments;
+
+    // TODO: check capability address
+    switch (options.general.convention) {
+        .rise => {
+            switch (options.rise.type) {
+                .cpu => {
+                    const command = @intToEnum(rise.capabilities.Command.CPU, options.rise.command);
+                    switch (command) {
+                        .shutdown => privileged.exitFromQEMU(.success),
+                    }
+                },
+                else => @panic("not implemented"),
+            }
+        },
+        .linux => @panic("TODO: linux syscall"),
+    }
 
     privileged.exitFromQEMU(.success);
     // switch (options.general.convention) {
@@ -1116,7 +1131,6 @@ const ApicPageAllocator = extern struct {
         _ = options;
         const apic_allocator = @ptrCast(?*ApicPageAllocator, @alignCast(@alignOf(ApicPageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
         defer apic_allocator.times += 1;
-        assert(apic_allocator.times == 0);
         assert(size == lib.arch.valid_page_sizes[0]);
         assert(alignment == lib.arch.valid_page_sizes[0]);
         const physical_memory = try cpu.page_allocator.allocate(size, alignment);
@@ -1344,93 +1358,4 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
     virtual_address_space.makeCurrent();
     const init_scheduler_common_arch_identity = init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler).architectureSpecific();
     restoreUserContext(&init_scheduler_common_arch_identity.disabled_save_area);
-
-    privileged.exitFromQEMU(.success);
-
-    //return error.TODO;
-
-    // const init_director = try cpu.spawnInitModule(spawn_state);
-    //
-    // init_director.disabled = true;
-    // const init_director_shared = @fieldParentPtr(CoreDirectorShared, "base", init_director.shared);
-    // init_director_shared.base.disabled = lib.maxInt(u32);
-    // init_director_shared.disabled_save_area.rdi = 0x20000;
-    // init_director_shared.disabled_save_area.fs = 0;
-    // init_director_shared.disabled_save_area.gs = 0;
-    // init_director_shared.disabled_save_area.rflags = .{
-    //     .IF = true,
-    // };
-    // init_director_shared.disabled_save_area.fxsave_area.fcw = 0x037f;
-    // init_director_shared.disabled_save_area.fxsave_area.mxcsr = 0x00001f80;
-    //
-    // // const aligned_init_director_size = lib.alignForward(@sizeOf(cpu.CoreDirectorData), 0x1000);
-    // // _ = aligned_init_director_size;
-    // // const aligned_init_director_shared_size = lib.alignForward(@sizeOf(cpu.CoreDirectorShared), 0x1000);
-    // // _ = aligned_init_director_shared_size;
-    // // const init_director_allocation = cpu.page_allocator.allocate(aligned_init_director_size, 0x1000) catch @panic("Core director allocation");
-    // // const init_director_shared_allocation = cpu.page_allocator.allocate(aligned_init_director_shared_size, 0x1000) catch @panic("Core director shared allocation failed");
-    //
-    // const capability_address_space_stack_physical_region = try cpu.page_allocator.allocate(capability_address_space_stack_size, 0x1000);
-    // try cpu.address_space.map(capability_address_space_stack_physical_region.address, VirtualAddress.new(capability_address_space_stack_address), capability_address_space_stack_size, .{
-    //     .write = true,
-    //     .user = false,
-    //     .global = true,
-    //     .cache_disable = true,
-    // });
-    //
-    // // TODO: don't waste this much space
-    // const virtual_address_space_allocation = try cpu.page_allocator.allocate(0x1000, 0x1000);
-    // const virtual_address_space = virtual_address_space_allocation.address.toHigherHalfVirtualAddress().access(*VirtualAddressSpace);
-    // virtual_address_space.* = .{
-    //     .arch = undefined,
-    //     .options = .{
-    //         .user = true,
-    //         .mapped_page_tables = false,
-    //         .log_pages = true,
-    //     },
-    // };
-    //
-    // // One for privileged mode, one for user
-    // const pml4_table_regions = try virtual_address_space.allocatePages(@sizeOf(paging.PML4Table) * 2, 0x1000 * 2, .{});
-    // const cpu_side_pml4_physical_address = pml4_table_regions.address;
-    // const user_side_pml4_physical_address = pml4_table_regions.offset(0x1000).address;
-    //
-    // // Copy the higher half address mapping from cpu address space to user cpu-side address space
-    // cpu.address_space.arch.copyHigherHalfPrivileged(cpu_side_pml4_physical_address);
-    // try cpu.address_space.arch.copyHigherHalfUser(user_side_pml4_physical_address, &cpu.page_allocator);
-    //
-    // init_director.virtual_address_space = virtual_address_space;
-    //
-    // // First map vital parts for context switch
-    // virtual_address_space.arch = .{
-    //     .cr3 = cr3.fromAddress(cpu_side_pml4_physical_address),
-    // };
-    //
-    // // Identity map dispatcher
-    // // virtual_address_space.map(init_director_allocation.address, init_director_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_size, .{ .write = true, .user = true }) catch @panic("user init director ");
-    // // virtual_address_space.map(init_director_shared_allocation.address, init_director_shared_allocation.address.toIdentityMappedVirtualAddress(), aligned_init_director_shared_size, .{ .write = true, .user = true }) catch @panic("user init director shared");
-    //
-    // virtual_address_space.arch.switchTo(.user);
-    //
-    // const user_stack_allocation = try cpu.page_allocator.allocate(0x4000, 0x1000);
-    // try virtual_address_space.map(user_stack_allocation.address, user_stack_allocation.address.toIdentityMappedVirtualAddress(), user_stack_allocation.size, .{ .write = true, .execute = false, .user = true });
-    //
-    //
-    // init_director_shared.disabled_save_area.rip = entry_point;
-    // init_director_shared.disabled_save_area.rsp = user_stack_allocation.address.offset(user_stack_allocation.size).toIdentityMappedVirtualAddress().value();
-    // init_director_shared.disabled_save_area.cr3 = @bitCast(u64, virtual_address_space.arch.cr3);
-    //
-    // try virtual_address_space.mapPageTables();
-    //
-    // const cpu_pml4 = cpu_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
-    // const user_pml4 = user_side_pml4_physical_address.toHigherHalfVirtualAddress().access(*paging.PML4Table);
-    // lib.copy(@TypeOf(user_pml4[0]), cpu_pml4[0..0x100], user_pml4[0..0x100]);
-    //
-    // virtual_address_space.arch.switchTo(.privileged);
-    // _ = virtual_address_space.translateAddress(VirtualAddress.new(0xffff_ffff_8000_0000 - 0x1000)) catch |err| {
-    //     log.err("error: {}", .{err});
-    // };
-    // virtual_address_space.arch.switchTo(.user);
-    //
-    // return init_director;
 }

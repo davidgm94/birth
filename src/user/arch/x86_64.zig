@@ -1,14 +1,8 @@
-const lib = @import("lib");
-const Syscall = lib.Syscall;
+const rise = @import("rise");
 
-const Result = extern struct {
-    first: usize,
-    second: usize,
-};
-
-pub inline fn syscall(options: Syscall.Options, arguments: Syscall.Arguments) Syscall.Result {
-    var first: Syscall.Result.Rise.First = undefined;
-    var second: Syscall.Result.Rise.Second = undefined;
+pub inline fn syscall(options: rise.syscall.Options, arguments: rise.syscall.Arguments) rise.syscall.Result {
+    var first: rise.syscall.Result.Rise.First = undefined;
+    var second: rise.syscall.Result.Rise.Second = undefined;
     asm volatile (
         \\syscall
         : [rax] "={rax}" (first),

@@ -119,7 +119,7 @@ pub const VirtualAddress = enum(u64) {
     }
 
     pub inline fn toPhysicalAddress(virtual_address: VA) PhysicalAddress {
-        assert(virtual_address.value() >= lib.config.cpu_driver_higher_half_address);
+        if (virtual_address.value() < lib.config.cpu_driver_higher_half_address) @panic("toPhysicalAddress");
         return @intToEnum(PhysicalAddress, virtual_address.value() - lib.config.cpu_driver_higher_half_address);
     }
 };
