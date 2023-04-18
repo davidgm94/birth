@@ -181,10 +181,8 @@ inline fn panicEpilogue() noreturn {
     panic_lock.release();
 
     if (lib.is_test) {
-        log.err("Exiting from QEMU...", .{});
         privileged.exitFromQEMU(.failure);
     } else {
-        log.err("Not exiting from QEMU...", .{});
         privileged.arch.stopCPU();
     }
 }

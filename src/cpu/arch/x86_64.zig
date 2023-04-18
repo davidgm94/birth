@@ -1010,124 +1010,6 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     };
 }
 
-fn dispatch(director: *cpu.CoreDirectorData) noreturn {
-    switch (director.disabled) {
-        true => {
-            cpu.current_director = director;
-            resumeExecution(director.shared.getDisabledSaveArea());
-        },
-        false => {
-            @panic("not disabled");
-        },
-    }
-}
-
-pub const CoreDirectorShared = extern struct {
-    base: cpu.CoreDirectorSharedGeneric,
-    crit_pc_low: VirtualAddress,
-    crit_pc_high: VirtualAddress,
-    ldt_base: VirtualAddress,
-    ldt_page_count: usize,
-
-    enabled_save_area: Registers,
-    disabled_save_area: Registers,
-    trap_save_area: Registers,
-};
-
-noinline fn resumeExecution(state: *align(16) Registers) noreturn {
-    const regs = state;
-    asm volatile (
-        \\pushq %[ss]
-        \\pushq 7*8(%[registers])
-        \\pushq %[rflags]
-        \\pushq %[cs]
-        \\pushq 16*8(%[registers])
-        \\fxrstor %[fxsave_area]
-        \\mov %[fs], %fs
-        \\mov %[gs], %gs
-        \\mov 17*8(%[registers]), %rax
-        \\mov %rax, %cr3
-        \\mov 0*8(%[registers]), %rax
-        \\mov 2*8(%[registers]), %rcx
-        \\mov 3*8(%[registers]), %rdx
-        \\mov 4*8(%[registers]), %rsi
-        \\mov 5*8(%[registers]), %rdi
-        \\mov 6*8(%[registers]), %rbp
-        \\mov 8*8(%[registers]), %r8
-        \\mov 9*8(%[registers]), %r9
-        \\mov 10*8(%[registers]), %r10
-        \\mov 11*8(%[registers]), %r11
-        \\mov 12*8(%[registers]), %r12
-        \\mov 13*8(%[registers]), %r13
-        \\mov 14*8(%[registers]), %r14
-        \\mov 15*8(%[registers]), %r15
-        \\mov 1*8(%[registers]), %rbx
-        \\iretq
-        :
-        : [rsp] "{rsp}" (@ptrToInt(&interrupt_stack) + interrupt_stack.len),
-          [registers] "{rbx}" (regs),
-          [ss] "i" (user_data_selector),
-          [cs] "i" (user_code_selector),
-          [fs] "r" (regs.fs),
-          [gs] "r" (regs.gs),
-          [rflags] "r" (regs.rflags.user()),
-          [fxsave_area] "*p" (&regs.fxsave_area),
-    );
-
-    while (true) {}
-}
-
-// pub const Registers = extern struct {
-//     rax: u64,
-//     rbx: u64,
-//     rcx: u64,
-//     rdx: u64,
-//     rsi: u64,
-//     rdi: u64,
-//     rbp: u64,
-//     rsp: u64,
-//     r8: u64,
-//     r9: u64,
-//     r10: u64,
-//     r11: u64,
-//     r12: u64,
-//     r13: u64,
-//     r14: u64,
-//     r15: u64,
-//     rip: u64,
-//     cr3: u64,
-//     reserved: u64,
-//     rflags: lib.arch.x86_64.registers.RFLAGS,
-//     fs: u16,
-//     gs: u16,
-//     fxsave_area: extern struct {
-//         fcw: u16,
-//         fsw: u16,
-//         ftw: u8,
-//         reserved1: u8,
-//         fop: u16,
-//         fpu_ip1: u32,
-//         fpu_ip2: u16,
-//         reserved2: u16,
-//         fpu_dp1: u32,
-//         fpu_dp2: u16,
-//         reserved3: u16,
-//         mxcsr: u32,
-//         mxcsr_mask: u32 = 0,
-//         st: [8][2]u64,
-//         xmm: [16][2]u64,
-//         reserved4: [12]u64,
-//     } align(16),
-//
-//     comptime {
-//         assert(@sizeOf(Registers) == 688);
-//     }
-//
-//     pub fn setParameter(regs: *Registers, param: u64) void {
-//         regs.rax = param;
-//     }
-// };
-
 fn spawnInitBSP(init_file: []const u8) !*cpu.UserScheduler {
     return try spawnInitCommon(init_file);
 }
@@ -1378,7 +1260,8 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
     init_scheduler_common_arch_higher_half.disabled_save_area.rflags = .{ .IF = true };
 
     try virtual_address_space.mapPageTables();
+
     virtual_address_space.makeCurrent();
-    const init_scheduler_common_arch_identity = init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler).architectureSpecific();
-    restoreUserContext(&init_scheduler_common_arch_identity.disabled_save_area);
+
+    restoreUserContext(&init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler).architectureSpecific().disabled_save_area);
 }
