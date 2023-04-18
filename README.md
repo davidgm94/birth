@@ -29,7 +29,7 @@ For each run, Github CI currently compiles all build and test artifacts and test
 
 ## External dependencies to compile and run the code (executables your machine should have in the PATH environment variable)
 
-* The Zig compiler - This is required to compile and run the code. Apart from the operating system being written in Zig, Zig is used as a build system, so no platform-specific scripting language is needed.
+* The Zig compiler (master) - This is required to compile and run the code. Apart from the operating system being written in Zig, Zig is used as a build system, so no platform-specific scripting language is needed. The easiest way to get it is to download the master binary at the website.
 * QEMU - to load and execute the operating system in a virtual environment
 * GDB - only for debugging
 
