@@ -29,7 +29,8 @@ pub const Disk = extern struct {
     };
     pub const WriteFn = fn (disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) WriteError!void;
     pub const WriteError = error{
-        write_error,
+        not_supported,
+        disk_size_overflow,
     };
 
     pub const Callbacks = extern struct {

@@ -37,7 +37,7 @@ const Error = error{
 };
 
 fn readFileAbsolute(allocator: *lib.Allocator.Wrapped, absolute_file_path: []const u8) ![]const u8 {
-    return try ((try host.fs.openFileAbsolute(absolute_file_path, .{})).readToEndAlloc(allocator.unwrap_zig(), max_file_length));
+    return try ((try host.fs.openFileAbsolute(absolute_file_path, .{})).readToEndAlloc(allocator.zigUnwrap(), max_file_length));
 }
 
 pub fn main() anyerror!void {
@@ -45,7 +45,7 @@ pub fn main() anyerror!void {
     defer arena_allocator.deinit();
     var wrapped_allocator = lib.Allocator.wrap(arena_allocator.allocator());
 
-    const arguments = (try host.allocateArguments(wrapped_allocator.unwrap_zig()))[1..];
+    const arguments = (try host.allocateArguments(wrapped_allocator.zigUnwrap()))[1..];
 
     const arguments_result: lib.ArgumentParser.DiskImageBuilder.Result = blk: {
         var argument_parser = lib.ArgumentParser.DiskImageBuilder{};
@@ -106,7 +106,7 @@ pub fn main() anyerror!void {
     const configuration = arguments_result.configuration;
 
     // TODO: use a format with hex support
-    const image_config = try lib.ImageConfig.get(wrapped_allocator.unwrap_zig(), arguments_result.image_configuration_path);
+    const image_config = try lib.ImageConfig.get(wrapped_allocator.zigUnwrap(), arguments_result.image_configuration_path);
     var disk_image = try DiskImage.fromZero(image_config.sector_count, image_config.sector_size);
     const disk = &disk_image.disk;
     const gpt_cache = try GPT.create(disk, null);
@@ -130,7 +130,7 @@ pub fn main() anyerror!void {
             const init_program = arguments_result.user_programs[0];
             assert(lib.containsAtLeast(u8, init_program, 1, "init"));
             try fat_partition_cache.makeNewFile("/init", try readFileAbsolute(&wrapped_allocator, init_program), wrapped_allocator.unwrap(), null, 0);
-            try fat_partition_cache.makeNewFile("/font", try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), "resources/zap-light16.psf", max_file_length), wrapped_allocator.unwrap(), null, 0);
+            try fat_partition_cache.makeNewFile("/font", try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), "resources/zap-light16.psf", max_file_length), wrapped_allocator.unwrap(), null, 0);
 
             switch (configuration.bootloader) {
                 .limine => {
@@ -142,13 +142,13 @@ pub fn main() anyerror!void {
 
                     const limine_cfg = blk: {
                         var limine_cfg_generator = LimineCFG{
-                            .buffer = host.ArrayList(u8).init(wrapped_allocator.unwrap_zig()),
+                            .buffer = host.ArrayList(u8).init(wrapped_allocator.zigUnwrap()),
                         };
                         try limine_cfg_generator.addField("TIMEOUT", "0");
                         try limine_cfg_generator.addEntryName("Rise");
                         try limine_cfg_generator.addField("PROTOCOL", "limine");
                         try limine_cfg_generator.addField("DEFAULT_ENTRY", "0");
-                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.unwrap_zig(), u8, &.{ "boot:///", lib.default_cpu_name }));
+                        try limine_cfg_generator.addField("KERNEL_PATH", try lib.concat(wrapped_allocator.zigUnwrap(), u8, &.{ "boot:///", lib.default_cpu_name }));
                         inline for (lib.fields(bootloader.File.Type)) |file_type_enum| {
                             const file_type = @field(bootloader.File.Type, file_type_enum.name);
                             const file_name = @tagName(file_type);
@@ -158,14 +158,14 @@ pub fn main() anyerror!void {
                     };
 
                     try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "limine.sys", max_file_length);
+                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "limine.sys", max_file_length);
                     try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
 
                     switch (configuration.architecture) {
                         .x86_64 => {
                             try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                             try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.unwrap_zig(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                         },
                         else => unreachable,
                     }
@@ -184,7 +184,7 @@ pub fn main() anyerror!void {
                         // const dap_offset = @offsetOf(BootDisk, "dap");
                         // _ = dap_offset;
                         // lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-                        const aligned_file_size = lib.alignForward(loader_file.len, 0x200);
+                        const aligned_file_size = lib.alignForward(loader_file.len, disk.sector_size);
                         const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) const u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("unexpected size");
                         const dap_top = bootloader.BIOS.stack_top - bootloader.BIOS.stack_size;
@@ -205,12 +205,12 @@ pub fn main() anyerror!void {
                         //     @panic("unable to fit loaded executable in memory");
                         // }
 
-                        try boot_disk_mbr.fill(wrapped_allocator.unwrap_zig(), dap);
+                        try boot_disk_mbr.fill(wrapped_allocator.zigUnwrap(), dap);
                         try disk.write_typed_sectors(BootDisk, boot_disk_mbr, boot_disk_mbr_lba, false);
                     },
                     .uefi => {
                         const loader_file_path = arguments_result.bootloader.?;
-                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.unwrap_zig(), loader_file_path, max_file_length);
+                        const loader_file = try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), loader_file_path, max_file_length);
                         try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, 0);
                         try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, 0);
                         try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", loader_file, wrapped_allocator.unwrap(), null, 0);

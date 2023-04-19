@@ -37,6 +37,7 @@ const BuildSteps = struct {
 };
 
 var ci = false;
+var debug_user = false;
 var modules = Modules{};
 var b: *Build = undefined;
 var build_steps: *BuildSteps = undefined;
@@ -59,6 +60,7 @@ const Options = struct {
 pub fn build(b_arg: *Build) !void {
     b = b_arg;
     ci = b.option(bool, "ci", "CI mode") orelse false;
+    debug_user = b.option(bool, "user", "Debug user program") orelse false;
     const default_cfg_override = b.option([]const u8, "default", "Default configuration JSON file") orelse "config/default.json";
     modules = blk: {
         var mods = Modules{};
@@ -141,9 +143,45 @@ pub fn build(b_arg: *Build) !void {
         break :blk exe;
     };
 
-    const native_tests = [_]struct { name: []const u8, root_project_path: []const u8, modules: []const ModuleID }{
-        .{ .name = "host_native_test", .root_project_path = "src/host", .modules = &.{ .lib, .host } },
-        .{ .name = "disk_image_builder_native_test", .root_project_path = disk_image_root_path, .modules = disk_image_builder_modules },
+    const native_tests = [_]struct {
+        name: []const u8,
+        root_project_path: []const u8,
+        modules: []const ModuleID,
+        c: ?C = null,
+
+        const C = struct {
+            include_paths: []const []const u8,
+            source_files: []const SourceFile,
+            link_libc: bool,
+            link_libcpp: bool,
+
+            const SourceFile = struct {
+                path: []const u8,
+                flags: []const []const u8,
+            };
+        };
+    }{
+        .{
+            .name = "host_native_test",
+            .root_project_path = "src/host",
+            .modules = &.{ .lib, .host },
+        },
+        .{
+            .name = "disk_image_builder_native_test",
+            .root_project_path = disk_image_root_path,
+            .modules = disk_image_builder_modules,
+            .c = .{
+                .include_paths = &.{"src/bootloader/limine/installables"},
+                .source_files = &.{
+                    .{
+                        .path = "src/bootloader/limine/installables/limine-deploy.c",
+                        .flags = &.{},
+                    },
+                },
+                .link_libc = true,
+                .link_libcpp = false,
+            },
+        },
     };
 
     const native_test_optimize_mode = .ReleaseFast;
@@ -157,11 +195,22 @@ pub fn build(b_arg: *Build) !void {
             .kind = .@"test",
         });
 
-        // TODO: do this properly
-        if (std.mem.containsAtLeast(u8, native_test.name, 1, "disk_image_builder")) {
-            test_exe.addIncludePath("src/bootloader/limine/installables");
-            test_exe.addCSourceFile("src/bootloader/limine/installables/limine-deploy.c", &.{});
-            test_exe.linkLibC();
+        if (native_test.c) |c| {
+            for (c.include_paths) |include_path| {
+                test_exe.addIncludePath(include_path);
+            }
+
+            for (c.source_files) |source_file| {
+                test_exe.addCSourceFile(source_file.path, source_file.flags);
+            }
+
+            if (c.link_libc) {
+                test_exe.linkLibC();
+            }
+
+            if (c.link_libcpp) {
+                test_exe.linkLibCpp();
+            }
         }
 
         const run_test_step = b.addRunArtifact(test_exe);
@@ -216,7 +265,6 @@ pub fn build(b_arg: *Build) !void {
                 cpu_driver.strip = false;
                 cpu_driver.red_zone = false;
                 cpu_driver.omit_frame_pointer = false;
-                cpu_driver.entry_symbol_name = entry_point_name;
 
                 cpu_driver.code_model = switch (architecture) {
                     .x86_64 => .kernel,
@@ -232,7 +280,8 @@ pub fn build(b_arg: *Build) !void {
                 }, "/linker_script.ld" })));
 
                 var user_module_list = try std.ArrayList(*CompileStep).initCapacity(b.allocator, user_modules.len);
-                const user_linker_script_path = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ "src/user/arch/", @tagName(architecture), "/linker_script.ld" }));
+                const user_architecture_source_path = try std.mem.concat(b.allocator, u8, &.{ "src/user/arch/", @tagName(architecture), "/" });
+                const user_linker_script_path = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ user_architecture_source_path, "linker_script.ld" }));
                 for (user_modules) |module| {
                     const user_module = try addCompileStep(.{
                         .kind = executable_kind,
@@ -366,10 +415,13 @@ pub fn build(b_arg: *Build) !void {
                                     .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
                                 };
 
+                                const user_init = user_module_list.items[0];
+
                                 const runner_run = try newRunnerRunArtifact(.{
                                     .configuration = configuration,
                                     .disk_image_path = disk_image_path,
                                     .cpu_driver = cpu_driver,
+                                    .user_init = user_init,
                                     .runner = runner,
                                     .qemu_options = .{
                                         .is_debug = false,
@@ -380,6 +432,7 @@ pub fn build(b_arg: *Build) !void {
                                     .configuration = configuration,
                                     .disk_image_path = disk_image_path,
                                     .cpu_driver = cpu_driver,
+                                    .user_init = user_init,
                                     .runner = runner,
                                     .qemu_options = .{
                                         .is_debug = true,
@@ -416,7 +469,6 @@ pub fn build(b_arg: *Build) !void {
                                         objdump_cpu_step.dependOn(&objdump_cpu.step);
 
                                         const objdump_init = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
-                                        const user_init = user_module_list.items[0];
                                         objdump_init.addArtifactArg(user_init);
 
                                         const objdump_user_step = b.step("objdump_init", "Objdump user init");
@@ -437,6 +489,7 @@ fn newRunnerRunArtifact(arguments: struct {
     disk_image_path: FileSource,
     runner: *CompileStep,
     cpu_driver: *CompileStep,
+    user_init: *CompileStep,
     qemu_options: QEMUOptions,
 }) !*RunStep {
     const runner = b.addRunArtifact(arguments.runner);
@@ -445,9 +498,11 @@ fn newRunnerRunArtifact(arguments: struct {
         .configuration => inline for (common.fields(Configuration)) |field| runner.addArg(@tagName(@field(arguments.configuration, field.name))),
         .image_configuration_path => runner.addArg(common.ImageConfig.default_path),
         .cpu_driver => runner.addArtifactArg(arguments.cpu_driver),
+        .init => runner.addArtifactArg(arguments.user_init),
         .disk_image_path => runner.addFileSourceArg(arguments.disk_image_path),
         .qemu_options => inline for (common.fields(QEMUOptions)) |field| runner.addArg(if (@field(arguments.qemu_options, field.name)) "true" else "false"),
         .ci => runner.addArg(if (ci) "true" else "false"),
+        .debug_user => runner.addArg(if (debug_user) "true" else "false"),
     };
 
     return runner;
@@ -493,7 +548,6 @@ fn addCompileStep(executable_descriptor: ExecutableDescriptor) !*CompileStep {
         },
         else => return Error.not_implemented,
     };
-    if (executable_descriptor.target.os_tag) |_| compile_step.entry_symbol_name = "entryPoint";
 
     compile_step.setMainPkgPath(source_root_dir);
 

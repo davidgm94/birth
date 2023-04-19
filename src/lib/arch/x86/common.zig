@@ -27,3 +27,33 @@ pub inline fn cpuid(leaf: u32) CPUID {
         .ecx = ecx,
     };
 }
+
+pub const Spinlock = enum(u8) {
+    released = 0,
+    acquired = 1,
+
+    pub inline fn acquire(spinlock: *volatile Spinlock) void {
+        asm volatile (
+            \\0:
+            \\xchgb %[value], %[spinlock]
+            \\test %[value], %[value]
+            \\jz 2f
+            // If not acquire, go to spinloop
+            \\1:
+            \\pause
+            \\cmp %[value], %[spinlock]
+            // Retry
+            \\jne 0b
+            \\jmp 1b
+            \\2:
+            :
+            : [spinlock] "*p" (spinlock),
+              [value] "r" (Spinlock.acquired),
+            : "memory"
+        );
+    }
+
+    pub inline fn release(spinlock: *volatile Spinlock) void {
+        @atomicStore(Spinlock, spinlock, .released, .Release);
+    }
+};

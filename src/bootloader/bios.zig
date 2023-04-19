@@ -28,7 +28,7 @@ pub const loader_start = 0x1000;
 pub const Disk = extern struct {
     disk: lib.Disk,
 
-    var buffer = [1]u8{0} ** (0x200 * 0x10);
+    var buffer = [1]u8{0} ** (lib.default_sector_size * 0x10);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
         const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
@@ -85,7 +85,7 @@ pub const Disk = extern struct {
         _ = bytes;
         _ = sector_offset;
         _ = commit_memory_to_disk;
-        @panic("todo: disk write");
+        return lib.Disk.WriteError.not_supported;
     }
 };
 
@@ -159,7 +159,6 @@ pub fn A20Enable() A20Error!void {
     if (!A20IsEnabled()) {
         return A20Error.a20_not_enabled;
     }
-    // TODO:
 }
 
 pub const MemoryMapEntry = extern struct {
@@ -330,7 +329,7 @@ pub const VBE = extern struct {
         };
 
         comptime {
-            assert(@sizeOf(Information) == 0x200);
+            assert(@sizeOf(Information) == lib.default_sector_size);
         }
 
         pub fn getVideoMode(vbe_info: *const VBE.Information, comptime isValidVideoMode: fn (mode: *const Mode) bool, desired_width: u16, desired_height: u16, edid_bpp: u8) ?Mode {

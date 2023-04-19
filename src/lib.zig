@@ -11,6 +11,7 @@ pub const Filesystem = @import("lib/filesystem.zig");
 pub const NLS = @import("lib/nls.zig");
 pub const PartitionTable = @import("lib/partition_table.zig");
 pub const PSF1 = @import("lib/psf1.zig");
+pub const Spinlock = arch.Spinlock;
 
 const extern_enum_array = @import("lib/extern_enum_array.zig");
 pub const EnumArray = extern_enum_array.EnumArray;
@@ -156,7 +157,7 @@ pub inline fn maybePtrSub(comptime T: type, ptr: ?*T, element_offset: usize) ?*T
 }
 
 test {
-    common.log.err("asdjkasd");
+    common.log.err("test not taken into the test suite");
     _ = DirectoryTokenizer;
     _ = Filesystem;
     _ = PartitionTable;
@@ -213,7 +214,7 @@ pub const Allocator = extern struct {
         return .{
             .allocator = .{
                 .callbacks = .{
-                    .allocate = Wrapped.wrapped_callback_allocate,
+                    .allocate = Wrapped.wrappedCallbackAllocate,
                 },
             },
             .zig = .{
@@ -223,7 +224,7 @@ pub const Allocator = extern struct {
         };
     }
 
-    pub fn unwrap_zig(allocator: *Allocator) common.ZigAllocator {
+    pub fn zigUnwrap(allocator: *Allocator) common.ZigAllocator {
         return .{
             .ptr = allocator,
             .vtable = &zig_vtable,
@@ -231,36 +232,33 @@ pub const Allocator = extern struct {
     }
 
     pub const zig_vtable = .{
-        .alloc = zig_allocate,
-        .resize = zig_resize,
-        .free = zig_free,
+        .alloc = zigAllocate,
+        .resize = zigResize,
+        .free = zigFree,
     };
 
-    pub fn zig_allocate(context: *anyopaque, size: usize, ptr_align: u8, return_address: usize) ?[*]u8 {
+    pub fn zigAllocate(context: *anyopaque, size: usize, ptr_align: u8, return_address: usize) ?[*]u8 {
         _ = context;
         _ = size;
         _ = ptr_align;
         _ = return_address;
-        @panic("todo: zig_allocate");
+        return null;
     }
-    //resize: *const fn (ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool,
-    //free: *const fn (ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void,
 
-    pub fn zig_resize(context: *anyopaque, buffer: []u8, buffer_alignment: u8, new_length: usize, return_address: usize) bool {
+    pub fn zigResize(context: *anyopaque, buffer: []u8, buffer_alignment: u8, new_length: usize, return_address: usize) bool {
         _ = context;
         _ = buffer;
         _ = buffer_alignment;
         _ = new_length;
         _ = return_address;
-        @panic("todo: zig_resize");
+        return false;
     }
 
-    pub fn zig_free(context: *anyopaque, buffer: []u8, buffer_alignment: u8, return_address: usize) void {
+    pub fn zigFree(context: *anyopaque, buffer: []u8, buffer_alignment: u8, return_address: usize) void {
         _ = context;
         _ = buffer;
         _ = buffer_alignment;
         _ = return_address;
-        @panic("todo: zig_free");
     }
 
     pub const Wrapped = extern struct {
@@ -274,16 +272,16 @@ pub const Allocator = extern struct {
             return &wrapped_allocator.allocator;
         }
 
-        pub fn unwrap_zig(wrapped_allocator: *Wrapped) common.ZigAllocator {
+        pub fn zigUnwrap(wrapped_allocator: *Wrapped) common.ZigAllocator {
             return .{
                 .ptr = wrapped_allocator.zig.ptr,
                 .vtable = wrapped_allocator.zig.vtable,
             };
         }
 
-        pub fn wrapped_callback_allocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        pub fn wrappedCallbackAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
             const wrapped_allocator = @fieldParentPtr(Wrapped, "allocator", allocator);
-            const zig_allocator = wrapped_allocator.unwrap_zig();
+            const zig_allocator = wrapped_allocator.zigUnwrap();
             if (alignment > common.maxInt(u8)) {
                 @panic("alignment supported by Zig is less than asked");
             }
@@ -403,7 +401,6 @@ pub fn ELF(comptime bits: comptime_int) type {
                     AMD64 = 0x3e,
                 };
 
-                // TODO: further checking
                 pub fn validate(file_header: *const FileHeader) Parser.Error!void {
                     if (file_header.magic != FileHeader.magic) {
                         return Parser.Error.invalid_magic;
@@ -577,7 +574,7 @@ pub fn ErrorSet(comptime error_list: type) type {
     };
 }
 
-pub fn getDebugInformation(allocator: common.ZigAllocator, elf_file: []align(0x200) const u8) !common.ModuleDebugInfo {
+pub fn getDebugInformation(allocator: common.ZigAllocator, elf_file: []align(common.default_sector_size) const u8) !common.ModuleDebugInfo {
     const elf = common.elf;
     var module_debug_info: common.ModuleDebugInfo = undefined;
     _ = module_debug_info;

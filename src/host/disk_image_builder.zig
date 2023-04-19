@@ -30,7 +30,9 @@ pub const DiskImage = extern struct {
             assert(bytes.len > 0);
             //assert(disk.disk.disk_size == disk.buffer.items.len);
             const byte_offset = sector_offset * disk_image.disk.sector_size;
-            if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.write_error;
+
+            if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.disk_size_overflow;
+
             lib.copy(u8, disk_image.getBuffer()[byte_offset .. byte_offset + bytes.len], bytes);
         }
     }

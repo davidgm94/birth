@@ -66,11 +66,11 @@ const GPT = struct {
 var format_buffer: [8192]u8 = undefined;
 fn print(comptime format: []const u8, args: anytype) void {
     const format_buffer_slice = std.fmt.bufPrint(&format_buffer, format, args) catch @panic("Unable to format stdout buffer\n");
-    stdout_write(format_buffer_slice);
+    stderr(format_buffer_slice);
 }
 
-fn stdout_write(bytes: []const u8) void {
-    _ = std.io.getStdOut().write(bytes) catch @panic("Unable to write to stdout\n");
+fn stderr(bytes: []const u8) void {
+    _ = std.io.getStdErr().write(bytes) catch @panic("Unable to write to stdout\n");
 }
 
 fn print_error_and_exit(e: InstallerError) InstallerError {
@@ -1470,7 +1470,7 @@ pub const hdd = [_]u8{
     0x73, 0x00, 0x00,
 };
 
-pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) InstallerError!void {
+pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
     if (@sizeOf(usize) != @sizeOf(u64)) return print_error_and_exit(InstallerError.not_64_bit);
 
     // Point to the second block where the GPT header might be
@@ -1587,10 +1587,10 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) InstallerE
 
     if (do_gpt) {
         if (partition_number != null) {
-            @panic("todo: partition_number != null");
+            return error.TODO;
         } else {
             const partition_entry_count = gpt_header.partition_entry_count;
-            if (partition_entry_count == 0) @panic("no partitions");
+            if (partition_entry_count == 0) return error.TODO;
             const partition_entry_base_address = @ptrToInt(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
             var partition_entry_address = partition_entry_base_address;
 
@@ -1619,7 +1619,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) InstallerE
             const new_partition_entry_count = new_partition_array_lba_size * partition_entry_per_lb_count;
 
             if (new_partition_entry_count <= max_partition_entry_used) {
-                @panic("todo: new_partition_entry_count <= max_partition_entry_used");
+                return error.TODO;
             }
 
             //print("New maximum count of partition entries: {}\n", .{new_partition_entry_count});

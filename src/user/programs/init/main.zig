@@ -3,18 +3,13 @@ const log = lib.log;
 const user = @import("user");
 const syscall = user.syscall;
 
-export fn entryPoint() callconv(.Naked) noreturn {
-    asm volatile (
-        \\push %rbp
-        \\mov %rsp, %rbp
-        \\jmp main
-    );
-    unreachable;
+comptime {
+    _ = user;
 }
 
 export var core_id: u32 = 0;
 
-export fn main() callconv(.C) noreturn {
+pub fn main() noreturn {
     core_id = syscall.getCoreId();
     log.debug("Hello world! User space initialization from core #{}", .{core_id});
     syscall.shutdown();

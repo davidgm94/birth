@@ -3,78 +3,70 @@ comptime {
 }
 
 const lib = @import("lib");
+const assert = lib.assert;
 const ExecutionMode = lib.Syscall.ExecutionMode;
+
+const rise = @import("rise");
 
 pub const arch = @import("user/arch.zig");
 pub const syscall = @import("user/syscall.zig");
+pub const thread = @import("user/thread.zig");
 
-const Lock = struct {
-    status: u8 = 0,
-
-    fn acquire(lock: *volatile Lock) void {
-        if (lock.status != 0 and lock.status != 0xff) {
-            var foo: u64 = 0;
-            foo += 1;
-        }
-
-        const expected: @TypeOf(lock.status) = 0;
-        while (@cmpxchgStrong(@TypeOf(lock.status), &lock.status, expected, ~expected, .Acquire, .Monotonic) == null) {
-            asm volatile ("pause" ::: "memory");
-        }
-        @fence(.Acquire);
-
-        if (lock.status != 0 and lock.status != 0xff) {
-            var foo: u64 = 0;
-            foo += 1;
-        }
-    }
-
-    fn release(lock: *volatile Lock) void {
-        if (lock.status != 0 and lock.status != 0xff) {
-            var foo: u64 = 0;
-            while (true) {
-                foo += 1;
-            }
-        }
-
-        const expected = ~@as(@TypeOf(lock.status), 0);
-        lock.assert_status(expected);
-        @fence(.Release);
-        lock.status = 0;
-
-        if (lock.status != 0 and lock.status != 0xff) {
-            var foo: u64 = 0;
-            while (true) {
-                foo += 1;
-            }
-        }
-    }
-
-    fn assert_status(lock: *volatile Lock, expected: u8) void {
-        if (lock.status != expected) {
-            @panic("User lock assert failed");
-        }
-    }
+pub const Scheduler = extern struct {
+    time_slice: u32,
+    core_id: u32,
 };
 
-// var writer: lib.Writer(void, Writer.Error, Writer.write) = undefined;
-
-// TODO: handle locks in userspace
-// TODO: handle errors
-// pub fn zig_log(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-//     var buffer: [0x2000]u8 = undefined;
-//     Writer.lock.acquire();
-//     defer Writer.lock.release();
-//     const resulting_slice = lib.bufPrint(&buffer, "[" ++ @tagName(level) ++ "] (" ++ @tagName(scope) ++ ") " ++ format, args) catch unreachable;
-//     writer.writeAll(resulting_slice) catch unreachable;
-// }
-
-// TODO: improve user panic implementation
 pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
-    panic("{s}", .{message});
+    @call(.always_inline, panic, .{ "{s}", .{message} });
 }
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     lib.log.scoped(.PANIC).err(format, arguments);
-    while (true) {}
+    while (true) {
+        asm volatile ("pause" ::: "memory");
+    }
 }
+
+fn schedulerInitDisabled(scheduler: *arch.Scheduler) void {
+    assert(scheduler.common.generic.disabled);
+    // Architecture-specific initialization
+    scheduler.initDisabled();
+    scheduler.generic.time_slice = 1;
+    // TODO: capabilities
+}
+
+pub var is_init = false;
+
+export fn riseInitializeDisabled(scheduler: *arch.Scheduler, arg_init: bool) callconv(.C) noreturn {
+    is_init = arg_init;
+    schedulerInitDisabled(scheduler);
+    thread.initDisabled(scheduler);
+}
+
+pub const VirtualAddress = enum(usize) {
+    _,
+
+    pub inline fn new(address: anytype) VirtualAddress {
+        const T = @TypeOf(address);
+        return switch (T) {
+            usize => @intToEnum(VirtualAddress, address),
+            else => switch (@typeInfo(T)) {
+                .Fn => @intToEnum(VirtualAddress, @ptrToInt(&address)),
+                .Pointer => @intToEnum(VirtualAddress, @ptrToInt(address)),
+                else => {
+                    @compileLog(T);
+                    @compileError("HA!");
+                },
+            },
+        };
+    }
+
+    pub inline fn value(va: VirtualAddress) usize {
+        return @enumToInt(va);
+    }
+
+    pub inline fn sub(va: *VirtualAddress, substraction: usize) void {
+        @ptrCast(*usize, va).* -= substraction;
+    }
+};

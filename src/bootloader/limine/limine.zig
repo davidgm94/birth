@@ -478,13 +478,17 @@ const Filesystem = extern struct {
             }
         }
 
-        @panic("readFile: can't find file with such path");
+        return Error.not_found;
     }
+
+    const FileSizeError = error{
+        not_implemented,
+    };
 
     fn getFileSize(context: ?*anyopaque, file_path: []const u8) anyerror!u32 {
         _ = file_path;
         _ = context;
-        @panic("TODO: getFileSize");
+        return FileSizeError.not_implemented;
     }
 };
 

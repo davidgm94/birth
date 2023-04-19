@@ -3,6 +3,7 @@ const Allocator = lib.Allocator;
 const assert = lib.assert;
 const ELF = lib.ELF(64);
 const log = lib.log;
+const Spinlock = lib.Spinlock;
 const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const panic = cpu.panic;
@@ -11,7 +12,6 @@ const x86_64 = privileged.arch.x86_64;
 const APIC = x86_64.APIC;
 const paging = x86_64.paging;
 const TSS = x86_64.TSS;
-const Registers = rise.arch.Registers;
 const cr0 = x86_64.registers.cr0;
 const cr3 = x86_64.registers.cr3;
 const cr4 = x86_64.registers.cr4;
@@ -36,6 +36,8 @@ pub const pcid = false;
 pub const smap = false;
 pub const invariant_tsc = false;
 
+const user_scheduler_virtual_address = VirtualAddress.new(0x1_000_000);
+
 pub const writer = privileged.E9Writer{ .context = {} };
 var writer_lock: Spinlock = .released;
 var apic_base_physical_address = PhysicalAddress.maybeInvalid(0);
@@ -51,6 +53,30 @@ const pcid_bit = 11;
 const pcid_mask = 1 << pcid_bit;
 const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
 const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
+
+pub const Registers = extern struct {
+    r15: u64,
+    r14: u64,
+    r13: u64,
+    r12: u64,
+    rbp: u64,
+    rbx: u64,
+    r11: u64,
+    r10: u64,
+    r9: u64,
+    r8: u64,
+    rax: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    syscall_number_or_error_code: u64,
+    rip: u64,
+    cs: u64,
+    rflags: lib.arch.x86_64.registers.RFLAGS,
+    rsp: u64,
+    ss: u64,
+};
 
 const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
     InterruptHandler(@enumToInt(Interrupt.DE), false),
@@ -319,8 +345,13 @@ const data_64 = @offsetOf(GDT, "data_64");
 const user_code_64 = @offsetOf(GDT, "user_code_64");
 const user_data_64 = @offsetOf(GDT, "user_data_64");
 const tss_selector = @offsetOf(GDT, "tss_descriptor");
-const user_code_selector = @offsetOf(GDT, "user_code_64") | user_dpl;
-const user_data_selector = @offsetOf(GDT, "user_data_64") | user_dpl;
+const user_code_selector = user_code_64 | user_dpl;
+const user_data_selector = user_data_64 | user_dpl;
+
+comptime {
+    assert(rise.arch.user_code_selector == user_code_selector);
+    assert(rise.arch.user_data_selector == user_data_selector);
+}
 
 const user_dpl = 3;
 
@@ -443,8 +474,6 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     bootloader_information.stage = .cpu;
 
     // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
-    // TODO: figure out the best way to create page allocators for the APP cores
-
     cpu.page_tables = bootloader_information.cpu_page_tables;
     cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
     cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
@@ -558,7 +587,6 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     star.write();
 
     IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
-    // TODO: figure out what this does
     const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
     IA32_FMASK.write(syscall_mask);
 
@@ -590,27 +618,19 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
 
     // TODO: configure PAT
 
-    // TODO:
     bootloader_information.draw_context.clearScreen(0xffff7f50);
     assert(cpu.bsp);
     try initAPIC();
+    x86_64.registers.IA32_FS_BASE.write(user_scheduler_virtual_address.value());
+
     cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
-    const init_user_scheduler = switch (cpu.bsp) {
-        true => blk: {
+    switch (cpu.bsp) {
+        true => {
             const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
-            const scheduler = try spawnInitBSP(init_module);
-            break :blk scheduler;
+            try spawnInitBSP(init_module);
         },
-        false => return error.TODO,
-    };
-    _ = init_user_scheduler;
-    return error.TODO;
-    // const init_module = switch (cpu.bsp) {
-    //     false => try spawnInitBSP(),
-    //     true => return error.TODO,
-    // };
-    //
-    // dispatch(init_module);
+        false => @panic("Implement APP"),
+    }
 }
 
 pub const IDT = extern struct {
@@ -773,8 +793,7 @@ pub export fn syscallEntryPoint() callconv(.Naked) void {
             ::: "memory");
 
         if (pcid) {
-            // TODO:
-            @compileError("TODO: pcid");
+            @compileError("pcid support not yet implemented");
         }
 
         asm volatile (
@@ -841,7 +860,6 @@ pub export fn syscallEntryPoint() callconv(.Naked) void {
         ::: "memory");
 
     // Pass arguments
-    // TODO: check if this works
     asm volatile (
         \\mov %rsp, %rdi
         \\mov %rax, %rsi
@@ -999,7 +1017,7 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
                 _ => @panic("not implemented"),
             }
         },
-        .linux => @panic("TODO: linux syscall"),
+        .linux => @panic("linux syscall"),
     }
 
     return .{
@@ -1010,8 +1028,8 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     };
 }
 
-fn spawnInitBSP(init_file: []const u8) !*cpu.UserScheduler {
-    return try spawnInitCommon(init_file);
+fn spawnInitBSP(init_file: []const u8) !noreturn {
+    try spawnInitCommon(init_file);
 }
 
 pub inline fn nextTimer(ms: u32) void {
@@ -1079,101 +1097,12 @@ pub fn initAPIC() !void {
     // nextTimer(1);
 }
 
-pub const Spinlock = enum(u8) {
-    released = 0,
-    acquired = 1,
-
-    pub inline fn acquire(spinlock: *volatile Spinlock) void {
-        asm volatile (
-            \\0:
-            \\xchgb %[value], %[spinlock]
-            \\test %[value], %[value]
-            \\jz 2f
-            // If not acquire, go to spinloop
-            \\1:
-            \\pause
-            \\cmp %[value], %[spinlock]
-            // Retry
-            \\jne 0b
-            \\jmp 1b
-            \\2:
-            :
-            : [spinlock] "*p" (spinlock),
-              [value] "r" (Spinlock.acquired),
-            : "memory"
-        );
-    }
-
-    pub inline fn release(spinlock: *volatile Spinlock) void {
-        @atomicStore(Spinlock, spinlock, .released, .Release);
-    }
-};
-
 pub inline fn writerStart() void {
     writer_lock.acquire();
 }
 
 pub inline fn writerEnd() void {
     writer_lock.release();
-}
-
-// TODO: make this work with no KPTI
-
-noinline fn restoreUserContext(registers: *const Registers) noreturn {
-    const fmt = lib.comptimePrint;
-    asm volatile (fmt(
-            "pushq %[ss]\n\t" ++
-                "pushq {}(%[registers])\n\t" ++
-                "pushq {}(%[registers])\n\t" ++
-                "pushq %[cs]\n\t" ++
-                "pushq {}(%[registers])\n\t" ++
-                "mov {}(%[registers]), %r15\n\t" ++
-                "mov {}(%[registers]), %r14\n\t" ++
-                "mov {}(%[registers]), %r13\n\t" ++
-                "mov {}(%[registers]), %r12\n\t" ++
-                "mov {}(%[registers]), %rbp\n\t" ++
-                "mov {}(%[registers]), %rbx\n\t" ++
-                "mov {}(%[registers]), %r11\n\t" ++
-                "mov {}(%[registers]), %r10\n\t" ++
-                "mov {}(%[registers]), %r9\n\t" ++
-                "mov {}(%[registers]), %r8\n\t" ++
-                "mov {}(%[registers]), %rax\n\t" ++
-                "mov {}(%[registers]), %rcx\n\t" ++
-                "mov {}(%[registers]), %rdx\n\t" ++
-                "mov {}(%[registers]), %rsi\n\t" ++
-                "mov {}(%[registers]), %rdi\n\t" ++
-                "iretq\n\t" ++
-                "cli\n\t" ++
-                "hlt\n\t",
-            .{
-                @offsetOf(Registers, "rsp"),
-                @offsetOf(Registers, "rflags"),
-                @offsetOf(Registers, "rip"),
-                @offsetOf(Registers, "r15"),
-                @offsetOf(Registers, "r14"),
-                @offsetOf(Registers, "r13"),
-                @offsetOf(Registers, "r12"),
-                @offsetOf(Registers, "rbp"),
-                @offsetOf(Registers, "rbx"),
-                @offsetOf(Registers, "r11"),
-                @offsetOf(Registers, "r10"),
-                @offsetOf(Registers, "r9"),
-                @offsetOf(Registers, "r8"),
-                @offsetOf(Registers, "rax"),
-                @offsetOf(Registers, "rcx"),
-                @offsetOf(Registers, "rdx"),
-                @offsetOf(Registers, "rsi"),
-                @offsetOf(Registers, "rdi"),
-            },
-        )
-        :
-        : [ss] "i" (user_data_selector),
-          [registers] "{rdi}" (registers),
-          [cs] "i" (user_code_selector),
-        : "memory"
-    );
-
-    @panic("TODO");
 }
 
 /// Architecture-specific implementation of mapping when you already can create user-space virtual address spaces
@@ -1191,14 +1120,13 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: 
         const first_index = first_indices[@enumToInt(paging.Level.PML4)];
         const last_index = @intCast(u9, last_indices[@enumToInt(paging.Level.PML4)]) +| 1;
 
-        // TODO: optimize
         for (cpu_pml4[first_index..last_index], user_pml4[first_index..last_index]) |cpu_pml4te, *user_pml4te| {
             user_pml4te.* = cpu_pml4te;
         }
     }
 }
 
-fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
+fn spawnInitCommon(init_file: []const u8) !noreturn {
     assert(cpu.bsp);
 
     const init_scheduler = try cpu.heap_allocator.create(cpu.UserScheduler);
@@ -1222,25 +1150,15 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
             const segment_physical_region = try virtual_address_space.allocateAndMapToAddress(segment_virtual_address, aligned_size, lib.arch.valid_page_sizes[0], segment_flags);
 
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
-            const src = init_file[program_header.offset..][0..program_header.size_in_memory];
+            const src = init_file[program_header.offset..][0..program_header.size_in_file];
             lib.copy(u8, dst, src);
         }
     }
 
-    const init_scheduler_allocation_size = lib.arch.valid_page_sizes[0];
-    const init_scheduler_common_physical_allocation = try cpu.page_allocator.allocate(init_scheduler_allocation_size, lib.arch.valid_page_sizes[0]);
+    const init_scheduler_allocation_size = 1 << 19;
+    const init_scheduler_common_physical_allocation = try virtual_address_space.allocateAndMapToAddress(user_scheduler_virtual_address, init_scheduler_allocation_size, lib.arch.valid_page_sizes[0], .{ .write = true, .user = true });
     const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
     const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
-
-    try virtual_address_space.map(init_scheduler_common_physical_allocation.address, init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress(), init_scheduler_allocation_size, .{
-        .write = true,
-        .user = true,
-    });
-
-    const user_stack_virtual_region = try virtual_address_space.allocateAndMap(privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
-        .write = true,
-        .user = true,
-    });
 
     const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
         .write = true,
@@ -1255,13 +1173,18 @@ fn spawnInitCommon(init_file: []const u8) !*cpu.UserScheduler {
         .write = true,
     });
 
+    init_scheduler_common_higher_half.disabled = true;
+    // First argument
+    init_scheduler_common_arch_higher_half.disabled_save_area.rdi = user_scheduler_virtual_address.value();
+    // Second argument
+    const is_init = true;
+    init_scheduler_common_arch_higher_half.disabled_save_area.rsi = @boolToInt(is_init);
     init_scheduler_common_arch_higher_half.disabled_save_area.rip = entry_point;
-    init_scheduler_common_arch_higher_half.disabled_save_area.rsp = user_stack_virtual_region.address.offset(user_stack_virtual_region.size).value();
     init_scheduler_common_arch_higher_half.disabled_save_area.rflags = .{ .IF = true };
 
     try virtual_address_space.mapPageTables();
 
     virtual_address_space.makeCurrent();
 
-    restoreUserContext(&init_scheduler_common_physical_allocation.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler).architectureSpecific().disabled_save_area);
+    user_scheduler_virtual_address.access(*rise.UserScheduler).architectureSpecific().disabled_save_area.restore();
 }

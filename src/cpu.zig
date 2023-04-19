@@ -38,10 +38,10 @@ pub export var page_allocator = PageAllocator{
 };
 pub export var driver: *Driver = undefined;
 pub export var page_tables: CPUPageTables = undefined;
-pub var file: []align(0x200) const u8 = undefined;
+pub var file: []align(lib.default_sector_size) const u8 = undefined;
 pub export var core_id: u32 = 0;
 pub export var bsp = false;
-var panic_lock = arch.Spinlock.released;
+var panic_lock = lib.Spinlock.released;
 
 /// This data structure holds the information needed to run a core
 pub const Driver = extern struct {
@@ -315,10 +315,6 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags) !void {
-        // TODO: use flags
-
-        // if (!asked_physical_address.isValid()) return Error.invalid_physical;
-        // if (!asked_virtual_address.isValid()) return Error.invalid_virtual;
         if (size == 0) {
             return paging.Error.invalid_size;
         }
@@ -353,11 +349,13 @@ pub const VirtualAddressSpace = extern struct {
     }
 
     fn allocatePages(virtual_address_space: *VirtualAddressSpace, options: PageAllocatorInterface.AllocatePageTablesOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        // TODO: optimize for other architectures
-        const alignment: u64 = switch (options.count) {
-            2 => 2 * paging.page_table_alignment,
-            0x200 => 0x200 * paging.page_table_alignment,
-            else => paging.page_table_alignment,
+        const alignment: u64 = switch (lib.cpu.arch) {
+            .x86_64 => switch (options.count) {
+                2 => 2 * paging.page_table_alignment,
+                0x200 => 0x200 * paging.page_table_alignment,
+                else => paging.page_table_alignment,
+            },
+            else => @compileError("architecture not supported"),
         };
         const result = try page_allocator.allocate(options.count * paging.page_table_size, alignment);
         const page_entry = try virtual_address_space.heap.create(PageEntry);
@@ -684,9 +682,4 @@ fn getDebugInformation() !lib.ModuleDebugInfo {
     };
 
     return debug_info;
-}
-
-pub inline fn spawnInitModule() !*UserScheduler {
-    // TODO: use capabilities
-    return error.TODO;
 }

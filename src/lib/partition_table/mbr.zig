@@ -147,7 +147,7 @@ pub const Partition = extern struct {
     signature: [2]u8 = [_]u8{ 0x55, 0xaa },
 
     comptime {
-        assert(@sizeOf(@This()) == 0x200);
+        assert(@sizeOf(@This()) == lib.default_sector_size);
     }
 
     pub fn compare(mbr: *Partition, other: *MBR.Partition) void {
@@ -181,12 +181,12 @@ pub const Partition = extern struct {
 
         const sector_size = bpb_2_0.sector_size;
         log.debug("Checking sector size: 0x{x}", .{sector_size});
-        if (sector_size != 0x200) {
-            log.warn("Sector size different than 0x200: 0x{x}", .{sector_size});
+        if (sector_size != lib.default_sector_size) {
+            log.warn("Sector size different than 0x{x}: 0x{x}", .{ lib.default_sector_size, sector_size });
             return VerificationError.sector_size;
         }
 
-        if (sector_size != 0x200 and sector_size != 0x400 and sector_size != 0x800 and sector_size != 0x1000) {
+        if (sector_size != lib.default_sector_size and sector_size != 0x400 and sector_size != 0x800 and sector_size != 0x1000) {
             return VerificationError.sector_size;
         }
 

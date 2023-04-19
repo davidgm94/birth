@@ -27,12 +27,6 @@ pub const ResourceOwner = enum(u2) {
     user = 2,
 };
 
-// pub const RBED = struct {
-//     queue_head: ?*CoreDirectorData,
-//     queue_tail: ?*CoreDirectorData,
-//     // TODO: more stuff
-// };
-
 const panic_logger = lib.log.scoped(.PANIC);
 
 pub inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {

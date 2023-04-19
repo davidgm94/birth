@@ -10,7 +10,7 @@ const stopCPU = privileged.arch.stopCPU;
 
 const cpu = @import("cpu");
 
-var lock: cpu.arch.Spinlock = .released;
+var lock: lib.Spinlock = .released;
 
 pub const std_options = struct {
     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
@@ -39,7 +39,6 @@ comptime {
         else => {},
     }
 }
-pub extern fn entryPoint() callconv(.Naked) noreturn;
 comptime {
-    @export(cpu.arch.entryPoint, .{ .name = "entryPoint", .linkage = .Strong });
+    @export(cpu.arch.entryPoint, .{ .name = "_start", .linkage = .Strong });
 }

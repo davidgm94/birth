@@ -15,7 +15,7 @@ const GUID = lib.uefi.Guid;
 const Allocator = lib.Allocator;
 
 pub const default_max_partition_count = 128;
-pub const min_block_size = 0x200;
+pub const min_block_size = lib.default_sector_size;
 pub const max_block_size = 0x1000;
 
 pub const Header = extern struct {
@@ -198,7 +198,7 @@ pub const Header = extern struct {
     };
 
     comptime {
-        assert(@sizeOf(Header) == 0x200);
+        assert(@sizeOf(Header) == lib.default_sector_size);
     }
 
     pub fn get(disk: *Disk) !*GPT.Header {
@@ -244,7 +244,7 @@ pub const Partition = extern struct {
     attributes: Attributes,
     partition_name: [36]u16,
 
-    pub const per_sector = @divExact(0x200, @sizeOf(Partition));
+    pub const per_sector = @divExact(lib.default_sector_size, @sizeOf(Partition));
 
     pub const Cache = extern struct {
         gpt: GPT.Header.Cache,
@@ -322,7 +322,7 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
     const primary_header_lba = first_lba;
     mbr.partitions[0] = MBR.LegacyPartition{
         .boot_indicator = 0,
-        .starting_chs = 0x200,
+        .starting_chs = lib.default_sector_size,
         .os_type = 0xee,
         .ending_chs = 0xff_ff_ff,
         .first_lba = first_lba,
