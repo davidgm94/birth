@@ -10,7 +10,7 @@ pub const Thread = extern struct {
     next: ?*Thread,
     stack: [*]u8,
     stack_top: [*]align(lib.arch.stack_alignment) u8,
-    registers: rise.arch.Registers align(lib.arch.stack_alignment),
+    register_arena: rise.arch.RegisterArena align(lib.arch.stack_alignment),
     core_id: u32,
 
     pub fn init(thread: *Thread, scheduler: *user.arch.Scheduler) void {
@@ -42,11 +42,11 @@ pub fn initDisabled(scheduler: *user.arch.Scheduler) noreturn {
 
     // TODO: use RAX as parameter?
 
-    user.arch.setInitialState(&thread.registers, VirtualAddress.new(bootstrapThread), VirtualAddress.new(thread.stack_top), .{0} ** 6);
+    user.arch.setInitialState(&thread.register_arena, VirtualAddress.new(bootstrapThread), VirtualAddress.new(thread.stack_top), .{0} ** 6);
 
     scheduler.common.generic.has_work = true;
 
-    scheduler.restore(&thread.registers);
+    scheduler.restore(&thread.register_arena);
 }
 
 fn bootstrapThread(parameters: ?*anyopaque) callconv(.C) noreturn {
