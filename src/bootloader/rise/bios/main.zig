@@ -76,9 +76,8 @@ const Filesystem = extern struct {
     fat_cache: lib.Filesystem.FAT32.Cache,
     disk: BIOS.Disk = .{
         .disk = .{
-            // TODO:
-            .disk_size = 64 * 1024 * 1024,
-            .sector_size = 0x200,
+            .disk_size = lib.default_disk_size,
+            .sector_size = lib.default_sector_size,
             .callbacks = .{
                 .read = BIOS.Disk.read,
                 .write = BIOS.Disk.write,
@@ -222,7 +221,6 @@ const Framebuffer = extern struct {
                 .shift = edid_video_mode.linear_blue_mask_shift,
                 .size = edid_video_mode.linear_blue_mask_size,
             },
-            // TODO:
             .memory_model = 0x06,
         };
 
@@ -247,7 +245,7 @@ const VirtualAddressSpace = extern struct {
     }
 };
 
-export fn entryPoint() callconv(.C) noreturn {
+export fn _start() callconv(.C) noreturn {
     main() catch |err| {
         @panic(@errorName(err));
     };

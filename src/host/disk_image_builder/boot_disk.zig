@@ -108,7 +108,7 @@ pub const BootDisk = extern struct {
         assembler.addInstruction(&mov_sp_stack_top);
         assembler.addInstruction(&mov_si(0x7c00));
         assembler.addInstruction(&mov_di(bootloader.BIOS.mbr_offset));
-        assembler.addInstruction(&mov_cx(0x200));
+        assembler.addInstruction(&mov_cx(lib.default_sector_size));
         assembler.addInstruction(&cld);
         assembler.addInstruction(&rep_movsb);
         try assembler.far_jmp_16(0x0, .reload_cs_16);
@@ -144,7 +144,7 @@ pub const BootDisk = extern struct {
 
         assembler.addInstruction(&[_]u8{0xbe} ++ lib.asBytes(&@as(u32, 0x600)));
         assembler.addInstruction(&[_]u8{0xbf} ++ lib.asBytes(&@as(u32, 0x10000)));
-        const aligned_file_size = @as(u32, dap.sector_count * 0x200);
+        const aligned_file_size = @as(u32, dap.sector_count * lib.default_sector_size);
         assembler.addInstruction(&[_]u8{0xb9} ++ lib.asBytes(&aligned_file_size));
         assembler.addInstruction(&cld);
         assembler.addInstruction(&[_]u8{ 0xf3, 0xa4 });
@@ -393,6 +393,6 @@ pub const BootDisk = extern struct {
     };
 
     comptime {
-        assert(@sizeOf(@This()) == 0x200);
+        assert(@sizeOf(@This()) == lib.default_sector_size);
     }
 };

@@ -28,3 +28,5 @@ pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
 pub fn page_mask(comptime asked_page_size: comptime_int) comptime_int {
     return asked_page_size - 1;
 }
+
+pub const Spinlock = current.Spinlock;

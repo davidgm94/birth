@@ -135,7 +135,7 @@ test "Limine barebones" {
             const image = ImageDescription{
                 .partition_start_lba = 0x800,
                 .disk_sector_count = 131072,
-                .disk_sector_size = 0x200,
+                .disk_sector_size = lib.default_sector_size,
                 .partition_name = "ESP",
                 .partition_filesystem = .fat32,
             };
@@ -147,33 +147,33 @@ test "Limine barebones" {
             };
             test_image.delete() catch {};
 
-            try test_image.createFAT(wrapped_allocator.unwrap_zig());
+            try test_image.createFAT(wrapped_allocator.zigUnwrap());
             if (deploy_limine and disk_image_builder.deploy(test_path, &limine.Installer.hdd, limine.Installer.hdd.len) != 0) {
                 @panic("asjdkajsd");
             }
 
             var loopback_device = LoopbackDevice{ .name = "loopback_device" };
-            try loopback_device.start(wrapped_allocator.unwrap_zig(), test_path);
+            try loopback_device.start(wrapped_allocator.zigUnwrap(), test_path);
 
             log.debug("Formatting", .{});
-            try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.unwrap_zig());
+            try host.spawnProcess(&.{ "./tools/format_loopback_fat32.sh", loopback_device.name }, wrapped_allocator.zigUnwrap());
 
             const mount_dir = "image_mount";
 
-            var partition = try loopback_device.mount(wrapped_allocator.unwrap_zig(), mount_dir);
+            var partition = try loopback_device.mount(wrapped_allocator.zigUnwrap(), mount_dir);
 
             for (limine_directories) |directory| {
-                try partition.mkdir(wrapped_allocator.unwrap_zig(), directory);
+                try partition.mkdir(wrapped_allocator.zigUnwrap(), directory);
             }
 
             for (limine_files) |file| {
-                try partition.copy_file(wrapped_allocator.unwrap_zig(), file.path, file.content);
+                try partition.copy_file(wrapped_allocator.zigUnwrap(), file.path, file.content);
             }
 
-            try partition.end(wrapped_allocator.unwrap_zig());
-            try loopback_device.end(wrapped_allocator.unwrap_zig());
+            try partition.end(wrapped_allocator.zigUnwrap());
+            try loopback_device.end(wrapped_allocator.zigUnwrap());
 
-            var original_disk_image = try test_image.toDiskImage(wrapped_allocator.unwrap_zig());
+            var original_disk_image = try test_image.toDiskImage(wrapped_allocator.zigUnwrap());
             const original_gpt_cache = try GPT.Partition.Cache.fromPartitionIndex(&original_disk_image.disk, 0, wrapped_allocator.unwrap());
             const original_fat_cache = try FAT32.Cache.fromGPTPartitionCache(wrapped_allocator.unwrap(), original_gpt_cache);
 

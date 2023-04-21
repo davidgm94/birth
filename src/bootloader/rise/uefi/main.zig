@@ -272,6 +272,10 @@ const Framebuffer = extern struct {
 const VAS = extern struct {
     mmap: *anyopaque,
 
+    const MapError = error{
+        map_failed,
+        region_empty,
+    };
     fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
         const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
         // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
@@ -295,11 +299,10 @@ const VAS = extern struct {
                     }
                 }
             },
-            .aarch64, .riscv64 => @panic("TODO map trampoline"),
             else => @compileError("Architecture not supported"),
         }
 
-        @panic("ensureLoaderIsMapped failed");
+        return MapError.map_failed;
     }
 
     fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator) anyerror!void {
@@ -308,17 +311,18 @@ const VAS = extern struct {
             \\mov %rsp, %[rsp]
             : [rsp] "=r" (-> u64),
         );
+
         while (try MMap.next(vas.mmap)) |entry| {
             if (entry.region.address.value() < rsp and rsp < entry.region.address.offset(entry.region.size).value()) {
                 const rsp_region_physical_address = entry.region.address;
                 const rsp_region_virtual_address = rsp_region_physical_address.toIdentityMappedVirtualAddress();
-                if (entry.region.size == 0) @panic("region empty ensureStackIsMapped");
+                if (entry.region.size == 0) return MapError.region_empty;
                 try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator);
                 return;
             }
         }
 
-        @panic("ensureStackIsMapped failed");
+        return MapError.map_failed;
     }
 };
 

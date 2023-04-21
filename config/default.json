@@ -1,9 +1,9 @@
 {
     "architecture": "x86_64",
     "bootloader": "rise",
-    "boot_protocol": "bios",
+    "boot_protocol": "uefi",
     "execution_environment": "qemu",
     "optimize_mode": "Debug",
-    "execution_type": "emulated",
+    "execution_type": "accelerated",
     "executable_kind": "exe"
 }

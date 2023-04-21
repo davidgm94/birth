@@ -54,7 +54,6 @@ bts $0x5, %eax
 mov %eax, %cr4
 
 // In EFER:
-// TODO: Consider enabling more bits
 mov $0xc0000080, %ecx
 mov $0x900, %eax
 xor %edx, %edx

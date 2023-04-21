@@ -12,3 +12,5 @@ const current = switch (lib.cpu.arch) {
 };
 
 pub usingnamespace current;
+
+pub const _start = current._start;

@@ -462,6 +462,8 @@ pub const ArgumentParser = struct {
             cpu_driver,
             qemu_options,
             ci,
+            debug_user,
+            init,
         };
 
         pub const Result = struct {
@@ -471,6 +473,11 @@ pub const ArgumentParser = struct {
             cpu_driver: []const u8,
             qemu_options: QEMUOptions,
             ci: bool,
+            debug_user: bool,
+            init: []const u8,
         };
     };
 };
+
+pub const default_disk_size = 64 * 1024 * 1024;
+pub const default_sector_size = 0x200;

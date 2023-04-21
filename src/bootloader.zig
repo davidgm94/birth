@@ -33,7 +33,7 @@ pub const CompactDate = packed struct(u16) {
     day: u5,
 };
 
-const file_alignment = 0x200;
+const file_alignment = lib.default_sector_size;
 const last_struct_offset = @offsetOf(Information, "slices");
 
 pub const Information = extern struct {
@@ -192,7 +192,8 @@ pub const Information = extern struct {
 
         try memory_map.initialize(memory_map.context);
         var memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
-        const madt_header = rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
+        const madt_header = try rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
+        lib.log.info("Get bootloader information", .{});
         const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
         const cpu_count = madt.getCPUCount();
 
@@ -655,7 +656,7 @@ pub const Information = extern struct {
         bad_total_size,
         bad_struct_offset,
     };
-    // TODO: further checks
+    //
     pub fn checkIntegrity(information: *const Information) !void {
         if (information.last_struct_offset != last_struct_offset) return IntegrityError.bad_struct_offset;
         const original_total_size = information.total_size;
@@ -830,13 +831,13 @@ pub const File = extern struct {
     type: Type,
     reserved: u32 = 0,
 
-    pub fn getContent(file: File, bootloader_information: *Information) []align(0x200) const u8 {
+    pub fn getContent(file: File, bootloader_information: *Information) []align(lib.default_sector_size) const u8 {
         return file.getContentSlice(bootloader_information);
     }
 
-    inline fn getContentSlice(file: File, bootloader_information: *Information) []align(0x200) u8 {
+    inline fn getContentSlice(file: File, bootloader_information: *Information) []align(lib.default_sector_size) u8 {
         const content_slice_offset = bootloader_information.getSliceOffset(.file_contents);
-        return @intToPtr([*]align(0x200) u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
+        return @intToPtr([*]align(lib.default_sector_size) u8, @ptrToInt(bootloader_information) + content_slice_offset.offset + file.content_offset)[0..file.content_size];
     }
 
     pub fn copyContent(file: File, bootloader_information: *Information, src_slice: []const u8) void {

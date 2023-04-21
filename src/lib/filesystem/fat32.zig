@@ -68,7 +68,7 @@ pub fn isBootRecord(file: []const u8) bool {
 }
 
 pub fn getClusterSize(size: u64) u16 {
-    if (size <= 64 * mb) return 0x200;
+    if (size <= 64 * mb) return lib.default_sector_size;
     if (size <= 128 * mb) return 1 * kb;
     if (size <= 256 * mb) return 2 * kb;
     if (size <= 8 * gb) return 8 * kb;
@@ -125,7 +125,7 @@ pub const DirectoryEntry = extern struct {
     file_size: u32,
 
     pub const Sector = [per_sector]@This();
-    pub const per_sector = @divExact(0x200, @sizeOf(@This()));
+    pub const per_sector = @divExact(lib.default_sector_size, @sizeOf(@This()));
 
     pub const Chain = extern struct {
         previous: ?*DirectoryEntry = null,
@@ -201,7 +201,7 @@ pub const LongNameEntry = extern struct {
     chars_11_12: [2]u16 align(1),
 
     pub const Sector = [per_sector]@This();
-    pub const per_sector = @divExact(0x200, @sizeOf(@This()));
+    pub const per_sector = @divExact(lib.default_sector_size, @sizeOf(@This()));
 
     pub fn isLast(entry: LongNameEntry) bool {
         return entry.sequence_number.last_logical;
@@ -226,7 +226,7 @@ pub const Entry = packed struct(u32) {
     reserved: u4 = 0,
 
     pub const Sector = [per_sector]FAT32.Entry;
-    const per_sector = @divExact(0x200, @sizeOf(FAT32.Entry));
+    const per_sector = @divExact(lib.default_sector_size, @sizeOf(FAT32.Entry));
 
     pub fn isFree(entry: Entry) bool {
         return entry.next_cluster == value_free;
