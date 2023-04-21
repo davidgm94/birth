@@ -1177,16 +1177,19 @@ fn spawnInitCommon(init_file: []const u8) !noreturn {
     init_scheduler_common_higher_half.self = init_scheduler_common_identity;
     init_scheduler_common_higher_half.disabled = true;
     // First argument
-    init_scheduler_common_arch_higher_half.disabled_save_area.rdi = user_scheduler_virtual_address.value();
+    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rdi = user_scheduler_virtual_address.value();
     // Second argument
     const is_init = true;
-    init_scheduler_common_arch_higher_half.disabled_save_area.rsi = @boolToInt(is_init);
-    init_scheduler_common_arch_higher_half.disabled_save_area.rip = entry_point;
-    init_scheduler_common_arch_higher_half.disabled_save_area.rflags = .{ .IF = true };
+    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rsi = @boolToInt(is_init);
+    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rip = entry_point;
+    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rflags = .{ .IF = true };
+
+    init_scheduler_common_arch_higher_half.disabled_save_area.fpu.fcw = 0x037f;
+    init_scheduler_common_arch_higher_half.disabled_save_area.fpu.mxcsr = 0x1f80;
 
     try virtual_address_space.mapPageTables();
 
     virtual_address_space.makeCurrent();
 
-    init_scheduler_common_identity.architectureSpecific().disabled_save_area.restore();
+    init_scheduler_common_identity.architectureSpecific().disabled_save_area.contextSwitch();
 }

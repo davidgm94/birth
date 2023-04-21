@@ -1,9 +1,20 @@
 const lib = @import("lib");
+const assert = lib.assert;
 const rise = @import("rise");
 
 pub const UserScheduler = extern struct {
     generic: rise.UserScheduler,
-    disabled_save_area: rise.arch.Registers,
+    disabled_save_area: RegisterArena,
+};
+
+pub const RegisterArena = extern struct {
+    fpu: FPU align(lib.arch.stack_alignment),
+    registers: rise.arch.Registers,
+
+    pub fn contextSwitch(register_arena: *align(lib.arch.stack_alignment) const RegisterArena) noreturn {
+        register_arena.fpu.load();
+        register_arena.registers.restore();
+    }
 };
 
 pub const Registers = extern struct {
@@ -81,6 +92,35 @@ pub const Registers = extern struct {
         );
 
         unreachable;
+    }
+};
+
+pub const FPU = extern struct {
+    fcw: u16,
+    fsw: u16,
+    ftw: u8,
+    reserved: u8 = 0,
+    fop: u16,
+    fpu_ip1: u32,
+    fpu_ip2: u16,
+    reserved0: u16 = 0,
+    fpu_dp1: u32,
+    fpu_dp2: u16,
+    reserved1: u16 = 0,
+    mxcsr: u32,
+    mxcsr_mask: u32,
+    st: [8][2]u64,
+    xmm: [16][2]u64,
+    reserved2: [12]u64 = .{0} ** 12,
+
+    pub inline fn load(fpu: *align(lib.arch.stack_alignment) const FPU) void {
+        assert(@ptrToInt(fpu) % lib.arch.stack_alignment == 0);
+        asm volatile (
+            \\fxrstor %[fpu]
+            :
+            : [fpu] "*p" (fpu),
+            : "memory"
+        );
     }
 };
 
