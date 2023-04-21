@@ -7,14 +7,6 @@ comptime {
     _ = user;
 }
 
-export var core_id: u32 = 0;
-
-pub fn main() noreturn {
-    core_id = syscall.getCoreId();
-    log.debug("Hello world! User space initialization from core #{}", .{core_id});
-    syscall.shutdown();
-}
-
 const Writer = extern struct {
     pub const Error = error{};
 
@@ -36,3 +28,12 @@ pub const std_options = struct {
         _ = level;
     }
 };
+
+export var core_id: u32 = 0;
+
+pub fn main() noreturn {
+    core_id = syscall.getCoreId();
+    user.currentScheduler().core_id = core_id;
+    log.debug("Hello world! User space initialization from core #{}", .{core_id});
+    syscall.shutdown();
+}

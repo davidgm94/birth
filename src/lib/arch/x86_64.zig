@@ -30,3 +30,5 @@ pub inline fn readTimestamp() u64 {
 
     return @as(u64, edx) << 32 | eax;
 }
+
+pub const stack_alignment = 0x10;

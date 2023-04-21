@@ -4,6 +4,6 @@
     "boot_protocol": "uefi",
     "execution_environment": "qemu",
     "optimize_mode": "Debug",
-    "execution_type": "accelerated",
+    "execution_type": "emulated",
     "executable_kind": "exe"
 }

@@ -355,7 +355,7 @@ comptime {
 
 const user_dpl = 3;
 
-export var interrupt_stack: [0x1000]u8 align(0x10) = undefined;
+export var interrupt_stack: [0x1000]u8 align(lib.arch.stack_alignment) = undefined;
 export var gdt = GDT{};
 export var tss = TSS{};
 export var idt = IDT{};
@@ -1158,6 +1158,7 @@ fn spawnInitCommon(init_file: []const u8) !noreturn {
     const init_scheduler_allocation_size = 1 << 19;
     const init_scheduler_common_physical_allocation = try virtual_address_space.allocateAndMapToAddress(user_scheduler_virtual_address, init_scheduler_allocation_size, lib.arch.valid_page_sizes[0], .{ .write = true, .user = true });
     const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    const init_scheduler_common_identity = user_scheduler_virtual_address.access(*rise.UserScheduler);
     const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
 
     const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
@@ -1173,6 +1174,7 @@ fn spawnInitCommon(init_file: []const u8) !noreturn {
         .write = true,
     });
 
+    init_scheduler_common_higher_half.self = init_scheduler_common_identity;
     init_scheduler_common_higher_half.disabled = true;
     // First argument
     init_scheduler_common_arch_higher_half.disabled_save_area.rdi = user_scheduler_virtual_address.value();
@@ -1186,5 +1188,5 @@ fn spawnInitCommon(init_file: []const u8) !noreturn {
 
     virtual_address_space.makeCurrent();
 
-    user_scheduler_virtual_address.access(*rise.UserScheduler).architectureSpecific().disabled_save_area.restore();
+    init_scheduler_common_identity.architectureSpecific().disabled_save_area.restore();
 }

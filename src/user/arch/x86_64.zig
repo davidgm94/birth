@@ -72,7 +72,7 @@ pub inline fn syscall(options: rise.syscall.Options, arguments: rise.syscall.Arg
 
 pub inline fn setInitialState(registers: *Registers, entry: VirtualAddress, stack: VirtualAddress, arguments: [6]usize) void {
     assert(stack.value() > lib.arch.valid_page_sizes[0]);
-    assert(lib.isAligned(stack.value(), 0x10));
+    assert(lib.isAligned(stack.value(), lib.arch.stack_alignment));
     var stack_address = stack;
     // x86_64 ABI
     stack_address.sub(@sizeOf(usize));
@@ -88,4 +88,18 @@ pub inline fn setInitialState(registers: *Registers, entry: VirtualAddress, stac
     registers.r9 = arguments[5];
 
     // TODO: FPU
+}
+
+pub fn maybeCurrentScheduler() ?*user.Scheduler {
+    return asm volatile (
+        \\mov %fs:0, %[user_scheduler]
+        : [user_scheduler] "=r" (-> ?*user.Scheduler),
+        :
+        : "memory"
+    );
+}
+
+pub inline fn currentScheduler() *user.Scheduler {
+    const result = maybeCurrentScheduler().?;
+    return result;
 }

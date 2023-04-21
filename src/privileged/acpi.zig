@@ -10,6 +10,10 @@ pub const RSDP = extern struct {
         revision: u8,
         RSDT_address: u32,
 
+        comptime {
+            assert(@sizeOf(Descriptor1) == 20);
+        }
+
         const RSDPError = error{
             version_corrupted,
         };
@@ -29,9 +33,13 @@ pub const RSDP = extern struct {
                     };
 
                     const root_table_header = @intToPtr(*align(1) Header, root_table_address);
+                    const EntryType = switch (is_xsdt) {
+                        false => u32,
+                        true => u64,
+                    };
 
-                    const entry_count = @divExact(root_table_header.length - @sizeOf(Header), @sizeOf(u32));
-                    const entries = @intToPtr([*]align(1) const u32, rsdp.RSDT_address + @sizeOf(Header))[0..entry_count];
+                    const entry_count = @divExact(root_table_header.length - @sizeOf(Header), @sizeOf(EntryType));
+                    const entries = @intToPtr([*]align(1) const EntryType, @ptrToInt(root_table_header) + @sizeOf(Header))[0..entry_count];
                     for (entries) |entry| {
                         const table_header = @intToPtr(*align(1) const Header, entry);
                         if (table_signature == table_header.signature) {
@@ -48,9 +56,15 @@ pub const RSDP = extern struct {
     pub const Descriptor2 = extern struct {
         descriptor1: Descriptor1,
         length: u32,
-        XSDT_address: u64,
-        extended_checksum: u8,
+        XSDT_address: u64 align(4),
+        cheksum: u8,
         reserved: [3]u8,
+
+        comptime {
+            assert(@alignOf(Descriptor1) == 4);
+            assert(@alignOf(Descriptor2) == 4);
+            assert(@sizeOf(Descriptor2) == 36);
+        }
     };
 };
 

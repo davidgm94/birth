@@ -9,8 +9,8 @@ pub const Thread = extern struct {
     previous: ?*Thread,
     next: ?*Thread,
     stack: [*]u8,
-    stack_top: [*]align(16) u8,
-    registers: rise.arch.Registers align(16),
+    stack_top: [*]align(lib.arch.stack_alignment) u8,
+    registers: rise.arch.Registers align(lib.arch.stack_alignment),
     core_id: u32,
 
     pub fn init(thread: *Thread, scheduler: *user.arch.Scheduler) void {
@@ -29,7 +29,7 @@ pub const Mutex = extern struct {
     }
 };
 
-var static_stack: [0x10000]u8 align(0x10) = undefined;
+var static_stack: [0x10000]u8 align(lib.arch.stack_alignment) = undefined;
 var static_thread: Thread = undefined;
 var static_thread_lock = Mutex{};
 

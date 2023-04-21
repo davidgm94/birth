@@ -28,6 +28,10 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     }
 }
 
+pub inline fn currentScheduler() *Scheduler {
+    return arch.currentScheduler();
+}
+
 fn schedulerInitDisabled(scheduler: *arch.Scheduler) void {
     assert(scheduler.common.generic.disabled);
     // Architecture-specific initialization
