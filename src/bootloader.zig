@@ -193,7 +193,6 @@ pub const Information = extern struct {
         try memory_map.initialize(memory_map.context);
         var memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
         const madt_header = try rsdp.findTable(.APIC) orelse @panic("Can't find MADT");
-        lib.log.info("Get bootloader information", .{});
         const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
         const cpu_count = madt.getCPUCount();
 

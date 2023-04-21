@@ -30,3 +30,5 @@ pub fn page_mask(comptime asked_page_size: comptime_int) comptime_int {
 }
 
 pub const Spinlock = current.Spinlock;
+
+pub const stack_alignment = current.stack_alignment;
