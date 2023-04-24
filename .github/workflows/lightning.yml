@@ -2,9 +2,9 @@ name: Lightning
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
 
 concurrency:
   # Cancels pending runs when a PR gets updated.
