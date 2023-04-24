@@ -75,6 +75,7 @@ const Signature = enum(u32) {
     MCFG = @ptrCast(*align(1) const u32, "MCFG").*,
     WAET = @ptrCast(*align(1) const u32, "WAET").*,
     BGRT = @ptrCast(*align(1) const u32, "BGRT").*,
+    _,
 };
 
 pub const Header = extern struct {

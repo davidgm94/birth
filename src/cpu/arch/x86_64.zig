@@ -991,30 +991,45 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     // TODO: check capability address
     switch (options.general.convention) {
         .rise => {
-            switch (options.rise.type) {
-                .cpu => {
-                    const command = @intToEnum(rise.capabilities.Command.CPU, options.rise.command);
-                    switch (command) {
-                        .shutdown => privileged.exitFromQEMU(.success),
-                        .get_core_id => return ok(.{
-                            .value = cpu.core_id,
-                        }),
-                        _ => @panic("Unknown cpu command"),
-                    }
-                },
-                .io => {
-                    const command = @intToEnum(rise.capabilities.Command.IO, options.rise.command);
-                    switch (command) {
-                        .stdout => {
-                            const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
-                            const message_len = arguments[1];
-                            const message = message_ptr[0..message_len];
-                            writer.writeAll(message) catch unreachable;
+            if (cpu.capabilities.hasPermissions(options.rise.type)) {
+                // const has_permissions = switch (isStatic(options.rise.type) {
+                //     false => @panic("TODO: implement dynamic capabilities"),
+                //     true => checkPermiss,
+                // };
+                switch (options.rise.type) {
+                    .cpu => {
+                        const command = @intToEnum(rise.capabilities.cpu, options.rise.command);
+                        switch (command) {
+                            .shutdown => privileged.exitFromQEMU(.success),
+                            .get_core_id => return ok(.{
+                                .value = cpu.core_id,
+                            }),
+                            // _ => @panic("Unknown cpu command"),
+                        }
+                    },
+                    .io => {
+                        const command = @intToEnum(rise.capabilities.io, options.rise.command);
+                        switch (command) {
+                            .stdout => {
+                                const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
+                                const message_len = arguments[1];
+                                const message = message_ptr[0..message_len];
+                                writer.writeAll(message) catch unreachable;
+                            },
+                            _ => @panic("Unknown io command"),
+                        }
+                    },
+                    // _ => @panic("not implemented"),
+                }
+            } else {
+                return .{
+                    .rise = .{
+                        .first = .{
+                            .@"error" = 1,
                         },
-                        _ => @panic("Unknown io command"),
-                    }
-                },
-                _ => @panic("not implemented"),
+                        .second = 0,
+                    },
+                };
             }
         },
         .linux => @panic("linux syscall"),
@@ -1129,8 +1144,6 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: 
 fn spawnInitCommon(init_file: []const u8) !noreturn {
     assert(cpu.bsp);
 
-    const init_scheduler = try cpu.heap_allocator.create(cpu.UserScheduler);
-    _ = init_scheduler;
     const init_elf = try ELF.Parser.init(init_file);
     const entry_point = init_elf.getEntryPoint();
     const program_headers = init_elf.getProgramHeaders();
@@ -1160,6 +1173,12 @@ fn spawnInitCommon(init_file: []const u8) !noreturn {
     const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
     const init_scheduler_common_identity = user_scheduler_virtual_address.access(*rise.UserScheduler);
     const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
+
+    const init_scheduler = (try virtual_address_space.allocateAndMap(@sizeOf(cpu.UserScheduler), lib.arch.valid_page_sizes[0], .{ .write = true, .secret = true })).address.access(*cpu.UserScheduler);
+    init_scheduler.common = init_scheduler_common_identity;
+    init_scheduler.static_capability_bitmap[@enumToInt(cpu.capabilities.Static.cpu)] = true;
+    init_scheduler.static_capability_bitmap[@enumToInt(cpu.capabilities.Static.io)] = true;
+    cpu.user_scheduler = init_scheduler;
 
     const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
         .write = true,

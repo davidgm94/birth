@@ -14,11 +14,13 @@ var lock: lib.Spinlock = .released;
 
 pub const std_options = struct {
     pub fn logFn(comptime level: lib.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        _ = level;
         lock.acquire();
         cpu.writer.writeAll("[CPU DRIVER] ") catch unreachable;
         cpu.writer.writeByte('[') catch unreachable;
         cpu.writer.writeAll(@tagName(scope)) catch unreachable;
+        cpu.writer.writeAll("] ") catch unreachable;
+        cpu.writer.writeByte('[') catch unreachable;
+        cpu.writer.writeAll(@tagName(level)) catch unreachable;
         cpu.writer.writeAll("] ") catch unreachable;
         lib.format(cpu.writer, format, args) catch unreachable;
         cpu.writer.writeByte('\n') catch unreachable;
@@ -38,7 +40,6 @@ comptime {
         .x86_64, .aarch64 => @export(limine.entryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong }),
         else => {},
     }
-}
-comptime {
+
     @export(cpu.arch.entryPoint, .{ .name = "_start", .linkage = .Strong });
 }
