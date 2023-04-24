@@ -18,9 +18,9 @@ const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
 const rise = @import("rise");
 
-pub const writer = arch.writer;
 pub const test_runner = @import("cpu/test_runner.zig");
 pub const arch = @import("cpu/arch.zig");
+pub const capabilities = @import("cpu/capabilities.zig");
 
 pub export var stack: [0x4000]u8 align(0x1000) = undefined;
 pub export var heap_allocator = Heap{};
@@ -36,12 +36,16 @@ pub export var page_allocator = PageAllocator{
         .primitive = true,
     },
 };
+
+pub export var user_scheduler: *UserScheduler = undefined;
 pub export var driver: *Driver = undefined;
 pub export var page_tables: CPUPageTables = undefined;
 pub var file: []align(lib.default_sector_size) const u8 = undefined;
 pub export var core_id: u32 = 0;
 pub export var bsp = false;
 var panic_lock = lib.Spinlock.released;
+
+pub const writer = arch.writer;
 
 /// This data structure holds the information needed to run a core
 pub const Driver = extern struct {
@@ -51,6 +55,12 @@ pub const Driver = extern struct {
 /// This data structure holds the information needed to run a program in a core (cpu side)
 pub const UserScheduler = extern struct {
     common: *rise.UserScheduler,
+    static_capability_bitmap: capabilities.Static.Bitmap,
+    padding: [lib.arch.valid_page_sizes[0] - 0x10]u8,
+
+    comptime {
+        assert(@sizeOf(UserScheduler) == lib.arch.valid_page_sizes[0]);
+    }
 };
 
 pub const Heap = extern struct {
@@ -304,8 +314,12 @@ pub const VirtualAddressSpace = extern struct {
 
     pub fn allocateAndMap(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64, general_flags: Mapping.Flags) !VirtualMemoryRegion {
         const physical_region = try page_allocator.allocate(size, alignment);
-        try virtual_address_space.map(physical_region.address, physical_region.address.toIdentityMappedVirtualAddress(), size, general_flags);
-        return physical_region.toIdentityMappedVirtualAddress();
+        const virtual_region = switch (general_flags.user) {
+            false => physical_region.toHigherHalfVirtualAddress(),
+            true => physical_region.toIdentityMappedVirtualAddress(),
+        };
+        try virtual_address_space.map(physical_region.address, virtual_region.address, size, general_flags);
+        return virtual_region;
     }
 
     pub fn allocateAndMapToAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, size: u64, alignment: u64, general_flags: Mapping.Flags) !PhysicalMemoryRegion {

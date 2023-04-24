@@ -42,10 +42,9 @@ pub const Options = extern union {
     };
 
     pub const Rise = packed struct(u64) {
-        address: u32,
         type: capabilities.Type,
-        command: capabilities.Command.DataType,
-        reserved: u7 = 0,
+        command: capabilities.Subtype,
+        reserved: lib.IntType(.unsigned, @bitSizeOf(u64) - @bitSizeOf(capabilities.Type) - @bitSizeOf(capabilities.Subtype) - @bitSizeOf(Convention)) = 0,
         convention: Convention = .rise,
 
         comptime {
