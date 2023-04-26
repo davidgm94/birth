@@ -103,7 +103,7 @@ hlt
 
 .align 16
 temporal_stack:
-.fill 128, 0
+.fill 128, 1, 0
 temporal_stack_top:
 
 invalid_idt:
