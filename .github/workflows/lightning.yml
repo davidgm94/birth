@@ -2,10 +2,17 @@ name: Lightning
 
 on:
   pull_request:
-  # push:
-  #   branches:
-  #     - main
-
+    paths:
+      - ".github/workflows/lightning.yml"
+      - "**.zig"
+  push:
+    paths:
+      - ".github/workflows/lightning.yml"
+      - "**.zig"
+    branches:
+      - main
+  schedule:
+    - cron: "0 0 * * *"
 concurrency:
   # Cancels pending runs when a PR gets updated.
   group: ${{ github.head_ref || github.run_id }}-${{ github.actor }}
