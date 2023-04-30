@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - uses: davidgm94/setup-qemu@main
+      - uses: davidgm94/setup-qemu@v1
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: master
