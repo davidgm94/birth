@@ -33,7 +33,7 @@ pub const DiskImage = extern struct {
 
             if (byte_offset + bytes.len > disk_image.disk.disk_size) return Disk.WriteError.disk_size_overflow;
 
-            lib.copy(u8, disk_image.getBuffer()[byte_offset .. byte_offset + bytes.len], bytes);
+            @memcpy(disk_image.getBuffer()[byte_offset .. byte_offset + bytes.len], bytes);
         }
     }
 

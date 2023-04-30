@@ -221,9 +221,9 @@ const MMap = extern struct {
         const memory_size = length_size_tuples.getAlignedTotalSize();
         try UEFI.Try(mmap.boot_services.allocatePages(.AllocateAnyPages, .LoaderData, memory_size >> UEFI.page_shifter, &memory.ptr));
         memory.len = memory_size;
-        lib.zero(memory);
+        @memset(memory, 0);
 
-        return PhysicalMemoryRegion.fromSlice(memory);
+        return PhysicalMemoryRegion.fromByteSlice(memory);
     }
 };
 

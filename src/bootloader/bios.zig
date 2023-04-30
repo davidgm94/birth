@@ -69,7 +69,7 @@ pub const Disk = extern struct {
             const bytes_to_copy = sectors_to_read * disk.sector_size;
             const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..];
             const src_slice = buffer[0..bytes_to_copy];
-            lib.copy(u8, dst_slice, src_slice);
+            @memcpy(dst_slice, src_slice);
         }
 
         const result = lib.Disk.ReadResult{

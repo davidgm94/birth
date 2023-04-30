@@ -236,7 +236,7 @@ pub const BootDisk = extern struct {
             //     lib.print("{x:0>2} ", .{byte});
             // }
             // lib.print("\n", .{});
-            lib.copy(u8, assembler.boot_disk.code[assembler.code_index .. assembler.code_index + instruction_bytes.len], instruction_bytes);
+            @memcpy(assembler.boot_disk.code[assembler.code_index .. assembler.code_index + instruction_bytes.len], instruction_bytes);
             assembler.code_index += @intCast(u8, instruction_bytes.len);
         }
 

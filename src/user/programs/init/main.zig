@@ -31,9 +31,10 @@ pub const std_options = struct {
 
 export var core_id: u32 = 0;
 
-pub fn main() noreturn {
+pub fn main() !noreturn {
     core_id = syscall.getCoreId();
     user.currentScheduler().core_id = core_id;
+    _ = try syscall.allocate(lib.arch.valid_page_sizes[0]);
     log.debug("Hello world! User space initialization from core #{}", .{core_id});
     syscall.shutdown();
 }

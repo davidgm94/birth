@@ -709,8 +709,8 @@ pub const Cache = extern struct {
         short_name_result.* = ShortNameResult{
             .name = blk: {
                 var name = [1]u8{' '} ** short_name_len;
-                lib.copy(u8, name[0..base_len], base[0..base_len]);
-                lib.copy(u8, name[max_base_len .. max_base_len + extension_len], extension[0..extension_len]);
+                @memcpy(name[0..base_len], base[0..base_len]);
+                @memcpy(name[max_base_len .. max_base_len + extension_len], extension[0..extension_len]);
                 break :blk name;
             },
             .case = .{ .base = .upper, .extension = .upper },
@@ -1177,7 +1177,7 @@ pub inline fn packString(name: []const u8, comptime options: PackStringOptions) 
         if (options.upper) {
             _ = lib.upperString(&result, name);
         } else {
-            lib.copy(u8, &result, name);
+            @memcpy(&result, name);
         }
     }
 

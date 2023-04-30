@@ -180,7 +180,7 @@ pub const Header = extern struct {
                 .attributes = .{},
                 .partition_name = blk: {
                     var name = [1]u16{0} ** 36;
-                    lib.copy(u16, &name, partition_name);
+                    @memcpy(name[0..partition_name.len], partition_name);
                     break :blk name;
                 },
             });

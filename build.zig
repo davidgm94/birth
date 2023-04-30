@@ -1,5 +1,6 @@
 const std = @import("std");
 const common = @import("src/common.zig");
+const os = common.os;
 
 // Build types
 const Build = std.Build;
@@ -462,17 +463,14 @@ pub fn build(b_arg: *Build) !void {
                                             b.default_step.dependOn(&user_module.step);
                                         }
 
-                                        const objdump_cpu = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
-                                        objdump_cpu.addArtifactArg(cpu_driver);
+                                        const artifacts: []const *CompileStep = &.{ cpu_driver, user_init };
+                                        const artifact_names: []const []const u8 = &.{ "cpu", "init" };
 
-                                        const objdump_cpu_step = b.step("objdump", "Objdump the CPU driver");
-                                        objdump_cpu_step.dependOn(&objdump_cpu.step);
-
-                                        const objdump_init = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
-                                        objdump_init.addArtifactArg(user_init);
-
-                                        const objdump_user_step = b.step("objdump_init", "Objdump user init");
-                                        objdump_user_step.dependOn(&objdump_init.step);
+                                        inline for (artifact_names, 0..) |artifact_name, index| {
+                                            const artifact = artifacts[index];
+                                            addObjdump(artifact, artifact_name);
+                                            addFileSize(artifact, artifact_name);
+                                        }
                                     }
                                 }
                             }
@@ -481,6 +479,44 @@ pub fn build(b_arg: *Build) !void {
                 }
             }
         }
+    }
+
+    if (os == .linux) {
+        const generate_command = b.addSystemCommand(&.{ "dot", "-Tpng" });
+        generate_command.addFileSourceArg(FileSource.relative("capabilities.dot"));
+        generate_command.addArg("-o");
+        const png = generate_command.addOutputFileArg("capabilities.png");
+
+        const visualize_command = b.addSystemCommand(&.{"xdg-open"});
+        visualize_command.addFileSourceArg(png);
+
+        const dot_command = b.step("dot", "TEMPORARY: (developers only) Generate a graph and visualize it");
+        dot_command.dependOn(&visualize_command.step);
+    }
+}
+
+fn addObjdump(artifact: *CompileStep, comptime name: []const u8) void {
+    switch (os) {
+        .linux => {
+            const objdump = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
+            objdump.addArtifactArg(artifact);
+            const objdump_step = b.step("objdump_" ++ name, "Objdump " ++ name);
+            objdump_step.dependOn(&objdump.step);
+        },
+        else => {},
+    }
+}
+
+fn addFileSize(artifact: *CompileStep, comptime name: []const u8) void {
+    switch (os) {
+        .linux => {
+            const file_size = b.addSystemCommand(&.{ "stat", "-c", "%s" });
+            file_size.addArtifactArg(artifact);
+
+            const file_size_step = b.step("file_size_" ++ name, "Get the file size of " ++ name);
+            file_size_step.dependOn(&file_size.step);
+        },
+        else => {},
     }
 }
 
@@ -626,9 +662,13 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
             else => return Error.architecture_not_supported,
         }
     }
-
-    const target = CrossTarget{
+    var target = CrossTarget{
         .cpu_arch = asked_arch,
+        .cpu_model = switch (common.cpu.arch) {
+            .x86 => .determined_by_cpu_arch,
+            .x86_64 => if (execution_mode == .privileged) .determined_by_cpu_arch else .{ .explicit = &common.Target.x86.cpu.x86_64_v3 },
+            else => .determined_by_cpu_arch,
+        },
         .os_tag = .freestanding,
         .abi = .none,
         .cpu_features_add = enabled_features,
