@@ -1,7 +1,7 @@
 {
     "memory": {
-        "amount": "1",
-        "unit": "gigabyte"
+        "amount": "2048",
+        "unit": "megabyte"
     },
     "virtualize": false,
     "vga": "std",

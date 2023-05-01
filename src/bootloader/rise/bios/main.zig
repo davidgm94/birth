@@ -105,7 +105,7 @@ const Filesystem = extern struct {
         filesystem.parser_index += 1;
         var file_path_buffer = [1]u8{'/'} ** 32;
         const file_name = @tagName(file_type);
-        lib.copy(u8, file_path_buffer[1..], file_name);
+        @memcpy(file_path_buffer[1..], file_name);
         const file_path = file_path_buffer[0 .. file_name.len + 1];
         const file_size = try filesystem.fat_cache.getFileSize(file_path);
 
@@ -202,7 +202,7 @@ const Framebuffer = extern struct {
         }
 
         const edid_video_mode = vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
-        const framebuffer_region = PhysicalMemoryRegion.new(PhysicalAddress.new(edid_video_mode.framebuffer_address), edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y);
+        const framebuffer_region = PhysicalMemoryRegion.fromRaw(edid_video_mode.framebuffer_address, edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y);
         const framebuffer = .{
             .address = framebuffer_region.address.value(),
             .pitch = edid_video_mode.linear_bytes_per_scanline,

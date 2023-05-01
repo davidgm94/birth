@@ -26,8 +26,20 @@ pub const log = std.log;
 
 pub const Writer = std.io.Writer;
 
+pub fn assert(ok: bool) void {
+    if (!ok) {
+        if (@inComptime()) {
+            @compileError("Assert failed!");
+        } else {
+            switch (build_mode) {
+                .Debug, .ReleaseSafe => unreachable,
+                .ReleaseSmall, .ReleaseFast => @panic("Assert failed!"),
+            }
+        }
+    }
+}
+
 const debug = std.debug;
-pub const assert = debug.assert;
 pub const print = debug.print;
 pub const StackIterator = debug.StackIterator;
 pub const dwarf = std.dwarf;
@@ -50,7 +62,6 @@ pub const json = std.json;
 
 const mem = std.mem;
 pub const ZigAllocator = mem.Allocator;
-pub const copy = mem.copy;
 pub const equal = mem.eql;
 pub const length = mem.len;
 pub const startsWith = mem.startsWith;
@@ -109,16 +120,10 @@ pub fn diff(file1: []const u8, file2: []const u8) !void {
     }
 }
 
-pub fn zero(slice: []u8) void {
-    for (slice) |*byte| {
-        byte.* = 0;
-    }
-}
-
 pub fn zeroes(comptime T: type) T {
     var result: T = undefined;
     const slice = asBytes(&result);
-    zero(slice);
+    @memset(slice, 0);
     return result;
 }
 

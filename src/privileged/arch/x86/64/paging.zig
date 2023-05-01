@@ -31,6 +31,39 @@ const Mapping = privileged.Mapping;
 const bootloader = @import("bootloader");
 
 const page_table_level_count = 4;
+pub const page_table_mask = page_table_entry_count - 1;
+
+pub fn pml5Base(base: u64) u64 {
+    return base >> 48 & page_table_mask;
+}
+
+pub fn pml4Base(base: u64) u64 {
+    return base >> 39 & page_table_mask;
+}
+
+pub fn pdptBase(base: u64) u64 {
+    return base >> 30 & page_table_mask;
+}
+
+pub fn pdtBase(base: u64) u64 {
+    return base >> 21 & page_table_mask;
+}
+
+pub fn ptBase(base: u64) u64 {
+    return base >> 12 & page_table_mask;
+}
+
+pub fn pdptEntries(limit: u64) u64 {
+    return pml4Base(limit - 1) + 1;
+}
+
+pub fn pdtEntries(limit: u64) u64 {
+    return pdptBase(limit - 1) + 1;
+}
+
+pub fn ptEntries(limit: u64) u64 {
+    return pdtBase(limit - 1) + 1;
+}
 
 pub const CPUPageTables = extern struct {
     pml4_table: PhysicalAddress,

@@ -24,6 +24,7 @@ const IA32_STAR = x86_64.registers.IA32_STAR;
 const PhysicalAddress = privileged.PhysicalAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
 const VirtualAddress = privileged.VirtualAddress;
+const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 
 const cpu = @import("cpu");
 const Heap = cpu.Heap;
@@ -40,7 +41,6 @@ const user_scheduler_virtual_address = VirtualAddress.new(0x1_000_000);
 
 pub const writer = privileged.E9Writer{ .context = {} };
 var writer_lock: Spinlock = .released;
-var apic_base_physical_address = PhysicalAddress.maybeInvalid(0);
 
 const capability_address_space_size = 1 * lib.gb;
 const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
@@ -53,6 +53,11 @@ const pcid_bit = 11;
 const pcid_mask = 1 << pcid_bit;
 const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
 const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
+
+const init_address_space_limit = 128 * lib.mb;
+const init_pdpt_size = paging.pdptEntries(init_address_space_limit);
+const init_pdt_size = paging.pdtEntries(init_address_space_limit);
+const init_pt_size = paging.ptEntries(init_address_space_limit);
 
 pub const Registers = extern struct {
     r15: u64,
@@ -423,6 +428,16 @@ const Interrupt = enum(u5) {
     _,
 };
 
+pub const root_page_table_entry = PageTableEntry.pml4;
+
+pub const PageTableEntry = enum(u3) {
+    pml5,
+    pml4,
+    pdp,
+    pd,
+    pt,
+};
+
 pub fn entryPoint() callconv(.Naked) noreturn {
     asm volatile (
         \\lea stack(%rip), %rsp
@@ -449,12 +464,22 @@ const InitializationError = error{
 
 pub export fn main(bootloader_information: *bootloader.Information) callconv(.C) noreturn {
     log.info("Initializing...\n\n\t[BUILD MODE] {s}\n\t[BOOTLOADER] {s}\n\t[BOOT PROTOCOL] {s}\n", .{ @tagName(lib.build_mode), @tagName(bootloader_information.bootloader), @tagName(bootloader_information.protocol) });
-    initialize(bootloader_information) catch |err| {
+    archInitialize(bootloader_information) catch |err| {
         cpu.panicWithStackTrace(@errorReturnTrace(), "Failed to initialize CPU: {}", .{err});
     };
 }
 
-pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
+fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
+    bootloader_information.draw_context.clearScreen(0xffff7f50);
+    // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
+    // This is mainly due to the transition from a 32-bit bootloader to a 64-bit CPU driver in the x86-64 architecture.
+    try bootloader_information.checkIntegrity();
+    // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
+    // functionality is not available anymore
+    bootloader_information.stage = .cpu;
+    // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
+    if (bootloader_information.getSlice(.files).len == 0) return InitializationError.no_files;
+
     const cpuid = lib.arch.x86_64.cpuid;
     if (pcid) {
         if (cpuid(1).ecx & (1 << 17) == 0) return InitializationError.feature_requested_and_not_available;
@@ -463,23 +488,6 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     if (invariant_tsc) {
         if (cpuid(0x80000007).edx & (1 << 8) == 0) return InitializationError.feature_requested_and_not_available;
     }
-
-    // Do an integrity check so that the bootloader information is in perfect state and there is no weird memory behavior.
-    // This is mainly due to the transition from a 32-bit bootloader to a 64-bit CPU driver in the x86-64 architecture.
-    try bootloader_information.checkIntegrity();
-    // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
-    if (bootloader_information.getSlice(.files).len == 0) return InitializationError.no_files;
-    // Informing the bootloader information struct that we have reached the CPU driver and any bootloader
-    // functionality is not available anymore
-    bootloader_information.stage = .cpu;
-
-    // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
-    cpu.page_tables = bootloader_information.cpu_page_tables;
-    cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
-    cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
-    cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
-        if (file_descriptor.type == .cpu) break file_descriptor.getContent(bootloader_information);
-    } else return InitializationError.cpu_file_not_found;
 
     // Initialize GDT
     const gdt_descriptor = GDT.Descriptor{
@@ -570,8 +578,7 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
 
     asm volatile ("sti" ::: "memory");
 
-    const ia32_apic_base = IA32_APIC_BASE.read();
-    cpu.bsp = ia32_apic_base.bsp;
+    cpu.bsp = IA32_APIC_BASE.read().bsp;
 
     const star = IA32_STAR{
         .kernel_cs = code_64,
@@ -609,6 +616,40 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     my_cr0.task_switched = false;
     my_cr0.write();
 
+    var ia32_apic_base = IA32_APIC_BASE.read();
+    comptime {
+        assert(lib.arch.valid_page_sizes[0] == 0x1000);
+    }
+
+    // The bootloader already mapped APIC
+
+    // const apic_base_physical_address = ia32_apic_base.getAddress();
+    // const minimal_paging = paging.Specific{
+    //     .cr3 = cr3.read(),
+    // };
+
+    // try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
+    //     .write = true,
+    //     .cache_disable = true,
+    //     .global = true,
+    // }, apic_page_allocator_interface);
+
+    const spurious_vector: u8 = 0xFF;
+    APIC.write(.spurious, @as(u32, 0x100) | spurious_vector);
+
+    const tpr = APIC.TaskPriorityRegister{};
+    tpr.write();
+
+    const lvt_timer = APIC.LVTTimer{};
+    lvt_timer.write();
+
+    ia32_apic_base.global_enable = true;
+    ia32_apic_base.write();
+
+    ticks_per_ms = APIC.calibrateTimer();
+
+    cpu.core_id = APIC.read(.id);
+
     asm volatile (
         \\fninit
         // TODO: figure out why this crashes with KVM
@@ -616,21 +657,150 @@ pub fn initialize(bootloader_information: *bootloader.Information) !noreturn {
         :: //[mxcsr] "m" (@as(u32, 0x1f80)),
         : "memory");
 
-    // TODO: configure PAT
-
-    bootloader_information.draw_context.clearScreen(0xffff7f50);
-    assert(cpu.bsp);
-    try initAPIC();
     x86_64.registers.IA32_FS_BASE.write(user_scheduler_virtual_address.value());
 
-    cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
+    // TODO: configure PAT
+
+    try initialize(bootloader_information);
+}
+
+const BSPEarlyAllocator = extern struct {
+    base: PhysicalAddress,
+    size: usize,
+    offset: usize,
+    allocator: Allocator = .{
+        .callbacks = .{
+            .allocate = callbackAllocate,
+        },
+    },
+    heap_first: ?*BSPHeapEntry = null,
+
+    const BSPHeapEntry = extern struct {
+        virtual_memory_region: VirtualMemoryRegion,
+        offset: usize = 0,
+        next: ?*BSPHeapEntry = null,
+
+        // pub fn create(heap: *BSPHeapEntry, comptime T: type) !*T {
+        //     _ = heap;
+        //     @panic("TODO: create");
+        // }
+
+        pub fn allocateBytes(heap: *BSPHeapEntry, size: u64, alignment: u64) ![]u8 {
+            assert(alignment < lib.arch.valid_page_sizes[0]);
+            assert(heap.virtual_memory_region.size > size);
+            if (!lib.isAligned(heap.virtual_memory_region.address.value(), alignment)) {
+                const misalignment = lib.alignForward(heap.virtual_memory_region.address.value(), alignment) - heap.virtual_memory_region.address.value();
+                _ = heap.virtual_memory_region.takeSlice(misalignment);
+            }
+
+            return heap.virtual_memory_region.takeByteSlice(size);
+        }
+    };
+
+    pub fn createPageAligned(allocator: *BSPEarlyAllocator, comptime T: type) AllocatorError!*align(lib.arch.valid_page_sizes[0]) T {
+        return @ptrCast(*align(lib.arch.valid_page_sizes[0]) T, try allocator.allocateBytes(@sizeOf(T)));
+    }
+
+    pub fn allocateBytes(allocator: *BSPEarlyAllocator, size: u64) AllocatorError![]align(lib.arch.valid_page_sizes[0]) u8 {
+        if (!lib.isAligned(size, lib.arch.valid_page_sizes[0])) return AllocatorError.bad_alignment;
+        if (allocator.offset + size > allocator.size) return AllocatorError.out_of_memory;
+
+        const physical_address = allocator.base.offset(allocator.offset);
+        allocator.offset += size;
+        const slice = physical_address.toHigherHalfVirtualAddress().access([*]align(lib.arch.valid_page_sizes[0]) u8)[0..size];
+        @memset(slice, 0);
+
+        return slice;
+    }
+
+    pub fn callbackAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
+        const early_allocator = @fieldParentPtr(BSPEarlyAllocator, "allocator", allocator);
+        if (alignment == lib.arch.valid_page_sizes[0] or size % lib.arch.valid_page_sizes[0] == 0) {
+            const result = early_allocator.allocateBytes(size) catch return Allocator.Allocate.Error.OutOfMemory;
+            return .{
+                .address = @ptrToInt(result.ptr),
+                .size = result.len,
+            };
+        } else if (alignment > lib.arch.valid_page_sizes[0]) {
+            @panic("WTF");
+        } else {
+            assert(size < lib.arch.valid_page_sizes[0]);
+            const heap_entry_allocation = early_allocator.allocateBytes(lib.arch.valid_page_sizes[0]) catch return Allocator.Allocate.Error.OutOfMemory;
+            const heap_entry_region = VirtualMemoryRegion.fromByteSlice(heap_entry_allocation);
+            const heap_entry = try early_allocator.addHeapRegion(heap_entry_region);
+            const result = try heap_entry.allocateBytes(size, alignment);
+            return .{
+                .address = @ptrToInt(result.ptr),
+                .size = result.len,
+            };
+        }
+    }
+
+    inline fn addHeapRegion(early_allocator: *BSPEarlyAllocator, region: VirtualMemoryRegion) !*BSPHeapEntry {
+        const heap_entry = region.address.access(*BSPHeapEntry);
+        const offset = @sizeOf(BSPHeapEntry);
+        heap_entry.* = .{
+            .offset = offset,
+            .virtual_memory_region = region.offset(offset),
+            .next = early_allocator.heap_first,
+        };
+
+        early_allocator.heap_first = heap_entry;
+
+        return heap_entry;
+    }
+    const AllocatorError = error{
+        out_of_memory,
+        bad_alignment,
+    };
+};
+
+fn initialize(bootloader_information: *bootloader.Information) !noreturn {
+    const memory_map_entries = bootloader_information.getMemoryMapEntries();
+    const page_counters = bootloader_information.getPageCounters();
+
+    var best: usize = 0;
+    var best_free_size: usize = 0;
+    for (memory_map_entries, page_counters, 0..) |memory_map_entry, page_counter, index| {
+        if (memory_map_entry.type != .usable or !lib.isAligned(memory_map_entry.region.size, lib.arch.valid_page_sizes[0]) or memory_map_entry.region.address.value() < lib.mb) {
+            continue;
+        }
+
+        const busy_page_count = page_counter;
+        const busy_size = busy_page_count << comptime lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+        const free_size = memory_map_entry.region.size - busy_size;
+        if (free_size > best_free_size) {
+            best = index;
+            best_free_size = free_size;
+            log.debug("Busy size: 0x{x}", .{busy_size});
+        }
+    }
+
+    log.debug("Best free size: 0x{x}. Index: {}", .{ best_free_size, best });
     switch (cpu.bsp) {
         true => {
+            var early_allocator = BSPEarlyAllocator{
+                .base = memory_map_entries[best].region.address.offset(memory_map_entries[best].region.size - best_free_size),
+                .size = best_free_size,
+                .offset = 0,
+            };
+            cpu.driver = try early_allocator.createPageAligned(cpu.Driver);
             const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
-            try spawnInitBSP(init_module);
+            try spawnInitBSP(init_module, &early_allocator.allocator);
         },
         false => @panic("Implement APP"),
     }
+
+    // assert(cpu.bsp);
+    // // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
+    // cpu.page_tables = bootloader_information.cpu_page_tables;
+    // cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
+    // cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
+    // cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
+    //     if (file_descriptor.type == .cpu) break file_descriptor.getContent(bootloader_information);
+    // } else return InitializationError.cpu_file_not_found;
+    //
+    // cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
 }
 
 pub const IDT = extern struct {
@@ -991,36 +1161,31 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     // TODO: check capability address
     switch (options.general.convention) {
         .rise => {
-            if (cpu.capabilities.hasPermissions(options.rise.type)) {
-                // const has_permissions = switch (isStatic(options.rise.type) {
-                //     false => @panic("TODO: implement dynamic capabilities"),
-                //     true => checkPermiss,
-                // };
-                switch (options.rise.type) {
-                    .cpu => {
-                        const command = @intToEnum(rise.capabilities.cpu, options.rise.command);
-                        switch (command) {
-                            .shutdown => privileged.exitFromQEMU(.success),
-                            .get_core_id => return ok(.{
-                                .value = cpu.core_id,
-                            }),
-                            // _ => @panic("Unknown cpu command"),
-                        }
-                    },
-                    .io => {
-                        const command = @intToEnum(rise.capabilities.io, options.rise.command);
-                        switch (command) {
-                            .stdout => {
-                                const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
-                                const message_len = arguments[1];
-                                const message = message_ptr[0..message_len];
-                                writer.writeAll(message) catch unreachable;
-                            },
-                            _ => @panic("Unknown io command"),
-                        }
-                    },
-                    // _ => @panic("not implemented"),
-                }
+            if (cpu.user_scheduler.capability_root_node.hasPermissions(options.rise.type)) switch (options.rise.type) {
+                .cpu => {
+                    const command = @intToEnum(rise.capabilities.cpu, options.rise.command);
+                    switch (command) {
+                        .shutdown => privileged.exitFromQEMU(.success),
+                        .get_core_id => return ok(.{
+                            .value = cpu.core_id,
+                        }),
+                        // _ => @panic("Unknown cpu command"),
+                    }
+                },
+                .io => {
+                    const command = @intToEnum(rise.capabilities.io, options.rise.command);
+                    switch (command) {
+                        .stdout => {
+                            const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
+                            const message_len = arguments[1];
+                            const message = message_ptr[0..message_len];
+                            writer.writeAll(message) catch unreachable;
+                        },
+                        _ => @panic("Unknown io command"),
+                    }
+                },
+                else => @panic("TODO capabilities"),
+                // _ => @panic("not implemented"),
             } else {
                 return .{
                     .rise = .{
@@ -1043,8 +1208,79 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     };
 }
 
-fn spawnInitBSP(init_file: []const u8) !noreturn {
-    try spawnInitCommon(init_file);
+fn spawnInitBSP(init_file: []const u8, allocator: *Allocator) !noreturn {
+    const user_scheduler = try spawnInitCommon(allocator);
+    _ = user_scheduler;
+    const init_elf = try ELF.Parser.init(init_file);
+    const entry_point = init_elf.getEntryPoint();
+    const program_headers = init_elf.getProgramHeaders();
+
+    const virtual_address_space = try VirtualAddressSpace.new();
+
+    for (program_headers) |program_header| {
+        if (program_header.type == .load) {
+            const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
+            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
+            const segment_flags = .{
+                .execute = program_header.flags.executable,
+                .write = program_header.flags.writable,
+                .user = true,
+            };
+
+            const segment_physical_region = try virtual_address_space.allocateAndMapToAddress(segment_virtual_address, aligned_size, lib.arch.valid_page_sizes[0], segment_flags);
+
+            const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
+            const src = init_file[program_header.offset..][0..program_header.size_in_file];
+            @memcpy(dst, src);
+        }
+    }
+    _ = entry_point;
+    //
+    // const init_scheduler_allocation_size = 1 << 19;
+    // const init_scheduler_common_physical_allocation = try virtual_address_space.allocateAndMapToAddress(user_scheduler_virtual_address, init_scheduler_allocation_size, lib.arch.valid_page_sizes[0], .{ .write = true, .user = true });
+    // const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    // const init_scheduler_common_identity = user_scheduler_virtual_address.access(*rise.UserScheduler);
+    // const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
+    //
+    // const init_scheduler = (try virtual_address_space.allocateAndMap(@sizeOf(cpu.UserScheduler), lib.arch.valid_page_sizes[0], .{ .write = true, .secret = true })).address.access(*cpu.UserScheduler);
+    // init_scheduler.common = init_scheduler_common_identity;
+    // init_scheduler.static_capability_bitmap.set(.cpu);
+    // init_scheduler.static_capability_bitmap.set(.io);
+    // cpu.user_scheduler = init_scheduler;
+    //
+    // const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
+    //     .write = true,
+    //     .user = false,
+    //     .secret = true,
+    // });
+    // _ = privileged_stack;
+    //
+    // const apic_base_physical_address = IA32_APIC_BASE.read().getAddress();
+    // try virtual_address_space.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
+    //     .global = false,
+    //     .cache_disable = true,
+    //     .write = true,
+    // });
+    //
+    // init_scheduler_common_higher_half.self = init_scheduler_common_identity;
+    // init_scheduler_common_higher_half.disabled = true;
+    // // First argument
+    // init_scheduler_common_arch_higher_half.disabled_save_area.registers.rdi = user_scheduler_virtual_address.value();
+    // // Second argument
+    // const is_init = true;
+    // init_scheduler_common_arch_higher_half.disabled_save_area.registers.rsi = @boolToInt(is_init);
+    // init_scheduler_common_arch_higher_half.disabled_save_area.registers.rip = entry_point;
+    // init_scheduler_common_arch_higher_half.disabled_save_area.registers.rflags = .{ .IF = true };
+    //
+    // init_scheduler_common_arch_higher_half.disabled_save_area.fpu.fcw = 0x037f;
+    // init_scheduler_common_arch_higher_half.disabled_save_area.fpu.mxcsr = 0x1f80;
+    //
+    // try virtual_address_space.mapPageTables();
+    //
+    // virtual_address_space.makeCurrent();
+    //
+    // init_scheduler_common_identity.architectureSpecific().disabled_save_area.contextSwitch();
+    @panic("TODO: spawnInitBSP");
 }
 
 pub inline fn nextTimer(ms: u32) void {
@@ -1076,42 +1312,6 @@ const apic_page_allocator_interface = privileged.PageAllocator{
     .context_type = .cpu,
 };
 
-pub fn initAPIC() !void {
-    var ia32_apic_base = IA32_APIC_BASE.read();
-    apic_base_physical_address = ia32_apic_base.getAddress();
-    comptime {
-        assert(lib.arch.valid_page_sizes[0] == 0x1000);
-    }
-
-    const minimal_paging = paging.Specific{
-        .cr3 = cr3.read(),
-    };
-
-    try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
-        .write = true,
-        .cache_disable = true,
-        .global = true,
-    }, apic_page_allocator_interface);
-
-    const spurious_vector: u8 = 0xFF;
-    APIC.write(.spurious, @as(u32, 0x100) | spurious_vector);
-
-    const tpr = APIC.TaskPriorityRegister{};
-    tpr.write();
-
-    const lvt_timer = APIC.LVTTimer{};
-    lvt_timer.write();
-
-    ia32_apic_base.global_enable = true;
-    ia32_apic_base.write();
-
-    ticks_per_ms = APIC.calibrateTimer();
-
-    cpu.core_id = APIC.read(.id);
-
-    // nextTimer(1);
-}
-
 pub inline fn writerStart() void {
     writer_lock.acquire();
 }
@@ -1141,74 +1341,73 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: 
     }
 }
 
-fn spawnInitCommon(init_file: []const u8) !noreturn {
+var once: bool = false;
+fn spawnInitCommon(allocator: *Allocator) !*cpu.UserScheduler {
+    assert(!once);
+    once = true;
+
+    // TODO: delete in the future
     assert(cpu.bsp);
 
-    const init_elf = try ELF.Parser.init(init_file);
-    const entry_point = init_elf.getEntryPoint();
-    const program_headers = init_elf.getProgramHeaders();
+    const root_capability_node = try spawnModule(allocator);
+    const init_scheduler = root_capability_node.dynamic.scheduler.handle.?;
+    try initPageTables(allocator, root_capability_node);
 
-    const virtual_address_space = try VirtualAddressSpace.new();
+    if (true) privileged.exitFromQEMU(.success);
 
-    for (program_headers) |program_header| {
-        if (program_header.type == .load) {
-            const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
-            const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
-            const segment_flags = .{
-                .execute = program_header.flags.executable,
-                .write = program_header.flags.writable,
-                .user = true,
-            };
+    return init_scheduler;
+}
 
-            const segment_physical_region = try virtual_address_space.allocateAndMapToAddress(segment_virtual_address, aligned_size, lib.arch.valid_page_sizes[0], segment_flags);
-
-            const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8);
-            const src = init_file[program_header.offset..][0..program_header.size_in_file];
-            lib.copy(u8, dst, src);
-        }
+const page_table_entry_offset = @enumToInt(root_page_table_entry);
+const page_table_entries = lib.enumValues(PageTableEntry)[page_table_entry_offset..];
+const page_table_sizes = [lib.enumCount(PageTableEntry) - page_table_entry_offset]comptime_int{ paging.page_table_size, paging.page_table_size * init_pdpt_size, paging.page_table_size * init_pdpt_size * init_pdt_size, paging.page_table_size * init_pdpt_size * init_pdt_size * init_pt_size };
+const page_table_total_size = blk: {
+    var total: usize = 0;
+    for (page_table_sizes) |size| {
+        total += size;
     }
 
-    const init_scheduler_allocation_size = 1 << 19;
-    const init_scheduler_common_physical_allocation = try virtual_address_space.allocateAndMapToAddress(user_scheduler_virtual_address, init_scheduler_allocation_size, lib.arch.valid_page_sizes[0], .{ .write = true, .user = true });
-    const init_scheduler_common_higher_half = init_scheduler_common_physical_allocation.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
-    const init_scheduler_common_identity = user_scheduler_virtual_address.access(*rise.UserScheduler);
-    const init_scheduler_common_arch_higher_half = init_scheduler_common_higher_half.architectureSpecific();
+    break :blk total;
+};
 
-    const init_scheduler = (try virtual_address_space.allocateAndMap(@sizeOf(cpu.UserScheduler), lib.arch.valid_page_sizes[0], .{ .write = true, .secret = true })).address.access(*cpu.UserScheduler);
-    init_scheduler.common = init_scheduler_common_identity;
-    init_scheduler.static_capability_bitmap[@enumToInt(cpu.capabilities.Static.cpu)] = true;
-    init_scheduler.static_capability_bitmap[@enumToInt(cpu.capabilities.Static.io)] = true;
-    cpu.user_scheduler = init_scheduler;
+fn initPageTables(allocator: *Allocator, root: *cpu.capabilities.Root) !void {
+    const page_table_allocation = try allocator.allocateBytes(page_table_total_size, lib.arch.valid_page_sizes[0]);
+    var page_table_physical_region = PhysicalMemoryRegion.fromAllocation(page_table_allocation);
 
-    const privileged_stack = try virtual_address_space.allocateAndMapToAddress(VirtualAddress.new(capability_address_space_stack_address), privileged.default_stack_size, lib.arch.valid_page_sizes[0], .{
-        .write = true,
-        .user = false,
-        .secret = true,
-    });
-    _ = privileged_stack;
+    assert(root.dynamic.page_tables.root.value() == 0);
+    assert(root.dynamic.page_tables.first_block == null);
+    assert(root.dynamic.page_tables.last_block == null);
 
-    try virtual_address_space.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
-        .global = false,
-        .cache_disable = true,
-        .write = true,
-    });
+    inline for (page_table_entries, page_table_sizes) |page_table_entry, level_size| {
+        const iterations = comptime @divExact(level_size, paging.page_table_size);
+        for (0..iterations) |_| {
+            const page_table_physical_address = page_table_physical_region.takeSlice(paging.page_table_size).address;
+            try root.addPageTable(allocator, page_table_physical_address, page_table_entry);
+        }
+    }
+}
 
-    init_scheduler_common_higher_half.self = init_scheduler_common_identity;
-    init_scheduler_common_higher_half.disabled = true;
-    // First argument
-    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rdi = user_scheduler_virtual_address.value();
-    // Second argument
-    const is_init = true;
-    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rsi = @boolToInt(is_init);
-    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rip = entry_point;
-    init_scheduler_common_arch_higher_half.disabled_save_area.registers.rflags = .{ .IF = true };
-
-    init_scheduler_common_arch_higher_half.disabled_save_area.fpu.fcw = 0x037f;
-    init_scheduler_common_arch_higher_half.disabled_save_area.fpu.mxcsr = 0x1f80;
-
-    try virtual_address_space.mapPageTables();
-
-    virtual_address_space.makeCurrent();
-
-    init_scheduler_common_identity.architectureSpecific().disabled_save_area.contextSwitch();
+const scheduler_memory_size = 4 * lib.arch.valid_page_sizes[0];
+fn spawnModule(allocator: *Allocator) !*cpu.capabilities.Root {
+    cpu.driver.valid = true;
+    const scheduler_memory = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(scheduler_memory_size, lib.arch.valid_page_sizes[0]));
+    const scheduler = try allocator.create(cpu.UserScheduler);
+    var root = cpu.capabilities.Root{
+        .static = .{
+            .cpu = true,
+        },
+        .dynamic = .{
+            .scheduler = .{
+                .handle = scheduler,
+                .memory = scheduler_memory,
+            },
+            .page_tables = .{},
+        },
+    };
+    const shared_scheduler_generic = scheduler_memory.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    shared_scheduler_generic.disabled = true;
+    shared_scheduler_generic.core_id = cpu.core_id;
+    root.dynamic.scheduler.handle.?.common = scheduler_memory.address.toIdentityMappedVirtualAddress().access(*rise.UserScheduler);
+    root.dynamic.scheduler.handle.?.capability_root_node = root;
+    return &root.dynamic.scheduler.handle.?.capability_root_node;
 }

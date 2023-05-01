@@ -35,6 +35,10 @@ jobs:
         with:
           version: master
 
-      - run: zig env
-      - run: zig build test_all -Dci --verbose -fsummary
+      - name: Zig environment variables
+        run: zig env
+      - name: Build test executables
+        run: zig build all_tests -Dci --verbose -fsummary
+      - name: Test with QEMU
+        run: zig build test_all -Dci --verbose -fsummary
 

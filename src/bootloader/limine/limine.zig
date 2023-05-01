@@ -372,20 +372,6 @@ const VirtualAddress = privileged.VirtualAddress;
 const stopCPU = privileged.arch.stopCPU;
 const paging = privileged.arch.x86_64.paging;
 
-fn mapSection(minimal_paging: paging.Specific, page_allocator: PageAllocator, comptime section_name: []const u8, flags: Mapping.Flags) !void {
-    const section_start_symbol = @extern(*u8, .{ .name = section_name ++ "_section_start" });
-    const section_end_symbol = @extern(*u8, .{ .name = section_name ++ "_section_end" });
-    const section_start = @ptrToInt(section_start_symbol);
-    const section_end = @ptrToInt(section_end_symbol);
-    const section_size = section_end - section_start;
-    log.debug("Section: {s}. Start: 0x{x}. End: 0x{x}. Size: 0x{x}", .{ section_name, section_start, section_end, section_size });
-
-    const virtual_address = VirtualAddress.new(section_start);
-    const physical_address = PhysicalAddress.new(virtual_address.value() - limine_kernel_address.response.?.virtual_address + limine_kernel_address.response.?.physical_address);
-    // log.debug("Mapping cpu driver section {s} (0x{x} - 0x{x}) for 0x{x} bytes", .{ section_name, physical_address.value(), virtual_address.value(), size });
-    try minimal_paging.map(physical_address, virtual_address, section_size, flags, page_allocator);
-}
-
 var limine_information = BootloaderInfo.Request{ .revision = 0 };
 var limine_stack_size = StackSize.Request{ .revision = 0, .stack_size = privileged.default_stack_size };
 var limine_hhdm = HHDM.Request{ .revision = 0 };
@@ -393,8 +379,6 @@ var limine_framebuffer = Framebuffer.Request{ .revision = 0 };
 var limine_smp = SMPInfoRequest{ .revision = 0, .flags = .{ .x2apic = false } };
 var limine_memory_map = MemoryMap.Request{ .revision = 0 };
 var limine_entry_point = EntryPoint.Request{ .revision = 0, .entry_point = limineEntryPoint };
-var limine_kernel_file = KernelFile.Request{ .revision = 0 };
-var limine_kernel_address = KernelAddress.Request{ .revision = 0 };
 var limine_modules = Module.Request{ .revision = 0 };
 var limine_rsdp = RSDP.Request{ .revision = 0 };
 var limine_smbios = SMBIOS.Request{ .revision = 0 };
@@ -409,8 +393,6 @@ comptime {
         @export(limine_smp, .{ .name = "limine_smp", .linkage = .Strong });
         @export(limine_memory_map, .{ .name = "limine_memory_map", .linkage = .Strong });
         @export(limine_entry_point, .{ .name = "limine_entry_point", .linkage = .Strong });
-        @export(limine_kernel_file, .{ .name = "limine_kernel_file", .linkage = .Strong });
-        @export(limine_kernel_address, .{ .name = "limine_kernel_address", .linkage = .Strong });
         @export(limine_modules, .{ .name = "limine_modules", .linkage = .Strong });
         @export(limine_rsdp, .{ .name = "limine_rsdp", .linkage = .Strong });
         @export(limine_smbios, .{ .name = "limine_smbios", .linkage = .Strong });
@@ -473,7 +455,7 @@ const Filesystem = extern struct {
             const path = module.path[0..lib.length(module.path)];
             if (lib.equal(u8, file_path, path)) {
                 assert(file_buffer.len >= module.size);
-                lib.copy(u8, file_buffer, @intToPtr([*]const u8, module.address)[0..module.size]);
+                @memcpy(file_buffer[0..module.size], @intToPtr([*]const u8, module.address)[0..module.size]);
                 return file_buffer;
             }
         }
@@ -573,15 +555,6 @@ const VAS = extern struct {
         _ = bootloader_information;
         _ = context;
         _ = minimal_paging;
-        // const sections = &[_]struct { name: []const u8, flags: Mapping.Flags }{
-        //     .{ .name = "text", .flags = .{ .write = false, .execute = true } },
-        //     .{ .name = "rodata", .flags = .{ .write = false, .execute = false } },
-        //     .{ .name = "data", .flags = .{ .write = true, .execute = false } },
-        // };
-        //
-        // inline for (sections) |section| {
-        //     try mapSection(minimal_paging, page_allocator, section.name, section.flags);
-        // }
     }
 
     fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator) anyerror!void {
@@ -591,7 +564,7 @@ const VAS = extern struct {
                 \\mov %rsp, %[result]
                 : [result] "=r" (-> u64),
             ),
-            .aarch64 => @panic("TODO stack"),
+            .aarch64 => @panic("TODO ensureStackIsMapped"),
             else => @compileError("Architecture not supported"),
         };
 

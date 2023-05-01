@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const log = lib.log.scoped(.thread);
 const user = @import("user");
 const rise = @import("rise");
 
@@ -66,7 +67,29 @@ fn mainThread(parameters: ?*anyopaque) noreturn {
     _ = parameters;
     const root = @import("root");
     if (@hasDecl(root, "main")) {
-        root.main();
+        const result = switch (@typeInfo(@typeInfo(@TypeOf(root.main)).Fn.return_type.?)) {
+            .NoReturn => root.main(),
+            .Void => blk: {
+                root.main();
+                break :blk 0;
+            },
+            .Int => root.main(),
+            .ErrorUnion => blk: {
+                const result = root.main() catch |err| {
+                    log.err("The process exited with an error: {s}", .{@errorName(err)});
+                    break :blk 1;
+                };
+
+                switch (@typeInfo(@TypeOf(result))) {
+                    .Void => break :blk 0,
+                    .Int => break :blk result,
+                    else => @compileError("Unexpected return type"),
+                }
+            },
+            else => @compileError("Unexpected return type"),
+        };
+        _ = result;
+        @panic("ASdasd");
     } else {
         const result = _main();
         _ = result;

@@ -38,7 +38,7 @@ pub export var page_allocator = PageAllocator{
 };
 
 pub export var user_scheduler: *UserScheduler = undefined;
-pub export var driver: *Driver = undefined;
+pub export var driver: *align(lib.arch.valid_page_sizes[0]) Driver = undefined;
 pub export var page_tables: CPUPageTables = undefined;
 pub var file: []align(lib.default_sector_size) const u8 = undefined;
 pub export var core_id: u32 = 0;
@@ -49,14 +49,22 @@ pub const writer = arch.writer;
 
 /// This data structure holds the information needed to run a core
 pub const Driver = extern struct {
+    init_root: capabilities.Root,
     valid: bool = false,
+    padding: [lib.arch.valid_page_sizes[0] - @sizeOf(bool) - @sizeOf(capabilities.Root)]u8,
+
+    comptime {
+        // @compileLog(@sizeOf(Driver));
+
+        assert(lib.isAligned(@sizeOf(Driver), lib.arch.valid_page_sizes[0]));
+    }
 };
 
 /// This data structure holds the information needed to run a program in a core (cpu side)
 pub const UserScheduler = extern struct {
     common: *rise.UserScheduler,
-    static_capability_bitmap: capabilities.Static.Bitmap,
-    padding: [lib.arch.valid_page_sizes[0] - 0x10]u8,
+    capability_root_node: capabilities.Root,
+    padding: [lib.arch.valid_page_sizes[0] - @sizeOf(capabilities.Root) - @sizeOf(*rise.UserScheduler)]u8,
 
     comptime {
         assert(@sizeOf(UserScheduler) == lib.arch.valid_page_sizes[0]);
@@ -90,8 +98,6 @@ pub const Heap = extern struct {
     }
 
     pub noinline fn allocateBytes(heap: *Heap, size: u64, alignment: u64) Allocator.Allocate.Error!VirtualMemoryRegion {
-        if (heap.region.size == 0) {}
-
         const target_address = lib.alignForward(heap.region.address.value(), alignment);
         const alignment_diff = target_address - heap.region.address.value();
         const aligned_size = size + alignment_diff;
@@ -178,9 +184,13 @@ pub const Heap = extern struct {
     pub const Entry = PageAllocator.Entry;
 };
 
+const print_stack_trace = false;
+var panic_count: usize = 0;
+
 inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
+    panic_count += 1;
     privileged.arch.disableInterrupts();
-    panic_lock.acquire();
+    if (panic_count == 1) panic_lock.acquire();
 
     try writer.writeAll("[CPU DRIVER] [PANIC] ");
     try writer.print(format, arguments);
@@ -188,7 +198,7 @@ inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
 }
 
 inline fn panicEpilogue() noreturn {
-    panic_lock.release();
+    if (panic_count == 1) panic_lock.release();
 
     if (lib.is_test) {
         privileged.exitFromQEMU(.failure);
@@ -245,13 +255,13 @@ fn printSourceAtAddress(debug_info: *lib.ModuleDebugInfo, address: usize) !void 
 
 pub fn panicWithStackTrace(stack_trace: ?*lib.StackTrace, comptime format: []const u8, arguments: anytype) noreturn {
     panicPrologue(format, arguments) catch {};
-    printStackTrace(stack_trace) catch {};
+    if (print_stack_trace) printStackTrace(stack_trace) catch {};
     panicEpilogue();
 }
 
 pub fn panicFromInstructionPointerAndFramePointer(return_address: usize, frame_address: usize, comptime format: []const u8, arguments: anytype) noreturn {
     panicPrologue(format, arguments) catch {};
-    printStackTraceFromStackIterator(return_address, frame_address) catch {};
+    if (print_stack_trace) printStackTraceFromStackIterator(return_address, frame_address) catch {};
     panicEpilogue();
 }
 
@@ -280,10 +290,7 @@ pub const VirtualAddressSpace = extern struct {
         },
     };
 
-    pub const paging = switch (lib.cpu.arch) {
-        .x86 => privileged.arch.x86_64.paging,
-        else => privileged.arch.current.paging,
-    };
+    pub const paging = privileged.arch.current.paging;
 
     pub fn new() !*VirtualAddressSpace {
         const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
@@ -300,10 +307,11 @@ pub const VirtualAddressSpace = extern struct {
     fn callbackHeapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         _ = alignment;
         _ = size;
-        if (lib.cpu.arch != .x86) {
-            const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", @fieldParentPtr(Heap, "allocator", allocator));
-            _ = virtual_address_space;
-        }
+        _ = allocator;
+        // if (lib.cpu.arch != .x86) {
+        //     const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", @fieldParentPtr(Heap, "allocator", allocator));
+        //     _ = virtual_address_space;
+        // }
 
         return Allocator.Allocate.Error.OutOfMemory;
     }
@@ -488,7 +496,7 @@ pub const PageAllocator = extern struct {
 
             while (ptr) |entry| : (ptr = entry.next) {
                 const aligned_address = lib.alignForward(entry.region.address.value(), alignment);
-                const top = entry.region.address.offset(entry.region.size).value();
+                const top = entry.region.top().value();
                 if (aligned_address < top and top - aligned_address > size) {
                     // log.debug("Found region which we should be splitting: (0x{x}, 0x{x})", .{ entry.region.address.value(), entry.region.size });
                     // log.debug("User asked for 0x{x} bytes with alignment 0x{x}", .{ size, alignment });
@@ -539,7 +547,7 @@ pub const PageAllocator = extern struct {
 
         //log.debug("Physical allocation: 0x{x}, 0x{x}", .{ allocation.address.value(), allocation.size });
 
-        lib.zero(allocation.toHigherHalfVirtualAddress().access(u8));
+        @memset(allocation.toHigherHalfVirtualAddress().access(u8), 0);
 
         return allocation;
     }

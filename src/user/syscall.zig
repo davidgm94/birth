@@ -24,6 +24,11 @@ pub fn getCoreId() u32 {
     return core_id;
 }
 
+pub fn allocate(size: usize) !*anyopaque {
+    _ = size;
+    @panic("TODO allocate");
+}
+
 pub inline fn invoke(comptime capability_type: capabilities.Type, comptime capability_command: @field(capabilities, @tagName(capability_type)), arguments: anytype) syscall.Result {
     const options = syscall.Options{
         .rise = .{

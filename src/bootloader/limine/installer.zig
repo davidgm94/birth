@@ -1628,8 +1628,8 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
                 const entry_offset = partition_i * gpt_header.partition_entry_size;
                 const primary_entry_base = gpt_header.partition_entry_LBA * lb_size + entry_offset;
                 const secondary_entry_base = secondary_GPT_header.partition_entry_LBA * lb_size + entry_offset;
-                std.mem.set(u8, device[primary_entry_base .. primary_entry_base + gpt_header.partition_entry_size], 0);
-                std.mem.set(u8, device[secondary_entry_base .. secondary_entry_base + gpt_header.partition_entry_size], 0);
+                @memset(device[primary_entry_base .. primary_entry_base + gpt_header.partition_entry_size], 0);
+                @memset(device[secondary_entry_base .. secondary_entry_base + gpt_header.partition_entry_size], 0);
             }
 
             assert(gpt_header.partition_entry_count * @sizeOf(GPT.Entry) == gpt_header.partition_entry_count * gpt_header.partition_entry_size);
@@ -1651,19 +1651,19 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
 
     const original_timestamp = @ptrCast(*[6]u8, &device[218]).*;
     const original_partition_table = @ptrCast(*[70]u8, &device[440]).*;
-    std.mem.copy(u8, device[0..512], hdd[0..512]);
+    @memcpy(device[0..512], hdd[0..512]);
 
     {
         const dst = device[stage2_loc_a .. stage2_loc_a + stage2_size_a];
         const src = hdd[512 .. 512 + stage2_size_a];
-        std.mem.copy(u8, dst, src);
+        @memcpy(dst, src);
     }
 
     {
         const size_left = stage2_size - stage2_size_a;
         const dst = device[stage2_loc_b .. stage2_loc_b + size_left];
         const src = hdd[512 + stage2_size_a .. 512 + stage2_size_a + size_left];
-        std.mem.copy(u8, dst, src);
+        @memcpy(dst, src);
     }
 
     @ptrCast(*align(1) u16, &device[0x1a4 + 0]).* = stage2_size_a;

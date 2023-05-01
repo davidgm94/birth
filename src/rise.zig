@@ -9,6 +9,7 @@ pub const UserScheduler = extern struct {
     self: *UserScheduler,
     disabled: bool,
     has_work: bool,
+    core_id: u32,
 
     pub inline fn architectureSpecific(user_scheduler: *UserScheduler) *arch.UserScheduler {
         return @fieldParentPtr(arch.UserScheduler, "generic", user_scheduler);

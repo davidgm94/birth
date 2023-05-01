@@ -1,5 +1,6 @@
 zig-cache/*
 zig-out/*
+*.png
 logfile
 debug_disk
 .gdb_history

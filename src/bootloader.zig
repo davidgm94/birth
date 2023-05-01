@@ -299,7 +299,7 @@ pub const Information = extern struct {
                 const file_type = @field(File.Type, file_type_enum.name);
                 const file_descriptor = try filesystem.get_file_descriptor(filesystem.context, file_type);
                 const path_len = @intCast(u32, file_descriptor.path.len);
-                lib.copy(u8, file_name_buffer[file_name_offset .. file_name_offset + path_len], file_descriptor.path);
+                @memcpy(file_name_buffer[file_name_offset .. file_name_offset + path_len], file_descriptor.path);
                 const aligned_file_size = lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
                 const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
 
@@ -404,7 +404,7 @@ pub const Information = extern struct {
                         @panic("bios: segment allocated memory must be equal or greater than especified");
                     }
 
-                    lib.copy(u8, dst_slice, src_slice);
+                    @memcpy(dst_slice, src_slice);
                 },
                 else => {
                     //log.warn("Unhandled PH {s}", .{@tagName(ph.type)});
@@ -427,6 +427,18 @@ pub const Information = extern struct {
         bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
         try virtual_address_space.ensure_stack_is_mapped(virtual_address_space.context, minimal_paging, page_allocator);
+
+        switch (lib.cpu.arch) {
+            .x86, .x86_64 => {
+                const apic_base_physical_address = privileged.arch.x86_64.registers.IA32_APIC_BASE.read().getAddress();
+                try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
+                    .write = true,
+                    .cache_disable = true,
+                    .global = true,
+                }, page_allocator);
+            },
+            else => @compileError("Not supported"),
+        }
 
         // bootloader_information.initializeSMP(madt);
 
@@ -545,7 +557,7 @@ pub const Information = extern struct {
                                     const smp_trampoline_region = PhysicalMemoryRegion.new(smp_trampoline_physical_address, smp_trampoline_size);
                                     const smp_trampoline_source = smp_trampoline_region.toIdentityMappedVirtualAddress().access(u8);
 
-                                    lib.copy(u8, smp_trampoline_buffer, smp_trampoline_source);
+                                    @memcpy(smp_trampoline_buffer, smp_trampoline_source);
                                     break :blk smp_trampoline_buffer_region.address.value();
                                 }
                             }
@@ -699,7 +711,7 @@ pub const Information = extern struct {
                                 .size = size,
                             };
 
-                            lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
+                            @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
 
                             page_counters[entry_index] += four_kb_pages;
 
@@ -725,7 +737,7 @@ pub const Information = extern struct {
                                     .size = size,
                                 };
 
-                                lib.zero(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)]);
+                                @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
                                 page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
                                 break :blk result;
@@ -841,7 +853,7 @@ pub const File = extern struct {
 
     pub fn copyContent(file: File, bootloader_information: *Information, src_slice: []const u8) void {
         const dst_slice = file.getContentSlice(bootloader_information);
-        lib.copy(u8, dst_slice, src_slice);
+        @memcpy(dst_slice, src_slice);
     }
 
     pub fn getPath(file: File, bootloader_information: *Information) []const u8 {
