@@ -38,7 +38,7 @@ pub const Static = enum {
 
     pub const Bitmap = @Type(.{
         .Struct = blk: {
-            const full_bit_size = @max(1, @sizeOf(Static)) << 3;
+            const full_bit_size = @max(@as(comptime_int, 1 << 3), @as(u8, @sizeOf(Static)) << 3);
             break :blk .{
                 .layout = .Packed,
                 .backing_integer = lib.IntType(.unsigned, full_bit_size),
