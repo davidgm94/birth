@@ -10,7 +10,6 @@ pub const current = switch (lib.cpu.arch) {
     else => @compileError("Architecture not supported"),
 };
 
-pub const CoreDirectorShared = current.CoreDirectorShared;
 pub const CPUPageTables = current.paging.CPUPageTables;
 pub const stopCPU = current.stopCPU;
 pub const paging = current.paging;

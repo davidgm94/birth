@@ -139,6 +139,10 @@ pub const Type = std_builtin.Type;
 pub const StackTrace = std_builtin.StackTrace;
 pub const SourceLocation = std_builtin.SourceLocation;
 
+pub fn FieldType(comptime T: type, comptime name: []const u8) type {
+    return @TypeOf(@field(@as(T, undefined), name));
+}
+
 // META PROGRAMMING
 pub const AutoEnumArray = std.enums.EnumArray;
 pub const fields = std.meta.fields;

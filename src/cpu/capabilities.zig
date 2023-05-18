@@ -126,33 +126,36 @@ pub const Root = extern struct {
             .cpu => root.static.cpu,
             // inline .cpu => |capability| return @field(cpu.user_scheduler.static_capability_bitmap, @tagName(capability)),
             // dynamic
-            else => @panic("TODO: handle cap"),
+            else => {
+                log.warn("TODO: implement capabilities", .{});
+                privileged.exitFromQEMU(.success);
+            },
             // _ => return false,
         };
     }
 
-    fn allocatePageTableNoCapacity(allocator: *Allocator, page_table_address: PhysicalAddress, page_table_entry_type: PageTableEntry.Type) !*PageTableBlock {
+    fn allocatePageTableNoCapacity(allocator: *Allocator, page_table_address: PhysicalAddress, flags: PageTableEntry.Flags) !*PageTableBlock {
         const page_table_block = try allocator.create(PageTableBlock);
         assert(page_table_block.index == 0);
-        page_table_block.addPageTableDescriptor(page_table_address, page_table_entry_type) catch @panic("WTF");
+        try page_table_block.addPageTableDescriptor(page_table_address, flags);
 
         return page_table_block;
     }
 
-    pub fn addPageTable(root: *Root, allocator: *Allocator, page_table_address: PhysicalAddress, page_table_entry_type: PageTableEntry.Type) !void {
-        if (page_table_entry_type == cpu.arch.root_page_table_type) {
+    pub fn addPageTable(root: *Root, allocator: *Allocator, page_table_address: PhysicalAddress, flags: PageTableEntry.Flags) !void {
+        if (flags.type == cpu.arch.root_page_table_type) {
             root.dynamic.page_tables.root = page_table_address;
         } else if (root.dynamic.page_tables.last_block) |last_block| {
             assert(root.dynamic.page_tables.first_block != null);
-            last_block.addPageTableDescriptor(page_table_address, page_table_entry_type) catch {
-                const page_table_block = try allocatePageTableNoCapacity(allocator, page_table_address, page_table_entry_type);
+            last_block.addPageTableDescriptor(page_table_address, flags) catch {
+                const page_table_block = try allocatePageTableNoCapacity(allocator, page_table_address, flags);
                 last_block.next = page_table_block;
                 page_table_block.previous = last_block;
                 root.dynamic.page_tables.last_block = page_table_block;
             };
         } else {
             assert(root.dynamic.page_tables.first_block == null);
-            const page_table_block = try allocatePageTableNoCapacity(allocator, page_table_address, page_table_entry_type);
+            const page_table_block = try allocatePageTableNoCapacity(allocator, page_table_address, flags);
             root.dynamic.page_tables.first_block = page_table_block;
             root.dynamic.page_tables.last_block = page_table_block;
         }
@@ -177,11 +180,11 @@ pub const PageTableBlock = extern struct {
         block_is_full,
     };
 
-    fn addPageTableDescriptor(block: *PageTableBlock, page_table_entry_address: PhysicalAddress, page_table_entry_type: PageTableEntry.Type) InsertionError!void {
+    fn addPageTableDescriptor(block: *PageTableBlock, page_table_entry_address: PhysicalAddress, flags: PageTableEntry.Flags) InsertionError!void {
         if (block.index < block.entries.len) {
             block.entries[block.index] = .{
-                .address = @intCast(u61, page_table_entry_address.value()),
-                .type = page_table_entry_type,
+                .address = @intCast(lib.FieldType(PageTableEntry, "address"), page_table_entry_address.value()),
+                .flags = flags,
             };
             block.index += 1;
         } else return InsertionError.block_is_full;
@@ -189,10 +192,13 @@ pub const PageTableBlock = extern struct {
 };
 
 pub const PageTableEntry = packed struct(u64) {
-    address: u61,
-    type: Type,
-    // type: Type,
-    // address: PhysicalAddress,
+    address: u48,
+    flags: Flags,
 
     pub const Type = cpu.arch.PageTableEntry;
+
+    pub const Flags = packed struct(u16) {
+        type: Type,
+        reserved: u14 = 0,
+    };
 };

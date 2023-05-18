@@ -22,7 +22,7 @@ pub const test_runner = @import("cpu/test_runner.zig");
 pub const arch = @import("cpu/arch.zig");
 pub const capabilities = @import("cpu/capabilities.zig");
 
-pub export var stack: [0x4000]u8 align(0x1000) = undefined;
+pub export var stack: [0x8000]u8 align(0x1000) = undefined;
 pub export var heap_allocator = Heap{};
 pub export var page_allocator = PageAllocator{
     .head = null,
@@ -64,7 +64,8 @@ pub const Driver = extern struct {
 pub const UserScheduler = extern struct {
     common: *rise.UserScheduler,
     capability_root_node: capabilities.Root,
-    padding: [lib.arch.valid_page_sizes[0] - @sizeOf(capabilities.Root) - @sizeOf(*rise.UserScheduler)]u8,
+    padding: [padding_len]u8 = .{0} ** padding_len,
+    const padding_len = lib.arch.valid_page_sizes[0] - @sizeOf(capabilities.Root) - @sizeOf(*rise.UserScheduler);
 
     comptime {
         assert(@sizeOf(UserScheduler) == lib.arch.valid_page_sizes[0]);
@@ -292,17 +293,17 @@ pub const VirtualAddressSpace = extern struct {
 
     pub const paging = privileged.arch.current.paging;
 
-    pub fn new() !*VirtualAddressSpace {
-        const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
-
-        virtual_address_space.* = .{
-            .arch = undefined,
-        };
-
-        virtual_address_space.arch = try paging.Specific.new(virtual_address_space.getPageAllocatorInterface(), page_tables);
-
-        return virtual_address_space;
-    }
+    // pub fn new() !*VirtualAddressSpace {
+    //     const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
+    //
+    //     virtual_address_space.* = .{
+    //         .arch = undefined,
+    //     };
+    //
+    //     virtual_address_space.arch = try paging.Specific.new(virtual_address_space.getPageAllocatorInterface(), page_tables);
+    //
+    //     return virtual_address_space;
+    // }
 
     fn callbackHeapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
         _ = alignment;
@@ -433,11 +434,6 @@ pub const VirtualAddressSpace = extern struct {
 
             if (it == null) it = last;
         }
-    }
-
-    pub inline fn translateAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress) !PhysicalAddress {
-        const physical_address = try paging.translateAddress(virtual_address_space.arch, virtual_address);
-        return physical_address;
     }
 
     pub fn getPageAllocatorInterface(virtual_address_space: *VirtualAddressSpace) PageAllocatorInterface {

@@ -30,7 +30,6 @@ pub const ResourceOwner = enum(u2) {
 const panic_logger = lib.log.scoped(.PANIC);
 
 pub inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {
-    log.info("Exiting with {s}", .{@tagName(exit_code)});
     comptime assert(@sizeOf(lib.QEMU.ExitCode) == @sizeOf(u32));
     arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(exit_code));
 
@@ -116,25 +115,29 @@ pub const VirtualAddress = enum(u64) {
     null = 0,
     _,
 
-    const VA = @This();
     pub usingnamespace AddressInterface(@This());
 
-    pub inline fn new(address: u64) VA {
-        return @intToEnum(VA, address);
+    pub inline fn new(address: u64) VirtualAddress {
+        return @intToEnum(VirtualAddress, address);
     }
 
-    pub inline fn access(virtual_address: VA, comptime Ptr: type) Ptr {
+    pub inline fn access(virtual_address: VirtualAddress, comptime Ptr: type) Ptr {
         return @intToPtr(Ptr, lib.safeArchitectureCast(virtual_address.value()));
     }
 
-    pub inline fn isValid(virtual_address: VA) bool {
+    pub inline fn isValid(virtual_address: VirtualAddress) bool {
         _ = virtual_address;
         return true;
     }
 
-    pub inline fn toPhysicalAddress(virtual_address: VA) PhysicalAddress {
-        if (virtual_address.value() < lib.config.cpu_driver_higher_half_address) @panic("toPhysicalAddress");
+    pub inline fn toPhysicalAddress(virtual_address: VirtualAddress) PhysicalAddress {
+        assert(virtual_address.value() >= lib.config.cpu_driver_higher_half_address);
         return @intToEnum(PhysicalAddress, virtual_address.value() - lib.config.cpu_driver_higher_half_address);
+    }
+
+    pub inline fn toGuaranteedPhysicalAddress(virtual_address: VirtualAddress) PhysicalAddress {
+        assert(virtual_address.value() < lib.config.cpu_driver_higher_half_address);
+        return PhysicalAddress.new(virtual_address.value());
     }
 };
 
@@ -191,9 +194,25 @@ pub fn RegionInterface(comptime Region: type) type {
             assert(size <= region.size);
             const result = Region{
                 .address = region.address,
-                .size = region.size,
+                .size = size,
             };
             region.* = region.offset(size);
+
+            return result;
+        }
+
+        pub inline fn split(region: Region, comptime count: comptime_int) [count]Region {
+            const region_size = @divExact(region.size, count);
+            var result: [count]Region = undefined;
+            var address = region.address;
+            var region_offset: u64 = 0;
+            inline for (&result) |*split_region| {
+                split_region.* = Region{
+                    .address = address.offset(region_offset),
+                    .size = region_size,
+                };
+                region_offset += region_size;
+            }
 
             return result;
         }

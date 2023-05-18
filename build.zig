@@ -35,6 +35,7 @@ const BuildSteps = struct {
     test_run: *Step,
     test_debug: *Step,
     test_all: *Step,
+    test_host: *Step,
 };
 
 var ci = false;
@@ -113,6 +114,7 @@ pub fn build(b_arg: *Build) !void {
         .test_run = b.step("test", "Run unit tests"),
         .test_debug = b.step("test_debug", "Debug unit tests"),
         .test_all = b.step("test_all", "Run all unit tests"),
+        .test_host = b.step("test_host", "Run host unit tests"),
     };
 
     const disk_image_builder_modules = &.{ .lib, .host, .bootloader };
@@ -216,6 +218,7 @@ pub fn build(b_arg: *Build) !void {
         const run_test_step = b.addRunArtifact(test_exe);
         //run_test_step.condition = .always;
         build_steps.test_all.dependOn(&run_test_step.step);
+        build_steps.test_host.dependOn(&run_test_step.step);
     }
 
     {
@@ -664,7 +667,7 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
         .cpu_arch = asked_arch,
         .cpu_model = switch (common.cpu.arch) {
             .x86 => .determined_by_cpu_arch,
-            .x86_64 => if (execution_mode == .privileged) .determined_by_cpu_arch else .{ .explicit = &common.Target.x86.cpu.x86_64_v3 },
+            .x86_64 => if (execution_mode == .privileged) .determined_by_cpu_arch else .{ .explicit = &common.Target.x86.cpu.x86_64_v2 },
             else => .determined_by_cpu_arch,
         },
         .os_tag = .freestanding,

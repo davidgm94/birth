@@ -49,8 +49,6 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
     efer.SCE = true;
     efer.write();
 
-    _ = minimal_paging.translateAddress(privileged.VirtualAddress.new(0xffff_ffff_8000_0000)) catch @panic("not mapped");
-
     minimal_paging.cr3.write();
 
     if (lib.cpu.arch == .x86) {
@@ -63,7 +61,7 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
         );
         cr4 |= (1 << 5);
         asm volatile (
-            \\mov %[cr4], %%cr4 
+            \\mov %[cr4], %%cr4
             :
             : [cr4] "r" (cr4),
             : "memory"
@@ -78,7 +76,7 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
         );
         cr0 |= (1 << 31);
         asm volatile (
-            \\mov %[cr0], %%cr0 
+            \\mov %[cr0], %%cr0
             :
             : [cr0] "r" (cr0),
             : "memory"
