@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const log = lib.log.scoped(.RUNNER);
 const host = @import("host");
 const Configuration = lib.Configuration;
 
@@ -223,7 +224,7 @@ pub fn main() anyerror!void {
                     try argument_list.append("-S");
                 }
 
-                const use_gf = true;
+                const use_gf = false;
                 var command_line_gdb = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
                 if (use_gf) {
                     try command_line_gdb.append("gf2");
@@ -262,27 +263,27 @@ pub fn main() anyerror!void {
             var process = host.ChildProcess.init(argument_list.items, wrapped_allocator.zigUnwrap());
             const result = try process.spawnAndWait();
 
-            switch (result) {
-                .Exited => |exit_code| {
-                    if (exit_code & 1 == 0) {
-                        return Error.qemu_error;
-                    }
-
+            if (result == .Exited) {
+                const exit_code = result.Exited;
+                if (exit_code & 1 != 0) {
                     const mask = lib.maxInt(@TypeOf(exit_code)) - 1;
                     const masked_exit_code = exit_code & mask;
 
-                    if (masked_exit_code == 0) {
-                        return Error.qemu_error;
-                    }
+                    if (masked_exit_code != 0) {
+                        const qemu_exit_code = @intToEnum(lib.QEMU.ExitCode, masked_exit_code >> 1);
 
-                    const qemu_exit_code = @intToEnum(lib.QEMU.ExitCode, masked_exit_code >> 1);
-
-                    if (qemu_exit_code != .success) {
-                        return Error.qemu_error;
-                    }
-                },
-                else => return Error.qemu_error,
+                        switch (qemu_exit_code) {
+                            .success => return log.info("Success!", .{}),
+                            .failure => log.err("QEMU exited with failure code", .{}),
+                            _ => log.err("Totally unexpected value", .{}),
+                        }
+                    } else log.err("QEMU exited with unexpected code: {}. Masked: {}", .{ exit_code, masked_exit_code });
+                } else log.err("QEMU exited with unexpected code: {}", .{exit_code});
+            } else {
+                log.err("QEMU was {s}", .{@tagName(result)});
             }
+
+            return Error.qemu_error;
         },
     }
 }

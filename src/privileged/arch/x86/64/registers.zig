@@ -116,15 +116,15 @@ pub const cr4 = packed struct(u64) {
     machine_check_enable: bool = false,
     page_global_enable: bool = true,
     performance_monitoring_counter_enable: bool = true,
-    operating_system_support_for_fx_save_restore: bool = true,
-    operating_system_support_for_unmasked_simd_fp_exceptions: bool = false,
+    OSFXSR: bool = true,
+    OSXMMEXCPT: bool = false,
     user_mode_instruction: bool = false,
     linear_addresses_57_bit: bool = false,
     vmx_enable: bool = false,
     smx_enable: bool = false,
     fs_gs_base_enable: bool = false,
     pcid_enable: bool = false,
-    os_xsave_enable: bool = false,
+    OSXSAVE: bool = false,
     key_locker_enable: bool = false,
     supervisor_mode_execution_prevention_enable: bool = false,
     supervisor_mode_access_prevention_enable: bool = false,
@@ -307,5 +307,51 @@ pub const IA32_APIC_BASE = packed struct(u64) {
 
     pub inline fn getAddress(ia32_apic_base: IA32_APIC_BASE) PhysicalAddress {
         return PhysicalAddress.new(@as(u64, ia32_apic_base.address) << @bitOffsetOf(IA32_APIC_BASE, "address"));
+    }
+};
+
+pub const XCR0 = packed struct(u64) {
+    X87: bool = true,
+    SSE: bool = true,
+    AVX: bool = false,
+    BNDREG: bool = false,
+    BNDCSR: bool = false,
+    opmask: bool = false,
+    ZMM_hi256: bool = false,
+    Hi16_ZMM: bool = false,
+    _: bool = false,
+    PKRU: bool = false,
+    reserved: u7 = 0,
+    AMX_TILECFG: bool = false,
+    AMX_TILEDATA: bool = false,
+    reserved1: u45 = 0,
+
+    pub inline fn read() XCR0 {
+        var eax: u32 = undefined;
+        var edx: u32 = undefined;
+
+        asm volatile (
+            \\xgetbv
+            : [eax] "={eax}" (eax),
+              [edx] "={edx}" (edx),
+            : [ecx] "i" (@as(u32, 0)),
+        );
+
+        const xcr0 = @bitCast(XCR0, @as(u64, edx) << 32 | eax);
+        return xcr0;
+    }
+
+    pub inline fn write(xcr0: XCR0) void {
+        const bitcasted_xcr0 = @bitCast(u64, xcr0);
+        const eax = @truncate(u32, bitcasted_xcr0);
+        const edx = @truncate(u32, bitcasted_xcr0 >> 32);
+
+        asm volatile (
+            \\xsetbv
+            :
+            : [eax] "{eax}" (eax),
+              [edx] "{edx}" (edx),
+              [ecx] "{edx}" (@as(u32, 0)),
+        );
     }
 };
