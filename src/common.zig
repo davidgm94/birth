@@ -279,8 +279,7 @@ pub const ImageConfig = struct {
 
     pub fn get(allocator: ZigAllocator, path: []const u8) !ImageConfig {
         const image_config_file = try std.fs.cwd().readFileAlloc(allocator, path, maxInt(usize));
-        var json_stream = std.json.TokenStream.init(image_config_file);
-        return try std.json.parse(ImageConfig, &json_stream, .{ .allocator = allocator });
+        return try std.json.parseFromSlice(ImageConfig, allocator, image_config_file, .{});
     }
 };
 

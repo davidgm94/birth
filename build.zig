@@ -91,8 +91,7 @@ pub fn build(b_arg: *Build) !void {
 
     default_configuration = blk: {
         const default_json_file = try std.fs.cwd().readFileAlloc(b.allocator, default_cfg_override, common.maxInt(usize));
-        var token_stream = std.json.TokenStream.init(default_json_file);
-        const cfg = try std.json.parse(Configuration, &token_stream, .{ .allocator = b.allocator });
+        const cfg = try std.json.parseFromSlice(Configuration, b.allocator, default_json_file, .{});
 
         break :blk Configuration{
             .architecture = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = cfg.architecture } }).getCpuArch(),
@@ -230,8 +229,7 @@ pub fn build(b_arg: *Build) !void {
             const dir_name = entry.name;
             const file_path = try std.mem.concat(b.allocator, u8, &.{ dir_name, "/module.json" });
             const file = try user_program_dir.dir.readFileAlloc(b.allocator, file_path, common.maxInt(usize));
-            var token_stream = std.json.TokenStream.init(file);
-            const user_program = try std.json.parse(common.UserProgram, &token_stream, .{ .allocator = b.allocator });
+            const user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
             try user_module_list.append(.{
                 .program = user_program,
                 .name = dir_name,

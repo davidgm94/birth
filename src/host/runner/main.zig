@@ -102,8 +102,7 @@ pub fn main() anyerror!void {
             const qemu_options = arguments_result.qemu_options;
 
             const config_file = try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), "config/qemu.json", max_file_length);
-            var token_stream = lib.json.TokenStream.init(config_file);
-            const arguments = try lib.json.parse(Arguments, &token_stream, .{ .allocator = wrapped_allocator.zigUnwrap() });
+            const arguments = try lib.json.parseFromSlice(Arguments, wrapped_allocator.zigUnwrap(), config_file, .{});
 
             var argument_list = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
 
