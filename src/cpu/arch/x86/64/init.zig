@@ -1460,26 +1460,22 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
             const cpu_ptable_count = cpu_indexed_top.PD - cpu_indexed_base.PD + 1;
             assert(cpu_ptable_count <= ptable_count);
 
-            const cpu_contained_in_base = cpu_indexed_base.PD >= indexed_base.PD and cpu_indexed_top.PD <= indexed_top.PD;
-            _ = cpu_contained_in_base;
-
             const support_pdp_table_count = 1;
             const support_pd_table_count = 1;
             const min = @min(@bitCast(u64, indexed_base), @bitCast(u64, cpu_indexed_base));
             const max = @max(@bitCast(u64, indexed_top), @bitCast(u64, cpu_indexed_top));
+            const min_indexed = @bitCast(paging.IndexedVirtualAddress, min);
             const general_diff = max - min;
-            const support_p_table_count = @divExact(general_diff, lib.arch.valid_page_sizes[0]);
+            const pte_count = @divExact(general_diff, lib.arch.valid_page_sizes[0]);
+            const support_p_table_count = 1 + pte_count / paging.page_table_entry_count + @boolToInt(@as(usize, paging.page_table_entry_count) - min_indexed.PT < pte_count);
+            log.debug("Support p table count: {}", .{support_p_table_count});
+            log.debug("indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, indexed_base), @bitCast(u64, indexed_top) });
+            log.debug("cpu indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, cpu_indexed_base), @bitCast(u64, cpu_indexed_top) });
 
             const support_page_table_count = @as(usize, support_pdp_table_count + support_pd_table_count + support_p_table_count);
             const support_page_table_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(support_page_table_count * paging.page_table_size, paging.page_table_alignment));
             log.debug("Support page tables: 0x{x} - 0x{x}", .{ support_page_table_physical_region.address.value(), support_page_table_physical_region.top().value() });
             log.debug("PD table count: {}. P table count: {}", .{ support_pd_table_count, support_p_table_count });
-            //assert(indexed_base.PT < indexed_top.PT);
-            const flags = .{
-                .present = true,
-                .write = true,
-            };
-            _ = flags;
 
             const support_pdp_offset = 0;
             const support_pd_offset = support_pdp_table_count * paging.page_table_size;
