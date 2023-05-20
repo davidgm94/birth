@@ -93,94 +93,94 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
     return struct {
         pub inline fn read() u64 {
             return switch (Register) {
-                .rax => asm volatile ("mov %%rax, %[result]"
+                .rax => asm volatile ("mov %rax, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rbx => asm volatile ("mov %%rbx, %[result]"
+                .rbx => asm volatile ("mov %rbx, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rcx => asm volatile ("mov %%rcx, %[result]"
+                .rcx => asm volatile ("mov %rcx, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rdx => asm volatile ("mov %%rdx, %[result]"
+                .rdx => asm volatile ("mov %rdx, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rbp => asm volatile ("mov %%rbp, %[result]"
+                .rbp => asm volatile ("mov %rbp, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rsp => asm volatile ("mov %%rsp, %[result]"
+                .rsp => asm volatile ("mov %rsp, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rsi => asm volatile ("mov %%rsi, %[result]"
+                .rsi => asm volatile ("mov %rsi, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .rdi => asm volatile ("mov %%rdi, %[result]"
+                .rdi => asm volatile ("mov %rdi, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r8 => asm volatile ("mov %%r8, %[result]"
+                .r8 => asm volatile ("mov %r8, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r9 => asm volatile ("mov %%r9, %[result]"
+                .r9 => asm volatile ("mov %r9, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r10 => asm volatile ("mov %%r10, %[result]"
+                .r10 => asm volatile ("mov %r10, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r11 => asm volatile ("mov %%r11, %[result]"
+                .r11 => asm volatile ("mov %r11, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r12 => asm volatile ("mov %%r12, %[result]"
+                .r12 => asm volatile ("mov %r12, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r13 => asm volatile ("mov %%r13, %[result]"
+                .r13 => asm volatile ("mov %r13, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r14 => asm volatile ("mov %%r14, %[result]"
+                .r14 => asm volatile ("mov %r14, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .r15 => asm volatile ("mov %%r15, %[result]"
+                .r15 => asm volatile ("mov %r15, %[result]"
                     : [result] "=r" (-> u64),
                 ),
-                .gs => asm volatile ("mov %%gs, %[result]"
-                    : [result] "=r" (-> u64),
-                    :
-                    : "memory"
-                ),
-                .cs => asm volatile ("mov %%cs, %[result]"
+                .gs => asm volatile ("mov %gs, %[result]"
                     : [result] "=r" (-> u64),
                     :
                     : "memory"
                 ),
-                .dr0 => asm volatile ("mov %%dr0, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr1 => asm volatile ("mov %%dr1, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr2 => asm volatile ("mov %%dr2, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr3 => asm volatile ("mov %%dr3, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr4 => asm volatile ("mov %%dr4, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr5 => asm volatile ("mov %%dr5, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr6 => asm volatile ("mov %%dr6, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .dr7 => asm volatile ("mov %%dr7, %[result]"
-                    : [result] "=r" (-> u64),
-                ),
-                .cr2 => asm volatile ("mov %%cr2, %[result]"
+                .cs => asm volatile ("mov %cs, %[result]"
                     : [result] "=r" (-> u64),
                     :
                     : "memory"
                 ),
-                .cr8 => asm volatile ("mov %%cr8, %[result]"
+                .dr0 => asm volatile ("mov %dr0, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr1 => asm volatile ("mov %dr1, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr2 => asm volatile ("mov %dr2, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr3 => asm volatile ("mov %dr3, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr4 => asm volatile ("mov %dr4, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr5 => asm volatile ("mov %dr5, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr6 => asm volatile ("mov %dr6, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .dr7 => asm volatile ("mov %dr7, %[result]"
+                    : [result] "=r" (-> u64),
+                ),
+                .cr2 => asm volatile ("mov %cr2, %[result]"
+                    : [result] "=r" (-> u64),
+                    :
+                    : "memory"
+                ),
+                .cr8 => asm volatile ("mov %cr8, %[result]"
                     : [result] "=r" (-> u64),
                     :
                     : "memory"
@@ -190,118 +190,118 @@ pub fn SimpleR64(comptime Register: SimpleRegister) type {
 
         pub inline fn write(value: u64) void {
             switch (Register) {
-                .rax => asm volatile ("mov %[in], %%rax"
+                .rax => asm volatile ("mov %[in], %rax"
                     :
                     : [in] "r" (value),
                 ),
-                .rbx => asm volatile ("mov %[in], %%rbx"
+                .rbx => asm volatile ("mov %[in], %rbx"
                     :
                     : [in] "r" (value),
                 ),
-                .rcx => asm volatile ("mov %[in], %%rcx"
+                .rcx => asm volatile ("mov %[in], %rcx"
                     :
                     : [in] "r" (value),
                 ),
-                .rdx => asm volatile ("mov %[in], %%rdx"
+                .rdx => asm volatile ("mov %[in], %rdx"
                     :
                     : [in] "r" (value),
                 ),
-                .rbp => asm volatile ("mov %[in], %%rbp"
+                .rbp => asm volatile ("mov %[in], %rbp"
                     :
                     : [in] "r" (value),
                 ),
-                .rsp => asm volatile ("mov %[in], %%rsp"
+                .rsp => asm volatile ("mov %[in], %rsp"
                     :
                     : [in] "r" (value),
                 ),
-                .rsi => asm volatile ("mov %[in], %%rsi"
+                .rsi => asm volatile ("mov %[in], %rsi"
                     :
                     : [in] "r" (value),
                 ),
-                .rdi => asm volatile ("mov %[in], %%rdi"
+                .rdi => asm volatile ("mov %[in], %rdi"
                     :
                     : [in] "r" (value),
                 ),
-                .r8 => asm volatile ("mov %[in], %%r8"
+                .r8 => asm volatile ("mov %[in], %r8"
                     :
                     : [in] "r" (value),
                 ),
-                .r9 => asm volatile ("mov %[in], %%r9"
+                .r9 => asm volatile ("mov %[in], %r9"
                     :
                     : [in] "r" (value),
                 ),
-                .r10 => asm volatile ("mov %[in], %%r10"
+                .r10 => asm volatile ("mov %[in], %r10"
                     :
                     : [in] "r" (value),
                 ),
-                .r11 => asm volatile ("mov %[in], %%r11"
+                .r11 => asm volatile ("mov %[in], %r11"
                     :
                     : [in] "r" (value),
                 ),
-                .r12 => asm volatile ("mov %[in], %%r12"
+                .r12 => asm volatile ("mov %[in], %r12"
                     :
                     : [in] "r" (value),
                 ),
-                .r13 => asm volatile ("mov %[in], %%r13"
+                .r13 => asm volatile ("mov %[in], %r13"
                     :
                     : [in] "r" (value),
                 ),
-                .r14 => asm volatile ("mov %[in], %%r14"
+                .r14 => asm volatile ("mov %[in], %r14"
                     :
                     : [in] "r" (value),
                 ),
-                .r15 => asm volatile ("mov %[in], %%r15"
+                .r15 => asm volatile ("mov %[in], %r15"
                     :
                     : [in] "r" (value),
                 ),
-                .gs => asm volatile ("mov %[in], %%gs"
-                    :
-                    : [in] "r" (value),
-                    : "memory"
-                ),
-                .cs => asm volatile ("mov %[in], %%cs"
+                .gs => asm volatile ("mov %[in], %gs"
                     :
                     : [in] "r" (value),
                     : "memory"
                 ),
-                .dr0 => asm volatile ("mov %[in], %%dr0"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr1 => asm volatile ("mov %[in], %%dr1"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr2 => asm volatile ("mov %[in], %%dr2"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr3 => asm volatile ("mov %[in], %%dr3"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr4 => asm volatile ("mov %[in], %%dr4"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr5 => asm volatile ("mov %[in], %%dr5"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr6 => asm volatile ("mov %[in], %%dr6"
-                    :
-                    : [in] "r" (value),
-                ),
-                .dr7 => asm volatile ("mov %[in], %%dr7"
-                    :
-                    : [in] "r" (value),
-                ),
-                .cr2 => asm volatile ("mov %[in], %%cr2"
+                .cs => asm volatile ("mov %[in], %cs"
                     :
                     : [in] "r" (value),
                     : "memory"
                 ),
-                .cr8 => asm volatile ("mov %[in], %%cr8"
+                .dr0 => asm volatile ("mov %[in], %dr0"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr1 => asm volatile ("mov %[in], %dr1"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr2 => asm volatile ("mov %[in], %dr2"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr3 => asm volatile ("mov %[in], %dr3"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr4 => asm volatile ("mov %[in], %dr4"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr5 => asm volatile ("mov %[in], %dr5"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr6 => asm volatile ("mov %[in], %dr6"
+                    :
+                    : [in] "r" (value),
+                ),
+                .dr7 => asm volatile ("mov %[in], %dr7"
+                    :
+                    : [in] "r" (value),
+                ),
+                .cr2 => asm volatile ("mov %[in], %cr2"
+                    :
+                    : [in] "r" (value),
+                    : "memory"
+                ),
+                .cr8 => asm volatile ("mov %[in], %cr8"
                     :
                     : [in] "r" (value),
                     : "memory"
