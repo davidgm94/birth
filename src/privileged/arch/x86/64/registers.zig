@@ -42,13 +42,13 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn read() cr3 {
-        return asm volatile ("mov %%cr3, %[result]"
+        return asm volatile ("mov %cr3, %[result]"
             : [result] "=r" (-> cr3),
         );
     }
 
     pub inline fn write(value: cr3) void {
-        asm volatile ("mov %[in], %%cr3"
+        asm volatile ("mov %[in], %cr3"
             :
             : [in] "r" (value),
         );
@@ -84,14 +84,14 @@ pub const cr0 = packed struct(u64) {
     upper_32_bits: u32 = 0,
 
     pub inline fn read() cr0 {
-        return asm volatile ("mov %%cr0, %[result]"
+        return asm volatile ("mov %cr0, %[result]"
             : [result] "=r" (-> cr0),
         );
     }
 
     pub inline fn write(cr0r: cr0) void {
         asm volatile (
-            \\mov %[cr0], %%cr0
+            \\mov %[cr0], %cr0
             :
             : [cr0] "r" (cr0r),
         );
@@ -135,14 +135,14 @@ pub const cr4 = packed struct(u64) {
 
     pub fn read() cr4 {
         return asm volatile (
-            \\mov %%cr4, %[result]
+            \\mov %cr4, %[result]
             : [result] "=r" (-> cr4),
         );
     }
 
     pub fn write(cr4_register: cr4) void {
         asm volatile (
-            \\mov %[cr4], %%cr4
+            \\mov %[cr4], %cr4
             :
             : [cr4] "r" (cr4_register),
         );

@@ -54,14 +54,14 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
     if (lib.cpu.arch == .x86) {
         // Enable PAE
         var cr4 = asm volatile (
-            \\mov %%cr4, %[cr4]
+            \\mov %cr4, %[cr4]
             : [cr4] "=r" (-> u32),
             :
             : "memory"
         );
         cr4 |= (1 << 5);
         asm volatile (
-            \\mov %[cr4], %%cr4
+            \\mov %[cr4], %cr4
             :
             : [cr4] "r" (cr4),
             : "memory"
@@ -69,14 +69,14 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
 
         // Enable paging
         var cr0 = asm volatile (
-            \\mov %%cr0, %[cr0]
+            \\mov %cr0, %[cr0]
             : [cr0] "=r" (-> u32),
             :
             : "memory"
         );
         cr0 |= (1 << 31);
         asm volatile (
-            \\mov %[cr0], %%cr0
+            \\mov %[cr0], %cr0
             :
             : [cr0] "r" (cr0),
             : "memory"
