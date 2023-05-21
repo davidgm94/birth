@@ -177,10 +177,10 @@ pub fn main() anyerror!void {
                     "host",
                 });
             } else {
-                // switch (common.cpu.arch) {
-                //     .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "qemu64,level=11,+x2apic" }),
-                //     else => return Error.architecture_not_supported,
-                // }
+                switch (lib.cpu.arch) {
+                    .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "max,+avx2" }),
+                    else => return Error.architecture_not_supported,
+                }
 
                 if (arguments.trace) |tracees| {
                     for (tracees) |tracee| {

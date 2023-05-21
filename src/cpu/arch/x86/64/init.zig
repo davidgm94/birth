@@ -203,23 +203,6 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     efer.SCE = true;
     efer.write();
 
-    var my_cr4 = cr4.read();
-    my_cr4.OSFXSR = true;
-    my_cr4.OSXMMEXCPT = true;
-    // my_cr4.OSXSAVE = true;
-    my_cr4.page_global_enable = true;
-    my_cr4.performance_monitoring_counter_enable = true;
-    my_cr4.write();
-    log.debug("Wrote CR4", .{});
-
-    var my_cr0 = cr0.read();
-    my_cr0.monitor_coprocessor = true;
-    my_cr0.emulation = false;
-    my_cr0.numeric_error = true;
-    my_cr0.task_switched = false;
-    my_cr0.write();
-    log.debug("Wrote CR0", .{});
-
     // TODO: AVX
 
     // const avx_xsave_cpuid = cpuid(1);
@@ -237,6 +220,23 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
     }
+
+    var my_cr4 = cr4.read();
+    my_cr4.OSFXSR = true;
+    my_cr4.OSXMMEXCPT = true;
+    //my_cr4.OSXSAVE = true;
+    my_cr4.page_global_enable = true;
+    my_cr4.performance_monitoring_counter_enable = true;
+    my_cr4.write();
+    log.debug("Wrote CR4", .{});
+
+    var my_cr0 = cr0.read();
+    my_cr0.monitor_coprocessor = true;
+    my_cr0.emulation = false;
+    my_cr0.numeric_error = true;
+    my_cr0.task_switched = false;
+    my_cr0.write();
+    log.debug("Wrote CR0", .{});
 
     var ia32_apic_base = IA32_APIC_BASE.read();
     // The bootloader already mapped APIC
@@ -1127,6 +1127,7 @@ fn spawnInitBSP(init_file: []const u8, allocator: *Allocator, cpu_page_tables: p
     const entry_point = init_elf.getEntryPoint();
     const program_headers = init_elf.getProgramHeaders();
     const scheduler_common = init_scheduler.common;
+    log.debug("Scheduler common: 0x{x}", .{@ptrToInt(scheduler_common)});
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
@@ -1149,9 +1150,17 @@ fn spawnInitBSP(init_file: []const u8, allocator: *Allocator, cpu_page_tables: p
         }
     }
 
-    //try address_space.debugMemoryMap();
+    // Once all page tables are set up, copy lower half of the address space to the user page table
+    const cpu_pml4 = page_table_regions.getCpuPML4();
+    const user_pml4 = page_table_regions.getUserPML4();
+    const half_page_table_entry_count = @divExact(paging.page_table_entry_count, 2);
+    @memcpy(user_pml4[0..half_page_table_entry_count], cpu_pml4[0..half_page_table_entry_count]);
+
     cpu.user_scheduler = init_scheduler;
     address_space.cr3.write();
+
+    scheduler_common.self = scheduler_common;
+    log.debug("PTR: 0x{x}. VALUE: 0x{x}", .{ @ptrToInt(&scheduler_common.self), @ptrToInt(scheduler_common.self) });
 
     // Set arguments
     {
@@ -1318,6 +1327,17 @@ const PageTableRegions = extern struct {
         const address_space = paging.Specific{ .cr3 = cr3.fromAddress(regions.get(.pml4).address) };
         return address_space;
     }
+
+    pub inline fn getCpuPML4(regions: PageTableRegions) *paging.PML4Table {
+        const cpu_pml4_table = regions.get(.pml4).offset(0).toHigherHalfVirtualAddress().access(paging.PML4TE)[0..paging.page_table_entry_count];
+        return cpu_pml4_table;
+    }
+
+    pub inline fn getUserPML4(regions: PageTableRegions) *paging.PML4Table {
+        const user_pml4_table = regions.get(.pml4).offset(paging.page_table_size).toHigherHalfVirtualAddress().access(paging.PML4TE);
+        assert(user_pml4_table.len == paging.page_table_entry_count);
+        return user_pml4_table[0..paging.page_table_entry_count];
+    }
 };
 
 const SpawnInitCommonResult = extern struct {
@@ -1337,7 +1357,6 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
     cpu.driver.valid = true;
 
     const page_table_regions = try PageTableRegions.create(allocator);
-    const address_space = page_table_regions.getAddressSpace();
 
     const indexed_start = @bitCast(paging.IndexedVirtualAddress, user_scheduler_virtual_address.value());
     const indexed_end = @bitCast(paging.IndexedVirtualAddress, user_scheduler_virtual_address.offset(PageTableRegions.init_vas_size).value());
@@ -1575,14 +1594,22 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
         }
     }
 
-    const desired_address = VirtualAddress.new(0xffff_ffff_8000_0000);
-    log.debug("[START] TRANSLATING DESIRED ADDRESS 0x{x}", .{desired_address.value()});
-    _ = try address_space.translateAddress(desired_address, .{
-        .execute_disable = false,
-    });
-    log.debug("[END] TRANSLATING DESIRED ADDRESS", .{});
-
     const init_cpu_scheduler = try allocator.create(cpu.UserScheduler);
+    const init_cpu_scheduler_virtual_region = VirtualMemoryRegion.fromAnytype(init_cpu_scheduler);
+    log.debug("Init scheduler: 0x{x}", .{init_cpu_scheduler_virtual_region.address.value()});
+    const init_cpu_scheduler_physical_region = init_cpu_scheduler_virtual_region.toPhysicalAddress();
+    const cpu_scheduler_indexed = @bitCast(paging.IndexedVirtualAddress, init_cpu_scheduler_virtual_region.address.value());
+    const scheduler_pml4te = &page_table_regions.getPageTables(.pml4)[cpu_scheduler_indexed.PML4];
+    assert(scheduler_pml4te.present);
+    const scheduler_pdpte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pml4te)), *paging.PDPTable))[cpu_scheduler_indexed.PDP];
+    assert(scheduler_pdpte.present);
+    const scheduler_pdte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdpte)), *paging.PDTable))[cpu_scheduler_indexed.PD];
+    assert(scheduler_pdte.present);
+    const scheduler_pte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdte)), *paging.PTable))[cpu_scheduler_indexed.PT];
+    scheduler_pte.* = paging.getPageEntry(paging.PTE, init_cpu_scheduler_physical_region.address.value(), .{
+        .present = true,
+        .write = true,
+    });
 
     init_cpu_scheduler.* = cpu.UserScheduler{
         .common = user_scheduler_virtual_address.access(*rise.UserScheduler),
@@ -1596,6 +1623,9 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
                     .memory = scheduler_memory_physical_region,
                 },
                 .page_tables = .{},
+                .io = .{
+                    .debug = true,
+                },
             },
         },
     };
@@ -1605,6 +1635,7 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
     assert(init_cpu_scheduler.capability_root_node.dynamic.page_tables.last_block == null);
 
     const higher_half_scheduler_common = scheduler_memory_physical_region.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
+    log.debug("Higher half: 0x{x}", .{@ptrToInt(higher_half_scheduler_common)});
     higher_half_scheduler_common.disabled = true;
     higher_half_scheduler_common.core_id = cpu.core_id;
 

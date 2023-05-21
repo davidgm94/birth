@@ -355,3 +355,20 @@ pub const XCR0 = packed struct(u64) {
         );
     }
 };
+
+pub const FSBASE = struct {
+    pub inline fn write(value: u64) void {
+        asm volatile (
+            \\wrfsbase
+            :
+            : [value] "r" (value),
+        );
+    }
+
+    pub inline fn read() u64 {
+        return asm volatile (
+            \\wrfsbase
+            : [value] "r" (-> u64),
+        );
+    }
+};

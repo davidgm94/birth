@@ -88,7 +88,12 @@ pub const Dynamic = enum {
     pub const Map = extern struct {
         scheduler: Scheduler,
         page_tables: PageTables,
+        io: IO,
     };
+};
+
+pub const IO = extern struct {
+    debug: bool,
 };
 
 pub const Scheduler = extern struct {
@@ -120,15 +125,18 @@ pub const Root = extern struct {
         other.dynamic = root.dynamic;
     }
 
-    pub inline fn hasPermissions(root: *const Root, capability_type: rise.capabilities.Type) bool {
+    pub inline fn hasPermissions(root: *const Root, comptime capability_type: rise.capabilities.Type, command: @field(rise.capabilities, @tagName(capability_type))) bool {
         return switch (capability_type) {
-            // static
+            // static capabilities
             .cpu => root.static.cpu,
-            // inline .cpu => |capability| return @field(cpu.user_scheduler.static_capability_bitmap, @tagName(capability)),
-            // dynamic
-            else => {
-                log.warn("TODO: implement capabilities", .{});
-                privileged.exitFromQEMU(.success);
+            // dynamic capabilities
+            else => |capability| switch (capability) {
+                .io => switch (command) {
+                    .log => root.dynamic.io.debug,
+                    _ => false,
+                },
+                .cpu => unreachable,
+                else => @panic("TODO hasPermissions"),
             },
             // _ => return false,
         };

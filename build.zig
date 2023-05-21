@@ -667,7 +667,12 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
         .cpu_arch = asked_arch,
         .cpu_model = switch (common.cpu.arch) {
             .x86 => .determined_by_cpu_arch,
-            .x86_64 => if (execution_mode == .privileged) .determined_by_cpu_arch else .{ .explicit = &common.Target.x86.cpu.x86_64_v2 },
+            .x86_64 => if (execution_mode == .privileged) .determined_by_cpu_arch else
+            // zig fmt off
+            .determined_by_cpu_arch,
+            // .determined_by_cpu_arch,
+            // TODO: this causes some problems
+            //.{ .explicit = &common.Target.x86.cpu.x86_64_v3 },
             else => .determined_by_cpu_arch,
         },
         .os_tag = .freestanding,

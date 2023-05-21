@@ -43,6 +43,8 @@ fn schedulerInitDisabled(scheduler: *arch.Scheduler) void {
 pub var is_init = false;
 
 export fn riseInitializeDisabled(scheduler: *arch.Scheduler, arg_init: bool) callconv(.C) noreturn {
+    // TODO: delete when this code is unnecessary. In the meanwhile it counts as a sanity check
+    assert(arg_init);
     is_init = arg_init;
     schedulerInitDisabled(scheduler);
     thread.initDisabled(scheduler);
