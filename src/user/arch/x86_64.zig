@@ -27,8 +27,6 @@ pub const Scheduler = extern struct {
         assert(register_arena.registers.rip > lib.arch.valid_page_sizes[0]);
         assert(register_arena.registers.rflags.IF and register_arena.registers.rflags.reserved0);
 
-        scheduler.common.generic.disabled = false;
-
         register_arena.contextSwitch();
     }
 };

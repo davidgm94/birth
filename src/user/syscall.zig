@@ -15,7 +15,7 @@ pub fn shutdown() noreturn {
 }
 
 pub fn log(message: []const u8) void {
-    _ = invoke(.io, .stdout, [2]usize{ @ptrToInt(message.ptr), message.len });
+    _ = invoke(.io, .log, [2]usize{ @ptrToInt(message.ptr), message.len });
 }
 
 pub fn getCoreId() u32 {

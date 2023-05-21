@@ -42,53 +42,52 @@ pub const Registers = extern struct {
     pub fn restore(registers: *const Registers) noreturn {
         const fmt = lib.comptimePrint;
         asm volatile (fmt(
-                // "mov {}(%[registers]), %r15\n\t" ++
-                    // "mov {}(%[registers]), %r14\n\t" ++
-                    // "mov {}(%[registers]), %r13\n\t" ++
-                    // "mov {}(%[registers]), %r12\n\t" ++
-                    // "mov {}(%[registers]), %rbp\n\t" ++
-                    // "mov {}(%[registers]), %rbx\n\t" ++
-                    // "mov {}(%[registers]), %r11\n\t" ++
-                    // "mov {}(%[registers]), %r10\n\t" ++
-                    // "mov {}(%[registers]), %r9\n\t" ++
-                    // "mov {}(%[registers]), %r8\n\t" ++
-                    // "mov {}(%[registers]), %rax\n\t" ++
-                    // "mov {}(%[registers]), %rcx\n\t" ++
-                    // "mov {}(%[registers]), %rdx\n\t" ++
-                    // "mov {}(%[registers]), %rsi\n\t" ++
+                "mov {}(%[registers]), %r15\n\t" ++
+                    "mov {}(%[registers]), %r14\n\t" ++
+                    "mov {}(%[registers]), %r13\n\t" ++
+                    "mov {}(%[registers]), %r12\n\t" ++
+                    "mov {}(%[registers]), %rbp\n\t" ++
+                    "mov {}(%[registers]), %rbx\n\t" ++
+                    "mov {}(%[registers]), %r11\n\t" ++
+                    "mov {}(%[registers]), %r10\n\t" ++
+                    "mov {}(%[registers]), %r9\n\t" ++
+                    "mov {}(%[registers]), %r8\n\t" ++
+                    "mov {}(%[registers]), %rax\n\t" ++
+                    "mov {}(%[registers]), %rcx\n\t" ++
+                    "mov {}(%[registers]), %rdx\n\t" ++
+                    "mov {}(%[registers]), %rsi\n\t" ++
                     "pushq %[ss]\n\t" ++
                     "pushq {}(%[registers])\n\t" ++
                     "pushq {}(%[registers])\n\t" ++
                     "pushq %[cs]\n\t" ++
                     "pushq {}(%[registers])\n\t" ++
-                    // "mov {}(%[registers]), %rdi\n\t" ++
+                    "mov {}(%[registers]), %rdi\n\t" ++
                     "iretq\n\t" ++
                     "1: jmp 1b",
 
                 .{
-                    // @offsetOf(Registers, "r15"),
-                    // @offsetOf(Registers, "r14"),
-                    // @offsetOf(Registers, "r13"),
-                    // @offsetOf(Registers, "r12"),
-                    // @offsetOf(Registers, "rbp"),
-                    // @offsetOf(Registers, "rbx"),
-                    // @offsetOf(Registers, "r11"),
-                    // @offsetOf(Registers, "r10"),
-                    // @offsetOf(Registers, "r9"),
-                    // @offsetOf(Registers, "r8"),
-                    // @offsetOf(Registers, "rax"),
-                    // @offsetOf(Registers, "rcx"),
-                    // @offsetOf(Registers, "rdx"),
-                    // @offsetOf(Registers, "rsi"),
+                    @offsetOf(Registers, "r15"),
+                    @offsetOf(Registers, "r14"),
+                    @offsetOf(Registers, "r13"),
+                    @offsetOf(Registers, "r12"),
+                    @offsetOf(Registers, "rbp"),
+                    @offsetOf(Registers, "rbx"),
+                    @offsetOf(Registers, "r11"),
+                    @offsetOf(Registers, "r10"),
+                    @offsetOf(Registers, "r9"),
+                    @offsetOf(Registers, "r8"),
+                    @offsetOf(Registers, "rax"),
+                    @offsetOf(Registers, "rcx"),
+                    @offsetOf(Registers, "rdx"),
+                    @offsetOf(Registers, "rsi"),
                     @offsetOf(Registers, "rsp"),
                     @offsetOf(Registers, "rflags"),
                     @offsetOf(Registers, "rip"),
-                    // @offsetOf(Registers, "rdi"),
+                    @offsetOf(Registers, "rdi"),
                 },
             )
             :
-            : 
-              [registers] "{rdi}" (registers),
+            : [registers] "{rdi}" (registers),
               [ss] "i" (rise.arch.user_data_selector),
               [cs] "i" (rise.arch.user_code_selector),
             : "memory"

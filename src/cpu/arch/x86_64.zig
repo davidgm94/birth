@@ -116,22 +116,23 @@ const SyscallRegisters = extern struct {
     ss: u64,
 };
 
-inline fn ok(result: struct {
-    value: u64,
+inline fn result(res: struct {
+    value: u64 = 0,
     another_value: u32 = 0,
+    @"error": u16 = 0,
     another_more_value: u8 = 0,
     flags: u7 = 0,
 }) rise.syscall.Result {
     return .{
         .rise = .{
             .first = .{
-                .padding1 = result.another_value,
-                .@"error" = 0,
-                .padding2 = result.another_more_value,
-                .padding3 = result.flags,
+                .padding1 = res.another_value,
+                .@"error" = res.@"error",
+                .padding2 = res.another_more_value,
+                .padding3 = res.flags,
                 .convention = .rise,
             },
-            .second = result.value,
+            .second = res.value,
         },
     };
 }
@@ -152,52 +153,34 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
     const arguments = [_]u64{ regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9 };
 
     // TODO: check capability address
-    switch (options.general.convention) {
-        .rise => {
-            if (cpu.user_scheduler.capability_root_node.hasPermissions(options.rise.type)) switch (options.rise.type) {
-                .cpu => {
-                    const command = @intToEnum(rise.capabilities.cpu, options.rise.command);
-                    switch (command) {
-                        .shutdown => privileged.exitFromQEMU(.success),
-                        .get_core_id => return ok(.{
-                            .value = cpu.core_id,
-                        }),
-                        // _ => @panic("Unknown cpu command"),
-                    }
-                },
-                .io => {
-                    const command = @intToEnum(rise.capabilities.io, options.rise.command);
-                    switch (command) {
-                        .stdout => {
+    return switch (options.general.convention) {
+        .rise => switch (options.rise.type) {
+            inline else => |capability_type| blk: {
+                const command = @intToEnum(capability_type.toCommand(), options.rise.command);
+                if (cpu.user_scheduler.capability_root_node.hasPermissions(capability_type, command)) switch (capability_type) {
+                    .io => switch (command) {
+                        .log => {
                             const message_ptr = @intToPtr(?[*]const u8, arguments[0]) orelse @panic("message null");
                             const message_len = arguments[1];
                             const message = message_ptr[0..message_len];
                             writer.writeAll(message) catch unreachable;
+
+                            break :blk result(.{});
                         },
-                        _ => @panic("Unknown io command"),
-                    }
-                },
-                else => @panic("TODO capabilities"),
-                // _ => @panic("not implemented"),
-            } else {
-                return .{
-                    .rise = .{
-                        .first = .{
-                            .@"error" = 1,
-                        },
-                        .second = 0,
+                        _ => break :blk result(.{ .@"error" = 1 }),
                     },
-                };
-            }
+                    .cpu => switch (command) {
+                        .shutdown => privileged.exitFromQEMU(.success),
+                        .get_core_id => break :blk result(.{
+                            .value = cpu.core_id,
+                        }),
+                        // _ => @panic("Unknown cpu command"),
+                    },
+                    else => @panic(@tagName(capability_type)),
+                } else break :blk result(.{ .@"error" = 1 });
+            },
         },
         .linux => @panic("linux syscall"),
-    }
-
-    return .{
-        .rise = .{
-            .first = .{},
-            .second = 0,
-        },
     };
 }
 
@@ -262,3 +245,7 @@ pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: 
 }
 pub const PageTableEntry = paging.Level;
 pub const root_page_table_entry = @intToEnum(cpu.arch.PageTableEntry, 0);
+
+pub const IOMap = extern struct {
+    debug: bool,
+};

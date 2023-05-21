@@ -177,6 +177,14 @@ pub fn RegionInterface(comptime Region: type) type {
             return new(addressToAddrT(@ptrToInt(slice.ptr)), slice.len);
         }
 
+        pub inline fn fromAnytype(any: anytype) Region {
+            assert(@typeInfo(@TypeOf(any)) == .Pointer);
+            return Region{
+                .address = VirtualAddress.new(@ptrToInt(any)),
+                .size = @sizeOf(@TypeOf(any.*)),
+            };
+        }
+
         pub inline fn offset(region: Region, asked_offset: AddrT) Region {
             const address = region.address.offset(asked_offset);
             const size = region.size - asked_offset;
@@ -254,6 +262,13 @@ pub const VirtualMemoryRegion = extern struct {
 
     pub inline fn takeByteSlice(virtual_memory_region: *VirtualMemoryRegion, size: u64) []u8 {
         return virtual_memory_region.takeSlice(size).access(u8);
+    }
+
+    pub inline fn toPhysicalAddress(virtual_memory_region: VirtualMemoryRegion) PhysicalMemoryRegion {
+        return PhysicalMemoryRegion{
+            .address = virtual_memory_region.address.toPhysicalAddress(),
+            .size = virtual_memory_region.size,
+        };
     }
 };
 
