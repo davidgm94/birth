@@ -8,11 +8,12 @@ comptime {
 }
 
 const Writer = extern struct {
-    pub const Error = error{};
+    pub const Error = error{
+        log_failed,
+    };
 
     pub fn write(_: void, bytes: []const u8) Error!usize {
-        syscall.log(bytes);
-        return bytes.len;
+        return syscall(.io, .log, bytes) catch return Error.log_failed;
     }
 };
 
@@ -32,8 +33,9 @@ pub const std_options = struct {
 export var core_id: u32 = 0;
 
 pub fn main() !noreturn {
-    core_id = syscall.getCoreId();
+    core_id = try syscall(.cpu, .get_core_id, {});
     user.currentScheduler().core_id = core_id;
     log.debug("Hello world! User space initialization from core #{}", .{core_id});
-    syscall.shutdown();
+    try syscall(.cpu, .shutdown, {});
+    unreachable;
 }

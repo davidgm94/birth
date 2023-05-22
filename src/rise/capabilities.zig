@@ -65,4 +65,51 @@ pub const CommandMap = blk: {
     break :blk command_map;
 };
 
-// Slots
+fn err(comptime thing_name: []const u8, something: anytype) void {
+    @compileError(thing_name ++ " not implemented for " ++ switch (@TypeOf(something)) {
+        Type => "capability ",
+        else => "command ",
+    } ++ @tagName(something));
+}
+
+pub fn ErrorSet(comptime capability: Type, comptime command: capability.toCommand()) type {
+    return switch (capability) {
+        .io => switch (command) {
+            .log => lib.ErrorSet(.{}),
+            else => err("Error", command),
+        },
+        .cpu => switch (command) {
+            .get_core_id => lib.ErrorSet(.{}),
+            .shutdown => lib.ErrorSet(.{}),
+        },
+        else => err("Error", capability),
+    };
+}
+
+pub fn Result(comptime capability: Type, comptime command: capability.toCommand()) type {
+    return switch (capability) {
+        .io => switch (command) {
+            .log => usize,
+            else => err("Result", command),
+        },
+        .cpu => switch (command) {
+            .get_core_id => u32,
+            .shutdown => noreturn,
+        },
+        else => err("Result", capability),
+    };
+}
+
+pub fn Arguments(comptime capability: Type, comptime command: capability.toCommand()) type {
+    return switch (capability) {
+        .io => switch (command) {
+            .log => []const u8,
+            else => err("Arguments", command),
+        },
+        .cpu => switch (command) {
+            .get_core_id => void,
+            .shutdown => void,
+        },
+        else => err("Arguments", capability),
+    };
+}

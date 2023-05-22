@@ -547,23 +547,42 @@ pub inline fn tryDereferenceAddress(value: anytype) DereferenceError!usize {
     return if (value <= common.maxInt(usize)) @truncate(usize, value) else return DereferenceError.address_bigger_than_usize;
 }
 
-pub fn ErrorSet(comptime error_list: type) type {
+pub fn ErrorSet(comptime error_list: anytype) type {
     comptime var error_fields: []const common.Type.Error = &.{};
-    inline for (@typeInfo(@TypeOf(error_list)).Struct.fields) |error_list_field| {
+    comptime var enum_items: []const common.Type.EnumField = &[2]common.Type.EnumField{
+        .{
+            .name = "ok",
+            .value = 0,
+        },
+        .{
+            .name = "forbidden",
+            .value = 1,
+        },
+    };
+    const error_list_fields = @typeInfo(@TypeOf(error_list)).Struct.fields;
+    inline for (error_list_fields) |error_list_field| {
+        const name = error_list_field.name;
         error_fields = error_fields ++ [1]common.Type.Error{
-            .{ .name = error_list_field.name },
+            .{ .name = name },
+        };
+
+        enum_items = enum_items ++ [1]common.Type.EnumField{
+            .{
+                .name = name,
+                .value = @field(error_list, name),
+            },
         };
     }
-    comptime var enum_items: []const common.Type.EnumField = &.{};
 
     const EnumType = @Type(common.Type{
         .Enum = .{
             .tag_type = u16,
             .fields = enum_items,
             .decls = &.{},
-            .is_exhaustive = false,
+            .is_exhaustive = true,
         },
     });
+
     const ErrorType = @Type(common.Type{
         .ErrorSet = error_fields,
     });
