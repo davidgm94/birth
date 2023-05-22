@@ -7,9 +7,9 @@ const assert = lib.assert;
 const ExecutionMode = lib.Syscall.ExecutionMode;
 
 const rise = @import("rise");
+const capabilities = rise.capabilities;
 
 pub const arch = @import("user/arch.zig");
-pub const syscall = @import("user/syscall.zig");
 pub const thread = @import("user/thread.zig");
 
 pub const Scheduler = extern struct {
@@ -76,3 +76,32 @@ pub const VirtualAddress = enum(usize) {
         @ptrCast(*usize, va).* -= substraction;
     }
 };
+
+pub fn syscall(comptime capability_type: capabilities.Type, comptime capability_command: @field(capabilities, @tagName(capability_type)), arguments: capabilities.Arguments(capability_type, capability_command)) capabilities.ErrorSet(capability_type, capability_command).Error!capabilities.Result(capability_type, capability_command) {
+    const options = rise.syscall.Options{
+        .rise = .{
+            .type = capability_type,
+            .command = @enumToInt(capability_command),
+        },
+    };
+
+    const raw_arguments: [6]usize = switch (@typeInfo(@TypeOf(arguments))) {
+        .Pointer => |pointer| switch (pointer.size) {
+            .Slice => .{0} ** 4 ++ [2]usize{ @ptrToInt(arguments.ptr), arguments.len },
+            else => @compileError("Unexpected pointer type"),
+        },
+        .Void => .{0} ** 6,
+        else => |_| @compileError("t: " ++ @typeName(@TypeOf(arguments))),
+    };
+
+    const result = arch.syscall(options, raw_arguments);
+    const ThisErrorSet = capabilities.ErrorSet(capability_type, capability_command);
+    const error_enum = @intToEnum(ThisErrorSet.Enum, result.rise.first.@"error");
+    return switch (error_enum) {
+        .ok => switch (capabilities.Result(capability_type, capability_command)) {
+            noreturn => unreachable,
+            else => while (true) {},
+        },
+        inline else => |comptime_error_enum| @field(ThisErrorSet.Error, @tagName(comptime_error_enum)),
+    };
+}

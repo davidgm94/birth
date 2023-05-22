@@ -18,7 +18,7 @@ pub fn log(message: []const u8) void {
     _ = invoke(.io, .log, [2]usize{ @ptrToInt(message.ptr), message.len });
 }
 
-pub fn getCoreId() u32 {
+pub fn getCoreId() !u32 {
     const result = invoke(.cpu, .get_core_id, {});
     const core_id = @truncate(u32, result.rise.second);
     return core_id;
