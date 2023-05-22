@@ -559,18 +559,20 @@ pub fn ErrorSet(comptime error_list: anytype) type {
             .value = 1,
         },
     };
-    const error_list_fields = @typeInfo(@TypeOf(error_list)).Struct.fields;
-    inline for (error_list_fields) |error_list_field| {
+    inline for (@typeInfo(@TypeOf(error_list)).Struct.fields) |error_list_field| {
         const name = error_list_field.name;
-        error_fields = error_fields ++ [1]common.Type.Error{
-            .{ .name = name },
-        };
 
         enum_items = enum_items ++ [1]common.Type.EnumField{
             .{
                 .name = name,
                 .value = @field(error_list, name),
             },
+        };
+    }
+
+    inline for (enum_items) |item| {
+        error_fields = error_fields ++ [1]common.Type.Error{
+            .{ .name = item.name, },
         };
     }
 

@@ -165,7 +165,9 @@ export fn syscall(regs: *const SyscallRegisters) callconv(.C) rise.syscall.Resul
                             const message = message_ptr[0..message_len];
                             writer.writeAll(message) catch unreachable;
 
-                            break :blk result(.{});
+                            break :blk result(.{
+                                .value = message.len,
+                            });
                         },
                         _ => break :blk result(.{ .@"error" = 1 }),
                     },

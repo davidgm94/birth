@@ -23,8 +23,8 @@ pub const panic = user.zigPanic;
 
 pub const std_options = struct {
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
-        lib.format(writer, format, args) catch {};
-        writer.writeByte('\n') catch {};
+        lib.format(writer, format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
         _ = scope;
         _ = level;
     }
@@ -37,5 +37,4 @@ pub fn main() !noreturn {
     user.currentScheduler().core_id = core_id;
     log.debug("Hello world! User space initialization from core #{}", .{core_id});
     try syscall(.cpu, .shutdown, {});
-    unreachable;
 }

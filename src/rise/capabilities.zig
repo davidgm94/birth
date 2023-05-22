@@ -1,6 +1,9 @@
 const lib = @import("lib");
 const assert = lib.assert;
 
+const rise = @import("rise");
+const syscall = rise.syscall;
+
 const Capabilities = @This();
 
 pub const Type = enum(u8) {
@@ -65,7 +68,7 @@ pub const CommandMap = blk: {
     break :blk command_map;
 };
 
-fn err(comptime thing_name: []const u8, something: anytype) void {
+inline fn err(comptime thing_name: []const u8, something: anytype) void {
     @compileError(thing_name ++ " not implemented for " ++ switch (@TypeOf(something)) {
         Type => "capability ",
         else => "command ",
@@ -111,5 +114,19 @@ pub fn Arguments(comptime capability: Type, comptime command: capability.toComma
             .shutdown => void,
         },
         else => err("Arguments", capability),
+    };
+}
+
+pub fn toResult(raw_result: syscall.Result.Rise, comptime capability: Type, comptime command: capability.toCommand()) Result(capability, command) {
+    return switch (capability) {
+        .io => switch (command) {
+            .log => raw_result.second,
+            else => err("Arguments", command),
+        },
+        .cpu => switch (command) {
+            .get_core_id => @intCast(u32, raw_result.second),
+            .shutdown => @compileError("No result is expected from shutdown"),
+        },
+        else => err("toResult", capability),
     };
 }
