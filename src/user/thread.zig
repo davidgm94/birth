@@ -75,8 +75,8 @@ fn mainThread(parameters: ?*anyopaque) noreturn {
             },
             .Int => root.main(),
             .ErrorUnion => blk: {
-                const result = root.main() catch |err| {
-                    log.err("The process exited with an error: {s}", .{@errorName(err)});
+                const result = root.main() catch {
+                    // TODO: log
                     break :blk 1;
                 };
 

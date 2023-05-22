@@ -87,20 +87,20 @@ pub fn syscall(comptime capability_type: capabilities.Type, comptime capability_
 
     const raw_arguments: [6]usize = switch (@typeInfo(@TypeOf(arguments))) {
         .Pointer => |pointer| switch (pointer.size) {
-            .Slice => .{0} ** 4 ++ [2]usize{ @ptrToInt(arguments.ptr), arguments.len },
+            .Slice => [2]usize{ @ptrToInt(arguments.ptr), arguments.len } ++ .{0} ** 4,
             else => @compileError("Unexpected pointer type"),
         },
         .Void => .{0} ** 6,
         else => |_| @compileError("t: " ++ @typeName(@TypeOf(arguments))),
     };
 
-    const result = arch.syscall(options, raw_arguments);
+    const raw_result = arch.syscall(options, raw_arguments);
     const ThisErrorSet = capabilities.ErrorSet(capability_type, capability_command);
-    const error_enum = @intToEnum(ThisErrorSet.Enum, result.rise.first.@"error");
+    const error_enum = @intToEnum(ThisErrorSet.Enum, raw_result.rise.first.@"error");
     return switch (error_enum) {
         .ok => switch (capabilities.Result(capability_type, capability_command)) {
             noreturn => unreachable,
-            else => while (true) {},
+            else => capabilities.toResult(raw_result.rise, capability_type, capability_command),
         },
         inline else => |comptime_error_enum| @field(ThisErrorSet.Error, @tagName(comptime_error_enum)),
     };
