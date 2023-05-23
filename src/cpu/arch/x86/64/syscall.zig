@@ -23,7 +23,7 @@ const pcid_mask = 1 << pcid_bit;
 /// - R10: argument 3
 /// - R8:  argument 4
 /// - R9:  argument 5
-inline fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Syscall.ErrorSet.Error!Syscall.Result {
+fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Syscall.ErrorSet.Error!Syscall.Result {
     const capability: rise.capabilities.Type = Syscall.capability;
     const command: capability.getCommandType() = Syscall.command;
     const arguments = try Syscall.toArguments(raw_arguments);
