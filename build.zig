@@ -291,7 +291,7 @@ pub fn build(b_arg: *Build) !void {
                         .root_project_path = try std.mem.concat(b.allocator, u8, &.{ user_program_dir_path, "/", module.name }),
                         .target = user_target,
                         .optimize_mode = optimize_mode,
-                        .modules = &.{ .lib, .user },
+                        .modules = &.{ .lib, .user, .rise },
                     });
                     user_module.strip = false;
 

@@ -76,17 +76,17 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     if (bootloader_information.getSlice(.files).len == 0) return InitializationError.no_files;
 
     const cpuid = lib.arch.x86_64.cpuid;
-    if (pcid) {
+    if (x86_64.pcid) {
         if (cpuid(1).ecx & (1 << 17) == 0) return InitializationError.feature_requested_and_not_available;
     }
 
-    if (invariant_tsc) {
+    if (x86_64.invariant_tsc) {
         if (cpuid(0x80000007).edx & (1 << 8) == 0) return InitializationError.feature_requested_and_not_available;
     }
 
     // Initialize GDT
-    const gdt_descriptor = GDT.Descriptor{
-        .limit = @sizeOf(GDT) - 1,
+    const gdt_descriptor = x86_64.GDT.Descriptor{
+        .limit = @sizeOf(x86_64.GDT) - 1,
         .address = @ptrToInt(&gdt),
     };
 
@@ -105,14 +105,14 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
         \\1:
         :
         : [gdt] "*p" (&gdt_descriptor),
-          [ds] "i" (data_64),
-          [cs] "i" (code_64),
+          [ds] "i" (x86_64.data_64),
+          [cs] "i" (x86_64.code_64),
         : "memory"
     );
 
     const tss_address = @ptrToInt(&tss);
     gdt.tss_descriptor = .{
-        .limit_low = @truncate(u16, @sizeOf(TSS)),
+        .limit_low = @truncate(u16, @sizeOf(x86_64.TSS)),
         .base_low = @truncate(u16, tss_address),
         .base_mid_low = @truncate(u8, tss_address >> 16),
         .access = .{
@@ -121,7 +121,7 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
             .present = true,
         },
         .attributes = .{
-            .limit = @truncate(u4, @sizeOf(TSS) >> 16),
+            .limit = @truncate(u4, @sizeOf(x86_64.TSS) >> 16),
             .available_for_system_software = false,
             .granularity = false,
         },
@@ -133,14 +133,14 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     asm volatile (
         \\ltr %[tss_selector]
         :
-        : [tss_selector] "r" (@as(u16, tss_selector)),
+        : [tss_selector] "r" (@as(u16, x86_64.tss_selector)),
         : "memory"
     );
 
-    log.debug("Kernel code 64(0x{x}): 0x{x}", .{ @offsetOf(GDT, "code_64"), gdt.code_64 });
-    log.debug("Kernel data 64(0x{x}): 0x{x}", .{ @offsetOf(GDT, "data_64"), gdt.data_64 });
-    log.debug("User code 64(0x{x}): 0x{x}", .{ @offsetOf(GDT, "user_code_64"), gdt.user_code_64 });
-    log.debug("User code 64(0x{x}): 0x{x}", .{ @offsetOf(GDT, "user_data_64"), gdt.user_data_64 });
+    log.debug("Kernel code 64(0x{x}): 0x{x}", .{ @offsetOf(x86_64.GDT, "code_64"), gdt.code_64 });
+    log.debug("Kernel data 64(0x{x}): 0x{x}", .{ @offsetOf(x86_64.GDT, "data_64"), gdt.data_64 });
+    log.debug("User code 64(0x{x}): 0x{x}", .{ @offsetOf(x86_64.GDT, "user_code_64"), gdt.user_code_64 });
+    log.debug("User code 64(0x{x}): 0x{x}", .{ @offsetOf(x86_64.GDT, "user_data_64"), gdt.user_data_64 });
     log.debug("ADDRESS: 0x{x}", .{@ptrToInt(&gdt.data_64)});
 
     // Initialize IDT
@@ -149,7 +149,7 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
         const interrupt_address = @ptrToInt(interrupt_handler);
         descriptor.* = .{
             .offset_low = @truncate(u16, interrupt_address),
-            .segment_selector = code_64,
+            .segment_selector = x86_64.code_64,
             .flags = .{
                 .ist = 0,
                 .type = if (i < 32) .trap_gate else .interrupt_gate,
@@ -161,8 +161,8 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
         };
     }
 
-    const idt_descriptor = IDT.Descriptor{
-        .limit = @sizeOf(IDT) - 1,
+    const idt_descriptor = x86_64.IDT.Descriptor{
+        .limit = @sizeOf(x86_64.IDT) - 1,
         .address = @ptrToInt(&idt),
     };
 
@@ -182,19 +182,19 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     cpu.bsp = IA32_APIC_BASE.read().bsp;
 
     const star = IA32_STAR{
-        .kernel_cs = code_64,
-        .user_cs_anchor = data_64,
+        .kernel_cs = x86_64.code_64,
+        .user_cs_anchor = x86_64.data_64,
     };
 
     comptime {
-        assert(data_64 == star.kernel_cs + 8);
-        assert(star.user_cs_anchor == user_data_64 - 8);
-        assert(star.user_cs_anchor == user_code_64 - 16);
+        assert(x86_64.data_64 == star.kernel_cs + 8);
+        assert(star.user_cs_anchor == x86_64.user_data_64 - 8);
+        assert(star.user_cs_anchor == x86_64.user_code_64 - 16);
     }
 
     star.write();
 
-    IA32_LSTAR.write(@ptrToInt(&syscallEntryPoint));
+    IA32_LSTAR.write(@ptrToInt(&cpu.arch.x86_64.syscall.entryPoint));
     const syscall_mask = privileged.arch.x86_64.registers.syscall_mask;
     IA32_FMASK.write(syscall_mask);
 
@@ -328,164 +328,16 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     // cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
 }
 
-const SystemSegmentDescriptor = extern struct {
-    const Type = enum(u4) {
-        ldt = 0b0010,
-        tss_available = 0b1001,
-        tss_busy = 0b1011,
-        call_gate = 0b1100,
-        interrupt_gate = 0b1110,
-        trap_gate = 0b1111,
-    };
-};
-const GDT = extern struct {
-    null: Entry = GDT.Entry.null_entry, // 0x00
-    code_16: Entry = GDT.Entry.code_16, // 0x08
-    data_16: Entry = GDT.Entry.data_16, // 0x10
-    code_32: Entry = GDT.Entry.code_32, // 0x18
-    data_32: Entry = GDT.Entry.data_32, // 0x20
-    code_64: u64 = 0x00A09A0000000000, // 0x28
-    data_64: u64 = 0x0000920000000000, // 0x30
-    user_data_64: u64 = @as(u64, 0x0000920000000000) | (3 << 45), //GDT.Entry.user_data_64, // 0x38
-    user_code_64: u64 = @as(u64, 0x00A09A0000000000) | (3 << 45), //GDT.Entry.user_code_64, // 0x40
-    tss_descriptor: TSS.Descriptor = undefined, // 0x48
-
-    const Entry = privileged.arch.x86_64.GDT.Entry;
-
-    const Descriptor = privileged.arch.x86_64.GDT.Descriptor;
-
-    comptime {
-        const entry_count = 9;
-        const target_size = entry_count * @sizeOf(Entry) + @sizeOf(TSS.Descriptor);
-
-        assert(@sizeOf(GDT) == target_size);
-        assert(@offsetOf(GDT, "code_64") == 0x28);
-        assert(@offsetOf(GDT, "data_64") == 0x30);
-        assert(@offsetOf(GDT, "user_data_64") == 0x38);
-        assert(@offsetOf(GDT, "user_code_64") == 0x40);
-        assert(@offsetOf(GDT, "tss_descriptor") == entry_count * @sizeOf(Entry));
-    }
-
-    pub fn getDescriptor(global_descriptor_table: *const GDT) GDT.Descriptor {
-        return .{
-            .limit = @sizeOf(GDT) - 1,
-            .address = @ptrToInt(global_descriptor_table),
-        };
-    }
-};
-
-const TSS = extern struct {
-    reserved0: u32 = 0,
-    rsp: [3]u64 align(4) = [3]u64{ 0, 0, 0 },
-    reserved1: u64 align(4) = 0,
-    IST: [7]u64 align(4) = [7]u64{ 0, 0, 0, 0, 0, 0, 0 },
-    reserved3: u64 align(4) = 0,
-    reserved4: u16 = 0,
-    IO_map_base_address: u16 = 104,
-
-    comptime {
-        assert(@sizeOf(TSS) == 104);
-    }
-
-    pub const Descriptor = extern struct {
-        limit_low: u16,
-        base_low: u16,
-        base_mid_low: u8,
-        access: Access,
-        attributes: Attributes,
-        base_mid_high: u8,
-        base_high: u32,
-        reserved: u32 = 0,
-
-        pub const Access = packed struct(u8) {
-            type: SystemSegmentDescriptor.Type,
-            reserved: u1 = 0,
-            dpl: u2,
-            present: bool,
-        };
-
-        pub const Attributes = packed struct(u8) {
-            limit: u4,
-            available_for_system_software: bool,
-            reserved: u2 = 0,
-            granularity: bool,
-        };
-
-        comptime {
-            assert(@sizeOf(TSS.Descriptor) == 0x10);
-        }
-    };
-
-    pub fn getDescriptor(tss_struct: *const TSS, offset: u64) Descriptor {
-        const address = @ptrToInt(tss_struct) + offset;
-        return Descriptor{
-            .low = .{
-                .limit_low = @truncate(u16, @sizeOf(TSS) - 1),
-                .base_low = @truncate(u16, address),
-                .base_low_mid = @truncate(u8, address >> 16),
-                .type = 0b1001,
-                .descriptor_privilege_level = 0,
-                .present = 1,
-                .limit_high = 0,
-                .available_for_system_software = 0,
-                .granularity = 0,
-                .base_mid = @truncate(u8, address >> 24),
-            },
-            .base_high = @truncate(u32, address >> 32),
-        };
-    }
-};
-
-pub const IDT = extern struct {
-    descriptors: [entry_count]GateDescriptor = undefined,
-    pub const Descriptor = privileged.arch.x86_64.SegmentDescriptor;
-    pub const GateDescriptor = extern struct {
-        offset_low: u16,
-        segment_selector: u16,
-        flags: packed struct(u16) {
-            ist: u3,
-            reserved: u5 = 0,
-            type: SystemSegmentDescriptor.Type,
-            reserved1: u1 = 0,
-            dpl: u2,
-            present: bool,
-        },
-        offset_mid: u16,
-        offset_high: u32,
-        reserved: u32 = 0,
-
-        comptime {
-            assert(@sizeOf(@This()) == 0x10);
-        }
-    };
-    pub const entry_count = 256;
-};
-
 export var interrupt_stack: [0x1000]u8 align(lib.arch.stack_alignment) = undefined;
-export var gdt = GDT{};
-export var tss = TSS{};
-export var idt = IDT{};
+export var gdt = x86_64.GDT{};
+export var tss = x86_64.TSS{};
+export var idt = x86_64.IDT{};
 export var user_stack: u64 = 0;
 
-const code_64 = @offsetOf(GDT, "code_64");
-const data_64 = @offsetOf(GDT, "data_64");
-const user_code_64 = @offsetOf(GDT, "user_code_64");
-const user_data_64 = @offsetOf(GDT, "user_data_64");
-const tss_selector = @offsetOf(GDT, "tss_descriptor");
-const user_code_selector = user_code_64 | user_dpl;
-const user_data_selector = user_data_64 | user_dpl;
-
 comptime {
-    assert(rise.arch.user_code_selector == user_code_selector);
-    assert(rise.arch.user_data_selector == user_data_selector);
+    assert(rise.arch.user_code_selector == x86_64.user_code_selector);
+    assert(rise.arch.user_data_selector == x86_64.user_data_selector);
 }
-
-const user_dpl = 3;
-
-pub const kpti = true;
-pub const pcid = false;
-pub const smap = false;
-pub const invariant_tsc = false;
 
 pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code: bool) fn () callconv(.Naked) noreturn {
     return struct {
@@ -494,7 +346,7 @@ pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code:
                 \\endbr64
                 ::: "memory");
 
-            if (smap) {
+            if (x86_64.smap) {
                 // TODO: Investigate why this is Exception #6
                 asm volatile (
                     \\clac
@@ -563,12 +415,6 @@ pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code:
         }
     }.handler;
 }
-const capability_address_space_size = 1 * lib.gb;
-const capability_address_space_start = capability_address_space_stack_top - capability_address_space_size;
-const capability_address_space_stack_top = 0xffff_ffff_8000_0000;
-const capability_address_space_stack_size = privileged.default_stack_size;
-const capability_address_space_stack_alignment = lib.arch.valid_page_sizes[0];
-const capability_address_space_stack_address = VirtualAddress.new(capability_address_space_stack_top - capability_address_space_stack_size);
 
 const Interrupt = enum(u5) {
     DE = 0x00,
@@ -852,171 +698,6 @@ const interrupt_handlers = [256]*const fn () callconv(.Naked) noreturn{
     InterruptHandler(0xfe, false),
     InterruptHandler(0xff, false),
 };
-
-const pcid_bit = 11;
-const pcid_mask = 1 << pcid_bit;
-const cr3_user_page_table_mask = 1 << @bitOffsetOf(cr3, "address");
-const cr3_user_page_table_and_pcid_mask = cr3_user_page_table_mask | pcid_mask;
-
-/// SYSCALL documentation
-/// ABI:
-/// - RAX: System call number
-/// - RCX: Return address
-/// - R11: Saved rflags
-/// - RDI: argument 0
-/// - RSI: argument 1
-/// - RDX: argument 2
-/// - R10: argument 3
-/// - R8:  argument 4
-/// - R9:  argument 5
-pub export fn syscallEntryPoint() callconv(.Naked) void {
-    asm volatile (
-        \\endbr64
-        \\swapgs
-        \\movq %rsp, user_stack(%rip)
-    );
-
-    if (kpti) {
-        asm volatile (
-            \\mov %cr3, %rsp
-            ::: "memory");
-
-        if (pcid) {
-            @compileError("pcid support not yet implemented");
-        }
-
-        asm volatile (
-            \\andq %[mask], %rsp
-            \\mov %rsp, %cr3
-            :
-            : [mask] "i" (~@as(u64, cr3_user_page_table_and_pcid_mask)),
-            : "memory"
-        );
-    }
-
-    // Safe stack
-    asm volatile ("movabsq %[capability_address_space_stack_top], %rsp"
-        :
-        : [capability_address_space_stack_top] "i" (capability_address_space_stack_top),
-        : "memory", "rsp"
-    );
-
-    asm volatile (
-        \\pushq %[user_ds]
-        \\pushq (user_stack)
-        \\pushq %r11
-        \\pushq %[user_cs]
-        \\pushq %rcx
-        \\pushq %rax
-        :
-        : [user_ds] "i" (user_data_selector),
-          [user_cs] "i" (user_code_selector),
-        : "memory"
-    );
-
-    // Push and clear registers
-    asm volatile (
-    // Push
-        \\pushq %rdi
-        \\pushq %rsi
-        \\pushq %rdx
-        \\pushq %rcx
-        \\pushq %rax
-        \\pushq %r8
-        \\pushq %r9
-        \\pushq %r10
-        \\pushq %r11
-        \\pushq %rbx
-        \\pushq %rbp
-        \\pushq %r12
-        \\pushq %r13
-        \\pushq %r14
-        \\pushq %r15
-        // Clear
-        \\xorl %esi, %esi
-        \\xorl %edx, %edx
-        \\xorl %ecx, %ecx
-        \\xorl %r8d,  %r8d
-        \\xorl %r9d,  %r9d
-        \\xorl %r10d, %r10d
-        \\xorl %r11d, %r11d
-        \\xorl %ebx,  %ebx
-        \\xorl %ebp,  %ebp
-        \\xorl %r12d, %r12d
-        \\xorl %r13d, %r13d
-        \\xorl %r14d, %r14d
-        \\xorl %r15d, %r15d
-        ::: "memory");
-
-    // Pass arguments
-    asm volatile (
-        \\mov %rsp, %rdi
-        \\mov %rax, %rsi
-        ::: "memory");
-
-    // TODO: more security stuff
-    asm volatile (
-        \\call syscall
-        ::: "memory");
-
-    // TODO: more security stuff
-
-    // Pop registers
-    asm volatile (
-        \\popq %r15
-        \\popq %r14
-        \\popq %r13
-        \\popq %r12
-        \\popq %rbp
-        \\popq %rbx
-        \\popq %r11
-        \\popq %r10
-        \\popq %r9
-        \\popq %r8
-        \\popq %rcx
-        // RAX
-        \\popq %rcx
-        // RDX
-        \\popq %rsi
-        \\popq %rsi
-        \\popq %rdi
-        ::: "memory");
-
-    if (kpti) {
-        // Restore CR3
-        asm volatile (
-            \\mov %cr3, %rsp
-            ::: "memory");
-
-        if (pcid) {
-            @compileError("PCID not supported yet");
-        }
-
-        asm volatile (
-            \\orq %[user_cr3_mask], %rsp
-            \\mov %rsp, %cr3
-            :
-            : [user_cr3_mask] "i" (cr3_user_page_table_mask),
-            : "memory"
-        );
-    }
-
-    // Restore RSP
-    asm volatile (
-        \\mov user_stack(%rip), %rsp
-        ::: "memory");
-
-    asm volatile (
-        \\swapgs
-        \\sysretq
-        ::: "memory");
-
-    asm volatile (
-        \\int3
-        ::: "memory");
-
-    unreachable;
-}
 
 const BSPEarlyAllocator = extern struct {
     base: PhysicalAddress,
@@ -1346,7 +1027,7 @@ const SpawnInitCommonResult = extern struct {
 };
 
 const scheduler_memory_size = 1 << 19;
-const dispatch_count = IDT.entry_count;
+const dispatch_count = x86_64.IDT.entry_count;
 var once: bool = false;
 
 fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult {
@@ -1556,9 +1237,9 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
     }
 
     {
-        const privileged_stack_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(capability_address_space_stack_size, capability_address_space_stack_alignment));
-        const indexed_privileged_stack = @bitCast(paging.IndexedVirtualAddress, capability_address_space_stack_address.value());
-        const stack_last_page = capability_address_space_stack_address.offset(capability_address_space_stack_size - lib.arch.valid_page_sizes[0]);
+        const privileged_stack_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(x86_64.capability_address_space_stack_size, x86_64.capability_address_space_stack_alignment));
+        const indexed_privileged_stack = @bitCast(paging.IndexedVirtualAddress, x86_64.capability_address_space_stack_address.value());
+        const stack_last_page = x86_64.capability_address_space_stack_address.offset(x86_64.capability_address_space_stack_size - lib.arch.valid_page_sizes[0]);
         const indexed_privileged_stack_last_page = @bitCast(paging.IndexedVirtualAddress, stack_last_page.value());
         assert(indexed_privileged_stack.PD == indexed_privileged_stack_last_page.PD);
         assert(indexed_privileged_stack.PT < indexed_privileged_stack_last_page.PT);

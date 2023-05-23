@@ -77,13 +77,13 @@ pub const Static = enum {
 
 pub const Dynamic = enum {
     io,
-    irq_table,
-    physical_memory,
-    device_memory,
-    ram,
-    cpu_memory,
-    vnode,
-    scheduler,
+    // irq_table,
+    // physical_memory,
+    // device_memory,
+    // ram,
+    // cpu_memory,
+    // vnode,
+    // scheduler,
 
     pub const Map = extern struct {
         scheduler: Scheduler,
@@ -133,10 +133,8 @@ pub const Root = extern struct {
             else => |capability| switch (capability) {
                 .io => switch (command) {
                     .log => root.dynamic.io.debug,
-                    _ => false,
                 },
                 .cpu => unreachable,
-                else => @panic("TODO hasPermissions"),
             },
             // _ => return false,
         };

@@ -1,9 +1,11 @@
 const lib = @import("lib");
 
 pub const current = switch (lib.cpu.arch) {
-    .x86_64 => @import("arch/x86_64.zig"),
+    .x86_64 => x86_64,
     else => @compileError("Architecture not supported"),
 };
+
+pub const x86_64 = @import("arch/x86_64.zig");
 pub usingnamespace current;
 
 pub const entryPoint = current.entryPoint;

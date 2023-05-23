@@ -45,32 +45,7 @@ comptime {
     );
 }
 
-pub inline fn syscall(options: rise.syscall.Options, arguments: rise.syscall.Arguments) rise.syscall.Result {
-    var first: rise.syscall.Result.Rise.First = undefined;
-    var second: rise.syscall.Result.Rise.Second = undefined;
-    asm volatile (
-        \\syscall
-        : [rax] "={rax}" (first),
-          [rdx] "={rdx}" (second),
-        : [options] "{rax}" (options),
-          [arg0] "{rdi}" (arguments[0]),
-          [arg1] "{rsi}" (arguments[1]),
-          [arg2] "{rdx}" (arguments[2]),
-          [arg3] "{r10}" (arguments[3]),
-          [arg4] "{r8}" (arguments[4]),
-          [arg5] "{r9}" (arguments[5]),
-        : "rcx", "r11", "rsp", "memory"
-    );
-
-    return .{
-        .rise = .{
-            .first = first,
-            .second = second,
-        },
-    };
-}
-
-pub inline fn setInitialState(register_arena: *RegisterArena, entry: VirtualAddress, stack: VirtualAddress, arguments: [6]usize) void {
+pub inline fn setInitialState(register_arena: *RegisterArena, entry: VirtualAddress, stack: VirtualAddress, arguments: rise.syscall.Arguments) void {
     assert(stack.value() > lib.arch.valid_page_sizes[0]);
     assert(lib.isAligned(stack.value(), lib.arch.stack_alignment));
     var stack_address = stack;
