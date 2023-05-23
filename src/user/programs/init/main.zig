@@ -1,7 +1,7 @@
 const lib = @import("lib");
 const log = lib.log;
 const user = @import("user");
-const syscall = user.syscall;
+const Syscall = user.Syscall;
 
 comptime {
     _ = user;
@@ -13,7 +13,7 @@ const Writer = extern struct {
     };
 
     pub fn write(_: void, bytes: []const u8) Error!usize {
-        return syscall(.io, .log, bytes) catch return Error.log_failed;
+        return Syscall(.io, .log).blocking(bytes) catch return Error.log_failed;
     }
 };
 
@@ -33,8 +33,8 @@ pub const std_options = struct {
 export var core_id: u32 = 0;
 
 pub fn main() !noreturn {
-    core_id = try syscall(.cpu, .get_core_id, {});
+    core_id = try Syscall(.cpu, .get_core_id).blocking({});
     user.currentScheduler().core_id = core_id;
     log.debug("Hello world! User space initialization from core #{}", .{core_id});
-    try syscall(.cpu, .shutdown, {});
+    try Syscall(.cpu, .shutdown).blocking({});
 }

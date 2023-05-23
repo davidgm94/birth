@@ -45,8 +45,6 @@ pub export var core_id: u32 = 0;
 pub export var bsp = false;
 var panic_lock = lib.Spinlock.released;
 
-pub const writer = arch.writer;
-
 /// This data structure holds the information needed to run a core
 pub const Driver = extern struct {
     init_root: capabilities.Root,
@@ -701,3 +699,5 @@ fn getDebugInformation() !lib.ModuleDebugInfo {
 
     return debug_info;
 }
+
+pub const writer = privileged.E9Writer{ .context = {} };

@@ -547,18 +547,9 @@ pub inline fn tryDereferenceAddress(value: anytype) DereferenceError!usize {
     return if (value <= common.maxInt(usize)) @truncate(usize, value) else return DereferenceError.address_bigger_than_usize;
 }
 
-pub fn ErrorSet(comptime error_list: anytype) type {
+pub fn ErrorSet(comptime error_list: anytype, comptime predefined_fields: []const common.Type.EnumField) type {
     comptime var error_fields: []const common.Type.Error = &.{};
-    comptime var enum_items: []const common.Type.EnumField = &[2]common.Type.EnumField{
-        .{
-            .name = "ok",
-            .value = 0,
-        },
-        .{
-            .name = "forbidden",
-            .value = 1,
-        },
-    };
+    comptime var enum_items: []const common.Type.EnumField = predefined_fields;
     inline for (@typeInfo(@TypeOf(error_list)).Struct.fields) |error_list_field| {
         const name = error_list_field.name;
 
@@ -572,7 +563,9 @@ pub fn ErrorSet(comptime error_list: anytype) type {
 
     inline for (enum_items) |item| {
         error_fields = error_fields ++ [1]common.Type.Error{
-            .{ .name = item.name, },
+            .{
+                .name = item.name,
+            },
         };
     }
 
