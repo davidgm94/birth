@@ -251,24 +251,3 @@ pub const Registers = extern struct {
     rsp: u64,
     ss: u64,
 };
-
-// inline fn result(res: struct {
-//     value: u64 = 0,
-//     another_value: u32 = 0,
-//     @"error": u16 = 0,
-//     another_more_value: u8 = 0,
-//     flags: u7 = 0,
-// }) rise.syscall.Result {
-//     return .{
-//         .rise = .{
-//             .first = .{
-//                 .padding1 = res.another_value,
-//                 .@"error" = res.@"error",
-//                 .padding2 = res.another_more_value,
-//                 .padding3 = res.flags,
-//                 .convention = .rise,
-//             },
-//             .second = res.value,
-//         },
-//     };
-// }
