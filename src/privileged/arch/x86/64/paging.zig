@@ -900,7 +900,7 @@ pub fn EntryTypeMap(comptime page_size: comptime_int) [EntryTypeMapSize(page_siz
                 result[@enumToInt(Level.PDP)] = PDPTE;
 
                 if (page_size == lib.arch.valid_page_sizes[1]) {
-                    assert(map_size == 3 + @boolToInt(Level == Level5));
+                    assert(map_size == @as(usize, 3) + @boolToInt(Level == Level5));
                     result[@enumToInt(Level.PD)] = PDTE_2MB;
                 } else {
                     assert(page_size == lib.arch.valid_page_sizes[0]);

@@ -91,7 +91,7 @@ pub const random = std.rand;
 
 pub const testing = std.testing;
 
-pub const sort = std.sort.sort;
+pub const sort = std.mem.sort;
 
 pub fn fieldSize(comptime T: type, field_name: []const u8) comptime_int {
     var foo: T = undefined;
