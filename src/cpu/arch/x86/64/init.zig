@@ -40,8 +40,6 @@ pub fn entryPoint() callconv(.Naked) noreturn {
         \\pushq $0
         \\mov %rsp, %rbp
         \\jmp main
-        \\cli
-        \\hlt
         :
         : [stack_len] "i" (cpu.stack.len),
         : "rsp", "rbp"
@@ -152,7 +150,7 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
             .segment_selector = x86_64.code_64,
             .flags = .{
                 .ist = 0,
-                .type = if (i < 32) .trap_gate else .interrupt_gate,
+                .type = if (i < 32) .trap_gate else .interrupt_gate, // TODO: I think this is not correct
                 .dpl = 0,
                 .present = true,
             },
@@ -178,8 +176,6 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     privileged.arch.io.write(u8, 0x21, 0xff);
 
     asm volatile ("sti" ::: "memory");
-
-    cpu.bsp = IA32_APIC_BASE.read().bsp;
 
     const star = IA32_STAR{
         .kernel_cs = x86_64.code_64,
@@ -238,19 +234,10 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     my_cr0.write();
     log.debug("Wrote CR0", .{});
 
+    // The bootloader already mapped APIC, so it's not necessary to map it here
     var ia32_apic_base = IA32_APIC_BASE.read();
-    // The bootloader already mapped APIC
-
-    // const apic_base_physical_address = ia32_apic_base.getAddress();
-    // const minimal_paging = paging.Specific{
-    //     .cr3 = cr3.read(),
-    // };
-
-    // try minimal_paging.map(apic_base_physical_address, apic_base_physical_address.toHigherHalfVirtualAddress(), lib.arch.valid_page_sizes[0], .{
-    //     .write = true,
-    //     .cache_disable = true,
-    //     .global = true,
-    // }, apic_page_allocator_interface);
+    cpu.bsp = ia32_apic_base.bsp;
+    ia32_apic_base.global_enable = true;
 
     const spurious_vector: u8 = 0xFF;
     APIC.write(.spurious, @as(u32, 0x100) | spurious_vector);
@@ -261,7 +248,6 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     const lvt_timer = APIC.LVTTimer{};
     lvt_timer.write();
 
-    ia32_apic_base.global_enable = true;
     ia32_apic_base.write();
 
     x86_64.ticks_per_ms = APIC.calibrateTimer();
@@ -275,6 +261,7 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
         :: //[mxcsr] "m" (@as(u32, 0x1f80)),
         : "memory");
 
+    // Write user TLS base address
     IA32_FS_BASE.write(user_scheduler_virtual_address.value());
 
     // TODO: configure PAT
@@ -286,46 +273,148 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     const memory_map_entries = bootloader_information.getMemoryMapEntries();
     const page_counters = bootloader_information.getPageCounters();
 
-    var best: usize = 0;
-    var best_free_size: usize = 0;
-    for (memory_map_entries, page_counters, 0..) |memory_map_entry, page_counter, index| {
-        if (memory_map_entry.type != .usable or !lib.isAligned(memory_map_entry.region.size, lib.arch.valid_page_sizes[0]) or memory_map_entry.region.address.value() < lib.mb) {
-            continue;
-        }
+    var free_size: usize = 0;
+    var free_region_count: usize = 0;
 
-        const busy_page_count = page_counter;
-        const busy_size = busy_page_count << comptime lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
-        const free_size = memory_map_entry.region.size - busy_size;
-        if (free_size > best_free_size) {
-            best = index;
-            best_free_size = free_size;
+    for (memory_map_entries, page_counters) |mmap_entry, page_counter| {
+        log.debug("region: 0x{x}, 0x{x}, {s}", .{ mmap_entry.region.address.value(), mmap_entry.region.size, @tagName(mmap_entry.type) });
+        if (mmap_entry.type == .usable) {
+            const free_region = mmap_entry.getFreeRegion(page_counter);
+            log.debug("Region free size: 0x{x}", .{free_region.size});
+            free_size += free_region.size;
+            free_region_count += @boolToInt(free_region.size > 0);
         }
     }
 
+    const total_to_allocate = @sizeOf(cpu.Driver) + @sizeOf(cpu.capabilities.Root) + lib.arch.valid_page_sizes[0];
+    log.debug("Total to allocate: 0x{x}", .{total_to_allocate});
+
+    const total_physical: struct {
+        region: PhysicalMemoryRegion,
+        free_size: u64,
+        index: usize,
+    } = for (memory_map_entries, page_counters, 0..) |mmap_entry, page_counter, index| {
+        if (mmap_entry.type == .usable) {
+            const free_region = mmap_entry.getFreeRegion(page_counter);
+            if (free_region.size >= total_to_allocate) {
+                break .{
+                    .region = PhysicalMemoryRegion.new(.{
+                        .address = free_region.address,
+                        .size = total_to_allocate,
+                    }),
+                    .free_size = free_region.size - total_to_allocate,
+                    .index = index,
+                };
+            }
+        }
+    } else {
+        @panic("AAA");
+    };
+
+    var offset: usize = 0;
+
+    cpu.driver = total_physical.region.offset(offset).address.toHigherHalfVirtualAddress().access(*align(lib.arch.valid_page_sizes[0]) cpu.Driver);
+    offset += @sizeOf(cpu.Driver);
+
+    const root_capability = total_physical.region.offset(offset).address.toHigherHalfVirtualAddress().access(*cpu.capabilities.Root);
+    offset += @sizeOf(cpu.capabilities.Root);
+
+    var heap_offset: usize = 0;
+    const heap_region = total_physical.region.offset(offset);
+    assert(heap_region.size == lib.arch.valid_page_sizes[0]);
+    const host_free_ram = heap_region.offset(heap_offset).address.toHigherHalfVirtualAddress().access(*cpu.capabilities.RAM.Region);
+    host_free_ram.* = .{
+        .region = PhysicalMemoryRegion.new(.{
+            .address = total_physical.region.offset(total_to_allocate).address,
+            .size = total_physical.free_size,
+        }),
+    };
+    heap_offset += @sizeOf(cpu.capabilities.RAM.Region);
+    const privileged_cpu_memory = heap_region.offset(heap_offset).address.toHigherHalfVirtualAddress().access(*cpu.capabilities.RAM.Region);
+    privileged_cpu_memory.* = .{
+        .region = total_physical.region,
+    };
+
+    heap_offset += @sizeOf(cpu.capabilities.RAM);
+
+    var previous_free_ram = host_free_ram;
+    for (memory_map_entries, page_counters, 0..) |memory_map_entry, page_counter, index| {
+        if (index == total_physical.index) continue;
+
+        if (memory_map_entry.type == .usable) {
+            const region = memory_map_entry.getFreeRegion(page_counter);
+            if (region.size > 0) {
+                const new_free_ram = heap_region.offset(heap_offset).address.toHigherHalfVirtualAddress().access(*cpu.capabilities.RAM.Region);
+                heap_offset += @sizeOf(cpu.capabilities.RAM.Region);
+                new_free_ram.* = .{
+                    .region = region,
+                };
+                previous_free_ram.next = new_free_ram;
+                previous_free_ram = new_free_ram;
+            }
+        }
+    }
+
+    root_capability.* = .{
+        .static = .{
+            .cpu = true,
+        },
+        .dynamic = .{
+            .io = .{
+                .debug = true,
+            },
+            .ram = .{
+                .lists = blk: {
+                    var lists = [1]?*cpu.capabilities.RAM.Region{null} ** lib.arch.reverse_valid_page_sizes.len;
+                    var free_ram_iterator: ?*cpu.capabilities.RAM.Region = host_free_ram;
+                    while (free_ram_iterator) |free_ram| {
+                        comptime assert(lib.arch.reverse_valid_page_sizes.len == 3);
+                        const next = free_ram.next;
+
+                        if (free_ram.region.size >= lib.arch.reverse_valid_page_sizes[0]) {
+                            const previous_first = lists[0];
+                            lists[0] = free_ram;
+                            free_ram.next = previous_first;
+                        } else if (free_ram.region.size >= lib.arch.reverse_valid_page_sizes[1]) {
+                            const previous_first = lists[1];
+                            lists[1] = free_ram;
+                            free_ram.next = previous_first;
+                        } else if (free_ram.region.size >= lib.arch.reverse_valid_page_sizes[2]) {
+                            const previous_first = lists[2];
+                            lists[2] = free_ram;
+                            free_ram.next = previous_first;
+                        } else unreachable;
+
+                        free_ram_iterator = next;
+                    }
+
+                    break :blk lists;
+                },
+            },
+            .cpu_memory = .{},
+        },
+        .scheduler = .{
+            .memory = undefined,
+        },
+        .heap = cpu.capabilities.Root.Heap.new(heap_region, heap_offset),
+    };
+
+    cpu.driver.* = .{
+        .valid = true,
+        .init_root_capability = .{
+            .value = root_capability,
+        },
+    };
+
+    log.debug("Free size: 0x{x}. Free region count: {}", .{ free_size, free_region_count });
+    log.debug("Bootloader allocated: 0x{x}", .{bootloader_information.total_size});
     switch (cpu.bsp) {
         true => {
-            var early_allocator = BSPEarlyAllocator{
-                .base = memory_map_entries[best].region.address.offset(memory_map_entries[best].region.size - best_free_size),
-                .size = best_free_size,
-                .offset = 0,
-            };
-            cpu.driver = try early_allocator.createPageAligned(cpu.Driver);
             const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
-            try spawnInitBSP(init_module, &early_allocator.allocator, bootloader_information.cpu_page_tables);
+            try spawnInitBSP(init_module, bootloader_information.cpu_page_tables);
         },
         false => @panic("Implement APP"),
     }
-
-    // assert(cpu.bsp);
-    // // As the bootloader information allocators are not now available, a page allocator pinned to the BSP core is set up here.
-    // cpu.page_tables = bootloader_information.cpu_page_tables;
-    // cpu.page_allocator = try PageAllocator.fromBSP(bootloader_information);
-    // cpu.heap_allocator = try Heap.fromPageAllocator(&cpu.page_allocator);
-    // cpu.file = for (bootloader_information.getFiles()) |file_descriptor| {
-    //     if (file_descriptor.type == .cpu) break file_descriptor.getContent(bootloader_information);
-    // } else return InitializationError.cpu_file_not_found;
-    //
-    // cpu.driver = try cpu.heap_allocator.create(cpu.Driver);
 }
 
 export var interrupt_stack: [0x1000]u8 align(lib.arch.stack_alignment) = undefined;
@@ -767,7 +856,9 @@ const BSPEarlyAllocator = extern struct {
         } else {
             assert(size < lib.arch.valid_page_sizes[0]);
             const heap_entry_allocation = early_allocator.allocateBytes(lib.arch.valid_page_sizes[0], lib.arch.valid_page_sizes[0]) catch return Allocator.Allocate.Error.OutOfMemory;
-            const heap_entry_region = VirtualMemoryRegion.fromByteSlice(heap_entry_allocation);
+            const heap_entry_region = VirtualMemoryRegion.fromByteSlice(.{
+                .slice = heap_entry_allocation,
+            });
             const heap_entry = try early_allocator.addHeapRegion(heap_entry_region);
             const result = try heap_entry.allocateBytes(size, alignment);
             return .{
@@ -796,8 +887,8 @@ const BSPEarlyAllocator = extern struct {
     };
 };
 
-fn spawnInitBSP(init_file: []const u8, allocator: *Allocator, cpu_page_tables: paging.CPUPageTables) !noreturn {
-    const spawn_init = try spawnInitCommon(allocator, cpu_page_tables);
+fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !noreturn {
+    const spawn_init = try spawnInitCommon(cpu_page_tables);
     const init_scheduler = spawn_init.scheduler;
     const page_table_regions = spawn_init.page_table_regions;
 
@@ -822,7 +913,7 @@ fn spawnInitBSP(init_file: []const u8, allocator: *Allocator, cpu_page_tables: p
                 .user = true,
             };
 
-            const segment_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(aligned_size, lib.arch.valid_page_sizes[0]));
+            const segment_physical_region = try cpu.driver.getRootCapability().allocatePages(aligned_size);
             try page_table_regions.mapSafe(segment_virtual_address, segment_physical_region.address, segment_physical_region.size, segment_flags);
 
             const src = init_file[program_header.offset..][0..program_header.size_in_file];
@@ -976,25 +1067,7 @@ const PageTableRegions = extern struct {
     const init_vas_pde_count = lib.alignForward(@divExact(init_vas_pte_count, paging.page_table_entry_count), paging.page_table_entry_count);
     const init_vas_pdpe_count = lib.alignForward(@divExact(init_vas_pde_count, paging.page_table_entry_count), paging.page_table_entry_count);
 
-    pub fn create(allocator: *Allocator) !PageTableRegions {
-        const total_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(total_size, 2 * paging.page_table_alignment));
-        log.debug("Total region: (0x{x}, 0x{x})", .{ total_region.address.value(), total_region.top().value() });
-        var region_slicer = total_region;
-        var result = PageTableRegions{
-            .regions = undefined,
-            .total = total_region,
-            .base_virtual_address = user_scheduler_virtual_address,
-        };
-
-        inline for (&result.regions, 0..) |*region, index| {
-            region.* = region_slicer.takeSlice(sizes[index]);
-        }
-
-        assert(region_slicer.size == 0);
-        assert(lib.isAligned(result.regions[0].address.value(), 2 * paging.page_table_alignment));
-
-        return result;
-    }
+    pub fn create() !PageTableRegions {}
 
     pub inline fn get(regions: PageTableRegions, index: Index) PhysicalMemoryRegion {
         return regions.regions[@enumToInt(index)];
@@ -1030,14 +1103,48 @@ const scheduler_memory_size = 1 << 19;
 const dispatch_count = x86_64.IDT.entry_count;
 var once: bool = false;
 
-fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult {
+fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult {
     assert(!once);
     once = true;
     // TODO: delete in the future
     assert(cpu.bsp);
     cpu.driver.valid = true;
 
-    const page_table_regions = try PageTableRegions.create(allocator);
+    const allocation: extern struct {
+        page_table_regions: PageTableRegions,
+        cpu_page_table_physical_region: PhysicalMemoryRegion,
+    } = blk: {
+        const page_table_regions_total_size = PageTableRegions.total_size;
+        const cpu_page_table_size = (paging.Level.count - 1) * paging.page_table_size;
+        const allocation_size = page_table_regions_total_size + cpu_page_table_size;
+        const allocation_alignment = 2 * paging.page_table_alignment;
+        const total_region = try cpu.driver.getRootCapability().allocatePageCustomAlignment(allocation_size, allocation_alignment);
+        log.debug("Total region: (0x{x}, 0x{x})", .{ total_region.address.value(), total_region.top().value() });
+        var region_slicer = total_region;
+        var page_table_regions = PageTableRegions{
+            .regions = undefined,
+            .total = total_region,
+            .base_virtual_address = user_scheduler_virtual_address,
+        };
+
+        inline for (&page_table_regions.regions, 0..) |*region, index| {
+            region.* = region_slicer.takeSlice(PageTableRegions.sizes[index]);
+        }
+
+        assert(lib.isAligned(page_table_regions.regions[0].address.value(), 2 * paging.page_table_alignment));
+
+        assert(region_slicer.size == cpu_page_table_size);
+
+        const cpu_page_table_physical_region = region_slicer;
+
+        break :blk .{
+            .page_table_regions = page_table_regions,
+            .cpu_page_table_physical_region = cpu_page_table_physical_region,
+        };
+    };
+
+    const page_table_regions = allocation.page_table_regions;
+    const cpu_page_table_physical_region = allocation.cpu_page_table_physical_region;
 
     const indexed_start = @bitCast(paging.IndexedVirtualAddress, user_scheduler_virtual_address.value());
     const indexed_end = @bitCast(paging.IndexedVirtualAddress, user_scheduler_virtual_address.offset(PageTableRegions.init_vas_size).value());
@@ -1074,7 +1181,7 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
         };
     }
 
-    const scheduler_memory_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(scheduler_memory_size, lib.arch.valid_page_sizes[0]));
+    const scheduler_memory_physical_region = try cpu.driver.getRootCapability().allocatePages(scheduler_memory_size);
     const scheduler_memory_map_flags = .{
         .present = true,
         .write = true,
@@ -1085,10 +1192,10 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
     try page_table_regions.mapSafe(user_scheduler_memory_start_virtual_address, scheduler_memory_physical_region.address, scheduler_memory_physical_region.size, scheduler_memory_map_flags);
 
     const root_page_tables = page_table_regions.get(.pml4).split(2);
+    log.debug("Root page tables: {any}", .{root_page_tables});
     assert(root_page_tables[0].size == lib.arch.valid_page_sizes[0]);
 
     // Map CPU driver into the CPU page table
-    const cpu_page_table_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes((paging.Level.count - 1) * paging.page_table_size, paging.page_table_alignment));
     var cpu_page_table_physical_region_iterator = cpu_page_table_physical_region;
     log.debug("CPU page table physical region: 0x{x} - 0x{x}", .{ cpu_page_table_physical_region.address.value(), cpu_page_table_physical_region.top().value() });
 
@@ -1129,115 +1236,111 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
         .address = paging.packAddress(paging.PDTE, pt.address.value()),
     };
 
-    {
-        const supporting_page_table_size = PageTableRegions.total_size;
-        const indexed_base = @bitCast(paging.IndexedVirtualAddress, page_table_regions.total.address.toHigherHalfVirtualAddress().value());
-        const indexed_top = @bitCast(paging.IndexedVirtualAddress, page_table_regions.total.top().toHigherHalfVirtualAddress().value());
-        const diff = @bitCast(u64, indexed_top) - @bitCast(u64, indexed_base);
-        log.debug("Mapping 0x{x} - 0x{x} to higher half", .{ page_table_regions.total.address.value(), page_table_regions.total.top().value() });
-        log.debug("supporting_page_table_size: {}", .{supporting_page_table_size});
-        log.debug("\nBASE: {}\n\nTOP: {}\n\n", .{ indexed_base, indexed_top });
+    const supporting_page_table_size = PageTableRegions.total_size;
+    const indexed_base = @bitCast(paging.IndexedVirtualAddress, page_table_regions.total.address.toHigherHalfVirtualAddress().value());
+    const indexed_top = @bitCast(paging.IndexedVirtualAddress, page_table_regions.total.top().toHigherHalfVirtualAddress().value());
+    const diff = @bitCast(u64, indexed_top) - @bitCast(u64, indexed_base);
+    log.debug("Mapping 0x{x} - 0x{x} to higher half", .{ page_table_regions.total.address.value(), page_table_regions.total.top().value() });
+    log.debug("supporting_page_table_size: {}", .{supporting_page_table_size});
+    log.debug("\nBASE: {}\n\nTOP: {}\n\n", .{ indexed_base, indexed_top });
 
-        log.debug("ASS1", .{});
-        assert(indexed_base.PML4 == indexed_top.PML4);
-        log.debug("ASS2", .{});
-        assert(indexed_base.PDP == indexed_top.PDP);
-        log.debug("ASS3", .{});
-        const ptable_count = indexed_top.PD - indexed_base.PD + 1;
+    log.debug("ASS1", .{});
+    assert(indexed_base.PML4 == indexed_top.PML4);
+    log.debug("ASS2", .{});
+    assert(indexed_base.PDP == indexed_top.PDP);
+    log.debug("ASS3", .{});
+    const ptable_count = indexed_top.PD - indexed_base.PD + 1;
 
-        {
-            const cpu_indexed_base = @bitCast(paging.IndexedVirtualAddress, cpu_page_table_physical_region.toHigherHalfVirtualAddress().address.value());
-            const cpu_indexed_top = @bitCast(paging.IndexedVirtualAddress, cpu_page_table_physical_region.toHigherHalfVirtualAddress().top().value());
-            const cpu_diff = @bitCast(u64, cpu_indexed_top) - @bitCast(u64, cpu_indexed_base);
-            log.debug("\nCPU BASE: {}\n\nCPU TOP: {}\n\n", .{ cpu_indexed_base, cpu_indexed_top });
-            assert(cpu_indexed_base.PML4 == cpu_indexed_top.PML4);
-            assert(cpu_indexed_base.PDP == cpu_indexed_top.PDP);
-            assert(cpu_indexed_base.PDP == indexed_base.PDP);
-            assert(cpu_indexed_base.PD == cpu_indexed_top.PD);
-            assert(cpu_indexed_base.PT < cpu_indexed_top.PT);
-            assert(cpu_indexed_base.PML4 == indexed_base.PML4);
-            assert(cpu_indexed_base.PDP == indexed_base.PDP);
-            const cpu_ptable_count = cpu_indexed_top.PD - cpu_indexed_base.PD + 1;
-            assert(cpu_ptable_count <= ptable_count);
+    const cpu_indexed_base = @bitCast(paging.IndexedVirtualAddress, cpu_page_table_physical_region.toHigherHalfVirtualAddress().address.value());
+    const cpu_indexed_top = @bitCast(paging.IndexedVirtualAddress, cpu_page_table_physical_region.toHigherHalfVirtualAddress().top().value());
+    const cpu_diff = @bitCast(u64, cpu_indexed_top) - @bitCast(u64, cpu_indexed_base);
+    log.debug("\nCPU BASE: {}\n\nCPU TOP: {}\n\n", .{ cpu_indexed_base, cpu_indexed_top });
+    assert(cpu_indexed_base.PML4 == cpu_indexed_top.PML4);
+    assert(cpu_indexed_base.PDP == cpu_indexed_top.PDP);
+    assert(cpu_indexed_base.PDP == indexed_base.PDP);
+    assert(cpu_indexed_base.PD == cpu_indexed_top.PD);
+    assert(cpu_indexed_base.PT < cpu_indexed_top.PT);
+    assert(cpu_indexed_base.PML4 == indexed_base.PML4);
+    assert(cpu_indexed_base.PDP == indexed_base.PDP);
+    const cpu_ptable_count = cpu_indexed_top.PD - cpu_indexed_base.PD + 1;
+    assert(cpu_ptable_count <= ptable_count);
 
-            const support_pdp_table_count = 1;
-            const support_pd_table_count = 1;
-            const min = @min(@bitCast(u64, indexed_base), @bitCast(u64, cpu_indexed_base));
-            const max = @max(@bitCast(u64, indexed_top), @bitCast(u64, cpu_indexed_top));
-            const min_indexed = @bitCast(paging.IndexedVirtualAddress, min);
-            const general_diff = max - min;
-            const pte_count = @divExact(general_diff, lib.arch.valid_page_sizes[0]);
-            const support_p_table_count = 1 + pte_count / paging.page_table_entry_count + @boolToInt(@as(usize, paging.page_table_entry_count) - min_indexed.PT < pte_count);
-            log.debug("Support p table count: {}", .{support_p_table_count});
-            log.debug("indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, indexed_base), @bitCast(u64, indexed_top) });
-            log.debug("cpu indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, cpu_indexed_base), @bitCast(u64, cpu_indexed_top) });
+    const support_pdp_table_count = 1;
+    const support_pd_table_count = 1;
+    const min = @min(@bitCast(u64, indexed_base), @bitCast(u64, cpu_indexed_base));
+    const max = @max(@bitCast(u64, indexed_top), @bitCast(u64, cpu_indexed_top));
+    const min_indexed = @bitCast(paging.IndexedVirtualAddress, min);
+    const general_diff = max - min;
+    const pte_count = @divExact(general_diff, lib.arch.valid_page_sizes[0]);
+    const support_p_table_count = 1 + pte_count / paging.page_table_entry_count + @boolToInt(@as(usize, paging.page_table_entry_count) - min_indexed.PT < pte_count);
+    log.debug("Support p table count: {}", .{support_p_table_count});
+    log.debug("indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, indexed_base), @bitCast(u64, indexed_top) });
+    log.debug("cpu indexed base: 0x{x}. top: 0x{x}", .{ @bitCast(u64, cpu_indexed_base), @bitCast(u64, cpu_indexed_top) });
 
-            const support_page_table_count = @as(usize, support_pdp_table_count + support_pd_table_count + support_p_table_count);
-            const support_page_table_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(support_page_table_count * paging.page_table_size, paging.page_table_alignment));
-            log.debug("Support page tables: 0x{x} - 0x{x}", .{ support_page_table_physical_region.address.value(), support_page_table_physical_region.top().value() });
-            log.debug("PD table count: {}. P table count: {}", .{ support_pd_table_count, support_p_table_count });
+    const support_page_table_count = @as(usize, support_pdp_table_count + support_pd_table_count + support_p_table_count);
+    const support_page_table_physical_region = try cpu.driver.getRootCapability().allocatePages(support_page_table_count * paging.page_table_size);
+    log.debug("Support page tables: 0x{x} - 0x{x}", .{ support_page_table_physical_region.address.value(), support_page_table_physical_region.top().value() });
+    log.debug("PD table count: {}. P table count: {}", .{ support_pd_table_count, support_p_table_count });
 
-            const support_pdp_offset = 0;
-            const support_pd_offset = support_pdp_table_count * paging.page_table_size;
-            const support_pt_offset = support_pd_offset + support_pd_table_count * paging.page_table_size;
+    const support_pdp_offset = 0;
+    const support_pd_offset = support_pdp_table_count * paging.page_table_size;
+    const support_pt_offset = support_pd_offset + support_pd_table_count * paging.page_table_size;
 
-            const support_pml4 = page_table_regions.getPageTables(.pml4);
-            const support_pdp_region = support_page_table_physical_region.offset(support_pdp_offset);
-            const support_pd_region = support_page_table_physical_region.offset(support_pd_offset);
-            const support_pt_region = support_page_table_physical_region.offset(support_pt_offset);
+    const support_pml4 = page_table_regions.getPageTables(.pml4);
+    const support_pdp_region = support_page_table_physical_region.offset(support_pdp_offset);
+    const support_pd_region = support_page_table_physical_region.offset(support_pd_offset);
+    const support_pt_region = support_page_table_physical_region.offset(support_pt_offset);
 
-            assert(!support_pml4[indexed_base.PML4].present);
-            assert(support_pdp_table_count == 1);
+    assert(!support_pml4[indexed_base.PML4].present);
+    assert(support_pdp_table_count == 1);
 
-            support_pml4[indexed_base.PML4] = paging.PML4TE{
-                .present = true,
-                .write = true,
-                .address = paging.packAddress(paging.PML4TE, support_pdp_region.address.value()),
-            };
+    support_pml4[indexed_base.PML4] = paging.PML4TE{
+        .present = true,
+        .write = true,
+        .address = paging.packAddress(paging.PML4TE, support_pdp_region.address.value()),
+    };
 
-            const support_pdp = support_pdp_region.toHigherHalfVirtualAddress().access(paging.PDPTE);
-            assert(!support_pdp[indexed_base.PDP].present);
-            assert(support_pd_table_count == 1);
+    const support_pdp = support_pdp_region.toHigherHalfVirtualAddress().access(paging.PDPTE);
+    assert(!support_pdp[indexed_base.PDP].present);
+    assert(support_pd_table_count == 1);
 
-            support_pdp[indexed_base.PDP] = paging.PDPTE{
-                .present = true,
-                .write = true,
-                .address = paging.packAddress(paging.PDPTE, support_pd_region.address.value()),
-            };
+    support_pdp[indexed_base.PDP] = paging.PDPTE{
+        .present = true,
+        .write = true,
+        .address = paging.packAddress(paging.PDPTE, support_pd_region.address.value()),
+    };
 
-            const support_pd = support_pd_region.toHigherHalfVirtualAddress().access(paging.PDTE);
-            assert(!support_pd[indexed_base.PD].present);
-            assert(indexed_base.PD <= cpu_indexed_base.PD);
+    const support_pd = support_pd_region.toHigherHalfVirtualAddress().access(paging.PDTE);
+    assert(!support_pd[indexed_base.PD].present);
+    assert(indexed_base.PD <= cpu_indexed_base.PD);
 
-            for (0..support_p_table_count) |i| {
-                const pd_index = indexed_base.PD + i;
-                const p_table_physical_region = support_pt_region.offset(i * paging.page_table_size);
-                support_pd[pd_index] = paging.PDTE{
-                    .present = true,
-                    .write = true,
-                    .address = paging.packAddress(paging.PDTE, p_table_physical_region.address.value()),
-                };
-            }
+    for (0..support_p_table_count) |i| {
+        const pd_index = indexed_base.PD + i;
+        const p_table_physical_region = support_pt_region.offset(i * paging.page_table_size);
+        support_pd[pd_index] = paging.PDTE{
+            .present = true,
+            .write = true,
+            .address = paging.packAddress(paging.PDTE, p_table_physical_region.address.value()),
+        };
+    }
 
-            const support_ptes = support_pt_region.toHigherHalfVirtualAddress().access(paging.PTE);
-            for (0..@divExact(diff, lib.arch.valid_page_sizes[0])) |page_index| {
-                support_ptes[indexed_base.PT + page_index] = paging.getPageEntry(paging.PTE, page_table_regions.total.offset(page_index * lib.arch.valid_page_sizes[0]).address.value(), .{
-                    .present = true,
-                    .write = true,
-                });
-            }
+    const support_ptes = support_pt_region.toHigherHalfVirtualAddress().access(paging.PTE);
+    for (0..@divExact(diff, lib.arch.valid_page_sizes[0])) |page_index| {
+        support_ptes[indexed_base.PT + page_index] = paging.getPageEntry(paging.PTE, page_table_regions.total.offset(page_index * lib.arch.valid_page_sizes[0]).address.value(), .{
+            .present = true,
+            .write = true,
+        });
+    }
 
-            for (0..@divExact(cpu_diff, lib.arch.valid_page_sizes[0])) |page_index| {
-                support_ptes[cpu_indexed_base.PT + page_index] = paging.getPageEntry(paging.PTE, cpu_page_table_physical_region.offset(page_index * lib.arch.valid_page_sizes[0]).address.value(), .{
-                    .present = true,
-                    .write = true,
-                });
-            }
-        }
+    for (0..@divExact(cpu_diff, lib.arch.valid_page_sizes[0])) |page_index| {
+        support_ptes[cpu_indexed_base.PT + page_index] = paging.getPageEntry(paging.PTE, cpu_page_table_physical_region.offset(page_index * lib.arch.valid_page_sizes[0]).address.value(), .{
+            .present = true,
+            .write = true,
+        });
     }
 
     {
-        const privileged_stack_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(x86_64.capability_address_space_stack_size, x86_64.capability_address_space_stack_alignment));
+        const privileged_stack_physical_region = try cpu.driver.getRootCapability().allocatePages(x86_64.capability_address_space_stack_size);
         const indexed_privileged_stack = @bitCast(paging.IndexedVirtualAddress, x86_64.capability_address_space_stack_address.value());
         const stack_last_page = x86_64.capability_address_space_stack_address.offset(x86_64.capability_address_space_stack_size - lib.arch.valid_page_sizes[0]);
         const indexed_privileged_stack_last_page = @bitCast(paging.IndexedVirtualAddress, stack_last_page.value());
@@ -1249,7 +1352,7 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
 
         const pdpte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(pml4te)), *paging.PDPTable))[indexed_privileged_stack.PDP];
         assert(!pdpte.present);
-        const pd_table_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(paging.page_table_size, paging.page_table_alignment));
+        const pd_table_physical_region = try cpu.driver.getRootCapability().allocatePages(paging.page_table_size);
         pdpte.* = paging.PDPTE{
             .present = true,
             .write = true,
@@ -1258,7 +1361,7 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
 
         const pdte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(pdpte)), *paging.PDTable))[indexed_privileged_stack.PD];
         assert(!pdte.present);
-        const p_table_physical_region = PhysicalMemoryRegion.fromAllocation(try allocator.allocateBytes(paging.page_table_size, paging.page_table_alignment));
+        const p_table_physical_region = try cpu.driver.getRootCapability().allocatePages(paging.page_table_size);
         pdte.* = paging.PDTE{
             .present = true,
             .write = true,
@@ -1275,18 +1378,54 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
         }
     }
 
-    const init_cpu_scheduler = try allocator.create(cpu.UserScheduler);
-    const init_cpu_scheduler_virtual_region = VirtualMemoryRegion.fromAnytype(init_cpu_scheduler);
+    const init_cpu_scheduler_physical_region = try cpu.driver.getRootCapability().allocatePages(@sizeOf(cpu.UserScheduler));
+    const init_cpu_scheduler_virtual_region = init_cpu_scheduler_physical_region.toHigherHalfVirtualAddress();
+    const init_cpu_scheduler = init_cpu_scheduler_virtual_region.address.access(*cpu.UserScheduler);
     log.debug("Init scheduler: 0x{x}", .{init_cpu_scheduler_virtual_region.address.value()});
-    const init_cpu_scheduler_physical_region = init_cpu_scheduler_virtual_region.toPhysicalAddress();
     const cpu_scheduler_indexed = @bitCast(paging.IndexedVirtualAddress, init_cpu_scheduler_virtual_region.address.value());
+    log.debug("CPU scheduler indexed: {}", .{cpu_scheduler_indexed});
+
+    assert(cpu_scheduler_indexed.PML4 == cpu_indexed_base.PML4);
+
     const scheduler_pml4te = &page_table_regions.getPageTables(.pml4)[cpu_scheduler_indexed.PML4];
     assert(scheduler_pml4te.present);
+
     const scheduler_pdpte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pml4te)), *paging.PDPTable))[cpu_scheduler_indexed.PDP];
-    assert(scheduler_pdpte.present);
-    const scheduler_pdte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdpte)), *paging.PDTable))[cpu_scheduler_indexed.PD];
-    assert(scheduler_pdte.present);
-    const scheduler_pte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdte)), *paging.PTable))[cpu_scheduler_indexed.PT];
+
+    // Sanity checks
+
+    const scheduler_pdte = blk: {
+        const pdp_is_inside = cpu_scheduler_indexed.PDP >= cpu_indexed_base.PDP and cpu_scheduler_indexed.PDP <= cpu_indexed_top.PDP;
+        log.debug("PDP inside: {}", .{pdp_is_inside});
+        assert(scheduler_pdpte.present == pdp_is_inside);
+
+        if (!scheduler_pdpte.present) {
+            const pdte_allocation = try cpu.driver.getRootCapability().allocatePages(paging.page_table_size);
+            scheduler_pdpte.* = .{
+                .present = true,
+                .write = true,
+                .address = paging.packAddress(@TypeOf(scheduler_pdpte.*), pdte_allocation.address.value()),
+            };
+        }
+
+        break :blk &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdpte)), *paging.PDTable))[cpu_scheduler_indexed.PD];
+    };
+
+    const scheduler_pte = blk: {
+        const is_inside_cpu_page_table_limits = cpu_scheduler_indexed.PD >= cpu_indexed_base.PD and cpu_scheduler_indexed.PD <= cpu_indexed_top.PD;
+        assert(is_inside_cpu_page_table_limits == scheduler_pdte.present);
+        if (!scheduler_pdte.present) {
+            const pte_allocation = try cpu.driver.getRootCapability().allocatePages(paging.page_table_size);
+            scheduler_pdte.* = .{
+                .present = true,
+                .write = true,
+                .address = paging.packAddress(@TypeOf(scheduler_pdte.*), pte_allocation.address.value()),
+            };
+        }
+
+        break :blk &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pdte)), *paging.PTable))[cpu_scheduler_indexed.PT];
+    };
+
     scheduler_pte.* = paging.getPageEntry(paging.PTE, init_cpu_scheduler_physical_region.address.value(), .{
         .present = true,
         .write = true,
@@ -1299,21 +1438,18 @@ fn spawnInitCommon(allocator: *Allocator, cpu_page_tables: paging.CPUPageTables)
                 .cpu = true,
             },
             .dynamic = .{
-                .scheduler = .{
-                    .handle = init_cpu_scheduler,
-                    .memory = scheduler_memory_physical_region,
-                },
-                .page_tables = .{},
                 .io = .{
                     .debug = true,
                 },
+                .ram = cpu.driver.getRootCapability().dynamic.ram,
+                .cpu_memory = .{},
+            },
+            .scheduler = .{
+                .handle = init_cpu_scheduler,
+                .memory = scheduler_memory_physical_region,
             },
         },
     };
-
-    assert(init_cpu_scheduler.capability_root_node.dynamic.page_tables.root.value() == 0);
-    assert(init_cpu_scheduler.capability_root_node.dynamic.page_tables.first_block == null);
-    assert(init_cpu_scheduler.capability_root_node.dynamic.page_tables.last_block == null);
 
     const higher_half_scheduler_common = scheduler_memory_physical_region.address.toHigherHalfVirtualAddress().access(*rise.UserScheduler);
     log.debug("Higher half: 0x{x}", .{@ptrToInt(higher_half_scheduler_common)});

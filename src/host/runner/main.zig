@@ -224,7 +224,7 @@ pub fn main() anyerror!void {
                     try argument_list.append("-S");
                 }
 
-                const use_gf = false;
+                const use_gf = true;
                 var command_line_gdb = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
                 if (use_gf) {
                     try command_line_gdb.append("gf2");

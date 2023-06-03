@@ -162,12 +162,20 @@ pub fn A20Enable() A20Error!void {
 }
 
 pub const MemoryMapEntry = extern struct {
-    region: PhysicalMemoryRegion,
+    address: PhysicalAddress,
+    size: u64,
     type: Type,
     unused: u32 = 0,
 
     pub inline fn isUsable(entry: MemoryMapEntry) bool {
-        return entry.type == .usable and entry.region.address.value() >= lib.mb;
+        return entry.type == .usable and entry.address.value() >= lib.mb;
+    }
+
+    pub inline fn toPhysicalMemoryRegion(entry: MemoryMapEntry) PhysicalMemoryRegion {
+        return PhysicalMemoryRegion.new(.{
+            .address = entry.address,
+            .size = entry.size,
+        });
     }
 
     const Type = enum(u32) {

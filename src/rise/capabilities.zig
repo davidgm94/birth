@@ -7,14 +7,11 @@ const syscall = rise.syscall;
 const Capabilities = @This();
 
 pub const Type = enum(u8) {
-    io,
-    cpu,
-    // physical_memory,
-    // // Inherited from physical memory
-    // device_memory,
-    // ram,
-    // // Inherited from RAM
-    // cpu_memory,
+    io, // primitive
+    cpu, // primitive
+    ram, // primitive
+    cpu_memory, // non-primitive
+    // TODO: device_memory, // primitive
     // vnode,
     // scheduler,
     // irq_table,
@@ -22,46 +19,53 @@ pub const Type = enum(u8) {
     // _,
 
     pub const Type = u8;
-
-    pub fn getCommandType(comptime capability_type: Capabilities.Type) type {
-        return @field(Capabilities, @tagName(capability_type));
-    }
 };
-
-// TODO: make this non-exhaustive enums
-// PROBLEM: https://github.com/ziglang/zig/issues/12250
-// Currently waiting on this since this will enable some comptime magic
 
 pub const Subtype = u16;
 pub const AllTypes = Type;
-pub const cpu = enum(u1) {
-    shutdown,
-    get_core_id,
-};
-pub const io = enum(u1) {
-    log,
-};
-pub const irq_table = enum(u1) {
-    foo,
-};
-pub const physical_memory = enum(u1) {
-    foo,
-};
-pub const device_memory = enum(u1) {
-    foo,
-};
-pub const ram = enum(u1) {
-    foo,
-};
-pub const cpu_memory = enum(u1) {
-    foo,
-};
-pub const vnode = enum(u1) {
-    foo,
-};
-pub const scheduler = enum(u1) {
-    foo,
-};
+
+pub fn CommandBuilder(comptime list: []const []const u8) type {
+    const capability_base_command_list = .{
+        "copy",
+        "mint",
+        "retype",
+        "delete",
+        "revoke",
+        "create",
+    } ++ list;
+    const enum_fields = lib.enumAddNames(&.{}, capability_base_command_list);
+
+    // TODO: make this non-exhaustive enums
+    // PROBLEM: https://github.com/ziglang/zig/issues/12250
+    // Currently waiting on this since this will enable some comptime magic
+    const result = @Type(.{
+        .Enum = .{
+            .tag_type = Subtype,
+            .fields = enum_fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+    return result;
+}
+
+/// Takes some names and integers. Then values are added to the Command enum for an specific capability
+/// The number is an offset of the fields with respect to the base command enum fields
+pub fn Command(comptime capability: Type) type {
+    const extra_command_list = switch (capability) {
+        .io => .{
+            "log",
+        },
+        .cpu => .{
+            "get_core_id",
+            "shutdown",
+        },
+        .ram => [_][]const u8{},
+        .cpu_memory => [_][]const u8{},
+    };
+
+    return CommandBuilder(&extra_command_list);
+}
 
 pub fn ErrorSet(comptime error_list: anytype) type {
     return lib.ErrorSet(error_list, &.{
@@ -87,9 +91,14 @@ pub fn ErrorSet(comptime error_list: anytype) type {
 const raw_argument_count = @typeInfo(syscall.Arguments).Array.len;
 const zero_arguments = [1]usize{0} ** raw_argument_count;
 
-pub fn Syscall(comptime capability_type: Type, comptime command_type: capability_type.getCommandType()) type {
+pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(capability_type)) type {
     const Types = switch (capability_type) {
         .io => switch (command_type) {
+            .copy, .mint, .retype, .delete, .revoke, .create => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const Result = void;
+                pub const Arguments = void;
+            },
             .log => struct {
                 pub const ErrorSet = Capabilities.ErrorSet(.{});
                 pub const Result = usize;
@@ -123,6 +132,11 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: capability
             },
         },
         .cpu => switch (command_type) {
+            .copy, .mint, .retype, .delete, .revoke, .create => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const Result = void;
+                pub const Arguments = void;
+            },
             .get_core_id => struct {
                 pub const ErrorSet = Capabilities.ErrorSet(.{});
                 pub const Result = u32;
@@ -148,6 +162,11 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: capability
 
                 pub const toResult = @compileError("noreturn unexpectedly returned");
             },
+        },
+        .ram, .cpu_memory => struct {
+            pub const ErrorSet = Capabilities.ErrorSet(.{});
+            pub const Result = void;
+            pub const Arguments = void;
         },
         // else => @compileError("TODO: " ++ @tagName(capability)),
     };

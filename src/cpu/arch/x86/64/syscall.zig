@@ -24,13 +24,15 @@ const pcid_mask = 1 << pcid_bit;
 /// - R8:  argument 4
 /// - R9:  argument 5
 fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Syscall.ErrorSet.Error!Syscall.Result {
+    assert(Syscall == rise.capabilities.Syscall(Syscall.capability, Syscall.command));
     const capability: rise.capabilities.Type = Syscall.capability;
-    const command: capability.getCommandType() = Syscall.command;
+    const command: rise.capabilities.Command(capability) = Syscall.command;
     const arguments = try Syscall.toArguments(raw_arguments);
 
     if (cpu.user_scheduler.capability_root_node.hasPermissions(capability, command)) {
         const result = switch (capability) {
             .io => switch (command) {
+                .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
                 .log => blk: {
                     const message = arguments;
                     cpu.writer.writeAll(message) catch unreachable;
@@ -39,9 +41,11 @@ fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Sy
                 },
             },
             .cpu => switch (command) {
+                .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
                 .get_core_id => cpu.core_id,
                 .shutdown => privileged.exitFromQEMU(.success),
             },
+            .cpu_memory, .ram => unreachable,
         };
 
         return result;
@@ -56,7 +60,7 @@ export fn syscall(registers: *const Registers) callconv(.C) rise.syscall.Result 
 
     return switch (options.general.convention) {
         .rise => switch (options.rise.type) {
-            inline else => |capability| switch (@intToEnum(capability.getCommandType(), options.rise.command)) {
+            inline else => |capability| switch (@intToEnum(rise.capabilities.Command(capability), options.rise.command)) {
                 inline else => |command| blk: {
                     const Syscall = rise.capabilities.Syscall(capability, command);
                     const result: Syscall.Result = riseSyscall(Syscall, arguments) catch |err| break :blk Syscall.errorToRaw(err);

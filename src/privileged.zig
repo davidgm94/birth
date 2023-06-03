@@ -153,31 +153,50 @@ pub fn RegionInterface(comptime Region: type) type {
     const AddrT = getAddrT(Addr);
 
     return struct {
-        pub inline fn new(address: Addr, size: AddrT) Region {
+        pub inline fn new(info: struct {
+            address: Addr,
+            size: AddrT,
+        }) Region {
             return Region{
-                .address = address,
-                .size = size,
+                .address = info.address,
+                .size = info.size,
             };
         }
-
-        pub inline fn fromRaw(raw_address: AddrT, size: AddrT) Region {
-            const address = Addr.new(raw_address);
-            return new(address, size);
+        pub inline fn fromRaw(info: struct {
+            raw_address: AddrT,
+            size: AddrT,
+        }) Region {
+            const address = Addr.new(info.raw_address);
+            return new(.{
+                .address = address,
+                .size = info.size,
+            });
         }
 
-        pub inline fn fromAllocation(allocation: Allocator.Allocate.Result) Region {
-            return new(addressToAddrT(allocation.address), allocation.size);
+        pub inline fn fromAllocation(info: struct {
+            allocation: Allocator.Allocate.Result,
+        }) Region {
+            return new(.{
+                .address = addressToAddrT(info.allocation.address),
+                .size = info.allocation.size,
+            });
         }
 
         inline fn addressToAddrT(address: AddrT) Addr {
             return if (Region == PhysicalMemoryRegion and address >= lib.config.cpu_driver_higher_half_address) VirtualAddress.new(address).toPhysicalAddress() else Addr.new(address);
         }
 
-        pub inline fn fromByteSlice(slice: []const u8) Region {
-            return new(addressToAddrT(@ptrToInt(slice.ptr)), slice.len);
+        pub inline fn fromByteSlice(info: struct {
+            slice: []const u8,
+        }) Region {
+            return new(.{
+                .address = addressToAddrT(@ptrToInt(info.slice.ptr)),
+                .size = info.slice.len,
+            });
         }
 
-        pub inline fn fromAnytype(any: anytype) Region {
+        pub inline fn fromAnytype(any: anytype, info: struct {}) Region {
+            _ = info;
             assert(@typeInfo(@TypeOf(any)) == .Pointer);
             return Region{
                 .address = VirtualAddress.new(@ptrToInt(any)),
@@ -192,6 +211,10 @@ pub fn RegionInterface(comptime Region: type) type {
                 .address = address,
                 .size = size,
             };
+        }
+
+        pub inline fn addOffset(region: *Region, asked_offset: AddrT) void {
+            region.* = region.offset(asked_offset);
         }
 
         pub inline fn top(region: Region) Addr {
@@ -264,7 +287,8 @@ pub const VirtualMemoryRegion = extern struct {
         return virtual_memory_region.takeSlice(size).access(u8);
     }
 
-    pub inline fn toPhysicalAddress(virtual_memory_region: VirtualMemoryRegion) PhysicalMemoryRegion {
+    pub inline fn toPhysicalAddress(virtual_memory_region: VirtualMemoryRegion, info: struct {}) PhysicalMemoryRegion {
+        _ = info;
         return PhysicalMemoryRegion{
             .address = virtual_memory_region.address.toPhysicalAddress(),
             .size = virtual_memory_region.size,

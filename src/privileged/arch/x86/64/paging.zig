@@ -23,7 +23,6 @@ const cr3 = x86_64.registers.cr3;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
 const Mapping = privileged.Mapping;
 
