@@ -547,6 +547,21 @@ pub inline fn tryDereferenceAddress(value: anytype) DereferenceError!usize {
     return if (value <= common.maxInt(usize)) @truncate(usize, value) else return DereferenceError.address_bigger_than_usize;
 }
 
+pub fn enumAddNames(comptime enum_fields: []const common.Type.EnumField, comptime names: []const []const u8) []const common.Type.EnumField {
+    comptime var result = enum_fields;
+    const previous_last_value = if (enum_fields.len > 0) enum_fields[enum_fields.len - 1].value else 0;
+
+    inline for (names, 0..) |name, value_start| {
+        const value = value_start + previous_last_value;
+        result = result ++ .{.{
+            .name = name,
+            .value = value,
+        }};
+    }
+
+    return result;
+}
+
 pub fn ErrorSet(comptime error_list: anytype, comptime predefined_fields: []const common.Type.EnumField) type {
     comptime var error_fields: []const common.Type.Error = &.{};
     comptime var enum_items: []const common.Type.EnumField = predefined_fields;

@@ -31,10 +31,7 @@ pub fn assert(ok: bool) void {
         if (@inComptime()) {
             @compileError("Assert failed!");
         } else {
-            switch (build_mode) {
-                .Debug, .ReleaseSafe => unreachable,
-                .ReleaseSmall, .ReleaseFast => @panic("Assert failed!"),
-            }
+            @panic("Assert failed!");
         }
     }
 }
@@ -406,9 +403,12 @@ pub fn canVirtualizeWithQEMU(architecture: Cpu.Arch, ci: bool) bool {
     if (ci) return false;
 
     return switch (os) {
-        .linux => true,
-        .macos, .windows => false,
-        else => @compileError("Operating system not supported"),
+        .linux => blk: {
+            const uname = std.os.uname();
+            const release = &uname.release;
+            break :blk !containsAtLeast(u8, release, 1, "WSL") and !containsAtLeast(u8, release, 1, "microsoft");
+        },
+        else => false,
     };
 }
 

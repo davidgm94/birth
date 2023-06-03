@@ -200,7 +200,10 @@ const MMap = extern struct {
             const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), mmap.buffer[mmap.offset..].ptr)).*;
             mmap.offset += mmap.descriptor_size;
             const result = bootloader.MemoryMapEntry{
-                .region = PhysicalMemoryRegion.new(PhysicalAddress.new(entry.physical_start), entry.number_of_pages << UEFI.page_shifter),
+                .region = PhysicalMemoryRegion.new(.{
+                    .address = PhysicalAddress.new(entry.physical_start),
+                    .size = entry.number_of_pages << UEFI.page_shifter,
+                }),
                 .type = switch (entry.type) {
                     .ReservedMemoryType, .LoaderCode, .LoaderData, .BootServicesCode, .BootServicesData, .RuntimeServicesCode, .RuntimeServicesData, .ACPIReclaimMemory, .ACPIMemoryNVS, .MemoryMappedIO, .MemoryMappedIOPortSpace, .PalCode, .PersistentMemory => .reserved,
                     .ConventionalMemory => .usable,
@@ -223,7 +226,7 @@ const MMap = extern struct {
         memory.len = memory_size;
         @memset(memory, 0);
 
-        return PhysicalMemoryRegion.fromByteSlice(memory);
+        return PhysicalMemoryRegion.fromByteSlice(.{ .slice = memory });
     }
 };
 

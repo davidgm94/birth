@@ -18,7 +18,6 @@ const PageAllocator = privileged.PageAllocator;
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
 const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 pub const paging = privileged.arch.paging;
 
 pub const Version = extern struct {
@@ -669,23 +668,31 @@ pub const Information = extern struct {
     };
     //
     pub fn checkIntegrity(information: *const Information) !void {
-        if (information.last_struct_offset != last_struct_offset) return IntegrityError.bad_struct_offset;
+        if (information.last_struct_offset != last_struct_offset) {
+            return IntegrityError.bad_struct_offset;
+        }
+
         const original_total_size = information.total_size;
         var total_size: u32 = 0;
         inline for (Information.Slice.TypeMap, 0..) |T, index| {
             const slice = information.slices.array.values[index];
+
             if (slice.alignment < @alignOf(T)) {
                 lib.log.err("Bad alignment of {}. Current: {}. Before: {}", .{ T, @alignOf(T), slice.alignment });
                 return IntegrityError.bad_slice_alignment;
             }
+
             if (slice.len * @sizeOf(T) != slice.size) {
                 return IntegrityError.bad_slice_size;
             }
+
             total_size = lib.alignForwardGeneric(u32, total_size, slice.alignment);
             total_size += lib.alignForwardGeneric(u32, slice.size, slice.alignment);
         }
 
-        if (total_size != original_total_size) return IntegrityError.bad_total_size;
+        if (total_size != original_total_size) {
+            return IntegrityError.bad_total_size;
+        }
     }
 
     pub fn allocatePages(bootloader_information: *Information, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
@@ -706,10 +713,10 @@ pub const Information = extern struct {
 
                     if (entry.type == .usable and target_address.value() <= lib.maxInt(usize) and size_left > size and entry.region.address.value() != 0) {
                         if (entry.region.address.isAligned(alignment)) {
-                            const result = PhysicalMemoryRegion{
+                            const result = PhysicalMemoryRegion.new(.{
                                 .address = target_address,
                                 .size = size,
-                            };
+                            });
 
                             @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
 
@@ -732,10 +739,10 @@ pub const Information = extern struct {
                             const allowed_quota = alignment / options.space_waste_allowed_to_guarantee_alignment;
 
                             if (aligned_address + size < entry.region.address.offset(entry.region.size).value() and difference <= allowed_quota) {
-                                const result = PhysicalMemoryRegion{
+                                const result = PhysicalMemoryRegion.new(.{
                                     .address = PhysicalAddress.new(aligned_address),
                                     .size = size,
-                                };
+                                });
 
                                 @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
                                 page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
@@ -828,6 +835,10 @@ pub const MemoryMapEntry = extern struct {
         reserved = 1,
         bad_memory = 2,
     };
+
+    pub fn getFreeRegion(mmap_entry: MemoryMapEntry, page_counter: u32) PhysicalMemoryRegion {
+        return mmap_entry.region.offset(page_counter << lib.arch.page_shifter(lib.arch.valid_page_sizes[0]));
+    }
 
     comptime {
         assert(@sizeOf(MemoryMapEntry) == @sizeOf(u64) * 3);

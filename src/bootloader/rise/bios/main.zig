@@ -167,7 +167,7 @@ const MemoryMap = extern struct {
 
         if (mmap.iterator.next()) |bios_entry| {
             return .{
-                .region = bios_entry.region,
+                .region = bios_entry.toPhysicalMemoryRegion(),
                 .type = switch (bios_entry.type) {
                     .usable => if (bios_entry.isUsable()) .usable else .reserved,
                     .bad_memory => .bad_memory,
@@ -202,7 +202,10 @@ const Framebuffer = extern struct {
         }
 
         const edid_video_mode = vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
-        const framebuffer_region = PhysicalMemoryRegion.fromRaw(edid_video_mode.framebuffer_address, edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y);
+        const framebuffer_region = PhysicalMemoryRegion.fromRaw(.{
+            .raw_address = edid_video_mode.framebuffer_address,
+            .size = edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y,
+        });
         const framebuffer = .{
             .address = framebuffer_region.address.value(),
             .pitch = edid_video_mode.linear_bytes_per_scanline,

@@ -663,7 +663,8 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
             else => return Error.architecture_not_supported,
         }
     }
-    var target = CrossTarget{
+
+    return CrossTarget{
         .cpu_arch = asked_arch,
         .cpu_model = switch (common.cpu.arch) {
             .x86 => .determined_by_cpu_arch,
@@ -671,7 +672,7 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
             // zig fmt off
             .determined_by_cpu_arch,
             // .determined_by_cpu_arch,
-            // TODO: this causes some problems
+            // TODO: this causes some problems: https://github.com/ziglang/zig/issues/15524
             //.{ .explicit = &common.Target.x86.cpu.x86_64_v3 },
             else => .determined_by_cpu_arch,
         },
@@ -680,6 +681,4 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
         .cpu_features_add = enabled_features,
         .cpu_features_sub = disabled_features,
     };
-
-    return target;
 }
