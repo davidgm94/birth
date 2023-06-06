@@ -224,13 +224,21 @@ pub fn main() anyerror!void {
                     try argument_list.append("-S");
                 }
 
-                const use_gf = true;
+                const use_gf = switch (lib.os) {
+                    .macos => false,
+                    .linux => true,
+                    else => false,
+                };
                 var command_line_gdb = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
                 if (use_gf) {
                     try command_line_gdb.append("gf2");
                 } else {
                     try command_line_gdb.append("kitty");
-                    try command_line_gdb.append("gdb");
+                    try command_line_gdb.append(switch (lib.os) {
+                        .linux => "gdb",
+                        .macos => "x86_64-elf-gdb",
+                        else => "gdb",
+                    });
                 }
 
                 try command_line_gdb.appendSlice(&.{ "-ex", switch (arguments_result.configuration.architecture) {
@@ -252,7 +260,7 @@ pub fn main() anyerror!void {
                 }
 
                 const debugger_process_arguments = switch (lib.os) {
-                    .linux => command_line_gdb.items,
+                    .linux, .macos => command_line_gdb.items,
                     else => return Error.not_implemented,
                 };
 
