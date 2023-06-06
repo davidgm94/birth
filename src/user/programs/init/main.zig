@@ -8,12 +8,12 @@ comptime {
 }
 
 const Writer = extern struct {
-    pub const Error = error{
-        log_failed,
-    };
+    pub const Syscall = user.Syscall(.io, .log);
+    pub const Error = Writer.Syscall.ErrorSet.Error;
 
     pub fn write(_: void, bytes: []const u8) Error!usize {
-        return Syscall(.io, .log).blocking(bytes) catch return Error.log_failed;
+        const result = try Writer.Syscall.blocking(bytes);
+        return result;
     }
 };
 
