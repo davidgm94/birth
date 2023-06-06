@@ -177,8 +177,8 @@ pub fn main() anyerror!void {
                     "host",
                 });
             } else {
-                switch (lib.cpu.arch) {
-                    .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "max,+avx2" }),
+                switch (arguments_result.configuration.architecture) {
+                    .x86_64 => try argument_list.appendSlice(&.{ "-cpu", "max" }),
                     else => return Error.architecture_not_supported,
                 }
 

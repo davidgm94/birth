@@ -646,7 +646,7 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
     var disabled_features = Cpu.Feature.Set.empty;
 
     if (execution_mode == .privileged) {
-        switch (common.cpu.arch) {
+        switch (asked_arch) {
             .x86, .x86_64 => {
                 // disable FPU
                 const Feature = Target.x86.Feature;
@@ -660,7 +660,10 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
 
                 enabled_features.addFeature(@enumToInt(Feature.soft_float));
             },
-            else => return Error.architecture_not_supported,
+            else => |arch| {
+                std.log.debug("Arch: {s}", .{@tagName(arch)});
+                return Error.architecture_not_supported;
+            },
         }
     }
 
