@@ -15,9 +15,9 @@ const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
 const CPUPageTables = privileged.arch.CPUPageTables;
 const PageAllocator = privileged.PageAllocator;
-const PhysicalAddress = privileged.PhysicalAddress;
-const VirtualAddress = privileged.VirtualAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const PhysicalAddress = lib.PhysicalAddress;
+const VirtualAddress = lib.VirtualAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 pub const paging = privileged.arch.paging;
 
 pub const Version = extern struct {

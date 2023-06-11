@@ -498,8 +498,8 @@ pub fn build(b_arg: *Build) !void {
 
 fn addObjdump(artifact: *CompileStep, comptime name: []const u8) void {
     switch (os) {
-        .linux => {
-            const objdump = b.addSystemCommand(&.{ "llvm-objdump", "-dxS", "-Mintel" });
+        .linux, .macos => {
+            const objdump = b.addSystemCommand(&.{ "objdump", "-dxS", "-Mintel" });
             objdump.addArtifactArg(artifact);
             const objdump_step = b.step("objdump_" ++ name, "Objdump " ++ name);
             objdump_step.dependOn(&objdump.step);

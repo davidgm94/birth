@@ -20,10 +20,10 @@ const reverse_valid_page_sizes = lib.arch.x86_64.reverse_valid_page_sizes;
 
 const x86_64 = privileged.arch.x86_64;
 const cr3 = x86_64.registers.cr3;
-const PhysicalAddress = privileged.PhysicalAddress;
-const VirtualAddress = privileged.VirtualAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
+const PhysicalAddress = lib.PhysicalAddress;
+const VirtualAddress = lib.VirtualAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const PhysicalAddressSpace = lib.PhysicalAddressSpace;
 const Mapping = privileged.Mapping;
 
 const bootloader = @import("bootloader");
@@ -600,10 +600,14 @@ pub const Specific = extern struct {
 
     pub inline fn getCpuPML4Table(specific: Specific) !*PML4Table {
         assert(@bitCast(u64, specific.cr3) & page_table_size == 0);
-        return try getPML4Table(specific.cr3);
+        return try specific.getPML4TableUnchecked();
     }
     pub inline fn getUserPML4Table(specific: Specific) !*PML4Table {
         return try getPML4Table(specific.getUserCr3());
+    }
+
+    pub inline fn getPML4TableUnchecked(specific: Specific) !*PML4Table {
+        return try getPML4Table(specific.cr3);
     }
 };
 

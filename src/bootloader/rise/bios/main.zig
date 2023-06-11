@@ -11,10 +11,10 @@ const stopCPU = privileged.arch.stopCPU;
 const GDT = privileged.arch.x86_64.GDT;
 const Mapping = privileged.Mapping;
 const PageAllocator = privileged.PageAllocator;
-const PhysicalAddress = privileged.PhysicalAddress;
-const VirtualAddress = privileged.VirtualAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const PhysicalAddress = lib.PhysicalAddress;
+const VirtualAddress = lib.VirtualAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const bootloader = @import("bootloader");
 const BIOS = bootloader.BIOS;

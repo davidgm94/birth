@@ -3,6 +3,11 @@ const config = lib.config;
 const Allocator = lib.Allocator;
 const ELF = lib.ELF(64);
 const log = lib.log.scoped(.UEFI);
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualAddress = lib.VirtualAddress;
+const VirtualAddressSpace = lib.VirtualAddressSpace;
+const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const bootloader = @import("bootloader");
 const UEFI = bootloader.UEFI;
@@ -24,11 +29,6 @@ const SystemTable = UEFI.SystemTable;
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
 const PageAllocator = privileged.PageAllocator;
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.VirtualAddressSpace;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 pub const writer = privileged.writer;
 
 const CPU = privileged.arch.CPU;
