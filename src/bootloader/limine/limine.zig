@@ -366,9 +366,9 @@ const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const Mapping = privileged.Mapping;
 const PageAllocator = privileged.PageAllocator;
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualAddress = lib.VirtualAddress;
 const stopCPU = privileged.arch.stopCPU;
 const paging = privileged.arch.x86_64.paging;
 

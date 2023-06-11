@@ -1,5 +1,6 @@
 const cpu = @import("cpu");
 const lib = @import("lib");
+const log = lib.log;
 const privileged = @import("privileged");
 const rise = @import("rise");
 
@@ -24,7 +25,7 @@ const pcid_mask = 1 << pcid_bit;
 /// - R8:  argument 4
 /// - R9:  argument 5
 fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Syscall.ErrorSet.Error!Syscall.Result {
-    assert(Syscall == rise.capabilities.Syscall(Syscall.capability, Syscall.command));
+    comptime assert(Syscall == rise.capabilities.Syscall(Syscall.capability, Syscall.command));
     const capability: rise.capabilities.Type = Syscall.capability;
     const command: rise.capabilities.Command(capability) = Syscall.command;
     const arguments = try Syscall.toArguments(raw_arguments);
@@ -45,7 +46,17 @@ fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Sy
                 .get_core_id => cpu.core_id,
                 .shutdown => privileged.exitFromQEMU(.success),
             },
-            .cpu_memory, .ram => unreachable,
+            .cpu_memory => switch (command) {
+                .allocate => {
+                    comptime assert(@TypeOf(arguments) == usize);
+                    const size = arguments;
+                    const physical_region = try cpu.user_scheduler.capability_root_node.allocatePages(size);
+                    try cpu.user_scheduler.capability_root_node.allocateCPUMemory(physical_region, .{ .privileged = false });
+                    return physical_region.address;
+                },
+                else => @panic(@tagName(command)),
+            },
+            .ram => unreachable,
         };
 
         return result;

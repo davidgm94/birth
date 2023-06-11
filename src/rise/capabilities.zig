@@ -1,5 +1,6 @@
 const lib = @import("lib");
 const assert = lib.assert;
+const PhysicalAddress = lib.PhysicalAddress;
 
 const rise = @import("rise");
 const syscall = rise.syscall;
@@ -61,54 +62,54 @@ pub fn Command(comptime capability: Type) type {
             "shutdown",
         },
         .ram => [_][]const u8{},
-        .cpu_memory => [_][]const u8{},
+        .cpu_memory => .{
+            "allocate",
+        },
     };
 
     return CommandBuilder(&extra_command_list);
 }
 
-pub fn ErrorSet(comptime error_list: anytype) type {
-    return lib.ErrorSet(error_list, &.{
-        .{
-            .name = "ok",
-            .value = 0,
-        },
+const success = 0;
+const first_valid_error = success + 1;
+
+pub fn ErrorSet(comptime error_names: []const []const u8) type {
+    return lib.ErrorSet(error_names, &.{
         .{
             .name = "forbidden",
-            .value = 1,
+            .value = first_valid_error + 0,
         },
         .{
             .name = "corrupted_input",
-            .value = 2,
+            .value = first_valid_error + 1,
         },
         .{
             .name = "invalid_input",
-            .value = 3,
+            .value = first_valid_error + 2,
         },
     });
 }
 
 const raw_argument_count = @typeInfo(syscall.Arguments).Array.len;
-const zero_arguments = [1]usize{0} ** raw_argument_count;
 
 pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(capability_type)) type {
     const Types = switch (capability_type) {
         .io => switch (command_type) {
             .copy, .mint, .retype, .delete, .revoke, .create => struct {
-                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
                 pub const Result = void;
                 pub const Arguments = void;
             },
             .log => struct {
-                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
                 pub const Result = usize;
                 pub const Arguments = []const u8;
 
-                pub inline fn toResult(raw_result: syscall.Result.Rise) Result {
+                inline fn toResult(raw_result: syscall.Result.Rise) Result {
                     return raw_result.second;
                 }
 
-                pub inline fn resultToRaw(result: Result) syscall.Result {
+                inline fn resultToRaw(result: Result) syscall.Result {
                     return syscall.Result{
                         .rise = .{
                             .first = .{},
@@ -133,20 +134,20 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
         },
         .cpu => switch (command_type) {
             .copy, .mint, .retype, .delete, .revoke, .create => struct {
-                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
                 pub const Result = void;
                 pub const Arguments = void;
             },
             .get_core_id => struct {
-                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
                 pub const Result = u32;
                 pub const Arguments = void;
 
-                pub inline fn toResult(raw_result: syscall.Result.Rise) Result {
+                inline fn toResult(raw_result: syscall.Result.Rise) Result {
                     return @intCast(Result, raw_result.second);
                 }
 
-                pub inline fn resultToRaw(result: Result) syscall.Result {
+                inline fn resultToRaw(result: Result) syscall.Result {
                     return syscall.Result{
                         .rise = .{
                             .first = .{},
@@ -156,17 +157,47 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
                 }
             },
             .shutdown => struct {
-                pub const ErrorSet = Capabilities.ErrorSet(.{});
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
                 pub const Result = noreturn;
                 pub const Arguments = void;
 
                 pub const toResult = @compileError("noreturn unexpectedly returned");
             },
         },
-        .ram, .cpu_memory => struct {
-            pub const ErrorSet = Capabilities.ErrorSet(.{});
+        .ram => struct {
+            pub const ErrorSet = Capabilities.ErrorSet(&.{});
             pub const Result = void;
             pub const Arguments = void;
+        },
+        .cpu_memory => struct {
+            pub const ErrorSet = Capabilities.ErrorSet(&.{
+                "OutOfMemory",
+            });
+            pub const Result = PhysicalAddress;
+            pub const Arguments = usize;
+
+            inline fn toResult(raw_result: syscall.Result.Rise) Result {
+                return PhysicalAddress.new(raw_result.second);
+            }
+
+            inline fn resultToRaw(result: Result) syscall.Result {
+                return syscall.Result{
+                    .rise = .{
+                        .first = .{},
+                        .second = result.value(),
+                    },
+                };
+            }
+
+            inline fn toArguments(raw_arguments: syscall.Arguments) !Arguments {
+                const size = raw_arguments[0];
+                return size;
+            }
+
+            inline fn argumentsToRaw(arguments: Arguments) syscall.Arguments {
+                const result = [1]usize{arguments};
+                return result ++ .{0} ** (raw_argument_count - result.len);
+            }
         },
         // else => @compileError("TODO: " ++ @tagName(capability)),
     };
@@ -176,12 +207,18 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
         pub const Result = Types.Result;
         pub const Arguments = Types.Arguments;
         pub const toResult = Types.toResult;
-        pub const toArguments = if (@hasDecl(Types, "toArguments")) Types.toArguments else struct {
-            fn lambda(raw_arguments: syscall.Arguments) error{}!void {
-                _ = raw_arguments;
-                return {};
-            }
-        }.lambda;
+        pub const toArguments = if (Arguments == void)
+            struct {
+                fn lambda(raw_arguments: syscall.Arguments) error{}!void {
+                    comptime {
+                        assert(Arguments == void);
+                    }
+                    _ = raw_arguments;
+                    return {};
+                }
+            }.lambda
+        else
+            Types.toArguments;
         pub const capability = capability_type;
         pub const command = command_type;
 
@@ -219,7 +256,7 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
 
         /// This is not meant to be called in the CPU driver
         pub fn blocking(arguments: Arguments) @This().ErrorSet.Error!Result {
-            const raw_arguments = if (@hasDecl(Types, "argumentsToRaw")) Types.argumentsToRaw(arguments) else zero_arguments;
+            const raw_arguments = if (Arguments == void) [1]usize{0} ** raw_argument_count else Types.argumentsToRaw(arguments);
             // TODO: make this more reliable and robust?
             const options = rise.syscall.Options{
                 .rise = .{
@@ -230,14 +267,21 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
 
             const raw_result = rise.arch.syscall(options, raw_arguments);
 
-            const error_value = @intToEnum(@This().ErrorSet.Enum, raw_result.rise.first.@"error");
+            const raw_error_value = raw_result.rise.first.@"error";
+            comptime {
+                assert(!@hasField(@This().ErrorSet.Enum, "ok"));
+                assert(!@hasField(@This().ErrorSet.Enum, "success"));
+                assert(lib.enumFields(@This().ErrorSet.Enum)[0].value == first_valid_error);
+            }
 
-            return switch (error_value) {
-                .ok => switch (Result) {
+            return switch (raw_error_value) {
+                success => switch (Result) {
                     noreturn => unreachable,
                     else => toResult(raw_result.rise),
                 },
-                inline else => |comptime_error_enum| @field(@This().ErrorSet.Error, @tagName(comptime_error_enum)),
+                else => switch (@intToEnum(@This().ErrorSet.Enum, raw_error_value)) {
+                    inline else => |comptime_error_enum| @field(@This().ErrorSet.Error, @tagName(comptime_error_enum)),
+                },
             };
         }
     };

@@ -14,10 +14,10 @@ const paging = x86_64.paging;
 const cr0 = x86_64.registers.cr0;
 const cr3 = x86_64.registers.cr3;
 const cr4 = x86_64.registers.cr4;
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualAddress = lib.VirtualAddress;
+const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const cpu = @import("cpu");
 const Heap = cpu.Heap;

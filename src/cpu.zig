@@ -9,9 +9,9 @@ const privileged = @import("privileged");
 const CPUPageTables = privileged.arch.CPUPageTables;
 const Mapping = privileged.Mapping;
 const PageAllocatorInterface = privileged.PageAllocator;
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalAddressSpace = lib.PhysicalAddressSpace;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const stopCPU = privileged.arch.stopCPU;
 const VirtualAddress = privileged.VirtualAddress;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
@@ -66,129 +66,17 @@ pub const UserScheduler = extern struct {
     capability_root_node: capabilities.Root,
     common: *rise.UserScheduler,
     padding: [padding_byte_count]u8 = .{0} ** padding_byte_count,
+
     const total_size = @sizeOf(capabilities.Root) + @sizeOf(*rise.UserScheduler);
     const aligned_size = lib.alignForward(total_size, lib.arch.valid_page_sizes[0]);
     const padding_byte_count = aligned_size - total_size;
+
     comptime {
         if (padding_byte_count == 0 and @hasField(UserScheduler, "padding")) {
             @compileError("remove padding because it is not necessary");
         }
     }
 };
-
-// pub const Heap = extern struct {
-//     region: VirtualMemoryRegion = .{
-//         .address = .null,
-//         .size = 0,
-//         .space = .cpu,
-//     },
-//
-//     var allocated: u64 = 0;
-//
-//     pub inline fn fromPageAllocator(pa: *PageAllocator) !Heap {
-//         const physical_allocation = try pa.allocate(lib.arch.valid_page_sizes[1], lib.arch.valid_page_sizes[1]);
-//         const virtual_allocation = physical_allocation.toHigherHalfVirtualAddress();
-//         return Heap{
-//             .region = virtual_allocation,
-//         };
-//     }
-//
-//     pub inline fn allocate(heap: *Heap, comptime T: type, count: usize) Allocator.Allocate.Error!*T {
-//         const region = try heap.allocateBytes(@sizeOf(T) * count, @alignOf(T));
-//         return region.access(T);
-//     }
-//
-//     pub inline fn create(heap: *Heap, comptime T: type) Allocator.Allocate.Error!*T {
-//         const region = try heap.allocateBytes(@sizeOf(T), @alignOf(T));
-//         return region.address.access(*T);
-//     }
-//
-//     pub noinline fn allocateBytes(heap: *Heap, size: u64, alignment: u64) Allocator.Allocate.Error!VirtualMemoryRegion {
-//         const target_address = lib.alignForward(heap.region.address.value(), alignment);
-//         const alignment_diff = target_address - heap.region.address.value();
-//         const aligned_size = size + alignment_diff;
-//
-//         allocated += size;
-//
-//         if (heap.region.size >= aligned_size) {
-//             const result_address = VirtualAddress.new(target_address);
-//             heap.region.size -= aligned_size;
-//             heap.region.address = heap.region.address.offset(aligned_size);
-//
-//             return .{
-//                 .address = result_address,
-//                 .size = size,
-//             };
-//         } else {
-//             assert(alignment < lib.arch.valid_page_sizes[0]);
-//             const region_allocation_size = if (lib.arch.valid_page_sizes[0] >= size) lib.arch.valid_page_sizes[0] else lib.alignForward(size, lib.arch.valid_page_sizes[0]);
-//             const region_allocation = try page_allocator.allocate(region_allocation_size, lib.arch.valid_page_sizes[0]);
-//             const virtual_region = region_allocation.toHigherHalfVirtualAddress();
-//             heap.region = virtual_region;
-//
-//             const result_address = heap.region.address;
-//
-//             heap.region.size -= size;
-//             heap.region.address = heap.region.address.offset(size);
-//
-//             return .{
-//                 .address = result_address,
-//                 .size = size,
-//             };
-//         }
-//     }
-//
-//     pub inline fn toZig(heap: *Heap) lib.ZigAllocator {
-//         return .{
-//             .ptr = heap,
-//             .vtable = &zig_vtable,
-//         };
-//     }
-//
-//     fn zigAllocate(ctx: *anyopaque, n: usize, log2_ptr_align: u8, ra: usize) ?[*]u8 {
-//         _ = log2_ptr_align;
-//         _ = ra;
-//         const heap = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
-//         const virtual_memory_region = heap.allocateBytes(n, 8) catch return null;
-//         return virtual_memory_region.address.access(?[*]u8);
-//     }
-//
-//     fn zigResize(
-//         ctx: *anyopaque,
-//         buf: []u8,
-//         log2_buf_align: u8,
-//         new_size: usize,
-//         return_address: usize,
-//     ) bool {
-//         _ = return_address;
-//         _ = new_size;
-//         _ = log2_buf_align;
-//         _ = buf;
-//         _ = ctx;
-//
-//         return false;
-//     }
-//
-//     fn zigFree(
-//         ctx: *anyopaque,
-//         buf: []u8,
-//         log2_buf_align: u8,
-//         return_address: usize,
-//     ) void {
-//         _ = return_address;
-//         _ = log2_buf_align;
-//         _ = buf;
-//         _ = ctx;
-//     }
-//
-//     pub const zig_vtable = lib.ZigAllocator.VTable{
-//         .alloc = zigAllocate,
-//         .free = zigFree,
-//         .resize = zigResize,
-//     };
-//
-//     pub const Entry = PageAllocator.Entry;
-// };
 
 const print_stack_trace = false;
 var panic_count: usize = 0;
@@ -277,181 +165,6 @@ pub fn panicFromInstructionPointerAndFramePointer(return_address: usize, frame_a
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @call(.always_inline, panicFromInstructionPointerAndFramePointer, .{ @returnAddress(), @frameAddress(), format, arguments });
 }
-
-// pub const UserVirtualAddressSpace = extern struct {
-//     generic: VirtualAddressSpace,
-// };
-
-// pub const VirtualAddressSpace = extern struct {
-//     arch: paging.Specific,
-//     first_page_tables: ?*PageEntry = null,
-//     last_page_tables: ?*PageEntry = null,
-//     page_table_count: usize = 0,
-//     // heap: Heap = .{},
-//
-//     pub const PageEntry = extern struct {
-//         address: PhysicalAddress,
-//         next: ?*PageEntry,
-//         options: packed struct(u8) {
-//             level: paging.Level,
-//             user: bool,
-//             reserved: u5 = 0,
-//         },
-//     };
-//
-//     pub const paging = privileged.arch.current.paging;
-//
-//     // pub fn new() !*VirtualAddressSpace {
-//     //     const virtual_address_space = try heap_allocator.create(VirtualAddressSpace);
-//     //
-//     //     virtual_address_space.* = .{
-//     //         .arch = undefined,
-//     //     };
-//     //
-//     //     virtual_address_space.arch = try paging.Specific.new(virtual_address_space.getPageAllocatorInterface(), page_tables);
-//     //
-//     //     return virtual_address_space;
-//     // }
-//
-//     fn callbackHeapAllocate(allocator: *Allocator, size: u64, alignment: u64) Allocator.Allocate.Error!Allocator.Allocate.Result {
-//         _ = alignment;
-//         _ = size;
-//         _ = allocator;
-//         // if (lib.cpu.arch != .x86) {
-//         //     const virtual_address_space = @fieldParentPtr(VirtualAddressSpace, "heap", @fieldParentPtr(Heap, "allocator", allocator));
-//         //     _ = virtual_address_space;
-//         // }
-//
-//         return Allocator.Allocate.Error.OutOfMemory;
-//     }
-//
-//     pub inline fn makeCurrent(vas: *const VirtualAddressSpace) void {
-//         vas.arch.makeCurrent();
-//     }
-//
-//     pub fn allocateAndMap(virtual_address_space: *VirtualAddressSpace, size: u64, alignment: u64, general_flags: Mapping.Flags) !VirtualMemoryRegion {
-//         const physical_region = try page_allocator.allocate(size, alignment);
-//         const virtual_region = switch (general_flags.user) {
-//             false => physical_region.toHigherHalfVirtualAddress(),
-//             true => physical_region.toIdentityMappedVirtualAddress(),
-//         };
-//         try virtual_address_space.map(physical_region.address, virtual_region.address, size, general_flags);
-//         return virtual_region;
-//     }
-//
-//     pub fn allocateAndMapToAddress(virtual_address_space: *VirtualAddressSpace, virtual_address: VirtualAddress, size: u64, alignment: u64, general_flags: Mapping.Flags) !PhysicalMemoryRegion {
-//         const physical_region = try page_allocator.allocate(size, alignment);
-//         try virtual_address_space.map(physical_region.address, virtual_address, size, general_flags);
-//         return physical_region;
-//     }
-//
-//     pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags) !void {
-//         if (size == 0) {
-//             return paging.Error.invalid_size;
-//         }
-//
-//         if (!lib.isAlignedGeneric(u64, asked_physical_address.value(), lib.arch.valid_page_sizes[0])) {
-//             return paging.Error.unaligned_physical;
-//         }
-//
-//         if (!lib.isAlignedGeneric(u64, asked_virtual_address.value(), lib.arch.valid_page_sizes[0])) {
-//             return paging.Error.unaligned_virtual;
-//         }
-//
-//         if (!lib.isAlignedGeneric(u64, size, lib.arch.valid_page_sizes[0])) {
-//             return paging.Error.unaligned_size;
-//         }
-//
-//         if (asked_physical_address.value() >= lib.config.cpu_driver_higher_half_address) {
-//             return paging.Error.invalid_physical;
-//         }
-//
-//         try arch.map(virtual_address_space, asked_physical_address, asked_virtual_address, size, general_flags);
-//     }
-//
-//     pub inline fn mapDevice(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, size: u64) !VirtualAddress {
-//         try virtual_address_space.map(asked_physical_address, asked_physical_address.toHigherHalfVirtualAddress(), size, .{
-//             .write = true,
-//             .cache_disable = true,
-//             .global = false,
-//         });
-//
-//         return asked_physical_address.toHigherHalfVirtualAddress();
-//     }
-//
-//     fn allocatePages(virtual_address_space: *VirtualAddressSpace, options: PageAllocatorInterface.AllocatePageTablesOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-//         const alignment: u64 = switch (lib.cpu.arch) {
-//             .x86_64 => switch (options.count) {
-//                 2 => 2 * paging.page_table_alignment,
-//                 0x200 => 0x200 * paging.page_table_alignment,
-//                 else => paging.page_table_alignment,
-//             },
-//             else => @compileError("architecture not supported"),
-//         };
-//         const result = try page_allocator.allocate(options.count * paging.page_table_size, alignment);
-//         const page_entry = try virtual_address_space.heap.create(PageEntry);
-//         page_entry.* = .{
-//             .address = result.address,
-//             .next = null,
-//             .options = .{
-//                 .level = options.level,
-//                 .user = options.user,
-//             },
-//         };
-//
-//         if (virtual_address_space.last_page_tables) |last| {
-//             assert(virtual_address_space.page_table_count > 0);
-//             last.next = page_entry;
-//         } else {
-//             assert(virtual_address_space.page_table_count == 0);
-//             assert(virtual_address_space.first_page_tables == null);
-//             virtual_address_space.first_page_tables = page_entry;
-//         }
-//
-//         virtual_address_space.last_page_tables = page_entry;
-//
-//         virtual_address_space.page_table_count += options.count;
-//
-//         return result;
-//     }
-//
-//     fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-//         if (size != paging.page_table_size) return error.OutOfMemory;
-//         if (alignment != paging.page_table_alignment) return error.OutOfMemory;
-//         if (!options.level_valid) return error.OutOfMemory;
-//
-//         const virtual_address_space = @ptrCast(*VirtualAddressSpace, @alignCast(@alignOf(VirtualAddressSpace), context));
-//         return try virtual_address_space.allocatePages(.{
-//             .count = options.count,
-//             .level = options.level,
-//             .user = options.user,
-//         });
-//     }
-//
-//     pub fn mapPageTables(virtual_address_space: *VirtualAddressSpace) !void {
-//         var it = virtual_address_space.first_page_tables;
-//         while (it != virtual_address_space.last_page_tables) {
-//             var last: *PageEntry = undefined;
-//             while (it) |page_table_entry| : (it = page_table_entry.next) {
-//                 try virtual_address_space.map(page_table_entry.address, page_table_entry.address.toHigherHalfVirtualAddress(), paging.page_table_size, .{
-//                     .user = page_table_entry.options.user,
-//                     .write = true,
-//                 });
-//                 last = page_table_entry;
-//             }
-//
-//             if (it == null) it = last;
-//         }
-//     }
-//
-//     pub fn getPageAllocatorInterface(virtual_address_space: *VirtualAddressSpace) PageAllocatorInterface {
-//         return .{
-//             .allocate = VirtualAddressSpace.callbackAllocatePages,
-//             .context = virtual_address_space,
-//             .context_type = .cpu,
-//         };
-//     }
-// };
 
 pub const PageAllocator = extern struct {
     head: ?*Entry,
@@ -599,15 +312,13 @@ pub const PageAllocator = extern struct {
             const occupied_size = page_counter.* << page_shifter;
 
             if (occupied_size < entry.region.size) {
-                var entry_size_left = entry.region.size - occupied_size;
+                const entry_size_left = entry.region.size - occupied_size;
 
                 var memory_taken_from_region: usize = 0;
                 while (memory_taken + memory_taken_from_region < total_memory_to_take) {
-                    if (entry_size_left == 0) break;
+                    if (memory_taken_from_region == entry_size_left) break;
 
                     const size_to_take = @min(2 * lib.mb, entry_size_left);
-                    //log.debug("Size to take: 0x{x}", .{size_to_take});
-                    entry_size_left -= size_to_take;
                     memory_taken_from_region += size_to_take;
                 }
 

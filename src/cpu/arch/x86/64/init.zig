@@ -8,15 +8,16 @@ const Allocator = lib.Allocator;
 const assert = lib.assert;
 const ELF = lib.ELF(64);
 const log = lib.log.scoped(.INIT);
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualAddress = lib.VirtualAddress;
+const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const panic = cpu.panic;
 const x86_64 = cpu.arch.current;
 
 const paging = privileged.arch.paging;
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualAddress = privileged.VirtualAddress;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
+
 const APIC = privileged.arch.x86_64.APIC;
 const cr0 = privileged.arch.x86_64.registers.cr0;
 const cr3 = privileged.arch.x86_64.registers.cr3;
@@ -201,17 +202,20 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
 
     // TODO: AVX
 
-    // const avx_xsave_cpuid = cpuid(1);
-    // const avx_support = avx_xsave_cpuid.ecx & (1 << 28) != 0;
-    // const xsave_support = avx_xsave_cpuid.ecx & (1 << 26) != 0;
+    const avx_xsave_cpuid = cpuid(1);
+    const avx_support = avx_xsave_cpuid.ecx & (1 << 28) != 0;
+    log.debug("AVX: {}", .{avx_support});
+    // if (avx_support) {
+    //     var xcr0 = XCR0.read();
+    //     xcr0.AVX = true;
+    //     xcr0.write();
+    // }
+    const xsave_support = avx_xsave_cpuid.ecx & (1 << 26) != 0;
+    log.debug("XSAVE: {}", .{xsave_support});
     // const avx2_cpuid = cpuid(7);
     // const avx2_support = avx2_cpuid.ebx & (1 << 5) != 0;
     // log.debug("AVX support: {}. XSAVE support: {}. AVX2 support: {}", .{ avx_support, xsave_support, avx2_support });
     //
-    // var xcr0 = XCR0.read();
-    // xcr0.AVX = true;
-    // log.debug("XCR0: {}", .{xcr0});
-    // xcr0.write();
 
     comptime {
         assert(lib.arch.valid_page_sizes[0] == 0x1000);
@@ -307,9 +311,7 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
                 };
             }
         }
-    } else {
-        @panic("AAA");
-    };
+    } else @panic("Total physical region not found");
 
     var offset: usize = 0;
 
@@ -391,7 +393,11 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
                     break :blk lists;
                 },
             },
-            .cpu_memory = .{},
+            .cpu_memory = .{
+                .flags = .{
+                    .allocate = true,
+                },
+            },
         },
         .scheduler = .{
             .memory = undefined,
@@ -408,6 +414,7 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
 
     log.debug("Free size: 0x{x}. Free region count: {}", .{ free_size, free_region_count });
     log.debug("Bootloader allocated: 0x{x}", .{bootloader_information.total_size});
+
     switch (cpu.bsp) {
         true => {
             const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
@@ -460,8 +467,8 @@ pub fn InterruptHandler(comptime interrupt_number: u64, comptime has_error_code:
                 \\push %r9
                 \\push %r10
                 \\push %r11
-                \\pushq %rbx
-                \\pushq %rbp
+                \\push %rbx
+                \\push %rbp
                 \\push %r12
                 \\push %r13
                 \\push %r14
@@ -887,14 +894,15 @@ const BSPEarlyAllocator = extern struct {
     };
 };
 
+const half_page_table_entry_count = @divExact(paging.page_table_entry_count, 2);
+
 fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !noreturn {
     const spawn_init = try spawnInitCommon(cpu_page_tables);
     const init_scheduler = spawn_init.scheduler;
     const page_table_regions = spawn_init.page_table_regions;
 
     // TODO: make this the right one
-    //const address_space = paging.Specific{ .cr3 = cr3.fromAddress(init_scheduler.capability_root_node.dynamic.page_tables.root) };
-    const address_space = paging.Specific{ .cr3 = cr3.fromAddress(spawn_init.page_table_regions.regions[0].address) };
+    const address_space = page_table_regions.getAddressSpace();
     const init_elf = try ELF.Parser.init(init_file);
     const entry_point = init_elf.getEntryPoint();
     const program_headers = init_elf.getProgramHeaders();
@@ -914,7 +922,7 @@ fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !n
             };
 
             const segment_physical_region = try cpu.driver.getRootCapability().allocatePages(aligned_size);
-            try page_table_regions.mapSafe(segment_virtual_address, segment_physical_region.address, segment_physical_region.size, segment_flags);
+            try page_table_regions.map(segment_virtual_address, segment_physical_region.address, segment_physical_region.size, segment_flags);
 
             const src = init_file[program_header.offset..][0..program_header.size_in_file];
             const dst = segment_physical_region.toHigherHalfVirtualAddress().access(u8)[0..program_header.size_in_file];
@@ -922,11 +930,10 @@ fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !n
         }
     }
 
-    // Once all page tables are set up, copy lower half of the address space to the user page table
+    // Once all page tables are set up, copy lower half of the address space to the cpu page table
     const cpu_pml4 = page_table_regions.getCpuPML4();
     const user_pml4 = page_table_regions.getUserPML4();
-    const half_page_table_entry_count = @divExact(paging.page_table_entry_count, 2);
-    @memcpy(user_pml4[0..half_page_table_entry_count], cpu_pml4[0..half_page_table_entry_count]);
+    @memcpy(cpu_pml4[0..half_page_table_entry_count], user_pml4[0..half_page_table_entry_count]);
 
     cpu.user_scheduler = init_scheduler;
     address_space.cr3.write();
@@ -934,20 +941,22 @@ fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !n
     scheduler_common.self = scheduler_common;
     log.debug("PTR: 0x{x}. VALUE: 0x{x}", .{ @ptrToInt(&scheduler_common.self), @ptrToInt(scheduler_common.self) });
 
-    // Set arguments
-    {
-        // First argument
-        scheduler_common.architectureSpecific().disabled_save_area.registers.rdi = user_scheduler_virtual_address.value();
-        // Second argument
-        const is_init = true;
-        scheduler_common.architectureSpecific().disabled_save_area.registers.rsi = @boolToInt(is_init);
-    }
-    scheduler_common.architectureSpecific().disabled_save_area.registers.rip = entry_point; // Set entry point
-    scheduler_common.architectureSpecific().disabled_save_area.registers.rflags = .{ .IF = true }; // Set RFLAGS
-    scheduler_common.architectureSpecific().disabled_save_area.fpu.fcw = 0x037f; // Set FPU
-    scheduler_common.architectureSpecific().disabled_save_area.fpu.mxcsr = 0x1f80;
+    const scheduler_common_arch = scheduler_common.architectureSpecific();
 
-    scheduler_common.architectureSpecific().disabled_save_area.contextSwitch();
+    // Set arguments
+
+    // First argument
+    scheduler_common_arch.disabled_save_area.registers.rdi = user_scheduler_virtual_address.value();
+    // Second argument
+    const is_init = true;
+    scheduler_common_arch.disabled_save_area.registers.rsi = @boolToInt(is_init);
+
+    scheduler_common_arch.disabled_save_area.registers.rip = entry_point; // Set entry point
+    scheduler_common_arch.disabled_save_area.registers.rflags = .{ .IF = true }; // Set RFLAGS
+    scheduler_common_arch.disabled_save_area.fpu.fcw = 0x037f; // Set FPU
+    scheduler_common_arch.disabled_save_area.fpu.mxcsr = 0x1f80;
+
+    scheduler_common_arch.disabled_save_area.contextSwitch();
 }
 
 const UserMemory = extern struct {
@@ -963,7 +972,7 @@ const PageTableRegions = extern struct {
     base_virtual_address: VirtualAddress,
 
     fn mapQuick(page_table_regions: PageTableRegions, virtual_address: VirtualAddress, physical_address: PhysicalAddress, size: usize, flags: paging.MemoryFlags) void {
-        const ptes = page_table_regions.getPageTables(.pt);
+        const ptes = page_table_regions.getPageTables(.{ .index = .pt });
         log.debug("PTE base: 0x{x}", .{@ptrToInt(ptes.ptr)});
         assert(lib.isAligned(size, lib.arch.valid_page_sizes[0]));
         const indexed = @bitCast(paging.IndexedVirtualAddress, virtual_address.value());
@@ -984,7 +993,7 @@ const PageTableRegions = extern struct {
         }
     }
 
-    fn mapSafe(page_table_regions: PageTableRegions, virtual_address: VirtualAddress, physical_address: PhysicalAddress, size: usize, flags: paging.MemoryFlags) !void {
+    fn map(page_table_regions: PageTableRegions, virtual_address: VirtualAddress, physical_address: PhysicalAddress, size: usize, flags: paging.MemoryFlags) !void {
         log.debug("Mapping 0x{x} -> 0x{x} for 0x{x} bytes", .{ virtual_address.value(), physical_address.value(), size });
         assert(page_table_regions.regions[@enumToInt(Index.pml4)].size == 2 * lib.arch.valid_page_sizes[0]);
         assert(page_table_regions.regions[@enumToInt(Index.pdp)].size == lib.arch.valid_page_sizes[0]);
@@ -992,7 +1001,7 @@ const PageTableRegions = extern struct {
 
         page_table_regions.mapQuick(virtual_address, physical_address, size, flags);
 
-        const address_space = paging.Specific{ .cr3 = cr3.fromAddress(page_table_regions.get(.pml4).address) };
+        const address_space = page_table_regions.getAddressSpace();
         const virtual_address_top = virtual_address.offset(size).value();
         var index: usize = 0;
 
@@ -1067,30 +1076,47 @@ const PageTableRegions = extern struct {
     const init_vas_pde_count = lib.alignForward(@divExact(init_vas_pte_count, paging.page_table_entry_count), paging.page_table_entry_count);
     const init_vas_pdpe_count = lib.alignForward(@divExact(init_vas_pde_count, paging.page_table_entry_count), paging.page_table_entry_count);
 
-    pub fn create() !PageTableRegions {}
+    const AccessOptions = packed struct {
+        index: Index,
+        user: bool = true,
+    };
 
-    pub inline fn get(regions: PageTableRegions, index: Index) PhysicalMemoryRegion {
-        return regions.regions[@enumToInt(index)];
+    pub inline fn getPhysicalRegion(regions: PageTableRegions, comptime options: AccessOptions) PhysicalMemoryRegion {
+        const index = @enumToInt(options.index);
+        const result = regions.regions[index].offset(switch (index) {
+            0 => switch (options.user) {
+                true => paging.page_table_size,
+                false => 0,
+            },
+            else => 0,
+        });
+
+        return switch (index) {
+            0 => PhysicalMemoryRegion.new(.{ .address = result.address, .size = paging.page_table_size }),
+            else => result,
+        };
     }
 
-    pub inline fn getPageTables(regions: PageTableRegions, comptime index: Index) []EntryType[@enumToInt(index)] {
-        return regions.regions[@enumToInt(index)].toHigherHalfVirtualAddress().access(EntryType[@enumToInt(index)]);
+    pub inline fn getPageTables(regions: PageTableRegions, comptime options: AccessOptions) []EntryType[@enumToInt(options.index)] {
+        return regions.getPhysicalRegion(options).toHigherHalfVirtualAddress().access(EntryType[@enumToInt(options.index)]);
     }
 
     pub inline fn getAddressSpace(regions: PageTableRegions) paging.Specific {
-        const address_space = paging.Specific{ .cr3 = cr3.fromAddress(regions.get(.pml4).address) };
+        const address_space = paging.Specific{ .cr3 = cr3.fromAddress(regions.getPhysicalRegion(.{ .index = .pml4, .user = true }).address) };
+        return address_space;
+    }
+
+    pub inline fn getPrivilegedAddressSpace(regions: PageTableRegions) paging.Specific {
+        const address_space = paging.Specific{ .cr3 = cr3.fromAddress(regions.getPhysicalRegion(.{ .index = .pml4, .user = false }).address) };
         return address_space;
     }
 
     pub inline fn getCpuPML4(regions: PageTableRegions) *paging.PML4Table {
-        const cpu_pml4_table = regions.get(.pml4).offset(0).toHigherHalfVirtualAddress().access(paging.PML4TE)[0..paging.page_table_entry_count];
-        return cpu_pml4_table;
+        return regions.getPageTables(.{ .index = .pml4, .user = false })[0..paging.page_table_entry_count];
     }
 
     pub inline fn getUserPML4(regions: PageTableRegions) *paging.PML4Table {
-        const user_pml4_table = regions.get(.pml4).offset(paging.page_table_size).toHigherHalfVirtualAddress().access(paging.PML4TE);
-        assert(user_pml4_table.len == paging.page_table_entry_count);
-        return user_pml4_table[0..paging.page_table_entry_count];
+        return regions.getPageTables(.{ .index = .pml4, .user = true })[0..paging.page_table_entry_count];
     }
 };
 
@@ -1150,28 +1176,31 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
     const indexed_end = @bitCast(paging.IndexedVirtualAddress, user_scheduler_virtual_address.offset(PageTableRegions.init_vas_size).value());
     log.debug("Indexed start: {}", .{indexed_start});
     log.debug("Indexed end: {}", .{indexed_end});
-    page_table_regions.getPageTables(.pml4)[indexed_start.PML4] = .{
+    page_table_regions.getPageTables(.{
+        .index = .pml4,
+        .user = true,
+    })[indexed_start.PML4] = .{
         .present = true,
         .write = true,
         .user = true,
-        .address = paging.packAddress(paging.PML4TE, page_table_regions.get(.pdp).address.value()),
+        .address = paging.packAddress(paging.PML4TE, page_table_regions.getPhysicalRegion(.{ .index = .pdp }).address.value()),
     };
 
-    page_table_regions.getPageTables(.pdp)[indexed_start.PDP] = .{
+    page_table_regions.getPageTables(.{ .index = .pdp })[indexed_start.PDP] = .{
         .present = true,
         .write = true,
         .user = true,
-        .address = paging.packAddress(paging.PDPTE, page_table_regions.get(.pd).address.value()),
+        .address = paging.packAddress(paging.PDPTE, page_table_regions.getPhysicalRegion(.{ .index = .pd }).address.value()),
     };
 
-    const pdes = page_table_regions.getPageTables(.pd);
+    const pdes = page_table_regions.getPageTables(.{ .index = .pd });
     log.debug("PDE count: {}", .{pdes.len});
-    log.debug("PTE base: 0x{x}. PTE count: {}", .{ page_table_regions.get(.pt).address.value(), page_table_regions.getPageTables(.pt).len });
+    //log.debug("PTE base: 0x{x}. PTE count: {}", .{ page_table_regions.get(.{ .index = .pt }).address.value(), page_table_regions.getPageTables(.{ .index = .pt }).len });
 
     for (pdes[indexed_start.PD .. indexed_start.PD + indexed_end.PD], 0..) |*pde, pde_offset| {
         const pte_index = paging.page_table_entry_count * pde_offset;
         const pte_offset = pte_index * paging.page_table_entry_size;
-        const pte_address = page_table_regions.get(.pt).offset(pte_offset).address.value();
+        const pte_address = page_table_regions.getPhysicalRegion(.{ .index = .pt }).offset(pte_offset).address.value();
         // log.debug("Linking PDE[{}] 0x{x} with PTE base address: 0x{x} (pte index: {}. pte offset: 0x{x})", .{ pde_offset, @ptrToInt(pde), pte_address, pte_index, pte_offset });
         pde.* = paging.PDTE{
             .present = true,
@@ -1189,9 +1218,12 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
         .execute_disable = true,
     };
 
-    try page_table_regions.mapSafe(user_scheduler_memory_start_virtual_address, scheduler_memory_physical_region.address, scheduler_memory_physical_region.size, scheduler_memory_map_flags);
+    try page_table_regions.map(user_scheduler_memory_start_virtual_address, scheduler_memory_physical_region.address, scheduler_memory_physical_region.size, scheduler_memory_map_flags);
 
-    const root_page_tables = page_table_regions.get(.pml4).split(2);
+    const root_page_tables = [2]PhysicalMemoryRegion{
+        page_table_regions.getPhysicalRegion(.{ .index = .pml4, .user = false }),
+        page_table_regions.getPhysicalRegion(.{ .index = .pml4, .user = true }),
+    };
     log.debug("Root page tables: {any}", .{root_page_tables});
     assert(root_page_tables[0].size == lib.arch.valid_page_sizes[0]);
 
@@ -1201,18 +1233,23 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
 
     const cpu_pte_count = paging.page_table_entry_count - paging.CPUPageTables.left_ptables;
     const cpu_ptes = cpu_page_tables.p_table.toHigherHalfVirtualAddress().access(*paging.PTable)[0..cpu_pte_count];
-    const user_mapped_cpu_ptes = cpu_page_table_physical_region.offset((paging.Level.count - 2) * paging.page_table_size).toHigherHalfVirtualAddress().access(paging.PTE)[0..cpu_pte_count];
+    const user_mapped_cpu_pte_offset = (paging.Level.count - 2) * paging.page_table_size;
+    log.debug("[OFFSET] 0x{x}", .{user_mapped_cpu_pte_offset});
+    const user_mapped_cpu_ptes = cpu_page_table_physical_region.offset(user_mapped_cpu_pte_offset).toHigherHalfVirtualAddress().access(paging.PTE)[0..cpu_pte_count];
     @memcpy(user_mapped_cpu_ptes, cpu_ptes);
 
-    for (root_page_tables) |root_page_table| {
-        const RootPageTableEntryType = paging.EntryTypeMap(lib.arch.valid_page_sizes[1])[@enumToInt(x86_64.root_page_table_entry)];
-        root_page_table.toHigherHalfVirtualAddress().access(paging.PML4TE)[paging.CPUPageTables.pml4_index] = paging.PML4TE{
-            .present = true,
-            .write = true,
-            .execute_disable = false,
-            .address = paging.packAddress(RootPageTableEntryType, cpu_page_table_physical_region.offset(0).address.value()),
-        };
-    }
+    const user_root_page_table_region = root_page_tables[1];
+    const RootPageTableEntryType = paging.EntryTypeMap(lib.arch.valid_page_sizes[1])[@enumToInt(x86_64.root_page_table_entry)];
+    user_root_page_table_region.toHigherHalfVirtualAddress().access(paging.PML4TE)[paging.CPUPageTables.pml4_index] = paging.PML4TE{
+        .present = true,
+        .write = true,
+        .execute_disable = false,
+        .address = paging.packAddress(RootPageTableEntryType, cpu_page_table_physical_region.offset(0).address.value()),
+    };
+
+    const current_address_space = paging.Specific{ .cr3 = cr3.read() };
+    const src_half = (try current_address_space.getPML4TableUnchecked())[half_page_table_entry_count..][0..half_page_table_entry_count];
+    @memcpy(root_page_tables[0].toHigherHalfVirtualAddress().access(paging.PML4TE)[half_page_table_entry_count..][0..half_page_table_entry_count], src_half);
 
     const pdp = cpu_page_table_physical_region_iterator.takeSlice(paging.page_table_size);
     const pd = cpu_page_table_physical_region_iterator.takeSlice(paging.page_table_size);
@@ -1286,7 +1323,7 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
     const support_pd_offset = support_pdp_table_count * paging.page_table_size;
     const support_pt_offset = support_pd_offset + support_pd_table_count * paging.page_table_size;
 
-    const support_pml4 = page_table_regions.getPageTables(.pml4);
+    const support_pml4 = page_table_regions.getPageTables(.{ .user = true, .index = .pml4 });
     const support_pdp_region = support_page_table_physical_region.offset(support_pdp_offset);
     const support_pd_region = support_page_table_physical_region.offset(support_pd_offset);
     const support_pt_region = support_page_table_physical_region.offset(support_pt_offset);
@@ -1347,7 +1384,7 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
         assert(indexed_privileged_stack.PD == indexed_privileged_stack_last_page.PD);
         assert(indexed_privileged_stack.PT < indexed_privileged_stack_last_page.PT);
 
-        const pml4te = &page_table_regions.getPageTables(.pml4)[indexed_privileged_stack.PML4];
+        const pml4te = &page_table_regions.getPageTables(.{ .index = .pml4, .user = false })[indexed_privileged_stack.PML4];
         assert(pml4te.present);
 
         const pdpte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(pml4te)), *paging.PDPTable))[indexed_privileged_stack.PDP];
@@ -1387,7 +1424,7 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
 
     assert(cpu_scheduler_indexed.PML4 == cpu_indexed_base.PML4);
 
-    const scheduler_pml4te = &page_table_regions.getPageTables(.pml4)[cpu_scheduler_indexed.PML4];
+    const scheduler_pml4te = &page_table_regions.getPageTables(.{ .index = .pml4, .user = true })[cpu_scheduler_indexed.PML4];
     assert(scheduler_pml4te.present);
 
     const scheduler_pdpte = &(try paging.accessPageTable(PhysicalAddress.new(paging.unpackAddress(scheduler_pml4te)), *paging.PDPTable))[cpu_scheduler_indexed.PDP];
@@ -1442,7 +1479,11 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
                     .debug = true,
                 },
                 .ram = cpu.driver.getRootCapability().dynamic.ram,
-                .cpu_memory = .{},
+                .cpu_memory = .{
+                    .flags = .{
+                        .allocate = true,
+                    },
+                },
             },
             .scheduler = .{
                 .handle = init_cpu_scheduler,

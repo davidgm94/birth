@@ -5,11 +5,10 @@ const bootloader = @import("bootloader");
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
 const x86_64 = privileged.arch.x86_64;
-const PhysicalAddress = privileged.PhysicalAddress;
-const VirtualAddress = privileged.VirtualAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
-const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
-const PhysicalAddressSpace = privileged.PhysicalAddressSpace;
+const PhysicalAddress = lib.PhysicalAddress;
+const VirtualAddress = lib.VirtualAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
+const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 inline fn segment(value: u32) u16 {
     return @intCast(u16, value & 0xffff0) >> 4;

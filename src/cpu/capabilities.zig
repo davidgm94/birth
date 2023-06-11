@@ -5,8 +5,8 @@ const enumCount = lib.enumCount;
 const log = lib.log.scoped(.capabilities);
 
 const privileged = @import("privileged");
-const PhysicalAddress = privileged.PhysicalAddress;
-const PhysicalMemoryRegion = privileged.PhysicalMemoryRegion;
+const PhysicalAddress = lib.PhysicalAddress;
+const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const rise = @import("rise");
 const cpu = @import("cpu");
 
@@ -60,8 +60,8 @@ pub const Static = enum {
 
 pub const Dynamic = enum {
     io,
-    ram,
-    cpu_memory,
+    ram, // Barrelfish equivalent: RAM (no PhysAddr)
+    cpu_memory, // Barrelfish equivalent: Frame
     // irq_table,
     // device_memory,
     // cpu_memory,
@@ -87,6 +87,7 @@ pub const RAM = extern struct {
     };
 
     inline fn getListIndex(size: usize) usize {
+        log.debug("Size: {}", .{size});
         inline for (lib.arch.reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_index| {
             if (size >= reverse_page_size) return reverse_index;
         }
@@ -121,8 +122,14 @@ pub const RAM = extern struct {
 };
 
 pub const CPUMemory = extern struct {
-    privileged: ?*RAM = null,
-    user: ?*RAM = null,
+    privileged: RAM = .{},
+    user: RAM = .{},
+    flags: Flags,
+
+    const Flags = packed struct(u64) {
+        allocate: bool,
+        reserved: u63 = 0,
+    };
 };
 
 pub const IO = extern struct {
@@ -171,7 +178,8 @@ pub const Root = extern struct {
                     .log => root.dynamic.io.debug,
                 },
                 .cpu => unreachable,
-                .cpu_memory, .ram => unreachable,
+                .cpu_memory => root.dynamic.cpu_memory.flags.allocate,
+                .ram => unreachable,
             },
             // _ => return false,
         };
@@ -183,6 +191,7 @@ pub const Root = extern struct {
 
     // Fast path
     pub fn allocatePages(root: *Root, size: usize) AllocateError!PhysicalMemoryRegion {
+        assert(size != 0);
         assert(lib.isAligned(size, lib.arch.valid_page_sizes[0]));
         var index = RAM.getListIndex(size);
 
@@ -190,6 +199,7 @@ pub const Root = extern struct {
             while (true) : (index -= 1) {
                 const list = root.dynamic.ram.lists[index];
                 var iterator = list;
+
                 while (iterator) |free_ram| : (iterator = free_ram.next) {
                     if (free_ram.region.size >= size) {
                         if (free_ram.region.size >= size) {
@@ -198,7 +208,6 @@ pub const Root = extern struct {
                         } else {
                             @panic("TODO: cnsume all reigon");
                         }
-                        @panic("Can allocate");
                     }
                 }
 
@@ -231,7 +240,7 @@ pub const Root = extern struct {
                             return allocated_region;
                         }
                     } else if (free_ram.allocateUnaligned(size, alignment)) |unaligned_allocation| {
-                        try root.addRegion(unaligned_allocation.wasted);
+                        try root.addRegion(&root.dynamic.ram, unaligned_allocation.wasted);
                         return unaligned_allocation.allocated;
                     }
                 }
@@ -243,7 +252,7 @@ pub const Root = extern struct {
         return AllocateError.OutOfMemory;
     }
 
-    inline fn allocateSingle(root: *Root, comptime T: type) AllocateError!*T {
+    fn allocateSingle(root: *Root, comptime T: type) AllocateError!*T {
         var iterator = root.heap.first;
         while (iterator) |heap_region| : (iterator = heap_region.next) {
             if (heap_region.alignmentFits(@alignOf(T))) {
@@ -257,7 +266,18 @@ pub const Root = extern struct {
             }
         }
 
-        @panic("WTASDASD");
+        const physical_region = try root.allocatePages(lib.arch.valid_page_sizes[0]);
+        const heap_region = physical_region.toHigherHalfVirtualAddress().address.access(*Heap.Region);
+        const first = root.heap.first;
+        heap_region.* = .{
+            .descriptor = physical_region.offset(@sizeOf(Heap.Region)),
+            .allocated_size = @sizeOf(Heap.Region),
+            .next = first,
+        };
+
+        root.heap.first = heap_region;
+
+        return try root.allocateSingle(T);
     }
 
     fn allocateMany(root: *Root, comptime T: type, count: usize) AllocateError![]T {
@@ -267,7 +287,7 @@ pub const Root = extern struct {
         @panic("TODO many");
     }
 
-    fn addRegion(root: *Root, physical_region: PhysicalMemoryRegion) !void {
+    fn addRegion(root: *Root, ram: *RAM, physical_region: PhysicalMemoryRegion) !void {
         const index = RAM.getListIndex(physical_region.size);
         const new_region = try root.allocateSingle(RAM.Region);
         new_region.* = RAM.Region{
@@ -275,43 +295,21 @@ pub const Root = extern struct {
             .next = root.dynamic.ram.lists[index],
         };
 
-        root.dynamic.ram.lists[index] = new_region;
+        ram.lists[index] = new_region;
     }
 
-    // pub fn pageAlignedAllocate(root: *Root, size: usize, alignment: usize) AllocateError!PhysicalMemoryRegion {
-    //     _ = alignment;
-    //     _ = size;
-    //     var iterator = root.dynamic.ram;
-    //     _ = iterator;
-    //     // while (iterator) |ram| : (iterator = ram.next) {
-    //     //     if (lib.isAligned(ram.region.address.value(), alignment)) {
-    //     //         if (ram.region.size >= size) {
-    //     //             @panic("can allocate");
-    //     //         }
-    //     //     } else {
-    //     //         const aligned_region_address = lib.alignForward(ram.region.address.value(), alignment);
-    //     //         const wasted_space = aligned_region_address - ram.region.address.value();
-    //     //         _ = wasted_space;
-    //     //
-    //     //         if (aligned_region_address + size <= ram.region.top().value()) {
-    //     //             // const wasted_region = ram.region.takeSlice(wasted_space);
-    //     //             // _ = wasted_region;
-    //     //             // const previous_next = ram.region.next;
-    //     //             // _ = previous_next;
-    //     //             //
-    //     //             // const space_left = ram.region.size - (wasted_space + size);
-    //     //             // _ = space_left;
-    //     //             // const region = ram.region.takeSlice(wasted_space + size);
-    //     //             // _ = region;
-    //     //             @panic("TODO: can allocate");
-    //     //         }
-    //     //     }
-    //     // }
-    //
-    //     @panic("TODO: pageAlignedAllocate");
-    // }
+    pub const AllocateCPUMemoryOptions = packed struct {
+        privileged: bool,
+    };
 
-    // TODO: optimize
+    pub fn allocateCPUMemory(root: *Root, physical_region: PhysicalMemoryRegion, options: AllocateCPUMemoryOptions) !void {
+        const ram_region = switch (options.privileged) {
+            true => &root.dynamic.cpu_memory.privileged,
+            false => &root.dynamic.cpu_memory.user,
+        };
+
+        try root.addRegion(ram_region, physical_region);
+    }
 
     pub const Heap = extern struct {
         first: ?*Region = null,
