@@ -757,7 +757,11 @@ pub const Cache = extern struct {
         }
     };
 
-    pub fn buildSlots(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry) !void {
+    const BuildSlots = error{
+        no_free_slot,
+    };
+
+    pub fn buildSlots(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry) !GenericEntry {
         var long_name_array = [1]u16{0} ** (long_name_max_characters + 2);
         const size = try translateToUnicode(entry_setup.name, &long_name_array);
         const long_name = long_name_array[0..size.len];
@@ -810,11 +814,13 @@ pub const Cache = extern struct {
             const checksum = shortNameCheckSum(&short_name_result.name);
 
             const long_slot_count = @intCast(u5, size.size / character_count_per_long_entry);
+            log.err("Size: {}. Long slot count: {}", .{ size.size, long_slot_count });
             entry.long_name_entries = blk: {
                 const allocator = maybe_allocator orelse @panic("fat32: allocator not provided");
                 const alloc_result = try allocator.allocateBytes(@intCast(usize, @sizeOf(LongNameEntry)) * long_slot_count, @alignOf(LongNameEntry));
                 break :blk @intToPtr([*]LongNameEntry, alloc_result.address)[0..long_slot_count];
             };
+
             var reverse_index = long_slot_count;
 
             for (entry.long_name_entries) |*long_name_entry| {
@@ -839,12 +845,38 @@ pub const Cache = extern struct {
             }
         }
 
+        return entry;
+    }
+
+    const EntrySetup = struct {
+        name: []const u8,
+        size: u32 = 0,
+        content_cluster: u32,
+        containing_cluster: u32,
+        is_dir: bool,
+    };
+
+    fn addEntry(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry, miliseconds: u64) !void {
+        _ = miliseconds;
+
+        // TODO:
+        if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
+
+        const entry = try cache.buildSlots(entry_setup, maybe_allocator, copy_entry);
+        try cache.addEntries(maybe_allocator, entry_setup, entry);
+    }
+
+    fn addEntries(cache: Cache, maybe_allocator: ?*lib.Allocator, entry_setup: EntrySetup, entry: GenericEntry) !void {
+        log.err("Trying with {s}", .{entry_setup.name});
+
         const total_slots = entry.getSlots();
+        log.debug("Total slots: {}", .{total_slots});
         var free_slots: usize = 0;
+        log.debug("Containing cluster: {}", .{entry_setup.containing_cluster});
         var entry_iterator = DirectoryEntryIterator(DirectoryEntry).init(entry_setup.containing_cluster);
         var current_cluster: u32 = 0;
 
-        while (try entry_iterator.next(cache, maybe_allocator)) |cluster_entry| {
+        blk: while (try entry_iterator.next(cache, maybe_allocator)) |cluster_entry| {
             if (cluster_entry.isFree()) {
                 if (free_slots == 0) current_cluster = @intCast(u32, entry_iterator.cluster);
                 free_slots += 1;
@@ -865,31 +897,17 @@ pub const Cache = extern struct {
 
                     try cache.disk.write_slice(DirectoryEntry, entry_iterator.cluster_entries, entry_iterator.getCurrentLBA(cache), false);
 
-                    return;
+                    log.err("Success!", .{});
+                    break :blk;
                 }
             } else {
                 free_slots = 0;
             }
+        } else {
+            lib.log.err("Cluster: {}. Iterator: {}", .{ entry_iterator.cluster, entry_iterator.entry });
+            lib.log.err("Failed while {s}", .{entry_setup.name});
+            return error.no_free_slot;
         }
-
-        @panic("fat32: cannot build slots");
-    }
-
-    const EntrySetup = struct {
-        name: []const u8,
-        size: u32 = 0,
-        content_cluster: u32,
-        containing_cluster: u32,
-        is_dir: bool,
-    };
-
-    pub fn addEntry(cache: Cache, entry_setup: EntrySetup, maybe_allocator: ?*lib.Allocator, copy_entry: ?*DirectoryEntry, miliseconds: u64) !void {
-        _ = miliseconds;
-
-        // TODO:
-        if (entry_setup.name[entry_setup.name.len - 1] == '.') @panic("todo: unexpected trailing dot");
-
-        try cache.buildSlots(entry_setup, maybe_allocator, copy_entry);
     }
 
     pub fn shortNameCheckSum(name: []const u8) u8 {
@@ -1239,7 +1257,7 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
 
     return struct {
         cluster_entries: []EntryType = &.{},
-        cluster_it: u32 = 0,
+        entry: u32 = 0,
         cluster: u32,
         cluster_fetched: bool = false,
 
@@ -1257,23 +1275,29 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
         }
 
         pub fn next(iterator: *Iterator, cache: Cache, allocator: ?*lib.Allocator) !?*EntryType {
-            if (iterator.cluster_fetched) iterator.cluster_it += 1;
-
             const cluster_sector_count = cache.getClusterSectorCount();
             const cluster_entry_count = @divExact(cluster_sector_count * cache.disk.sector_size, @sizeOf(EntryType));
-            assert(iterator.cluster_it <= cluster_entry_count);
-            if (iterator.cluster_it == cluster_entry_count) return null; // TODO: Should we early return like this?
+            log.debug("Cluster entry count: {}", .{cluster_entry_count});
+            assert(iterator.entry <= cluster_entry_count);
 
-            if (!iterator.cluster_fetched or iterator.cluster_it == cluster_entry_count) {
-                if (iterator.cluster_it == cluster_entry_count) iterator.cluster += 1;
+            if (iterator.cluster_fetched) {
+                iterator.entry += 1;
+            }
 
+            if (iterator.entry == cluster_entry_count) {
+                // log.warn("We should be returning null", .{});
+                // iterator.cluster += 1;
+                return null;
+            }
+
+            if (!iterator.cluster_fetched or iterator.entry == cluster_entry_count) {
                 const cluster_lba = cache.clusterToSector(iterator.cluster);
                 iterator.cluster_entries = try cache.disk.read_slice(EntryType, cluster_entry_count, cluster_lba, allocator, .{});
-                iterator.cluster_it = 0;
+                iterator.entry = 0;
                 iterator.cluster_fetched = true;
             }
 
-            return &iterator.cluster_entries[iterator.cluster_it];
+            return &iterator.cluster_entries[iterator.entry];
         }
     };
 }

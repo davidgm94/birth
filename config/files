@@ -1,3 +1,0 @@
-.{ .host_path = "zig-cache", .host_base = "cpu_driver", .suffix_type = "arch", .guest = "/cpudriv.er", .type = "cpu_driver", },
-.{ .host_path = "resources", .host_base = "zap-light16.psf", .suffix_type = "none", .guest = "/font.psf", .type = "font", },
-.{ .host_path = "zig-cache", .host_base = "init", .suffix_type = "arch", .guest = "/init", .type = "init", },

@@ -88,11 +88,13 @@ const Filesystem = extern struct {
     parser_index: usize = 0,
     cache_index: u32 = 0,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
+    fn initialize(context: ?*anyopaque, file_list_file: []const u8, file_buffer: []u8) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const gpt_cache = try lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&filesystem.disk.disk, 0, &filesystem.fat_allocator.allocator);
         filesystem.fat_cache = try lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&filesystem.fat_allocator.allocator, gpt_cache);
         filesystem.cache_index = filesystem.fat_allocator.allocated;
+        const file = try filesystem.readFile(file_list_file, file_buffer);
+        lib.assert(file.ptr == file_buffer.ptr);
     }
 
     fn deinitialize(context: ?*anyopaque) anyerror!void {
@@ -100,21 +102,17 @@ const Filesystem = extern struct {
         filesystem.fat_allocator.allocated = filesystem.cache_index;
     }
 
-    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
+    fn getFileDescriptor(context: ?*anyopaque, file_path: []const u8) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         filesystem.parser_index += 1;
-        var file_path_buffer = [1]u8{'/'} ** 32;
-        const file_name = @tagName(file_type);
-        @memcpy(file_path_buffer[1..], file_name);
-        const file_path = file_path_buffer[0 .. file_name.len + 1];
         const file_size = try filesystem.fat_cache.getFileSize(file_path);
 
         // Reset cache so the allocator memory is not pressured
         filesystem.fat_allocator.allocated = filesystem.cache_index;
+
         return .{
             .path = file_path,
             .size = file_size,
-            .type = file_type,
         };
     }
 
@@ -271,7 +269,7 @@ fn main() !noreturn {
         .context = &fs,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_file_descriptor = Filesystem.getFileDescriptor,
+        .get_file_size = Filesystem.getFileSize,
         .read_file = Filesystem.readFileCallback,
     }, .{
         .context = &memory_map,

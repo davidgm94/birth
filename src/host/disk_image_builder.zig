@@ -46,6 +46,7 @@ pub const DiskImage = extern struct {
         const byte_count = sector_count * disk_image.disk.sector_size;
         const byte_offset = sector_offset * disk_image.disk.sector_size;
         if (byte_offset + byte_count > disk.disk_size) {
+            lib.log.err("Sector count: {}. Sector offset: {}", .{ sector_count, sector_offset });
             return Disk.ReadError.read_error;
         }
         return .{

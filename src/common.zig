@@ -378,6 +378,7 @@ pub const Module = struct {
     program: UserProgram,
     name: []const u8,
 };
+
 pub const UserProgram = struct {
     kind: Kind,
     dependencies: []const Dependency,
