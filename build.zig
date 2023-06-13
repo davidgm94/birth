@@ -131,6 +131,7 @@ pub fn build(b_arg: *Build) !void {
 
         break :blk exe;
     };
+    _ = disk_image_builder;
 
     const runner = blk: {
         const exe = try addCompileStep(.{
@@ -144,6 +145,7 @@ pub fn build(b_arg: *Build) !void {
 
         break :blk exe;
     };
+    _ = runner;
 
     const native_tests = [_]struct {
         name: []const u8,
@@ -221,279 +223,279 @@ pub fn build(b_arg: *Build) !void {
         build_steps.test_host.dependOn(&run_test_step.step);
     }
 
-    {
-        var user_module_list = std.ArrayList(common.Module).init(b.allocator);
-        var user_program_dir = try std.fs.cwd().openIterableDir(user_program_dir_path, .{ .access_sub_paths = true });
-        defer user_program_dir.close();
-
-        var user_program_iterator = user_program_dir.iterate();
-
-        while (try user_program_iterator.next()) |entry| {
-            const dir_name = entry.name;
-            const file_path = try std.mem.concat(b.allocator, u8, &.{ dir_name, "/module.json" });
-            const file = try user_program_dir.dir.readFileAlloc(b.allocator, file_path, common.maxInt(usize));
-            const user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
-            try user_module_list.append(.{
-                .program = user_program,
-                .name = dir_name,
-            });
-        }
-
-        user_modules = user_module_list.items;
-    }
-
-    const executable_kinds = [2]CompileStep.Kind{ .exe, .@"test" };
-
-    for (common.enumValues(OptimizeMode)) |optimize_mode| {
-        for (common.supported_architectures, 0..) |architecture, architecture_index| {
-            const user_target = try getTarget(architecture, .user);
-
-            for (executable_kinds) |executable_kind| {
-                const is_test = executable_kind == .@"test";
-                const cpu_driver_path = "src/cpu";
-                const target = try getTarget(architecture, .privileged);
-                const cpu_driver = try addCompileStep(.{
-                    .kind = executable_kind,
-                    .name = "cpu_driver",
-                    .root_project_path = cpu_driver_path,
-                    .target = target,
-                    .optimize_mode = optimize_mode,
-                    .modules = &.{ .lib, .bootloader, .privileged, .cpu, .rise },
-                });
-
-                cpu_driver.force_pic = true;
-                cpu_driver.disable_stack_probing = true;
-                cpu_driver.stack_protector = false;
-                cpu_driver.strip = false;
-                cpu_driver.red_zone = false;
-                cpu_driver.omit_frame_pointer = false;
-
-                cpu_driver.code_model = switch (architecture) {
-                    .x86_64 => .kernel,
-                    .riscv64 => .medium,
-                    .aarch64 => .small,
-                    else => return Error.architecture_not_supported,
-                };
-
-                cpu_driver.setLinkerScriptPath(FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ cpu_driver_path, "/arch/", switch (architecture) {
-                    .x86_64 => "x86/64",
-                    .x86 => "x86/32",
-                    else => @tagName(architecture),
-                }, "/linker_script.ld" })));
-
-                var user_module_list = try std.ArrayList(*CompileStep).initCapacity(b.allocator, user_modules.len);
-                const user_architecture_source_path = try std.mem.concat(b.allocator, u8, &.{ "src/user/arch/", @tagName(architecture), "/" });
-                const user_linker_script_path = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ user_architecture_source_path, "linker_script.ld" }));
-                for (user_modules) |module| {
-                    const user_module = try addCompileStep(.{
-                        .kind = executable_kind,
-                        .name = module.name,
-                        .root_project_path = try std.mem.concat(b.allocator, u8, &.{ user_program_dir_path, "/", module.name }),
-                        .target = user_target,
-                        .optimize_mode = optimize_mode,
-                        .modules = &.{ .lib, .user, .rise },
-                    });
-                    user_module.strip = false;
-
-                    user_module.setLinkerScriptPath(user_linker_script_path);
-
-                    user_module_list.appendAssumeCapacity(user_module);
-                }
-
-                const bootloaders = common.architecture_bootloader_map[architecture_index];
-                for (bootloaders) |bootloader_struct| {
-                    const bootloader = bootloader_struct.id;
-                    for (bootloader_struct.protocols) |boot_protocol| {
-                        const rise_loader_path = "src/bootloader/rise/";
-                        const bootloader_name = "bootloader";
-                        const bootloader_modules = &.{ .lib, .bootloader, .privileged };
-
-                        const maybe_bootloader_compile_step: ?*CompileStep = switch (bootloader) {
-                            .rise => switch (boot_protocol) {
-                                .bios => switch (architecture) {
-                                    .x86_64 => blk: {
-                                        const bootloader_path = rise_loader_path ++ "bios";
-                                        const executable = try addCompileStep(.{
-                                            .kind = executable_kind,
-                                            .name = bootloader_name,
-                                            .root_project_path = bootloader_path,
-                                            .target = try getTarget(.x86, .privileged),
-                                            .optimize_mode = .ReleaseSmall,
-                                            .modules = bootloader_modules,
-                                        });
-
-                                        executable.disable_stack_probing = true;
-                                        executable.stack_protector = false;
-
-                                        executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
-                                        executable.addAssemblyFile(bootloader_path ++ "/unreal_mode.S");
-                                        executable.setLinkerScriptPath(FileSource.relative(bootloader_path ++ "/linker_script.ld"));
-                                        executable.code_model = .small;
-
-                                        break :blk executable;
-                                    },
-                                    else => return Error.architecture_not_supported,
-                                },
-                                .uefi => blk: {
-                                    const bootloader_path = rise_loader_path ++ "uefi";
-                                    const executable = try addCompileStep(.{
-                                        .kind = executable_kind,
-                                        .name = bootloader_name,
-                                        .root_project_path = bootloader_path,
-                                        .target = .{
-                                            .cpu_arch = architecture,
-                                            .os_tag = .uefi,
-                                            .abi = .msvc,
-                                        },
-                                        .optimize_mode = .ReleaseSafe,
-                                        .modules = bootloader_modules,
-                                    });
-
-                                    switch (architecture) {
-                                        .x86_64 => executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S"),
-                                        else => {},
-                                    }
-
-                                    break :blk executable;
-                                },
-                            },
-                            .limine => null,
-                        };
-
-                        if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                            bootloader_compile_step.red_zone = false;
-                            bootloader_compile_step.link_gc_sections = true;
-                            bootloader_compile_step.want_lto = true;
-                            bootloader_compile_step.strip = true;
-                        }
-
-                        const execution_environments: []const ExecutionEnvironment = switch (bootloader) {
-                            .rise, .limine => switch (boot_protocol) {
-                                .bios => switch (architecture) {
-                                    .x86_64 => &.{.qemu},
-                                    else => return Error.architecture_not_supported,
-                                },
-                                .uefi => &.{.qemu},
-                            },
-                        };
-
-                        const execution_types: []const ExecutionType =
-                            switch (common.canVirtualizeWithQEMU(architecture, ci)) {
-                            true => &.{ .emulated, .accelerated },
-                            false => &.{.emulated},
-                        };
-
-                        for (execution_types) |execution_type| {
-                            for (execution_environments) |execution_environment| {
-                                const configuration = Configuration{
-                                    .architecture = architecture,
-                                    .bootloader = bootloader,
-                                    .boot_protocol = boot_protocol,
-                                    .optimize_mode = optimize_mode,
-                                    .execution_environment = execution_environment,
-                                    .execution_type = execution_type,
-                                    .executable_kind = executable_kind,
-                                };
-
-                                var disk_argument_parser = common.ArgumentParser.DiskImageBuilder{};
-                                const disk_image_builder_run = b.addRunArtifact(disk_image_builder);
-                                const disk_image_path = disk_image_builder_run.addOutputFileArg("disk.hdd");
-
-                                while (disk_argument_parser.next()) |argument_type| switch (argument_type) {
-                                    .configuration => inline for (common.fields(Configuration)) |field| disk_image_builder_run.addArg(@tagName(@field(configuration, field.name))),
-                                    .image_configuration_path => disk_image_builder_run.addArg(common.ImageConfig.default_path),
-                                    .disk_image_path => {
-                                        // Must be first
-                                        assert(@enumToInt(argument_type) == 0);
-                                    },
-                                    .bootloader => {
-                                        if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                                            disk_image_builder_run.addArtifactArg(bootloader_compile_step);
-                                        } else {
-                                            disk_image_builder_run.addArg(common.ArgumentParser.null_specifier);
-                                        }
-                                    },
-                                    .cpu => disk_image_builder_run.addArtifactArg(cpu_driver),
-                                    .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
-                                };
-
-                                const user_init = user_module_list.items[0];
-
-                                const runner_run = try newRunnerRunArtifact(.{
-                                    .configuration = configuration,
-                                    .disk_image_path = disk_image_path,
-                                    .cpu_driver = cpu_driver,
-                                    .user_init = user_init,
-                                    .runner = runner,
-                                    .qemu_options = .{
-                                        .is_debug = false,
-                                        .is_test = is_test,
-                                    },
-                                });
-                                const runner_debug = try newRunnerRunArtifact(.{
-                                    .configuration = configuration,
-                                    .disk_image_path = disk_image_path,
-                                    .cpu_driver = cpu_driver,
-                                    .user_init = user_init,
-                                    .runner = runner,
-                                    .qemu_options = .{
-                                        .is_debug = true,
-                                        .is_test = is_test,
-                                    },
-                                });
-
-                                if (is_test) {
-                                    build_steps.test_all.dependOn(&runner_run.step);
-                                }
-
-                                if (architecture == default_configuration.architecture and bootloader == default_configuration.bootloader and boot_protocol == default_configuration.boot_protocol and optimize_mode == default_configuration.optimize_mode and execution_environment == default_configuration.execution_environment and execution_type == default_configuration.execution_type) {
-                                    if (is_test) {
-                                        build_steps.test_run.dependOn(&runner_run.step);
-                                        build_steps.test_debug.dependOn(&runner_debug.step);
-                                    } else {
-                                        build_steps.run.dependOn(&runner_run.step);
-                                        build_steps.debug.dependOn(&runner_debug.step);
-
-                                        if (maybe_bootloader_compile_step) |bs| {
-                                            b.default_step.dependOn(&bs.step);
-                                        }
-
-                                        b.default_step.dependOn(&cpu_driver.step);
-
-                                        for (user_module_list.items) |user_module| {
-                                            b.default_step.dependOn(&user_module.step);
-                                        }
-
-                                        const artifacts: []const *CompileStep = &.{ cpu_driver, user_init };
-                                        const artifact_names: []const []const u8 = &.{ "cpu", "init" };
-
-                                        inline for (artifact_names, 0..) |artifact_name, index| {
-                                            const artifact = artifacts[index];
-                                            addObjdump(artifact, artifact_name);
-                                            addFileSize(artifact, artifact_name);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (os == .linux) {
-        const generate_command = b.addSystemCommand(&.{ "dot", "-Tpng" });
-        generate_command.addFileSourceArg(FileSource.relative("capabilities.dot"));
-        generate_command.addArg("-o");
-        const png = generate_command.addOutputFileArg("capabilities.png");
-
-        const visualize_command = b.addSystemCommand(&.{"xdg-open"});
-        visualize_command.addFileSourceArg(png);
-
-        const dot_command = b.step("dot", "TEMPORARY: (developers only) Generate a graph and visualize it");
-        dot_command.dependOn(&visualize_command.step);
-    }
+    // {
+    //     var user_module_list = std.ArrayList(common.Module).init(b.allocator);
+    //     var user_program_dir = try std.fs.cwd().openIterableDir(user_program_dir_path, .{ .access_sub_paths = true });
+    //     defer user_program_dir.close();
+    //
+    //     var user_program_iterator = user_program_dir.iterate();
+    //
+    //     while (try user_program_iterator.next()) |entry| {
+    //         const dir_name = entry.name;
+    //         const file_path = try std.mem.concat(b.allocator, u8, &.{ dir_name, "/module.json" });
+    //         const file = try user_program_dir.dir.readFileAlloc(b.allocator, file_path, common.maxInt(usize));
+    //         const user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
+    //         try user_module_list.append(.{
+    //             .program = user_program,
+    //             .name = dir_name,
+    //         });
+    //     }
+    //
+    //     user_modules = user_module_list.items;
+    // }
+    //
+    // const executable_kinds = [2]CompileStep.Kind{ .exe, .@"test" };
+    //
+    // for (common.enumValues(OptimizeMode)) |optimize_mode| {
+    //     for (common.supported_architectures, 0..) |architecture, architecture_index| {
+    //         const user_target = try getTarget(architecture, .user);
+    //
+    //         for (executable_kinds) |executable_kind| {
+    //             const is_test = executable_kind == .@"test";
+    //             const cpu_driver_path = "src/cpu";
+    //             const target = try getTarget(architecture, .privileged);
+    //             const cpu_driver = try addCompileStep(.{
+    //                 .kind = executable_kind,
+    //                 .name = "cpu_driver",
+    //                 .root_project_path = cpu_driver_path,
+    //                 .target = target,
+    //                 .optimize_mode = optimize_mode,
+    //                 .modules = &.{ .lib, .bootloader, .privileged, .cpu, .rise },
+    //             });
+    //
+    //             cpu_driver.force_pic = true;
+    //             cpu_driver.disable_stack_probing = true;
+    //             cpu_driver.stack_protector = false;
+    //             cpu_driver.strip = false;
+    //             cpu_driver.red_zone = false;
+    //             cpu_driver.omit_frame_pointer = false;
+    //
+    //             cpu_driver.code_model = switch (architecture) {
+    //                 .x86_64 => .kernel,
+    //                 .riscv64 => .medium,
+    //                 .aarch64 => .small,
+    //                 else => return Error.architecture_not_supported,
+    //             };
+    //
+    //             cpu_driver.setLinkerScriptPath(FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ cpu_driver_path, "/arch/", switch (architecture) {
+    //                 .x86_64 => "x86/64",
+    //                 .x86 => "x86/32",
+    //                 else => @tagName(architecture),
+    //             }, "/linker_script.ld" })));
+    //
+    //             var user_module_list = try std.ArrayList(*CompileStep).initCapacity(b.allocator, user_modules.len);
+    //             const user_architecture_source_path = try std.mem.concat(b.allocator, u8, &.{ "src/user/arch/", @tagName(architecture), "/" });
+    //             const user_linker_script_path = FileSource.relative(try std.mem.concat(b.allocator, u8, &.{ user_architecture_source_path, "linker_script.ld" }));
+    //             for (user_modules) |module| {
+    //                 const user_module = try addCompileStep(.{
+    //                     .kind = executable_kind,
+    //                     .name = module.name,
+    //                     .root_project_path = try std.mem.concat(b.allocator, u8, &.{ user_program_dir_path, "/", module.name }),
+    //                     .target = user_target,
+    //                     .optimize_mode = optimize_mode,
+    //                     .modules = &.{ .lib, .user, .rise },
+    //                 });
+    //                 user_module.strip = false;
+    //
+    //                 user_module.setLinkerScriptPath(user_linker_script_path);
+    //
+    //                 user_module_list.appendAssumeCapacity(user_module);
+    //             }
+    //
+    //             const bootloaders = common.architecture_bootloader_map[architecture_index];
+    //             for (bootloaders) |bootloader_struct| {
+    //                 const bootloader = bootloader_struct.id;
+    //                 for (bootloader_struct.protocols) |boot_protocol| {
+    //                     const rise_loader_path = "src/bootloader/rise/";
+    //                     const bootloader_name = "bootloader";
+    //                     const bootloader_modules = &.{ .lib, .bootloader, .privileged };
+    //
+    //                     const maybe_bootloader_compile_step: ?*CompileStep = switch (bootloader) {
+    //                         .rise => switch (boot_protocol) {
+    //                             .bios => switch (architecture) {
+    //                                 .x86_64 => blk: {
+    //                                     const bootloader_path = rise_loader_path ++ "bios";
+    //                                     const executable = try addCompileStep(.{
+    //                                         .kind = executable_kind,
+    //                                         .name = bootloader_name,
+    //                                         .root_project_path = bootloader_path,
+    //                                         .target = try getTarget(.x86, .privileged),
+    //                                         .optimize_mode = .ReleaseSmall,
+    //                                         .modules = bootloader_modules,
+    //                                     });
+    //
+    //                                     executable.disable_stack_probing = true;
+    //                                     executable.stack_protector = false;
+    //
+    //                                     executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S");
+    //                                     executable.addAssemblyFile(bootloader_path ++ "/unreal_mode.S");
+    //                                     executable.setLinkerScriptPath(FileSource.relative(bootloader_path ++ "/linker_script.ld"));
+    //                                     executable.code_model = .small;
+    //
+    //                                     break :blk executable;
+    //                                 },
+    //                                 else => return Error.architecture_not_supported,
+    //                             },
+    //                             .uefi => blk: {
+    //                                 const bootloader_path = rise_loader_path ++ "uefi";
+    //                                 const executable = try addCompileStep(.{
+    //                                     .kind = executable_kind,
+    //                                     .name = bootloader_name,
+    //                                     .root_project_path = bootloader_path,
+    //                                     .target = .{
+    //                                         .cpu_arch = architecture,
+    //                                         .os_tag = .uefi,
+    //                                         .abi = .msvc,
+    //                                     },
+    //                                     .optimize_mode = .ReleaseSafe,
+    //                                     .modules = bootloader_modules,
+    //                                 });
+    //
+    //                                 switch (architecture) {
+    //                                     .x86_64 => executable.addAssemblyFile("src/bootloader/arch/x86/64/smp_trampoline.S"),
+    //                                     else => {},
+    //                                 }
+    //
+    //                                 break :blk executable;
+    //                             },
+    //                         },
+    //                         .limine => null,
+    //                     };
+    //
+    //                     if (maybe_bootloader_compile_step) |bootloader_compile_step| {
+    //                         bootloader_compile_step.red_zone = false;
+    //                         bootloader_compile_step.link_gc_sections = true;
+    //                         bootloader_compile_step.want_lto = true;
+    //                         bootloader_compile_step.strip = true;
+    //                     }
+    //
+    //                     const execution_environments: []const ExecutionEnvironment = switch (bootloader) {
+    //                         .rise, .limine => switch (boot_protocol) {
+    //                             .bios => switch (architecture) {
+    //                                 .x86_64 => &.{.qemu},
+    //                                 else => return Error.architecture_not_supported,
+    //                             },
+    //                             .uefi => &.{.qemu},
+    //                         },
+    //                     };
+    //
+    //                     const execution_types: []const ExecutionType =
+    //                         switch (common.canVirtualizeWithQEMU(architecture, ci)) {
+    //                         true => &.{ .emulated, .accelerated },
+    //                         false => &.{.emulated},
+    //                     };
+    //
+    //                     for (execution_types) |execution_type| {
+    //                         for (execution_environments) |execution_environment| {
+    //                             const configuration = Configuration{
+    //                                 .architecture = architecture,
+    //                                 .bootloader = bootloader,
+    //                                 .boot_protocol = boot_protocol,
+    //                                 .optimize_mode = optimize_mode,
+    //                                 .execution_environment = execution_environment,
+    //                                 .execution_type = execution_type,
+    //                                 .executable_kind = executable_kind,
+    //                             };
+    //
+    //                             var disk_argument_parser = common.ArgumentParser.DiskImageBuilder{};
+    //                             const disk_image_builder_run = b.addRunArtifact(disk_image_builder);
+    //                             const disk_image_path = disk_image_builder_run.addOutputFileArg("disk.hdd");
+    //
+    //                             while (disk_argument_parser.next()) |argument_type| switch (argument_type) {
+    //                                 .configuration => inline for (common.fields(Configuration)) |field| disk_image_builder_run.addArg(@tagName(@field(configuration, field.name))),
+    //                                 .image_configuration_path => disk_image_builder_run.addArg(common.ImageConfig.default_path),
+    //                                 .disk_image_path => {
+    //                                     // Must be first
+    //                                     assert(@enumToInt(argument_type) == 0);
+    //                                 },
+    //                                 .bootloader => {
+    //                                     if (maybe_bootloader_compile_step) |bootloader_compile_step| {
+    //                                         disk_image_builder_run.addArtifactArg(bootloader_compile_step);
+    //                                     } else {
+    //                                         disk_image_builder_run.addArg(common.ArgumentParser.null_specifier);
+    //                                     }
+    //                                 },
+    //                                 .cpu => disk_image_builder_run.addArtifactArg(cpu_driver),
+    //                                 .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
+    //                             };
+    //
+    //                             const user_init = user_module_list.items[0];
+    //
+    //                             const runner_run = try newRunnerRunArtifact(.{
+    //                                 .configuration = configuration,
+    //                                 .disk_image_path = disk_image_path,
+    //                                 .cpu_driver = cpu_driver,
+    //                                 .user_init = user_init,
+    //                                 .runner = runner,
+    //                                 .qemu_options = .{
+    //                                     .is_debug = false,
+    //                                     .is_test = is_test,
+    //                                 },
+    //                             });
+    //                             const runner_debug = try newRunnerRunArtifact(.{
+    //                                 .configuration = configuration,
+    //                                 .disk_image_path = disk_image_path,
+    //                                 .cpu_driver = cpu_driver,
+    //                                 .user_init = user_init,
+    //                                 .runner = runner,
+    //                                 .qemu_options = .{
+    //                                     .is_debug = true,
+    //                                     .is_test = is_test,
+    //                                 },
+    //                             });
+    //
+    //                             if (is_test) {
+    //                                 build_steps.test_all.dependOn(&runner_run.step);
+    //                             }
+    //
+    //                             if (architecture == default_configuration.architecture and bootloader == default_configuration.bootloader and boot_protocol == default_configuration.boot_protocol and optimize_mode == default_configuration.optimize_mode and execution_environment == default_configuration.execution_environment and execution_type == default_configuration.execution_type) {
+    //                                 if (is_test) {
+    //                                     build_steps.test_run.dependOn(&runner_run.step);
+    //                                     build_steps.test_debug.dependOn(&runner_debug.step);
+    //                                 } else {
+    //                                     build_steps.run.dependOn(&runner_run.step);
+    //                                     build_steps.debug.dependOn(&runner_debug.step);
+    //
+    //                                     if (maybe_bootloader_compile_step) |bs| {
+    //                                         b.default_step.dependOn(&bs.step);
+    //                                     }
+    //
+    //                                     b.default_step.dependOn(&cpu_driver.step);
+    //
+    //                                     for (user_module_list.items) |user_module| {
+    //                                         b.default_step.dependOn(&user_module.step);
+    //                                     }
+    //
+    //                                     const artifacts: []const *CompileStep = &.{ cpu_driver, user_init };
+    //                                     const artifact_names: []const []const u8 = &.{ "cpu", "init" };
+    //
+    //                                     inline for (artifact_names, 0..) |artifact_name, index| {
+    //                                         const artifact = artifacts[index];
+    //                                         addObjdump(artifact, artifact_name);
+    //                                         addFileSize(artifact, artifact_name);
+    //                                     }
+    //                                 }
+    //                             }
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // if (os == .linux) {
+    //     const generate_command = b.addSystemCommand(&.{ "dot", "-Tpng" });
+    //     generate_command.addFileSourceArg(FileSource.relative("capabilities.dot"));
+    //     generate_command.addArg("-o");
+    //     const png = generate_command.addOutputFileArg("capabilities.png");
+    //
+    //     const visualize_command = b.addSystemCommand(&.{"xdg-open"});
+    //     visualize_command.addFileSourceArg(png);
+    //
+    //     const dot_command = b.step("dot", "TEMPORARY: (developers only) Generate a graph and visualize it");
+    //     dot_command.dependOn(&visualize_command.step);
+    // }
 }
 
 fn addObjdump(artifact: *CompileStep, comptime name: []const u8) void {
@@ -510,8 +512,12 @@ fn addObjdump(artifact: *CompileStep, comptime name: []const u8) void {
 
 fn addFileSize(artifact: *CompileStep, comptime name: []const u8) void {
     switch (os) {
-        .linux => {
-            const file_size = b.addSystemCommand(&.{ "stat", "-c", "%s" });
+        .linux, .macos => {
+            const file_size = b.addSystemCommand(switch (os) {
+                .linux => &.{ "stat", "-c", "%s" },
+                .macos => &.{ "wc", "-c" },
+                else => unreachable,
+            });
             file_size.addArtifactArg(artifact);
 
             const file_size_step = b.step("file_size_" ++ name, "Get the file size of " ++ name);
@@ -585,6 +591,8 @@ fn addCompileStep(executable_descriptor: ExecutableDescriptor) !*CompileStep {
         },
         else => return Error.not_implemented,
     };
+    compile_step.compress_debug_sections = .zlib;
+    compile_step.link_gc_sections = true;
 
     compile_step.setMainPkgPath(source_root_dir);
 

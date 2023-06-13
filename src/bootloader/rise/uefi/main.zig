@@ -64,11 +64,13 @@ const Filesystem = extern struct {
     handle: UEFI.Handle,
     root: *FileProtocol,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
+    fn initialize(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const loaded_image = Protocol.open(LoadedImageProtocol, filesystem.boot_services, filesystem.handle);
         const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, filesystem.boot_services, loaded_image.device_handle orelse @panic("No device handle"));
         try UEFI.Try(filesystem_protocol.openVolume(&filesystem.root));
+        const result = try filesystem.readFileFast(file_path, file_buffer);
+        lib.assert(result.ptr == file_buffer.ptr);
     }
 
     fn deinitialize(context: ?*anyopaque) anyerror!void {
@@ -89,6 +91,11 @@ const Filesystem = extern struct {
         handle: *FileProtocol,
         path_size: u32,
     };
+
+    fn getFileSizeCallback(context: ?*anyopaque, file_path: []const u8) !u32 {
+        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+        return @intCast(u32, try filesystem.getFileSize(file_path));
+    }
 
     fn getFileSize(filesystem: *Filesystem, file_path: []const u8) anyerror!u64 {
         const file = try filesystem.openFile(file_path);
@@ -368,7 +375,7 @@ pub fn main() noreturn {
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_file_descriptor = Filesystem.getFileDescriptor,
+        .get_file_size = Filesystem.getFileSizeCallback,
         .read_file = Filesystem.readFileCallback,
     }, .{
         .context = &mmap,

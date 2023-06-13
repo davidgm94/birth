@@ -51,7 +51,7 @@ pub const Information = extern struct {
     cpu_driver_mappings: CPUDriverMappings,
     framebuffer: Framebuffer,
     draw_context: DrawContext,
-    font: Font,
+    //font: Font,
     smp: SMP.Information,
     architecture: Architecture,
     cpu_page_tables: CPUPageTables,
@@ -164,30 +164,35 @@ pub const Information = extern struct {
     pub fn initialize(filesystem: Initialization.Filesystem, memory_map: Initialization.MemoryMap, framebuffer: Initialization.Framebuffer, virtual_address_space: Initialization.VirtualAddressSpace, rsdp: *ACPI.RSDP.Descriptor1, bootloader_tag: lib.Bootloader, protocol: Protocol) anyerror!noreturn {
         lib.log.info("Booting with bootloader {s} and boot protocol {s}", .{ @tagName(bootloader_tag), @tagName(protocol) });
         const framebuffer_data = try framebuffer.initialize(framebuffer.context);
-        filesystem.initialize(filesystem.context) catch return Initialization.Error.filesystem_initialization_failed;
-        const file_type_enums = lib.fields(File.Type);
+        var files_buffer: [200]u8 = undefined;
+        filesystem.initialize(filesystem.context, "/bootmods", &files_buffer) catch return Initialization.Error.filesystem_initialization_failed;
 
         var total_file_size: usize = 0;
         var total_aligned_file_size: u32 = 0;
         var total_file_name_size: usize = 0;
-        const total_file_count: u32 = file_type_enums.len;
+        var total_file_count: u32 = 0;
 
-        inline for (file_type_enums) |file_type_enum| {
-            const file_name = file_type_enum.name;
-            const file_type = @field(File.Type, file_name);
-            const file_descriptor = filesystem.get_file_descriptor(filesystem.context, file_type) catch return switch (file_type) {
-                .cpu => Initialization.Error.cpu_driver_not_found,
-                .init => Initialization.Error.init_not_found,
-                .font => Initialization.Error.font_not_found,
-            };
+        var filesystem_index: usize = 0;
+        var maybe_cpu_driver_index: ?usize = null;
 
-            total_file_size += file_descriptor.size;
-            total_aligned_file_size += lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
-            total_file_name_size += file_descriptor.path.len;
+        while (lib.indexOf(u8, files_buffer[filesystem_index..], "\n")) |next_line_character_index| {
+            const path = files_buffer[filesystem_index .. filesystem_index + next_line_character_index];
+            filesystem_index += next_line_character_index + 1;
+
+            if (lib.equal(u8, path, "/cpu")) maybe_cpu_driver_index = total_file_count;
+
+            const file_size = try filesystem.get_file_size(filesystem.context, path);
+            total_file_size += file_size;
+            total_aligned_file_size += lib.alignForwardGeneric(u32, file_size, file_alignment);
+
+            total_file_name_size += path.len;
+
+            total_file_count += 1;
         }
 
+        const cpu_driver_index = maybe_cpu_driver_index orelse @panic("CPU not found");
+
         try filesystem.deinitialize(filesystem.context);
-        const cpu_driver_index = @enumToInt(File.Type.cpu);
 
         try memory_map.initialize(memory_map.context);
         var memory_map_entry_count = try memory_map.get_memory_map_entry_count(memory_map.context);
@@ -255,7 +260,7 @@ pub const Information = extern struct {
             },
             .framebuffer = framebuffer_data,
             .draw_context = .{},
-            .font = undefined,
+            // .font = undefined,
             .cpu_driver_mappings = .{},
             .cpu_page_tables = undefined,
             .smp = switch (lib.cpu.arch) {
@@ -293,32 +298,30 @@ pub const Information = extern struct {
 
             var file_content_offset: u32 = 0;
             var file_name_offset: u32 = 0;
+            var file_index: usize = 0;
+            filesystem_index = 0;
 
-            inline for (lib.fields(File.Type), 0..) |file_type_enum, file_index| {
-                const file_type = @field(File.Type, file_type_enum.name);
-                const file_descriptor = try filesystem.get_file_descriptor(filesystem.context, file_type);
-                const path_len = @intCast(u32, file_descriptor.path.len);
-                @memcpy(file_name_buffer[file_name_offset .. file_name_offset + path_len], file_descriptor.path);
-                const aligned_file_size = lib.alignForwardGeneric(u32, file_descriptor.size, file_alignment);
-                const file_buffer = file_content_buffer[file_content_offset .. file_content_offset + aligned_file_size];
+            while (lib.indexOf(u8, files_buffer[filesystem_index..], "\n")) |next_line_character_index| {
+                const path = files_buffer[filesystem_index .. filesystem_index + next_line_character_index];
+                lib.log.debug("Path: {s}", .{path});
+                filesystem_index += next_line_character_index + 1;
+                @memcpy(file_name_buffer[file_name_offset..][0..path.len], path);
 
-                const file = filesystem.read_file(filesystem.context, file_descriptor.path, file_buffer) catch {
-                    switch (file_descriptor.type) {
-                        .cpu => return Initialization.Error.cpu_driver_not_found,
-                        .font => return Initialization.Error.font_not_found,
-                        .init => return Initialization.Error.init_not_found,
-                    }
-                };
-                _ = file;
+                const file_size = try filesystem.get_file_size(filesystem.context, path);
+                const aligned_file_size = lib.alignForwardGeneric(u32, file_size, file_alignment);
+                const file_buffer = file_content_buffer[file_content_offset..][0..aligned_file_size];
+                const file = filesystem.read_file(filesystem.context, path, file_buffer) catch return Initialization.Error.file_not_found;
+                lib.log.debug("File[0]: 0x{x}", .{file[0]});
                 file_slice[file_index] = .{
                     .content_offset = file_content_offset,
-                    .content_size = file_descriptor.size,
+                    .content_size = file_size,
                     .path_offset = file_name_offset,
-                    .path_size = path_len,
-                    .type = file_descriptor.type,
+                    .path_size = @intCast(u32, path.len),
                 };
+
                 file_content_offset += aligned_file_size;
-                file_name_offset += path_len;
+                file_name_offset += @intCast(u32, path.len);
+                file_index += 1;
             }
 
             if (file_content_offset != file_content_buffer.len) @panic("File content slice size mismatch");
@@ -341,6 +344,8 @@ pub const Information = extern struct {
         const minimal_paging = privileged.arch.paging.Specific.fromPageTables(bootloader_information.cpu_page_tables);
 
         const cpu_driver_file_descriptor = bootloader_information.getSlice(.files)[cpu_driver_index];
+        lib.log.debug("CPU driver index: {}", .{cpu_driver_index});
+        lib.log.debug("CPU driver path: {s}", .{cpu_driver_file_descriptor.getPath(bootloader_information)});
         const cpu_driver_file_content = cpu_driver_file_descriptor.getContent(bootloader_information);
         var elf_parser = try lib.ELF(64).Parser.init(cpu_driver_file_content);
         const program_headers = elf_parser.getProgramHeaders();
@@ -451,24 +456,16 @@ pub const Information = extern struct {
 
     pub const Initialization = struct {
         pub const Error = error{
-            cpu_driver_not_found,
-            font_not_found,
-            init_not_found,
+            file_not_found,
             filesystem_initialization_failed,
         };
 
         pub const Filesystem = extern struct {
             context: ?*anyopaque,
-            initialize: *const fn (context: ?*anyopaque) anyerror!void,
+            initialize: *const fn (context: ?*anyopaque, file_list_name: []const u8, file_buffer: []u8) anyerror!void,
             deinitialize: *const fn (context: ?*anyopaque) anyerror!void,
-            get_file_descriptor: *const fn (context: ?*anyopaque, file_type: File.Type) anyerror!Descriptor,
+            get_file_size: *const fn (context: ?*anyopaque, file_path: []const u8) anyerror!u32,
             read_file: *const fn (context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8,
-
-            pub const Descriptor = struct {
-                path: []const u8,
-                size: u32,
-                type: File.Type,
-            };
         };
 
         pub const MemoryMap = extern struct {
@@ -802,10 +799,11 @@ pub const Information = extern struct {
         return Allocator.Allocate.Error.OutOfMemory;
     }
 
-    pub fn fetchFileByType(bootloader_information: *Information, file_type: File.Type) ?[]const u8 {
+    pub fn fetchFile(bootloader_information: *Information, path: []const u8) ?[]const u8 {
         const files = bootloader_information.getFiles();
         for (files) |file_descriptor| {
-            if (file_descriptor.type == file_type) {
+            const file_path = file_descriptor.getPath(bootloader_information);
+            if (lib.equal(u8, path, file_path)) {
                 return file_descriptor.getContent(bootloader_information);
             }
         }
@@ -850,7 +848,6 @@ pub const File = extern struct {
     content_size: u32,
     path_offset: u32,
     path_size: u32,
-    type: Type,
     reserved: u32 = 0,
 
     pub fn getContent(file: File, bootloader_information: *Information) []align(lib.default_sector_size) const u8 {
@@ -875,7 +872,7 @@ pub const File = extern struct {
     pub const Type = enum(u32) {
         cpu,
         font,
-        init,
+        user,
     };
 };
 

@@ -411,7 +411,7 @@ const Filesystem = extern struct {
     module_count: usize,
     index: usize,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
+    fn initialize(context: ?*anyopaque, file_list_name: []const u8, file_buffer: []u8) anyerror!void {
         const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         const limine_module_response = limine_modules.response.?;
         filesystem.* = .{
@@ -419,6 +419,9 @@ const Filesystem = extern struct {
             .module_count = limine_module_response.module_count,
             .index = 0,
         };
+
+        const file = try readFile(context, file_list_name, file_buffer);
+        assert(file.ptr == file_buffer.ptr);
     }
 
     fn deinitialize(context: ?*anyopaque) anyerror!void {
@@ -597,7 +600,7 @@ pub fn main() !noreturn {
         .context = &filesystem,
         .initialize = Filesystem.initialize,
         .deinitialize = Filesystem.deinitialize,
-        .get_file_descriptor = Filesystem.getFileDescriptor,
+        .get_file_size = Filesystem.getFileSize,
         .read_file = Filesystem.readFile,
     }, .{
         .context = &memory_map,

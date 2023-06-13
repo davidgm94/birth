@@ -417,7 +417,7 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
 
     switch (cpu.bsp) {
         true => {
-            const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
+            const init_module = bootloader_information.fetchFile("/init") orelse return InitializationError.init_file_not_found;
             try spawnInitBSP(init_module, bootloader_information.cpu_page_tables);
         },
         false => @panic("Implement APP"),

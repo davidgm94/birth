@@ -10,7 +10,6 @@ const CPUPageTables = privileged.arch.CPUPageTables;
 const Mapping = privileged.Mapping;
 const PageAllocatorInterface = privileged.PageAllocator;
 const PhysicalAddress = lib.PhysicalAddress;
-const PhysicalAddressSpace = lib.PhysicalAddressSpace;
 const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const stopCPU = privileged.arch.stopCPU;
 const VirtualAddress = privileged.VirtualAddress;

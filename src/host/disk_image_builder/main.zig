@@ -125,12 +125,22 @@ pub fn main() anyerror!void {
                 .last_lba = gpt_partition_cache.partition.last_lba,
             }, null);
 
+            var file_list = host.ArrayList(u8).init(wrapped_allocator.zigUnwrap());
+
             try fat_partition_cache.makeNewFile("/cpu", try readFileAbsolute(&wrapped_allocator, arguments_result.cpu), wrapped_allocator.unwrap(), null, 0);
-            assert(arguments_result.user_programs.len == 1);
-            const init_program = arguments_result.user_programs[0];
-            assert(lib.containsAtLeast(u8, init_program, 1, "init"));
-            try fat_partition_cache.makeNewFile("/init", try readFileAbsolute(&wrapped_allocator, init_program), wrapped_allocator.unwrap(), null, 0);
-            try fat_partition_cache.makeNewFile("/font", try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), "resources/zap-light16.psf", max_file_length), wrapped_allocator.unwrap(), null, 0);
+            try file_list.appendSlice("/cpu\n");
+            // try fat_partition_cache.makeNewFile("/font", try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), "resources/zap-light16.psf", max_file_length), wrapped_allocator.unwrap(), null, 0);
+            // try file_list.appendSlice("/font\n");
+
+            for (arguments_result.user_programs) |user_program| {
+                const relative_name = user_program[lib.lastIndexOf(u8, user_program, "/") orelse unreachable ..];
+                assert(relative_name[0] == '/');
+                try fat_partition_cache.makeNewFile(relative_name, try readFileAbsolute(&wrapped_allocator, user_program), wrapped_allocator.unwrap(), null, 0);
+                try file_list.appendSlice(relative_name);
+                try file_list.append('\n');
+            }
+
+            try fat_partition_cache.makeNewFile("/bootmods", file_list.items, wrapped_allocator.unwrap(), null, 0);
 
             switch (configuration.bootloader) {
                 .limine => {
@@ -157,10 +167,6 @@ pub fn main() anyerror!void {
                         break :blk limine_cfg_generator.buffer.items;
                     };
 
-                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "limine.sys", max_file_length);
-                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-
                     switch (configuration.architecture) {
                         .x86_64 => {
                             try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
@@ -169,6 +175,10 @@ pub fn main() anyerror!void {
                         },
                         else => unreachable,
                     }
+
+                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "limine.sys", max_file_length);
+                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
                 },
                 .rise => switch (configuration.boot_protocol) {
                     .bios => {

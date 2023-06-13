@@ -23,7 +23,6 @@ const cr3 = x86_64.registers.cr3;
 const PhysicalAddress = lib.PhysicalAddress;
 const VirtualAddress = lib.VirtualAddress;
 const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
-const PhysicalAddressSpace = lib.PhysicalAddressSpace;
 const Mapping = privileged.Mapping;
 
 const bootloader = @import("bootloader");
@@ -161,7 +160,10 @@ pub const CPUPageTables = extern struct {
     };
 
     pub fn map(cpu_page_tables: CPUPageTables, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: Mapping.Flags) CPUPageTables.MapError!void {
-        if (asked_virtual_address.value() < base) return CPUPageTables.MapError.lower_limit_exceeded;
+        if (asked_virtual_address.value() < base) {
+            log.err("Map function failed when mapping 0x{x} -> 0x{x} for 0x{x} bytes", .{ asked_virtual_address.value(), asked_physical_address.value(), size });
+            return CPUPageTables.MapError.lower_limit_exceeded;
+        }
         if (asked_virtual_address.offset(size).value() > top) return CPUPageTables.MapError.upper_limit_exceeded;
 
         const flags = general_flags.toArchitectureSpecific();
