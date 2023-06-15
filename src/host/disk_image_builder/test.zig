@@ -4,8 +4,7 @@ const log = lib.log.scoped(.DISK_IMAGE_BUILDER);
 const FAT32 = lib.Filesystem.FAT32;
 const GPT = lib.PartitionTable.GPT;
 const host = @import("host");
-const bootloader = @import("bootloader");
-const limine = bootloader.limine;
+const limine_installer = @import("limine_installer");
 
 const disk_image_builder = @import("../disk_image_builder.zig");
 const ImageDescription = disk_image_builder.ImageDescription;
@@ -56,8 +55,9 @@ const MountedPartition = struct {
     }
 
     fn copy_file(partition: MountedPartition, allocator: lib.ZigAllocator, file_path: []const u8, file_content: []const u8) !void {
+        // TODO: make this work for Windows?
         const last_slash_index = lib.lastIndexOf(u8, file_path, "/") orelse @panic("fat32: copy file last slash");
-        const file_name = file_path[last_slash_index + 1 ..];
+        const file_name = host.basename(file_path);
         assert(file_name.len > 0);
         try host.cwd().writeFile(file_name, file_content);
         const dir = file_path[0..if (last_slash_index == 0) 1 else last_slash_index];
@@ -148,7 +148,7 @@ test "Limine barebones" {
             test_image.delete() catch {};
 
             try test_image.createFAT(wrapped_allocator.zigUnwrap());
-            if (deploy_limine and disk_image_builder.deploy(test_path, &limine.Installer.hdd, limine.Installer.hdd.len) != 0) {
+            if (deploy_limine and disk_image_builder.deploy(test_path, &limine_installer.hdd, limine_installer.hdd.len) != 0) {
                 @panic("asjdkajsd");
             }
 
@@ -184,7 +184,7 @@ test "Limine barebones" {
             const my_buffer = disk_image.getBuffer();
 
             if (deploy_limine) {
-                try limine.Installer.install(my_buffer, false, null);
+                try limine_installer.install(my_buffer, false, null);
             }
 
             const fat_partition_cache = try disk_image_builder.format(gpt_partition_cache.gpt.disk, .{

@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const assert = lib.assert;
 const log = lib.log.scoped(.RUNNER);
 const host = @import("host");
 const Configuration = lib.Configuration;
@@ -7,11 +8,13 @@ const Error = error{
     wrong_argument_count,
     disk_image_path_not_found,
     cpu_driver_not_found,
+    loader_path_not_found,
     qemu_options_not_found,
     configuration_not_found,
     configuration_wrong_argument,
     ci_not_found,
     debug_user_not_found,
+    debug_loader_not_found,
     init_not_found,
     image_configuration_path_not_found,
     qemu_error,
@@ -32,11 +35,13 @@ pub fn main() anyerror!void {
         var argument_parser = lib.ArgumentParser.Runner{};
         var argument_disk_image_path: ?[]const u8 = null;
         var argument_cpu_driver_path: ?[]const u8 = null;
+        var argument_loader_path: ?[]const u8 = null;
         var argument_qemu_options: ?lib.QEMUOptions = null;
         var argument_configuration: ?Configuration = null;
         var argument_image_configuration_path: ?[]const u8 = null;
         var argument_ci: ?bool = null;
         var argument_debug_user: ?bool = null;
+        var argument_debug_loader: ?bool = null;
         var argument_init_path: ?[]const u8 = null;
         var argument_index: usize = 0;
 
@@ -47,6 +52,10 @@ pub fn main() anyerror!void {
             },
             .cpu_driver => {
                 argument_cpu_driver_path = arguments[argument_index];
+                argument_index += 1;
+            },
+            .loader_path => {
+                argument_loader_path = arguments[argument_index];
                 argument_index += 1;
             },
             .qemu_options => {
@@ -78,6 +87,10 @@ pub fn main() anyerror!void {
                 argument_debug_user = if (lib.equal(u8, arguments[argument_index], "true")) true else if (lib.equal(u8, arguments[argument_index], "false")) false else return Error.debug_user_not_found;
                 argument_index += 1;
             },
+            .debug_loader => {
+                argument_debug_loader = if (lib.equal(u8, arguments[argument_index], "true")) true else if (lib.equal(u8, arguments[argument_index], "false")) false else return Error.debug_loader_not_found;
+                argument_index += 1;
+            },
             .init => {
                 argument_init_path = arguments[argument_index];
                 argument_index += 1;
@@ -89,11 +102,13 @@ pub fn main() anyerror!void {
         break :blk .{
             .disk_image_path = argument_disk_image_path orelse return Error.disk_image_path_not_found,
             .cpu_driver = argument_cpu_driver_path orelse return Error.cpu_driver_not_found,
+            .loader_path = argument_loader_path orelse return Error.loader_path_not_found,
             .qemu_options = argument_qemu_options orelse return Error.qemu_options_not_found,
             .configuration = argument_configuration orelse return Error.configuration_not_found,
             .image_configuration_path = argument_image_configuration_path orelse return Error.image_configuration_path_not_found,
             .ci = argument_ci orelse return Error.ci_not_found,
             .debug_user = argument_debug_user orelse return Error.debug_user_not_found,
+            .debug_loader = argument_debug_loader orelse return Error.debug_loader_not_found,
             .init = argument_init_path orelse return Error.init_not_found,
         };
     };
@@ -248,7 +263,11 @@ pub fn main() anyerror!void {
 
                 try command_line_gdb.appendSlice(&.{ "-ex", "target remote localhost:1234" });
                 if (arguments_result.debug_user) {
+                    assert(!arguments_result.debug_loader);
                     try command_line_gdb.appendSlice(&.{ "-ex", try lib.allocPrint(wrapped_allocator.zigUnwrap(), "symbol-file {s}", .{arguments_result.init}) });
+                } else if (arguments_result.debug_loader) {
+                    assert(!arguments_result.debug_user);
+                    try command_line_gdb.appendSlice(&.{ "-ex", try lib.allocPrint(wrapped_allocator.zigUnwrap(), "symbol-file {s}", .{arguments_result.loader_path}) });
                 } else {
                     try command_line_gdb.appendSlice(&.{ "-ex", try lib.allocPrint(wrapped_allocator.zigUnwrap(), "symbol-file {s}", .{arguments_result.cpu_driver}) });
                 }

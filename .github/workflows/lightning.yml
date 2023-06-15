@@ -38,7 +38,7 @@ jobs:
       - name: Zig environment variables
         run: zig env
       - name: Build test executables
-        run: zig build all_tests -Dci --verbose -fsummary
+        run: zig build all_tests -Dci --verbose
       - name: Test with QEMU
-        run: zig build test_all -Dci --verbose -fsummary
+        run: zig build test_all -Dci --verbose
 

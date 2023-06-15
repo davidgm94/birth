@@ -16,6 +16,61 @@ pub const Spinlock = arch.Spinlock;
 const extern_enum_array = @import("lib/extern_enum_array.zig");
 pub const EnumArray = extern_enum_array.EnumArray;
 
+pub fn memcpy(noalias destination: []u8, noalias source: []const u8) void {
+    @setRuntimeSafety(false);
+    // Using this as the Zig implementation is really slow (at least in x86 with soft_float enabled
+    // if (common.cpu.arch == .x86 or common.cpu.arch == .x86_64 and common.Target.x86.featureSetHas(common.cpu.features, .soft_float)) {
+    const bytes_left = switch (common.cpu.arch) {
+        .x86 => asm volatile (
+            \\rep movsb
+            : [ret] "={ecx}" (-> usize),
+            : [dest] "{edi}" (destination.ptr),
+              [src] "{esi}" (source.ptr),
+              [len] "{ecx}" (source.len),
+        ),
+        .x86_64 => asm volatile (
+            \\rep movsb
+            : [ret] "={rcx}" (-> usize),
+            : [dest] "{rdi}" (destination.ptr),
+              [src] "{rsi}" (source.ptr),
+              [len] "{rcx}" (source.len),
+        ),
+        else => @compileError("Unreachable"),
+    };
+
+    common.assert(bytes_left == 0);
+    // } else {
+    //     @memcpy(destination, source);
+    // }
+}
+
+// pub fn memset(comptime T: type, slice: []T, elem: T) void {
+//     @setRuntimeSafety(false);
+//
+//     const bytes_left = switch (T) {
+//         u8 => switch (common.cpu.arch) {
+//             .x86 => asm volatile (
+//                 \\rep stosb
+//                 : [ret] "={ecx}" (-> usize),
+//                 : [slice] "{edi}" (slice.ptr),
+//                   [len] "{ecx}" (slice.len),
+//                   [element] "{al}" (elem),
+//             ),
+//             .x86_64 => asm volatile (
+//                 \\rep movsb
+//                 : [ret] "={rcx}" (-> usize),
+//                 : [slice] "{rdi}" (slice.ptr),
+//                   [len] "{rcx}" (slice.len),
+//                   [element] "{al}" (elem),
+//             ),
+//             else => @compileError("Unsupported OS"),
+//         },
+//         else => @compileError("Type " ++ @typeName(T) ++ " not supported"),
+//     };
+//
+//     common.assert(bytes_left == 0);
+// }
+
 pub fn EnumStruct(comptime Enum: type, comptime Value: type) type {
     const EnumFields = common.enumFields(Enum);
     const MyEnumStruct = @Type(.{
@@ -775,6 +830,16 @@ pub fn RegionInterface(comptime Region: type) type {
 
         pub inline fn top(region: Region) Addr {
             return region.address.offset(region.size);
+        }
+
+        pub fn shrinked(region: Region, size: AddrT) Region {
+            common.assert(size <= region.size);
+            const result = Region{
+                .address = region.address,
+                .size = size,
+            };
+
+            return result;
         }
 
         pub inline fn takeSlice(region: *Region, size: AddrT) Region {

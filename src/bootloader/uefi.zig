@@ -43,30 +43,30 @@ pub fn result(src: lib.SourceLocation, status: Status) void {
     };
 }
 
-pub inline fn get_system_table() *SystemTable {
+pub inline fn getSystemTable() *SystemTable {
     return uefi.system_table;
 }
 
-pub inline fn get_handle() Handle {
+pub inline fn getHandle() Handle {
     return uefi.handle;
 }
 
 pub const Protocol = struct {
-    pub fn locate(comptime ProtocolT: type, boot_services: *BootServices) Error!*ProtocolT {
+    pub fn locate(comptime ProtocolT: type, boot_services: *BootServices) !*ProtocolT {
         var pointer_buffer: ?*anyopaque = null;
-        result(@src(), boot_services.locateProtocol(&ProtocolT.guid, null, &pointer_buffer));
+        try Try(boot_services.locateProtocol(&ProtocolT.guid, null, &pointer_buffer));
         return cast(ProtocolT, pointer_buffer);
     }
 
-    pub fn handle(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) Error!*ProtocolT {
+    pub fn handle(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) !*ProtocolT {
         var interface_buffer: ?*anyopaque = null;
-        result(@src(), boot_services.handleProtocol(efi_handle, &ProtocolT.guid, &interface_buffer));
+        try Try(boot_services.handleProtocol(efi_handle, &ProtocolT.guid, &interface_buffer));
         return cast(ProtocolT, interface_buffer);
     }
 
-    pub fn open(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) *ProtocolT {
+    pub fn open(comptime ProtocolT: type, boot_services: *BootServices, efi_handle: Handle) !*ProtocolT {
         var interface_buffer: ?*anyopaque = null;
-        result(@src(), boot_services.openProtocol(efi_handle, &ProtocolT.guid, &interface_buffer, efi_handle, null, .{ .get_protocol = true }));
+        try Try(boot_services.openProtocol(efi_handle, &ProtocolT.guid, &interface_buffer, efi_handle, null, .{ .get_protocol = true }));
         return cast(ProtocolT, interface_buffer);
     }
 

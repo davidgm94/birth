@@ -35,12 +35,12 @@ pub const Header = extern struct {
     partition_array_crc32: u32,
     reserved1: [420]u8 = [1]u8{0} ** 420,
 
-    pub fn update_crc32(header: *Header) void {
+    pub fn updateCrc32(header: *Header) void {
         header.header_crc32 = 0;
         header.header_crc32 = CRC32.compute(lib.asBytes(header)[0..header.header_size]);
     }
 
-    pub fn get_partition_count_in_sector(header: *const Header, disk: *const Disk) u32 {
+    pub fn getPartititonCountInSector(header: *const Header, disk: *const Disk) u32 {
         return @divExact(disk.sector_size, header.partition_entry_size);
     }
 
@@ -112,7 +112,7 @@ pub const Header = extern struct {
         disk: *Disk,
         gpt: *GPT.Partition,
 
-        pub fn get_free_partition_slot(cache: Cache) !*GPT.Partition {
+        pub fn getFreePartitionSlot(cache: Cache) !*GPT.Partition {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             // TODO: undo hack
 
@@ -127,54 +127,54 @@ pub const Header = extern struct {
             //@panic("todo: get_free_partition_slot");
         }
 
-        pub fn get_partition_index(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
+        pub fn getPartitionIndex(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             return @divExact(@intCast(u32, @ptrToInt(partition) - @ptrToInt(partition_entries.ptr)), cache.header.partition_entry_size);
         }
 
-        pub fn get_partition_sector(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
-            return get_partition_index(cache, partition, partition_entries) / cache.header.get_partition_count_in_sector(cache.disk);
+        pub fn getPartitionSector(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
+            return getPartitionIndex(cache, partition, partition_entries) / cache.header.getPartititonCountInSector(cache.disk);
         }
 
         pub fn getPartitionEntries(cache: Cache, allocator: ?*lib.Allocator) ![]GPT.Partition {
-            const partition_entries = try cache.disk.read_slice(GPT.Partition, cache.header.partition_entry_count, cache.header.partition_array_lba, allocator, .{});
+            const partition_entries = try cache.disk.readSlice(GPT.Partition, cache.header.partition_entry_count, cache.header.partition_array_lba, allocator, .{});
             return partition_entries;
         }
 
-        pub inline fn update_partition_entry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition) !void {
+        pub inline fn updatePartitionEntry(cache: Cache, partition: *GPT.Partition, new_value: GPT.Partition) !void {
             if (cache.disk.type != .memory) @panic("Disk is not memory");
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
             const partition_entries = try cache.getPartitionEntries(null);
             const partition_entry_bytes = lib.sliceAsBytes(partition_entries);
             partition.* = new_value;
             cache.header.partition_array_crc32 = CRC32.compute(partition_entry_bytes);
-            cache.header.update_crc32();
+            cache.header.updateCrc32();
 
-            const backup_gpt_header = try cache.disk.read_typed_sectors(GPT.Header, cache.header.backup_lba, null, .{});
+            const backup_gpt_header = try cache.disk.readTypedSectors(GPT.Header, cache.header.backup_lba, null, .{});
             backup_gpt_header.partition_array_crc32 = cache.header.partition_array_crc32;
-            backup_gpt_header.update_crc32();
+            backup_gpt_header.updateCrc32();
 
-            const partition_entry_sector_offset = cache.get_partition_sector(partition, partition_entries);
+            const partition_entry_sector_offset = cache.getPartitionSector(partition, partition_entries);
             const partition_entry_byte_offset = partition_entry_sector_offset * cache.disk.sector_size;
             // Only commit to disk the modified sector
             const partition_entry_modified_sector_bytes = partition_entry_bytes[partition_entry_byte_offset .. partition_entry_byte_offset + cache.disk.sector_size];
-            try cache.disk.write_slice(u8, partition_entry_modified_sector_bytes, cache.header.partition_array_lba + partition_entry_sector_offset, false);
+            try cache.disk.writeSlice(u8, partition_entry_modified_sector_bytes, cache.header.partition_array_lba + partition_entry_sector_offset, false);
             // Force write because for memory disk we only hold a pointer to the main partition entry array
-            try cache.disk.write_slice(u8, partition_entry_modified_sector_bytes, backup_gpt_header.partition_array_lba + partition_entry_sector_offset, true);
-            try cache.disk.write_typed_sectors(GPT.Header, cache.header, cache.header.header_lba, false);
-            try cache.disk.write_typed_sectors(GPT.Header, backup_gpt_header, backup_gpt_header.header_lba, false);
+            try cache.disk.writeSlice(u8, partition_entry_modified_sector_bytes, backup_gpt_header.partition_array_lba + partition_entry_sector_offset, true);
+            try cache.disk.writeTypedSectors(GPT.Header, cache.header, cache.header.header_lba, false);
+            try cache.disk.writeTypedSectors(GPT.Header, backup_gpt_header, backup_gpt_header.header_lba, false);
         }
 
         pub fn addPartition(cache: Cache, comptime filesystem: lib.Filesystem.Type, partition_name: []const u16, lba_start: u64, lba_end: u64, gpt_partition: ?*const GPT.Partition) !GPT.Partition.Cache {
             // TODO: check if we are not overwriting a partition
             // TODO: check filesystem specific stuff
-            const new_partition_entry = try cache.get_free_partition_slot();
-            try update_partition_entry(cache, new_partition_entry, GPT.Partition{
+            const new_partition_entry = try cache.getFreePartitionSlot();
+            try updatePartitionEntry(cache, new_partition_entry, GPT.Partition{
                 .partition_type_guid = switch (filesystem) {
                     .fat32 => efi_guid,
                     else => @panic("unexpected filesystem"),
                 },
-                .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else get_random_guid(),
+                .unique_partition_guid = if (gpt_partition) |gpt_part| gpt_part.unique_partition_guid else getRandomGuid(),
                 .first_lba = lba_start,
                 .last_lba = lba_end,
                 .attributes = .{},
@@ -202,16 +202,16 @@ pub const Header = extern struct {
     }
 
     pub fn get(disk: *Disk) !*GPT.Header {
-        return try disk.read_typed_sectors(GPT.Header, 1);
+        return try disk.readTypedSectors(GPT.Header, 1);
     }
 
-    pub fn get_backup(gpt_header: *GPT.Header, disk: *Disk) !*GPT.Header {
-        return try disk.read_typed_sectors(GPT.Header, gpt_header.backup_lba);
+    pub fn getBackup(gpt_header: *GPT.Header, disk: *Disk) !*GPT.Header {
+        return try disk.readTypedSectors(GPT.Header, gpt_header.backup_lba);
     }
 };
 
 var prng = lib.random.DefaultPrng.init(0);
-pub fn get_random_guid() GUID {
+pub fn getRandomGuid() GUID {
     const random_array = blk: {
         var arr: [16]u8 = undefined;
         const random = prng.random();
@@ -252,15 +252,15 @@ pub const Partition = extern struct {
 
         pub fn fromPartitionIndex(disk: *Disk, partition_index: usize, allocator: ?*lib.Allocator) !GPT.Partition.Cache {
             const mbr_lba = MBR.default_lba;
-            const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, allocator, .{});
+            const mbr = try disk.readTypedSectors(MBR.Partition, mbr_lba, allocator, .{});
             const primary_gpt_header_lba = mbr_lba + 1;
-            const gpt_header = try disk.read_typed_sectors(GPT.Header, primary_gpt_header_lba, allocator, .{});
+            const gpt_header = try disk.readTypedSectors(GPT.Header, primary_gpt_header_lba, allocator, .{});
             if (gpt_header.partition_entry_count == 0) @panic("No GPT partition entries");
             assert(gpt_header.partition_entry_size == @sizeOf(GPT.Partition));
             // TODO: undo hack
             if (partition_index < gpt_header.partition_entry_count) {
                 if (partition_index != 0) @panic("Unsupported partition index");
-                const partition_entries_first_sector = try disk.read_slice(GPT.Partition, GPT.Partition.per_sector, gpt_header.partition_array_lba, allocator, .{});
+                const partition_entries_first_sector = try disk.readSlice(GPT.Partition, GPT.Partition.per_sector, gpt_header.partition_array_lba, allocator, .{});
                 const partition_entry = &partition_entries_first_sector[0];
 
                 return .{
@@ -317,7 +317,7 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
     if (disk.type != .memory) @panic("gpt: creation is only supported for memory disks");
     // 1. Create MBR fake partition
     const mbr_lba = MBR.default_lba;
-    const mbr = try disk.read_typed_sectors(MBR.Partition, mbr_lba, null, .{});
+    const mbr = try disk.readTypedSectors(MBR.Partition, mbr_lba, null, .{});
     const first_lba = mbr_lba + 1;
     const primary_header_lba = first_lba;
     mbr.partitions[0] = MBR.LegacyPartition{
@@ -329,16 +329,16 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
         .size_in_lba = @intCast(u32, @divExact(disk.disk_size, disk.sector_size) - 1),
     };
     mbr.signature = .{ 0x55, 0xaa };
-    try disk.write_typed_sectors(MBR.Partition, mbr, mbr_lba, false);
+    try disk.writeTypedSectors(MBR.Partition, mbr, mbr_lba, false);
 
     // 2. Write GPT header
     const partition_count = default_max_partition_count;
     const partition_array_sector_count = @divExact(@sizeOf(Partition) * partition_count, disk.sector_size);
     // TODO: properly compute header LBA
-    const gpt_header = try disk.read_typed_sectors(GPT.Header, first_lba, null, .{});
+    const gpt_header = try disk.readTypedSectors(GPT.Header, first_lba, null, .{});
     const secondary_header_lba = mbr.partitions[0].size_in_lba;
     const partition_array_lba_start = first_lba + 1;
-    const partition_entries = try disk.read_slice(GPT.Partition, partition_count, partition_array_lba_start, null, .{});
+    const partition_entries = try disk.readSlice(GPT.Partition, partition_count, partition_array_lba_start, null, .{});
     gpt_header.* = GPT.Header{
         .signature = "EFI PART".*,
         .revision = .{ 0, 0, 1, 0 },
@@ -348,21 +348,21 @@ pub fn create(disk: *Disk, copy_gpt_header: ?*const Header) !GPT.Header.Cache {
         .backup_lba = secondary_header_lba,
         .first_usable_lba = partition_array_lba_start + partition_array_sector_count,
         .last_usable_lba = secondary_header_lba - primary_header_lba - partition_array_sector_count,
-        .disk_guid = if (copy_gpt_header) |gpth| gpth.disk_guid else get_random_guid(),
+        .disk_guid = if (copy_gpt_header) |gpth| gpth.disk_guid else getRandomGuid(),
         .partition_array_lba = partition_array_lba_start,
         .partition_entry_count = partition_count,
         .partition_array_crc32 = CRC32.compute(lib.sliceAsBytes(partition_entries)),
     };
 
-    gpt_header.update_crc32();
-    try disk.write_typed_sectors(GPT.Header, gpt_header, primary_header_lba, false);
+    gpt_header.updateCrc32();
+    try disk.writeTypedSectors(GPT.Header, gpt_header, primary_header_lba, false);
 
     var backup_gpt_header = gpt_header.*;
     backup_gpt_header.partition_array_lba = secondary_header_lba - primary_header_lba - partition_array_sector_count + 1;
     backup_gpt_header.header_lba = gpt_header.backup_lba;
     backup_gpt_header.backup_lba = gpt_header.header_lba;
-    backup_gpt_header.update_crc32();
-    try disk.write_typed_sectors(GPT.Header, &backup_gpt_header, secondary_header_lba, true);
+    backup_gpt_header.updateCrc32();
+    try disk.writeTypedSectors(GPT.Header, &backup_gpt_header, secondary_header_lba, true);
 
     return .{
         .mbr = mbr,

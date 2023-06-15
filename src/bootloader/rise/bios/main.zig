@@ -1,5 +1,6 @@
 const lib = @import("lib");
 const Allocator = lib.Allocator;
+const assert = lib.assert;
 const log = lib.log;
 const privileged = @import("privileged");
 const ACPI = privileged.ACPI;
@@ -17,7 +18,7 @@ const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const bootloader = @import("bootloader");
-const BIOS = bootloader.BIOS;
+const bios = @import("bios");
 
 extern const loader_start: u8;
 extern const loader_end: u8;
@@ -49,12 +50,16 @@ pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;
 
     pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        _ = args;
+        _ = format;
+        _ = scope;
         _ = level;
-        writer.writeByte('[') catch stopCPU();
-        writer.writeAll(@tagName(scope)) catch stopCPU();
-        writer.writeAll("] ") catch stopCPU();
-        lib.format(writer, format, args) catch stopCPU();
-        writer.writeByte('\n') catch stopCPU();
+        // _ = level;
+        // writer.writeByte('[') catch stopCPU();
+        // writer.writeAll(@tagName(scope)) catch stopCPU();
+        // writer.writeAll("] ") catch stopCPU();
+        // lib.format(writer, format, args) catch stopCPU();
+        // writer.writeByte('\n') catch stopCPU();
     }
 };
 
@@ -74,98 +79,49 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 const Filesystem = extern struct {
     fat_allocator: FATAllocator = .{},
     fat_cache: lib.Filesystem.FAT32.Cache,
-    disk: BIOS.Disk = .{
-        .disk = .{
-            .disk_size = lib.default_disk_size,
-            .sector_size = lib.default_sector_size,
-            .callbacks = .{
-                .read = BIOS.Disk.read,
-                .write = BIOS.Disk.write,
-            },
-            .type = .bios,
-        },
-    },
-    parser_index: usize = 0,
-    cache_index: u32 = 0,
+    disk: bios.Disk = .{},
+    cache_index: usize = 0,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        const gpt_cache = try lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&filesystem.disk.disk, 0, &filesystem.fat_allocator.allocator);
-        filesystem.fat_cache = try lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&filesystem.fat_allocator.allocator, gpt_cache);
-        filesystem.cache_index = filesystem.fat_allocator.allocated;
-    }
-
-    fn deinitialize(context: ?*anyopaque) anyerror!void {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+    pub fn deinitialize(filesystem: *Filesystem) !void {
         filesystem.fat_allocator.allocated = filesystem.cache_index;
     }
 
-    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        filesystem.parser_index += 1;
-        var file_path_buffer = [1]u8{'/'} ** 32;
-        const file_name = @tagName(file_type);
-        @memcpy(file_path_buffer[1..], file_name);
-        const file_path = file_path_buffer[0 .. file_name.len + 1];
-        const file_size = try filesystem.fat_cache.getFileSize(file_path);
-
-        // Reset cache so the allocator memory is not pressured
-        filesystem.fat_allocator.allocated = filesystem.cache_index;
-        return .{
-            .path = file_path,
-            .size = file_size,
-            .type = file_type,
-        };
-    }
-
-    fn readFile(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+    pub fn readFile(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) ![]const u8 {
+        log.debug("File {s} read started", .{file_path});
+        assert(filesystem.fat_allocator.allocated <= filesystem.fat_allocator.buffer.len);
         const file = try filesystem.fat_cache.readFileToBuffer(file_path, file_buffer);
+        log.debug("File read succeeded", .{});
         return file;
     }
 
-    fn readFileCallback(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        return try filesystem.readFile(file_path, file_buffer);
+    pub fn sneakFile(filesystem: *Filesystem, file_path: []const u8, size: usize) ![]const u8 {
+        log.debug("File {s} read started", .{file_path});
+        const file = try filesystem.fat_cache.readFileToCache(file_path, size);
+        log.debug("File read succeeded", .{});
+        return file;
     }
 
-    fn getFileSize(context: ?*anyopaque, file_path: []const u8) anyerror!u32 {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+    pub fn getFileSize(filesystem: *Filesystem, file_path: []const u8) !u32 {
         const file_size = try filesystem.fat_cache.getFileSize(file_path);
+        filesystem.fat_allocator.allocated = filesystem.cache_index;
         return file_size;
     }
 
-    fn getCacheIndex(context: ?*anyopaque) u32 {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        return filesystem.fat_allocator.allocated;
-    }
-
-    fn setCacheIndex(context: ?*anyopaque, cache_index: u32) void {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        filesystem.fat_allocator.allocated = cache_index;
+    pub fn getSectorSize(filesystem: *Filesystem) u16 {
+        return filesystem.disk.disk.sector_size;
     }
 };
 
 const MemoryMap = extern struct {
-    iterator: BIOS.E820Iterator,
+    iterator: bios.E820Iterator,
+    entry_count: u32,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
-        const mmap = @ptrCast(*MemoryMap, @alignCast(@alignOf(MemoryMap), context));
-        mmap.iterator = .{};
-    }
-    fn deinitialize(context: ?*anyopaque) anyerror!void {
-        const mmap = @ptrCast(*MemoryMap, @alignCast(@alignOf(MemoryMap), context));
-        mmap.iterator = .{};
+    pub fn getEntryCount(memory_map: *const MemoryMap) u32 {
+        return memory_map.entry_count;
     }
 
-    fn getMemoryMapEntryCount(context: ?*anyopaque) anyerror!u32 {
-        _ = context;
-        return BIOS.getMemoryMapEntryCount();
-    }
-
-    fn next(context: ?*anyopaque) anyerror!?bootloader.MemoryMapEntry {
-        const mmap = @ptrCast(*MemoryMap, @alignCast(@alignOf(MemoryMap), context));
-
-        if (mmap.iterator.next()) |bios_entry| {
+    pub fn next(memory_map: *MemoryMap) !?bootloader.MemoryMapEntry {
+        if (memory_map.iterator.next()) |bios_entry| {
             return .{
                 .region = bios_entry.toPhysicalMemoryRegion(),
                 .type = switch (bios_entry.type) {
@@ -180,115 +136,144 @@ const MemoryMap = extern struct {
     }
 };
 
-const Framebuffer = extern struct {
-    fn initialize(context: ?*anyopaque) anyerror!bootloader.Framebuffer {
-        _ = context;
-        var vbe_info: BIOS.VBE.Information = undefined;
+const Initialization = struct {
+    filesystem: Filesystem,
+    memory_map: MemoryMap,
+    framebuffer: bootloader.Framebuffer,
+    architecture: switch (lib.cpu.arch) {
+        .x86, .x86_64 => struct {
+            rsdp: u32,
+        },
+        else => @compileError("Architecture not supported"),
+    },
+    early_initialized: bool = false,
+    framebuffer_initialized: bool = false,
+    memory_map_initialized: bool = false,
+    filesystem_initialized: bool = false,
 
-        const edid_info = BIOS.VBE.getEDIDInfo() catch @panic("No EDID");
-        const edid_width = edid_info.getWidth();
-        const edid_height = edid_info.getHeight();
-        const edid_bpp = 32;
-        const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
-        _ = preferred_resolution;
-        BIOS.VBE.getControllerInformation(&vbe_info) catch @panic("No VBE information");
-
-        if (!lib.equal(u8, &vbe_info.signature, "VESA")) {
-            @panic("VESA signature");
-        }
-
-        if (vbe_info.version_major != 3 and vbe_info.version_minor != 0) {
-            @panic("VESA version");
-        }
-
-        const edid_video_mode = vbe_info.getVideoMode(BIOS.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
-        const framebuffer_region = PhysicalMemoryRegion.fromRaw(.{
-            .raw_address = edid_video_mode.framebuffer_address,
-            .size = edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y,
-        });
-        const framebuffer = .{
-            .address = framebuffer_region.address.value(),
-            .pitch = edid_video_mode.linear_bytes_per_scanline,
-            .width = edid_video_mode.resolution_x,
-            .height = edid_video_mode.resolution_y,
-            .bpp = edid_video_mode.bpp,
-            .red_mask = .{
-                .shift = edid_video_mode.linear_red_mask_shift,
-                .size = edid_video_mode.linear_red_mask_size,
+    pub fn getCPUCount(init: *Initialization) !u32 {
+        return switch (lib.cpu.arch) {
+            .x86, .x86_64 => blk: {
+                const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, init.architecture.rsdp);
+                const madt_header = try rsdp.findTable(.APIC);
+                const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
+                break :blk madt.getCPUCount();
             },
-            .green_mask = .{
-                .shift = edid_video_mode.linear_green_mask_shift,
-                .size = edid_video_mode.linear_green_mask_size,
-            },
-            .blue_mask = .{
-                .shift = edid_video_mode.linear_blue_mask_shift,
-                .size = edid_video_mode.linear_blue_mask_size,
-            },
-            .memory_model = 0x06,
+            else => @compileError("Architecture not supported"),
         };
-
-        return framebuffer;
     }
-};
 
-const VirtualAddressSpace = extern struct {
-    fn ensureLoaderIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
+    pub fn getRSDPAddress(init: *Initialization) u32 {
+        return init.architecture.rsdp;
+    }
+
+    pub fn deinitializeMemoryMap(init: *Initialization) !void {
+        init.memory_map.iterator = bios.E820Iterator{};
+    }
+
+    pub fn ensureLoaderIsMapped(init: *Initialization, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) !void {
+        _ = init;
         _ = bootloader_information;
-        _ = context;
         const loader_physical_start = PhysicalAddress.new(lib.alignBackward(@ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
         const loader_size = lib.alignForwardGeneric(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
+        // Not caring about safety here
         try paging.map(loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForwardGeneric(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator);
     }
 
-    fn ensureStackIsMapped(context: ?*anyopaque, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator) anyerror!void {
-        _ = context;
-        const loader_stack_size = BIOS.stack_size;
-        const loader_stack = PhysicalAddress.new(lib.alignForwardGeneric(u32, BIOS.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
-        paging.map(loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator) catch @panic("Mapping of loader stack failed");
+    pub fn ensureStackIsMapped(init: *Initialization, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator) !void {
+        _ = init;
+        const loader_stack_size = bios.stack_size;
+        const loader_stack = PhysicalAddress.new(lib.alignForwardGeneric(u32, bios.stack_top, lib.arch.valid_page_sizes[0]) - loader_stack_size);
+        try paging.map(loader_stack, loader_stack.toIdentityMappedVirtualAddress(), loader_stack_size, .{ .write = true, .execute = false }, page_allocator);
+    }
+
+    pub fn initialize(init: *Initialization) !void {
+        // assert(!init.filesystem.initialized);
+        // defer init.filesystem.initialized = true;
+        init.* = .{
+            .filesystem = .{
+                .fat_cache = undefined,
+            },
+            .memory_map = .{
+                .iterator = .{},
+                .entry_count = bios.getMemoryMapEntryCount(),
+            },
+            .architecture = switch (lib.cpu.arch) {
+                .x86, .x86_64 => .{
+                    .rsdp = @ptrToInt(try bios.findRSDP()),
+                },
+                else => @compileError("Architecture not supported"),
+            },
+            .framebuffer = blk: {
+                var vbe_info: bios.VBE.Information = undefined;
+
+                const edid_info = bios.VBE.getEDIDInfo() catch @panic("No EDID");
+                const edid_width = edid_info.getWidth();
+                const edid_height = edid_info.getHeight();
+                const edid_bpp = 32;
+                const preferred_resolution = if (edid_width != 0 and edid_height != 0) .{ .x = edid_width, .y = edid_height } else @panic("No EDID");
+                _ = preferred_resolution;
+                bios.VBE.getControllerInformation(&vbe_info) catch @panic("No VBE information");
+
+                if (!lib.equal(u8, &vbe_info.signature, "VESA")) {
+                    @panic("VESA signature");
+                }
+
+                if (vbe_info.version_major != 3 and vbe_info.version_minor != 0) {
+                    @panic("VESA version");
+                }
+
+                const edid_video_mode = vbe_info.getVideoMode(bios.VBE.Mode.defaultIsValid, edid_width, edid_height, edid_bpp) orelse @panic("No video mode");
+                const framebuffer_region = PhysicalMemoryRegion.fromRaw(.{
+                    .raw_address = edid_video_mode.framebuffer_address,
+                    .size = edid_video_mode.linear_bytes_per_scanline * edid_video_mode.resolution_y,
+                });
+
+                const framebuffer = .{
+                    .address = framebuffer_region.address.value(),
+                    .pitch = edid_video_mode.linear_bytes_per_scanline,
+                    .width = edid_video_mode.resolution_x,
+                    .height = edid_video_mode.resolution_y,
+                    .bpp = edid_video_mode.bpp,
+                    .red_mask = .{
+                        .shift = edid_video_mode.linear_red_mask_shift,
+                        .size = edid_video_mode.linear_red_mask_size,
+                    },
+                    .green_mask = .{
+                        .shift = edid_video_mode.linear_green_mask_shift,
+                        .size = edid_video_mode.linear_green_mask_size,
+                    },
+                    .blue_mask = .{
+                        .shift = edid_video_mode.linear_blue_mask_shift,
+                        .size = edid_video_mode.linear_blue_mask_size,
+                    },
+                    .memory_model = 0x06,
+                };
+
+                break :blk framebuffer;
+            },
+        };
+
+        const gpt_cache = try lib.PartitionTable.GPT.Partition.Cache.fromPartitionIndex(&init.filesystem.disk.disk, 0, &init.filesystem.fat_allocator.allocator);
+        init.filesystem.fat_cache = try lib.Filesystem.FAT32.Cache.fromGPTPartitionCache(&init.filesystem.fat_allocator.allocator, gpt_cache);
+        init.filesystem.cache_index = init.filesystem.fat_allocator.allocated;
+        try init.deinitializeMemoryMap();
+
+        init.memory_map_initialized = true;
+        init.filesystem_initialized = true;
+        init.framebuffer_initialized = true;
+
+        init.early_initialized = true;
     }
 };
 
+var initialization: Initialization = undefined;
+
 export fn _start() callconv(.C) noreturn {
-    main() catch |err| {
+    bios.A20Enable() catch @panic("A20 is not enabled");
+
+    initialization.initialize() catch |err| @panic(@errorName(err));
+    bootloader.Information.initialize(&initialization, .rise, .bios) catch |err| {
         @panic(@errorName(err));
     };
-}
-
-var fs = Filesystem{
-    .fat_cache = undefined,
-};
-
-var memory_map = MemoryMap{
-    .iterator = .{},
-};
-
-fn main() !noreturn {
-    BIOS.A20Enable() catch @panic("can't enable a20");
-
-    const rsdp_address = BIOS.findRSDP() orelse @panic("Can't find RSDP");
-    const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, rsdp_address);
-    const bootloader_information = try bootloader.Information.initialize(.{
-        .context = &fs,
-        .initialize = Filesystem.initialize,
-        .deinitialize = Filesystem.deinitialize,
-        .get_file_descriptor = Filesystem.getFileDescriptor,
-        .read_file = Filesystem.readFileCallback,
-    }, .{
-        .context = &memory_map,
-        .initialize = MemoryMap.initialize,
-        .deinitialize = MemoryMap.deinitialize,
-        .get_memory_map_entry_count = MemoryMap.getMemoryMapEntryCount,
-        .next = MemoryMap.next,
-        .get_host_region = null,
-    }, .{
-        .context = null,
-        .initialize = Framebuffer.initialize,
-    }, .{
-        .context = null,
-        .ensure_loader_is_mapped = VirtualAddressSpace.ensureLoaderIsMapped,
-        .ensure_stack_is_mapped = VirtualAddressSpace.ensureStackIsMapped,
-    }, rsdp, .rise, .bios);
-    _ = bootloader_information;
-
-    @panic("loader not found");
 }

@@ -16,16 +16,18 @@ pub const RSDP = extern struct {
 
         const RSDPError = error{
             version_corrupted,
+            table_not_found,
+            xsdt_32_bit,
         };
 
-        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) !?*align(1) const Header {
+        pub fn findTable(rsdp: *RSDP.Descriptor1, table_signature: Signature) !*align(1) const Header {
             switch (switch (rsdp.revision) {
                 0 => false,
                 2 => true,
                 else => return RSDPError.version_corrupted,
             }) {
                 inline else => |is_xsdt| {
-                    if (is_xsdt and lib.cpu.arch == .x86) return null;
+                    if (is_xsdt and lib.cpu.arch == .x86) return RSDPError.xsdt_32_bit;
 
                     const root_table_address = switch (is_xsdt) {
                         false => rsdp.RSDT_address,
@@ -47,7 +49,7 @@ pub const RSDP = extern struct {
                         }
                     }
 
-                    return null;
+                    return RSDPError.table_not_found;
                 },
             }
         }
