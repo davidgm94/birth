@@ -45,7 +45,7 @@ pub const Static = enum {
                     fields = fields ++ [1]lib.Type.StructField{.{
                         .name = "reserved",
                         .type = padding_type,
-                        .default_value = &0,
+                        .default_value = &@as(padding_type, 0),
                         .is_comptime = false,
                         .alignment = 0,
                     }};
@@ -87,7 +87,6 @@ pub const RAM = extern struct {
     };
 
     inline fn getListIndex(size: usize) usize {
-        log.debug("Size: {}", .{size});
         inline for (lib.arch.reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_index| {
             if (size >= reverse_page_size) return reverse_index;
         }

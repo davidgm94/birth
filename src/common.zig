@@ -24,7 +24,11 @@ pub const CrossTarget = std.zig.CrossTarget;
 
 pub const log = std.log;
 
+pub const Reader = std.io.Reader;
 pub const Writer = std.io.Writer;
+
+pub const FixedBufferStream = std.io.FixedBufferStream;
+pub const fixedBufferStream = std.io.fixedBufferStream;
 
 pub fn assert(ok: bool) void {
     if (!ok) {
@@ -35,6 +39,8 @@ pub fn assert(ok: bool) void {
         }
     }
 }
+
+pub const deflate = std.compress.deflate;
 
 const debug = std.debug;
 pub const print = debug.print;
@@ -150,7 +156,6 @@ pub const Tag = std.meta.Tag;
 
 const math = std.math;
 pub const maxInt = math.maxInt;
-pub const max = math.max;
 pub const min = math.min;
 pub const divCeil = math.divCeil;
 pub const clamp = math.clamp;
@@ -431,7 +436,7 @@ pub const ArgumentParser = struct {
         };
 
         pub const Result = struct {
-            bootloader: ?[]const u8,
+            bootloader: []const u8,
             disk_image_path: []const u8,
             image_configuration_path: []const u8,
             cpu: []const u8,
@@ -468,9 +473,11 @@ pub const ArgumentParser = struct {
             disk_image_path,
             image_configuration_path,
             cpu_driver,
+            loader_path,
             qemu_options,
             ci,
             debug_user,
+            debug_loader,
             init,
         };
 
@@ -479,9 +486,11 @@ pub const ArgumentParser = struct {
             disk_image_path: []const u8,
             image_configuration_path: []const u8,
             cpu_driver: []const u8,
+            loader_path: []const u8,
             qemu_options: QEMUOptions,
             ci: bool,
             debug_user: bool,
+            debug_loader: bool,
             init: []const u8,
         };
     };

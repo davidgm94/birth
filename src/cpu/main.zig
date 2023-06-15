@@ -2,9 +2,6 @@ const lib = @import("lib");
 const assert = lib.assert;
 const log = lib.log;
 
-const bootloader = @import("bootloader");
-const limine = bootloader.limine;
-
 const privileged = @import("privileged");
 const stopCPU = privileged.arch.stopCPU;
 
@@ -36,10 +33,5 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 }
 
 comptime {
-    switch (lib.cpu.arch) {
-        .x86_64, .aarch64 => @export(limine.entryPoint, .{ .name = "limineEntryPoint", .linkage = .Strong }),
-        else => {},
-    }
-
     @export(cpu.arch.entryPoint, .{ .name = "_start", .linkage = .Strong });
 }
