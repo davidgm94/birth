@@ -19,43 +19,46 @@ pub const Static = enum {
 
     pub const count = lib.enumCount(@This());
 
-    pub const Bitmap = @Type(.{
-        .Struct = blk: {
-            const full_bit_size = @max(@as(comptime_int, 1 << 3), @as(u8, @sizeOf(Static)) << 3);
-            break :blk .{
+    pub const Bitmap = blk: {
+        const full_bit_size = @max(@as(comptime_int, 1 << 3), @as(comptime_int, @sizeOf(Static)) << 3);
+        assert(Static.count > 0);
+        assert(@sizeOf(Static) > 0 or Static.count == 1);
+        const padding_type = lib.IntType(.unsigned, full_bit_size - Static.count);
+
+        const fields = fields_blk: {
+            var result: []const lib.Type.StructField = &.{};
+            inline for (lib.enumFields(Static)) |static_field| {
+                result = result ++ [1]lib.Type.StructField{.{
+                    .name = static_field.name,
+                    .type = bool,
+                    .default_value = null,
+                    .is_comptime = false,
+                    .alignment = 0,
+                }};
+            }
+
+            result = result ++ [1]lib.Type.StructField{.{
+                .name = "reserved",
+                .type = padding_type,
+                .default_value = &@as(padding_type, 0),
+                .is_comptime = false,
+                .alignment = 0,
+            }};
+            break :fields_blk result;
+        };
+
+        const backing_integer = lib.IntType(.unsigned, full_bit_size);
+
+        break :blk @Type(.{
+            .Struct = .{
                 .layout = .Packed,
-                .backing_integer = lib.IntType(.unsigned, full_bit_size),
-                .fields = fields: {
-                    var fields: []const lib.Type.StructField = &.{};
-                    inline for (lib.enumFields(Static)) |static_field| {
-                        fields = fields ++ [1]lib.Type.StructField{.{
-                            .name = static_field.name,
-                            .type = bool,
-                            .default_value = null,
-                            .is_comptime = false,
-                            .alignment = 0,
-                        }};
-                    }
-
-                    assert(Static.count > 0);
-                    assert(@sizeOf(Static) > 0 or Static.count == 1);
-
-                    const padding_type = lib.IntType(.unsigned, full_bit_size - Static.count);
-
-                    fields = fields ++ [1]lib.Type.StructField{.{
-                        .name = "reserved",
-                        .type = padding_type,
-                        .default_value = &0,
-                        .is_comptime = false,
-                        .alignment = 0,
-                    }};
-                    break :fields fields;
-                },
+                .backing_integer = backing_integer,
+                .fields = fields,
                 .decls = &.{},
                 .is_tuple = false,
-            };
-        },
-    });
+            },
+        });
+    };
 };
 
 pub const Dynamic = enum {
@@ -87,7 +90,6 @@ pub const RAM = extern struct {
     };
 
     inline fn getListIndex(size: usize) usize {
-        log.debug("Size: {}", .{size});
         inline for (lib.arch.reverse_valid_page_sizes, 0..) |reverse_page_size, reverse_index| {
             if (size >= reverse_page_size) return reverse_index;
         }

@@ -341,7 +341,7 @@ pub const Cache = extern struct {
         const file_size = directory_entry.file_size;
         const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
         const lba = cache.clusterToSector(first_cluster);
-        const result = try cache.disk.read_slice(u8, aligned_file_size, lba, allocator, .{});
+        const result = try cache.disk.readSlice(u8, aligned_file_size, lba, allocator, .{});
         return result[0..file_size];
     }
 
@@ -357,6 +357,21 @@ pub const Cache = extern struct {
         return result.buffer[0..file_size];
     }
 
+    pub fn readFileToCache(cache: Cache, file_path: []const u8, size: usize) ![]const u8 {
+        const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
+        const directory_entry = directory_entry_result.directory_entry;
+        const first_cluster = directory_entry.getFirstCluster();
+        const file_size = directory_entry.file_size;
+        const lba = cache.clusterToSector(first_cluster);
+
+        const read_size = @min(file_size, size);
+        const aligned_read_size = lib.alignForward(read_size, cache.disk.sector_size);
+
+        const result = try cache.disk.callbacks.readCache(cache.disk, @divExact(aligned_read_size, cache.disk.sector_size), lba);
+        const result_slice = result.buffer[0..read_size];
+        return result_slice;
+    }
+
     pub fn getFileSize(cache: Cache, file_path: []const u8) !u32 {
         const directory_entry_result = try cache.getDirectoryEntry(file_path, null);
         return directory_entry_result.directory_entry.file_size;
@@ -369,10 +384,10 @@ pub const Cache = extern struct {
         };
         const disk = gpt_partition_cache.gpt.disk;
 
-        const partition_mbr = try disk.read_typed_sectors(MBR.Partition, partition_range.first_lba, allocator, .{});
+        const partition_mbr = try disk.readTypedSectors(MBR.Partition, partition_range.first_lba, allocator, .{});
         assert(partition_mbr.bpb.dos3_31.dos2_0.cluster_sector_count == 1);
         const fs_info_sector = partition_range.first_lba + partition_mbr.bpb.fs_info_sector;
-        const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_sector, allocator, .{});
+        const fs_info = try disk.readTypedSectors(FAT32.FSInfo, fs_info_sector, allocator, .{});
 
         return .{
             .disk = disk,
@@ -396,7 +411,7 @@ pub const Cache = extern struct {
         var cluster_lba = cluster_directory_entry_lba;
 
         while (cluster_lba < top_cluster_lba) : (cluster_lba += 1) {
-            const fat_directory_entries = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_lba);
+            const fat_directory_entries = try cache.disk.readTypedSectors(DirectoryEntry.Sector, cluster_lba);
 
             for (fat_directory_entries, 0..) |*entry, entry_index| {
                 if (entry.is_free()) {
@@ -475,7 +490,7 @@ pub const Cache = extern struct {
             const slice_end = cluster_byte_offset + cluster_byte_count;
             const slice = file_content[slice_start..if (slice_end > file_content.len) file_content.len else slice_end];
             const lba = cache.clusterToSector(cluster);
-            try cache.disk.write_slice(u8, slice, lba, true);
+            try cache.disk.writeSlice(u8, slice, lba, true);
         }
 
         return clusters[0];
@@ -863,7 +878,7 @@ pub const Cache = extern struct {
 
                     entry_iterator.cluster_entries[entry_index] = entry.normal_entry;
 
-                    try cache.disk.write_slice(DirectoryEntry, entry_iterator.cluster_entries, entry_iterator.getCurrentLBA(cache), false);
+                    try cache.disk.writeSlice(DirectoryEntry, entry_iterator.cluster_entries, entry_iterator.getCurrentLBA(cache), false);
 
                     return;
                 }
@@ -914,11 +929,11 @@ pub const Cache = extern struct {
         try cache.allocateClusters(&clusters, allocator);
         const cluster = clusters[0];
         const lba = cache.clusterToSector(cluster);
-        const fat_directory_entries = try cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, lba, allocator, .{});
+        const fat_directory_entries = try cache.disk.readTypedSectors(FAT32.DirectoryEntry.Sector, lba, allocator, .{});
 
         var copy_entry: ?*FAT32.DirectoryEntry = null;
         if (copy_cache) |cp_cache| {
-            const entries = try cp_cache.disk.read_typed_sectors(FAT32.DirectoryEntry.Sector, cp_cache.clusterToSector(cluster), allocator, .{});
+            const entries = try cp_cache.disk.readTypedSectors(FAT32.DirectoryEntry.Sector, cp_cache.clusterToSector(cluster), allocator, .{});
             copy_entry = &entries[0];
         }
         const attributes = Attributes{
@@ -966,7 +981,7 @@ pub const Cache = extern struct {
         // }
 
         // TODO: zero initialize the unused part of the cluster
-        try cache.disk.write_typed_sectors(FAT32.DirectoryEntry.Sector, fat_directory_entries, lba, false);
+        try cache.disk.writeTypedSectors(FAT32.DirectoryEntry.Sector, fat_directory_entries, lba, false);
 
         return cluster;
     }
@@ -994,9 +1009,9 @@ pub const Cache = extern struct {
         const cluster_offset = cluster * @sizeOf(u32) / cache.disk.sector_size;
         while (fat_index < fat_entry_count) : (fat_index += 1) {
             const fat_entry_lba = fat_lba + (fat_index * fat_entry_sector_count) + cluster_offset;
-            const fat_entry_sector = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, fat_entry_lba, allocator, .{});
+            const fat_entry_sector = try cache.disk.readTypedSectors(FAT32.Entry.Sector, fat_entry_lba, allocator, .{});
             fat_entry_sector[fat_entry_sector_index] = entry;
-            try cache.disk.write_typed_sectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
+            try cache.disk.writeTypedSectors(FAT32.Entry.Sector, fat_entry_sector, fat_entry_lba, false);
         }
     }
 
@@ -1071,7 +1086,7 @@ pub const Cache = extern struct {
 
             while (true) : (upper_cluster += 1) {
                 const cluster_sector_offset = root_cluster_sector + cache.getClusterSectorCount() * (upper_cluster - root_cluster);
-                const directory_entries_in_cluster = try cache.disk.read_typed_sectors(DirectoryEntry.Sector, cluster_sector_offset, cache.allocator, .{});
+                const directory_entries_in_cluster = try cache.disk.readTypedSectors(DirectoryEntry.Sector, cluster_sector_offset, cache.allocator, .{});
 
                 var entry_index: usize = 0;
                 while (entry_index < directory_entries_in_cluster.len) : ({
@@ -1206,7 +1221,7 @@ const FATEntryIterator = struct {
         const lba_offset = cache.getFATLBA() + (cluster / FAT32.Entry.per_sector);
 
         return .{
-            .entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset, allocator, .{}),
+            .entries = try cache.disk.readTypedSectors(FAT32.Entry.Sector, lba_offset, allocator, .{}),
             .cluster = cluster,
         };
     }
@@ -1222,7 +1237,7 @@ const FATEntryIterator = struct {
 
             if (iterator.cluster != 0 and iterator.cluster % iterator.entries.len == 0) {
                 const lba_offset = cache.getFATLBA() + (iterator.cluster / FAT32.Entry.per_sector);
-                iterator.entries = try cache.disk.read_typed_sectors(FAT32.Entry.Sector, lba_offset, allocator, .{});
+                iterator.entries = try cache.disk.readTypedSectors(FAT32.Entry.Sector, lba_offset, allocator, .{});
             }
 
             const result = iterator.cluster;
@@ -1268,7 +1283,7 @@ fn DirectoryEntryIterator(comptime EntryType: type) type {
                 if (iterator.cluster_it == cluster_entry_count) iterator.cluster += 1;
 
                 const cluster_lba = cache.clusterToSector(iterator.cluster);
-                iterator.cluster_entries = try cache.disk.read_slice(EntryType, cluster_entry_count, cluster_lba, allocator, .{});
+                iterator.cluster_entries = try cache.disk.readSlice(EntryType, cluster_entry_count, cluster_lba, allocator, .{});
                 iterator.cluster_it = 0;
                 iterator.cluster_fetched = true;
             }

@@ -305,14 +305,16 @@ pub fn build(b_arg: *Build) !void {
                     const bootloader = bootloader_struct.id;
                     for (bootloader_struct.protocols) |boot_protocol| {
                         const rise_loader_path = "src/bootloader/rise/";
+                        const limine_loader_path = "src/bootloader/limine";
                         const bootloader_name = "bootloader";
-                        const bootloader_modules = &.{ .lib, .bootloader, .privileged };
+                        const bootloader_modules = [_]ModuleID{ .lib, .bootloader, .privileged };
 
-                        const maybe_bootloader_compile_step: ?*CompileStep = switch (bootloader) {
+                        const bootloader_compile_step = switch (bootloader) {
                             .rise => switch (boot_protocol) {
                                 .bios => switch (architecture) {
                                     .x86_64 => blk: {
                                         const bootloader_path = rise_loader_path ++ "bios";
+                                        bootloader_modules ++ .{.bios};
                                         const executable = try addCompileStep(.{
                                             .kind = executable_kind,
                                             .name = bootloader_name,
@@ -330,12 +332,18 @@ pub fn build(b_arg: *Build) !void {
                                         executable.setLinkerScriptPath(FileSource.relative(bootloader_path ++ "/linker_script.ld"));
                                         executable.code_model = .small;
 
+                                        if (architecture == default_configuration.architecture and bootloader == default_configuration.bootloader and boot_protocol == default_configuration.boot_protocol and optimize_mode == default_configuration.optimize_mode and !is_test) {
+                                            addObjdump(executable, bootloader_name);
+                                            addFileSize(executable, bootloader_name);
+                                        }
+
                                         break :blk executable;
                                     },
                                     else => return Error.architecture_not_supported,
                                 },
                                 .uefi => blk: {
                                     const bootloader_path = rise_loader_path ++ "uefi";
+                                    bootloader_modules ++ .{.uefi};
                                     const executable = try addCompileStep(.{
                                         .kind = executable_kind,
                                         .name = bootloader_name,
@@ -357,15 +365,26 @@ pub fn build(b_arg: *Build) !void {
                                     break :blk executable;
                                 },
                             },
-                            .limine => null,
+                            .limine => blk: {
+                                const bootloader_path = limine_loader_path;
+                                bootloader_modules ++ .{.limine};
+                                const executable = try addCompileStep(.{
+                                    .kind = executable_kind,
+                                    .name = bootloader_name,
+                                    .root_project_path = bootloader_path,
+                                    .target = try getTarget(.x86, .privileged),
+                                    .optimize_mode = .ReleaseSmall,
+                                    .modules = bootloader_modules,
+                                });
+
+                                break :blk executable;
+                            },
                         };
 
-                        if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                            bootloader_compile_step.red_zone = false;
-                            bootloader_compile_step.link_gc_sections = true;
-                            bootloader_compile_step.want_lto = true;
-                            bootloader_compile_step.strip = true;
-                        }
+                        bootloader_compile_step.red_zone = false;
+                        bootloader_compile_step.link_gc_sections = true;
+                        bootloader_compile_step.want_lto = true;
+                        bootloader_compile_step.strip = true;
 
                         const execution_environments: []const ExecutionEnvironment = switch (bootloader) {
                             .rise, .limine => switch (boot_protocol) {
@@ -407,11 +426,7 @@ pub fn build(b_arg: *Build) !void {
                                         assert(@enumToInt(argument_type) == 0);
                                     },
                                     .bootloader => {
-                                        if (maybe_bootloader_compile_step) |bootloader_compile_step| {
-                                            disk_image_builder_run.addArtifactArg(bootloader_compile_step);
-                                        } else {
-                                            disk_image_builder_run.addArg(common.ArgumentParser.null_specifier);
-                                        }
+                                        disk_image_builder_run.addArtifactArg(bootloader_compile_step);
                                     },
                                     .cpu => disk_image_builder_run.addArtifactArg(cpu_driver),
                                     .user_programs => for (user_module_list.items) |user_module| disk_image_builder_run.addArtifactArg(user_module),
@@ -454,9 +469,7 @@ pub fn build(b_arg: *Build) !void {
                                         build_steps.run.dependOn(&runner_run.step);
                                         build_steps.debug.dependOn(&runner_debug.step);
 
-                                        if (maybe_bootloader_compile_step) |bs| {
-                                            b.default_step.dependOn(&bs.step);
-                                        }
+                                        b.default_step.dependOn(&bootloader_compile_step.step);
 
                                         b.default_step.dependOn(&cpu_driver.step);
 
@@ -510,8 +523,12 @@ fn addObjdump(artifact: *CompileStep, comptime name: []const u8) void {
 
 fn addFileSize(artifact: *CompileStep, comptime name: []const u8) void {
     switch (os) {
-        .linux => {
-            const file_size = b.addSystemCommand(&.{ "stat", "-c", "%s" });
+        .linux, .macos => {
+            const file_size = b.addSystemCommand(switch (os) {
+                .linux => &.{ "stat", "-c", "%s" },
+                .macos => &.{ "wc", "-c" },
+                else => unreachable,
+            });
             file_size.addArtifactArg(artifact);
 
             const file_size_step = b.step("file_size_" ++ name, "Get the file size of " ++ name);
@@ -585,6 +602,9 @@ fn addCompileStep(executable_descriptor: ExecutableDescriptor) !*CompileStep {
         },
         else => return Error.not_implemented,
     };
+
+    compile_step.compress_debug_sections = .zlib;
+    compile_step.link_gc_sections = true;
 
     compile_step.setMainPkgPath(source_root_dir);
 

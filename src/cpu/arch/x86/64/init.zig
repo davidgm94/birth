@@ -72,7 +72,7 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     // functionality is not available anymore
     bootloader_information.stage = .cpu;
     // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
-    if (bootloader_information.getSlice(.files).len == 0) return InitializationError.no_files;
+    if (bootloader_information.getSlice(.bundle).len == 0) return InitializationError.no_files;
 
     const cpuid = lib.arch.x86_64.cpuid;
     if (x86_64.pcid) {
@@ -281,17 +281,14 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     var free_region_count: usize = 0;
 
     for (memory_map_entries, page_counters) |mmap_entry, page_counter| {
-        log.debug("region: 0x{x}, 0x{x}, {s}", .{ mmap_entry.region.address.value(), mmap_entry.region.size, @tagName(mmap_entry.type) });
         if (mmap_entry.type == .usable) {
             const free_region = mmap_entry.getFreeRegion(page_counter);
-            log.debug("Region free size: 0x{x}", .{free_region.size});
             free_size += free_region.size;
             free_region_count += @boolToInt(free_region.size > 0);
         }
     }
 
     const total_to_allocate = @sizeOf(cpu.Driver) + @sizeOf(cpu.capabilities.Root) + lib.arch.valid_page_sizes[0];
-    log.debug("Total to allocate: 0x{x}", .{total_to_allocate});
 
     const total_physical: struct {
         region: PhysicalMemoryRegion,
@@ -417,8 +414,8 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
 
     switch (cpu.bsp) {
         true => {
-            const init_module = bootloader_information.fetchFileByType(.init) orelse return InitializationError.init_file_not_found;
-            try spawnInitBSP(init_module, bootloader_information.cpu_page_tables);
+            const init_module_descriptor = try bootloader_information.getFileDescriptor("init");
+            try spawnInitBSP(init_module_descriptor.content, bootloader_information.cpu_page_tables);
         },
         false => @panic("Implement APP"),
     }
@@ -1281,11 +1278,8 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
     log.debug("supporting_page_table_size: {}", .{supporting_page_table_size});
     log.debug("\nBASE: {}\n\nTOP: {}\n\n", .{ indexed_base, indexed_top });
 
-    log.debug("ASS1", .{});
     assert(indexed_base.PML4 == indexed_top.PML4);
-    log.debug("ASS2", .{});
     assert(indexed_base.PDP == indexed_top.PDP);
-    log.debug("ASS3", .{});
     const ptable_count = indexed_top.PD - indexed_base.PD + 1;
 
     const cpu_indexed_base = @bitCast(paging.IndexedVirtualAddress, cpu_page_table_physical_region.toHigherHalfVirtualAddress().address.value());

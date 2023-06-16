@@ -25,24 +25,39 @@ pub const stack_size: u16 = 0x2000;
 pub const loader_start = 0x1000;
 
 pub const Disk = extern struct {
-    disk: lib.Disk,
+    disk: lib.Disk = .{
+        .disk_size = lib.default_disk_size,
+        .sector_size = lib.default_sector_size,
+        .callbacks = .{
+            .read = read,
+            .write = write,
+            .readCache = readCache,
+        },
+        .type = .bios,
+        .cache_size = buffer.len,
+    },
 
     var buffer = [1]u8{0} ** (lib.default_sector_size * 0x10);
 
     pub fn read(disk: *lib.Disk, sector_count: u64, sector_offset: u64, maybe_provided_buffer: ?[]u8) lib.Disk.ReadError!lib.Disk.ReadResult {
-        const provided_buffer = maybe_provided_buffer orelse @panic("buffer was not provided");
         if (sector_count > lib.maxInt(u16)) @panic("too many sectors");
+
+        const buffer_sectors = @divExact(buffer.len, disk.sector_size);
+        if (maybe_provided_buffer == null) {
+            if (sector_count > buffer_sectors) {
+                return error.read_error;
+            }
+        }
 
         const disk_buffer_address = @ptrToInt(&buffer);
         if (disk_buffer_address > lib.maxInt(u16)) @panic("address too high");
 
         var sectors_left = sector_count;
         while (sectors_left > 0) {
-            const buffer_sectors = @divExact(buffer.len, disk.sector_size);
             const sectors_to_read = @intCast(u16, @min(sectors_left, buffer_sectors));
-            defer sectors_left -= sectors_to_read;
 
             const lba_offset = sector_count - sectors_left;
+            sectors_left -= sectors_to_read;
             const lba = sector_offset + lba_offset;
 
             const dap = DAP{
@@ -63,20 +78,49 @@ pub const Disk = extern struct {
             };
 
             interrupt(0x13, &registers, &registers);
-            if (registers.eflags.flags.carry_flag) @panic("disk read failed");
+
+            if (registers.eflags.flags.carry_flag) return error.read_error;
+
             const provided_buffer_offset = lba_offset * disk.sector_size;
             const bytes_to_copy = sectors_to_read * disk.sector_size;
-            const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..];
             const src_slice = buffer[0..bytes_to_copy];
-            @memcpy(dst_slice, src_slice);
+
+            if (maybe_provided_buffer) |provided_buffer| {
+                const dst_slice = provided_buffer[@intCast(usize, provided_buffer_offset)..][0..bytes_to_copy];
+
+                // TODO: report Zig that this codegen is so bad that we have to use rep movsb instead to make it go fast
+                // Tasks:
+                // - Find out the root issue: is it only soft float? is it 32-bit soft_float? is it 32-bit soft_float ReleaseSmall?
+                // - Report the issue with data to back the facts
+                const use_rep_movsb = true;
+                if (use_rep_movsb) {
+                    lib.memcpy(dst_slice, src_slice);
+                    const bytes_left = asm volatile (
+                        \\rep movsb
+                        : [ret] "={ecx}" (-> usize),
+                        : [dest] "{edi}" (dst_slice.ptr),
+                          [src] "{esi}" (src_slice.ptr),
+                          [len] "{ecx}" (src_slice.len),
+                    );
+                    assert(bytes_left == 0);
+                } else {
+                    @memcpy(dst_slice, src_slice);
+                }
+            }
         }
 
         const result = lib.Disk.ReadResult{
             .sector_count = sector_count,
-            .buffer = provided_buffer.ptr,
+            .buffer = (maybe_provided_buffer orelse &buffer).ptr,
         };
 
         return result;
+    }
+
+    pub fn readCache(disk: *lib.Disk, asked_sector_count: u64, sector_offset: u64) lib.Disk.ReadError!lib.Disk.ReadResult {
+        const max_sector_count = @divExact(disk.cache_size, disk.sector_size);
+        const sector_count = if (asked_sector_count > max_sector_count) max_sector_count else asked_sector_count;
+        return try read(disk, sector_count, sector_offset, null);
     }
 
     pub fn write(disk: *lib.Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) lib.Disk.WriteError!void {
@@ -190,7 +234,8 @@ var memory_map_entries: [max_memory_entry_count]MemoryMapEntry = undefined;
 const max_memory_entry_count = 32;
 
 pub const E820Iterator = extern struct {
-    registers: Registers = .{},
+    registers: Registers = Registers{},
+    index: usize = 0,
 
     pub fn next(iterator: *E820Iterator) ?MemoryMapEntry {
         var memory_map_entry: MemoryMapEntry = undefined;
@@ -204,6 +249,7 @@ pub const E820Iterator = extern struct {
         interrupt(0x15, &iterator.registers, &iterator.registers);
 
         if (!iterator.registers.eflags.flags.carry_flag and iterator.registers.ebx != 0) {
+            iterator.index += 1;
             return memory_map_entry;
         } else {
             return null;
@@ -272,25 +318,42 @@ pub fn getEBDAAddress() u32 {
     }
 }
 
-pub fn findRSDP() ?u32 {
+const FindRSDP = error{
+    not_found,
+    checksum_failed,
+};
+
+pub fn findRSDP() FindRSDP!*ACPI.RSDP.Descriptor1 {
     const ebda_address = getEBDAAddress();
     const main_bios_area_base_address = 0xe0000;
     const RSDP_PTR = "RSD PTR ".*;
 
     const pointers = [2]u32{ ebda_address, main_bios_area_base_address };
     const limits = [2]u32{ ebda_address + @intCast(u32, @enumToInt(lib.SizeUnit.kilobyte)), @intCast(u32, @enumToInt(lib.SizeUnit.megabyte)) };
+
     for (pointers, 0..) |pointer, index| {
         var ptr = pointer;
         const limit = limits[index];
 
         while (ptr < limit) : (ptr += 16) {
             const rsdp_descriptor = @intToPtr(*ACPI.RSDP.Descriptor1, ptr);
+
             if (lib.equal(u8, &rsdp_descriptor.signature, &RSDP_PTR)) {
                 switch (rsdp_descriptor.revision) {
-                    0 => if (wrapSumBytes(lib.asBytes(rsdp_descriptor)) == 0) return @ptrToInt(rsdp_descriptor),
+                    0 => {
+                        if (wrapSumBytes(lib.asBytes(rsdp_descriptor)) == 0) {
+                            return rsdp_descriptor;
+                        } else {
+                            return FindRSDP.checksum_failed;
+                        }
+                    },
                     2 => {
                         const rsdp_descriptor2 = @fieldParentPtr(ACPI.RSDP.Descriptor2, "descriptor1", rsdp_descriptor);
-                        if (wrapSumBytes(lib.asBytes(rsdp_descriptor2)) == 0) return @ptrToInt(rsdp_descriptor);
+                        if (wrapSumBytes(lib.asBytes(rsdp_descriptor2)) == 0) {
+                            return &rsdp_descriptor2.descriptor1;
+                        } else {
+                            return FindRSDP.checksum_failed;
+                        }
                     },
                     else => unreachable,
                 }
@@ -298,7 +361,7 @@ pub fn findRSDP() ?u32 {
         }
     }
 
-    return null;
+    return FindRSDP.not_found;
 }
 
 pub const RealModePointer = extern struct {

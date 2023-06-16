@@ -582,6 +582,7 @@ const VAS = extern struct {
 };
 
 pub fn main() !noreturn {
+    if (true) @panic("TODO");
     log.debug("Limine start", .{});
     var filesystem: Filesystem = undefined;
     var memory_map: MMap = undefined;

@@ -6,7 +6,6 @@ const log = lib.log.scoped(.UEFI);
 const PhysicalAddress = lib.PhysicalAddress;
 const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const VirtualAddress = lib.VirtualAddress;
-const VirtualAddressSpace = lib.VirtualAddressSpace;
 const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const bootloader = @import("bootloader");
@@ -41,7 +40,6 @@ const Stage = enum {
     trampoline,
 };
 
-pub var framebuffer: bootloader.Framebuffer = undefined;
 pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll("[UEFI] [PANIC] ") catch {};
     writer.writeAll(message) catch {};
@@ -50,7 +48,10 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     if (lib.is_test) {
         privileged.exitFromQEMU(.failure);
     } else {
-        asm volatile ("cli\nhlt");
+        asm volatile (
+            \\cli
+            \\hlt
+            ::: "memory");
         unreachable;
     }
 }
@@ -59,29 +60,36 @@ pub var draw_writer: bootloader.DrawContext.Writer = undefined;
 pub var maybe_bootloader_information: ?*bootloader.Information = null;
 pub var boot_services_on = true;
 
+var buffer: [0x200 * 10]u8 = undefined;
+
 const Filesystem = extern struct {
     boot_services: *UEFI.BootServices,
     handle: UEFI.Handle,
     root: *FileProtocol,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
+    pub fn initialize(filesystem: *Filesystem) !void {
         const loaded_image = Protocol.open(LoadedImageProtocol, filesystem.boot_services, filesystem.handle);
         const filesystem_protocol = Protocol.open(SimpleFilesystemProtocol, filesystem.boot_services, loaded_image.device_handle orelse @panic("No device handle"));
         try UEFI.Try(filesystem_protocol.openVolume(&filesystem.root));
     }
 
-    fn deinitialize(context: ?*anyopaque) anyerror!void {
-        _ = context;
+    pub fn deinitialize(filesystem: *Filesystem) !void {
+        _ = filesystem;
         // const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
         // _ = filesystem;
     }
 
-    fn readFileFast(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
+    pub fn readFile(filesystem: *Filesystem, file_path: []const u8, file_buffer: []u8) ![]const u8 {
         const file = try filesystem.openFile(file_path);
+
         var size: u64 = file_buffer.len;
+
         try UEFI.Try(file.handle.read(&size, file_buffer.ptr));
-        if (file_buffer.len < size) @panic("readFileFast");
+
+        if (file_buffer.len < size) {
+            @panic("readFileFast");
+        }
+
         return file_buffer[0..size];
     }
 
@@ -90,17 +98,28 @@ const Filesystem = extern struct {
         path_size: u32,
     };
 
-    fn getFileSize(filesystem: *Filesystem, file_path: []const u8) anyerror!u64 {
-        const file = try filesystem.openFile(file_path);
-        var file_info_buffer: [@sizeOf(UEFI.FileInfo) + 0x100]u8 align(@alignOf(UEFI.FileInfo)) = undefined;
-        var file_info_size = file_info_buffer.len;
-        try UEFI.Try(file.handle.getInfo(&UEFI.FileInfo.guid, &file_info_size, &file_info_buffer));
-        if (file_info_buffer.len < file_info_size) @panic("getFileSize");
-        const file_info = @ptrCast(*UEFI.FileInfo, &file_info_buffer);
-        return file_info.file_size;
+    pub fn sneakFile(filesystem: *Filesystem, file_path: []const u8, size: usize) ![]const u8 {
+        const file = try filesystem.readFile(file_path, buffer[0..size]);
+        return file;
     }
 
-    fn openFile(filesystem: *Filesystem, file_path: []const u8) anyerror!FileDescriptor {
+    pub fn getFileSize(filesystem: *Filesystem, file_path: []const u8) !u32 {
+        const file = try filesystem.openFile(file_path);
+
+        var file_info_buffer: [@sizeOf(UEFI.FileInfo) + 0x100]u8 align(@alignOf(UEFI.FileInfo)) = undefined;
+        var file_info_size = file_info_buffer.len;
+
+        try UEFI.Try(file.handle.getInfo(&UEFI.FileInfo.guid, &file_info_size, &file_info_buffer));
+
+        if (file_info_buffer.len < file_info_size) {
+            return Error.file_descriptor_buffer_not_big_enough;
+        }
+
+        const file_info = @ptrCast(*UEFI.FileInfo, &file_info_buffer);
+        return @intCast(u32, file_info.file_size);
+    }
+
+    fn openFile(filesystem: *Filesystem, file_path: []const u8) !FileDescriptor {
         var file: *FileProtocol = undefined;
         var path_buffer: [256:0]u16 = undefined;
         const length = try lib.unicode.utf8ToUtf16Le(&path_buffer, file_path);
@@ -114,91 +133,36 @@ const Filesystem = extern struct {
         };
     }
 
-    fn getFileDescriptor(context: ?*anyopaque, file_type: bootloader.File.Type) anyerror!bootloader.Information.Initialization.Filesystem.Descriptor {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        const file_name = @tagName(file_type);
-        return .{
-            .path = file_name,
-            .size = @intCast(u32, try filesystem.getFileSize(file_name)),
-            .type = file_type,
-        };
-    }
-
-    fn readFileCallback(context: ?*anyopaque, file_path: []const u8, file_buffer: []u8) anyerror![]const u8 {
-        const filesystem = @ptrCast(*Filesystem, @alignCast(@alignOf(Filesystem), context));
-        const file = try filesystem.readFileFast(file_path, file_buffer);
-        return file;
+    pub fn getDiskSectorSize(filesystem: *Filesystem) u16 {
+        _ = filesystem;
+        return lib.default_sector_size;
     }
 };
 
-const MMap = extern struct {
+const MemoryMap = extern struct {
     boot_services: *UEFI.BootServices,
     handle: UEFI.Handle,
-    size: usize,
+    size: usize = buffer_len,
     key: usize,
     descriptor_size: usize,
     descriptor_version: u32,
-    buffer: [practical_memory_map_descriptor_size * practical_memory_map_descriptor_count]u8 align(@alignOf(MemoryDescriptor)) = undefined,
+    buffer: [buffer_len]u8 align(@alignOf(MemoryDescriptor)) = undefined,
     offset: usize = 0,
 
-    fn initialize(context: ?*anyopaque) anyerror!void {
-        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
-        _ = mmap.boot_services.getMemoryMap(&mmap.size, null, &mmap.key, &mmap.descriptor_size, &mmap.descriptor_version);
+    const buffer_len = practical_memory_map_descriptor_size * practical_memory_map_descriptor_count;
+
+    pub fn initialize(memory_map: *MemoryMap) !u32 {
+        log.debug("Memory map size BEFORE: {}", .{memory_map.size});
+        try UEFI.Try(memory_map.boot_services.getMemoryMap(&memory_map.size, @ptrCast([*]UEFI.MemoryDescriptor, &memory_map.buffer), &memory_map.key, &memory_map.descriptor_size, &memory_map.descriptor_version));
+        log.debug("Memory map size AFTER: {}", .{memory_map.size});
+        const entry_count = @intCast(u32, @divExact(memory_map.size, memory_map.descriptor_size));
+        return entry_count;
     }
 
-    fn deinitialize(context: ?*anyopaque) anyerror!void {
-        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
-        if (boot_services_on) {
-            defer boot_services_on = false;
-
-            // Add the region for the bootloader information
-            mmap.size += mmap.descriptor_size;
-            const expected_memory_map_size = mmap.size;
-            const expected_memory_map_descriptor_size = mmap.descriptor_size;
-            const expected_memory_map_descriptor_version = mmap.descriptor_version;
-
-            log.debug("Getting memory map before exiting boot services...", .{});
-
-            try UEFI.Try(mmap.boot_services.getMemoryMap(&mmap.size, @ptrCast([*]MemoryDescriptor, &mmap.buffer), &mmap.key, &mmap.descriptor_size, &mmap.descriptor_version));
-            if (expected_memory_map_size != mmap.size) {
-                log.warn("Old memory map size: {}. New memory map size: {}", .{ expected_memory_map_size, mmap.size });
-            }
-            if (expected_memory_map_descriptor_size != mmap.descriptor_size) {
-                @panic("Descriptor size change");
-            }
-            if (expected_memory_map_descriptor_version != mmap.descriptor_version) {
-                @panic("Descriptor version change");
-            }
-            const real_memory_map_entry_count = @divExact(mmap.size, mmap.descriptor_size);
-            const expected_memory_map_entry_count = @divExact(expected_memory_map_size, expected_memory_map_descriptor_size);
-            const diff = @intCast(i16, expected_memory_map_entry_count) - @intCast(i16, real_memory_map_entry_count);
-            if (diff < 0) {
-                @panic("Memory map entry count diff < 0");
-            }
-
-            // bootloader_information.configuration.memory_map_diff = @intCast(u8, diff);
-
-            log.debug("Exiting boot services...", .{});
-            try UEFI.Try(mmap.boot_services.exitBootServices(mmap.handle, mmap.key));
-
-            privileged.arch.disableInterrupts();
-        }
-
-        mmap.offset = 0;
-    }
-
-    fn getMemoryMapEntryCount(context: ?*anyopaque) anyerror!u32 {
-        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
-        // Return one more since we are expected to allocate a region for the bootloader information
-        return @intCast(u32, @divExact(mmap.size, mmap.descriptor_size) + 1);
-    }
-
-    fn next(context: ?*anyopaque) anyerror!?bootloader.MemoryMapEntry {
-        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
-
-        if (mmap.offset < mmap.size) {
-            const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), mmap.buffer[mmap.offset..].ptr)).*;
-            mmap.offset += mmap.descriptor_size;
+    pub fn next(memory_map: *MemoryMap) !?bootloader.MemoryMapEntry {
+        if (memory_map.offset < memory_map.size) {
+            const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[memory_map.offset..].ptr)).*;
+            memory_map.offset += memory_map.descriptor_size;
             const result = bootloader.MemoryMapEntry{
                 .region = PhysicalMemoryRegion.new(.{
                     .address = PhysicalAddress.new(entry.physical_start),
@@ -218,11 +182,72 @@ const MMap = extern struct {
         return null;
     }
 
-    fn getHostRegion(context: ?*anyopaque, length_size_tuples: bootloader.LengthSizeTuples) anyerror!PhysicalMemoryRegion {
-        const mmap = @ptrCast(*MMap, @alignCast(@alignOf(MMap), context));
+    pub fn reset(memory_map: *MemoryMap) void {
+        memory_map.offset = 0;
+    }
+
+    fn getMemoryMapEntryCount(memory_map: *MemoryMap) !u32 {
+        // Return one more since we are expected to allocate a region for the bootloader information
+        const result = @intCast(u32, @divExact(memory_map.size, memory_map.descriptor_size) + 1);
+        return result;
+    }
+
+    pub fn deinitialize(memory_map: *MemoryMap) !void {
+        log.debug("\n\nDEINIT\n\n", .{});
+        if (boot_services_on) {
+            defer boot_services_on = false;
+
+            // Add the region for the bootloader information
+            memory_map.size += 100 * memory_map.descriptor_size;
+            const expected_memory_map_size = memory_map.size;
+            const expected_memory_map_descriptor_size = memory_map.descriptor_size;
+            const expected_memory_map_descriptor_version = memory_map.descriptor_version;
+
+            while (true) : (memory_map.size += memory_map.descriptor_size) {
+                log.debug("Getting memory map before exiting boot services...", .{});
+                log.debug("Buffer size: {}", .{memory_map.size});
+
+                UEFI.Try(memory_map.boot_services.getMemoryMap(&memory_map.size, @ptrCast([*]MemoryDescriptor, &memory_map.buffer), &memory_map.key, &memory_map.descriptor_size, &memory_map.descriptor_version)) catch continue;
+
+                break;
+            }
+
+            if (expected_memory_map_size != memory_map.size) {
+                log.warn("Old memory map size: {}. New memory map size: {}", .{ expected_memory_map_size, memory_map.size });
+            }
+
+            if (expected_memory_map_descriptor_size != memory_map.descriptor_size) {
+                @panic("Descriptor size change");
+            }
+
+            if (expected_memory_map_descriptor_version != memory_map.descriptor_version) {
+                @panic("Descriptor version change");
+            }
+
+            const real_memory_map_entry_count = @divExact(memory_map.size, memory_map.descriptor_size);
+            const expected_memory_map_entry_count = @divExact(expected_memory_map_size, expected_memory_map_descriptor_size);
+            const diff = @intCast(i16, expected_memory_map_entry_count) - @intCast(i16, real_memory_map_entry_count);
+
+            if (diff < 0) {
+                @panic("Memory map entry count diff < 0");
+            }
+
+            // bootloader_information.configuration.memory_map_diff = @intCast(u8, diff);
+
+            log.debug("Exiting boot services...", .{});
+            try UEFI.Try(memory_map.boot_services.exitBootServices(memory_map.handle, memory_map.key));
+            log.debug("Exited boot services", .{});
+
+            privileged.arch.disableInterrupts();
+        }
+
+        memory_map.offset = 0;
+    }
+
+    fn getHostRegion(memory_map: *MemoryMap, length_size_tuples: bootloader.LengthSizeTuples) !PhysicalMemoryRegion {
         var memory: []align(UEFI.page_size) u8 = undefined;
         const memory_size = length_size_tuples.getAlignedTotalSize();
-        try UEFI.Try(mmap.boot_services.allocatePages(.AllocateAnyPages, .LoaderData, memory_size >> UEFI.page_shifter, &memory.ptr));
+        try UEFI.Try(memory_map.boot_services.allocatePages(.AllocateAnyPages, .LoaderData, memory_size >> UEFI.page_shifter, &memory.ptr));
         memory.len = memory_size;
         @memset(memory, 0);
 
@@ -233,9 +258,8 @@ const MMap = extern struct {
 const Framebuffer = extern struct {
     boot_services: *UEFI.BootServices,
 
-    fn initialize(context: ?*anyopaque) anyerror!bootloader.Framebuffer {
-        const fb = @ptrCast(*Framebuffer, @alignCast(@alignOf(Framebuffer), context));
-        const gop = try Protocol.locate(UEFI.GraphicsOutputProtocol, fb.boot_services);
+    pub fn initialize(framebuffer: *Framebuffer) !bootloader.Framebuffer {
+        const gop = try Protocol.locate(UEFI.GraphicsOutputProtocol, framebuffer.boot_services);
         const pixel_format_info: struct {
             red_color_mask: bootloader.Framebuffer.ColorMask,
             blue_color_mask: bootloader.Framebuffer.ColorMask,
@@ -272,32 +296,26 @@ const Framebuffer = extern struct {
     }
 };
 
-const VAS = extern struct {
+const VirtualAddressSpace = extern struct {
     mmap: *anyopaque,
 
-    const MapError = error{
-        map_failed,
-        region_empty,
-    };
-    fn ensureLoaderIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) anyerror!void {
-        const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
+    pub fn ensureLoaderIsMapped(virtual_address_space: *VirtualAddressSpace, minimal_paging: paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information, memory_map: *MemoryMap) !void {
+        _ = bootloader_information;
+        _ = virtual_address_space;
+
+        log.debug("Ensuring loader is mapped", .{});
         // Actually mapping the whole UEFI executable so we don't have random problems with code being dereferenced by the trampoline
         switch (lib.cpu.arch) {
             .x86_64 => {
-                {
-                    const physical_address = PhysicalAddress.new(@ptrToInt(bootloader_information));
-                    const size = bootloader_information.getAlignedTotalSize();
-                    // minimal_paging.map(physical_address, physical_address.toIdentityMappedVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator) catch |err| UEFI.panic("Unable to map bootloader information (identity): {}", .{err});
-                    try minimal_paging.map(physical_address, physical_address.toHigherHalfVirtualAddress(), size, .{ .write = true, .execute = false }, page_allocator);
-                }
                 const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
 
-                try MMap.deinitialize(vas.mmap);
-                while (try MMap.next(vas.mmap)) |entry| {
+                try memory_map.deinitialize();
+                while (try memory_map.next()) |entry| {
                     if (entry.region.address.value() < trampoline_code_start and trampoline_code_start < entry.region.address.offset(entry.region.size).value()) {
                         const code_physical_region = entry.region;
                         const code_virtual_address = code_physical_region.address.toIdentityMappedVirtualAddress();
                         try minimal_paging.map(code_physical_region.address, code_virtual_address, code_physical_region.size, .{ .write = false, .execute = true }, page_allocator);
+                        log.debug("Ended ensuring loader is mapped", .{});
                         return;
                     }
                 }
@@ -305,89 +323,31 @@ const VAS = extern struct {
             else => @compileError("Architecture not supported"),
         }
 
-        return MapError.map_failed;
+        return Error.map_failed;
     }
 
-    fn ensureStackIsMapped(context: ?*anyopaque, minimal_paging: paging.Specific, page_allocator: PageAllocator) anyerror!void {
-        const vas = @ptrCast(*VAS, @alignCast(@alignOf(VAS), context));
+    pub fn ensureStackIsMapped(virtual_address_space: *VirtualAddressSpace, minimal_paging: paging.Specific, page_allocator: PageAllocator, memory_map: *MemoryMap) !void {
+        _ = virtual_address_space;
+        log.debug("Ensuring stack is mapped", .{});
         const rsp = asm volatile (
             \\mov %rsp, %[rsp]
             : [rsp] "=r" (-> u64),
         );
 
-        while (try MMap.next(vas.mmap)) |entry| {
+        while (try memory_map.next()) |entry| {
             if (entry.region.address.value() < rsp and rsp < entry.region.address.offset(entry.region.size).value()) {
                 const rsp_region_physical_address = entry.region.address;
                 const rsp_region_virtual_address = rsp_region_physical_address.toIdentityMappedVirtualAddress();
-                if (entry.region.size == 0) return MapError.region_empty;
+                if (entry.region.size == 0) return Error.region_empty;
                 try minimal_paging.map(rsp_region_physical_address, rsp_region_virtual_address, entry.region.size, .{ .write = true, .execute = false }, page_allocator);
+                log.debug("Ended ensuring stack is mapped", .{});
                 return;
             }
         }
 
-        return MapError.map_failed;
+        return Error.map_failed;
     }
 };
-
-pub fn main() noreturn {
-    const system_table = UEFI.get_system_table();
-    const handle = UEFI.get_handle();
-    const boot_services = system_table.boot_services orelse @panic("boot services");
-    const out = system_table.con_out orelse @panic("con out");
-    UEFI.result(@src(), out.reset(true));
-    UEFI.result(@src(), out.clearScreen());
-
-    const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
-    const rsdp_physical_address = for (configuration_tables) |configuration_table| {
-        if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
-            break PhysicalAddress.new(@ptrToInt(configuration_table.vendor_table));
-        }
-    } else @panic("Unable to find RSDP");
-    const rsdp_descriptor = rsdp_physical_address.toIdentityMappedVirtualAddress().access(*ACPI.RSDP.Descriptor1);
-
-    var filesystem: Filesystem = .{
-        .boot_services = boot_services,
-        .handle = handle,
-        .root = undefined,
-    };
-    var mmap: MMap = .{
-        .boot_services = boot_services,
-        .handle = handle,
-        .size = 0,
-        .key = 0,
-        .descriptor_size = 0,
-        .descriptor_version = 0,
-    };
-    var fb = Framebuffer{
-        .boot_services = boot_services,
-    };
-    var vas = VAS{
-        .mmap = &mmap,
-    };
-    bootloader.Information.initialize(.{
-        .context = &filesystem,
-        .initialize = Filesystem.initialize,
-        .deinitialize = Filesystem.deinitialize,
-        .get_file_descriptor = Filesystem.getFileDescriptor,
-        .read_file = Filesystem.readFileCallback,
-    }, .{
-        .context = &mmap,
-        .initialize = MMap.initialize,
-        .deinitialize = MMap.deinitialize,
-        .get_memory_map_entry_count = MMap.getMemoryMapEntryCount,
-        .next = MMap.next,
-        .get_host_region = MMap.getHostRegion,
-    }, .{
-        .context = &fb,
-        .initialize = Framebuffer.initialize,
-    }, .{
-        .context = &vas,
-        .ensure_loader_is_mapped = VAS.ensureLoaderIsMapped,
-        .ensure_stack_is_mapped = VAS.ensureStackIsMapped,
-    }, rsdp_descriptor, .rise, .uefi) catch |err| {
-        @panic(@errorName(err));
-    };
-}
 
 pub const std_options = struct {
     pub const log_level = lib.std.log.Level.debug;
@@ -421,3 +381,101 @@ pub const std_options = struct {
 
 const practical_memory_map_descriptor_size = 0x30;
 const practical_memory_map_descriptor_count = 256;
+
+const Error = error{
+    boot_services_not_found,
+    con_out_not_found,
+    rsdp_not_found,
+    file_descriptor_buffer_not_big_enough,
+    map_failed,
+    region_empty,
+};
+
+const Initialization = struct {
+    filesystem: Filesystem,
+    memory_map: MemoryMap,
+    framebuffer: Framebuffer,
+    virtual_address_space: VirtualAddressSpace,
+    architecture: switch (lib.cpu.arch) {
+        .x86_64 => struct {
+            rsdp: *ACPI.RSDP.Descriptor1,
+        },
+        else => @compileError("Architecture not supported"),
+    },
+    system_table: *SystemTable,
+
+    fn initialize(init: *Initialization) !void {
+        const system_table = UEFI.getSystemTable();
+        const handle = UEFI.getHandle();
+        const boot_services = system_table.boot_services orelse return Error.boot_services_not_found;
+        const out = system_table.con_out orelse return Error.con_out_not_found;
+        try UEFI.Try(out.reset(true));
+        try UEFI.Try(out.clearScreen());
+
+        init.* = .{
+            .filesystem = .{
+                .boot_services = boot_services,
+                .handle = handle,
+                .root = undefined,
+            },
+            .memory_map = .{
+                .boot_services = boot_services,
+                .handle = handle,
+                .key = 0,
+                .descriptor_size = 0,
+                .descriptor_version = 0,
+            },
+            .framebuffer = .{
+                .boot_services = boot_services,
+            },
+            .virtual_address_space = undefined,
+            .architecture = switch (lib.cpu.arch) {
+                .x86_64 => .{
+                    .rsdp = blk: {
+                        const configuration_tables = system_table.configuration_table[0..system_table.number_of_table_entries];
+
+                        const rsdp = for (configuration_tables) |configuration_table| {
+                            if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
+                                break @ptrCast(*ACPI.RSDP.Descriptor1, @alignCast(@alignOf(ACPI.RSDP.Descriptor1), configuration_table.vendor_table));
+                            }
+                        } else return Error.rsdp_not_found;
+
+                        break :blk rsdp;
+                    },
+                },
+                else => @compileError("Architecture not supported"),
+            },
+            .system_table = system_table,
+        };
+    }
+
+    pub fn getRSDPAddress(init: *Initialization) u32 {
+        return switch (lib.cpu.arch) {
+            .x86_64 => @intCast(u32, @ptrToInt(init.architecture.rsdp)),
+            else => @compileError("Architecture not supported"),
+        };
+    }
+
+    pub fn getCPUCount(init: *Initialization) !u32 {
+        return switch (lib.cpu.arch) {
+            .x86_64 => blk: {
+                const madt_header = try init.architecture.rsdp.findTable(.APIC);
+                const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
+                break :blk madt.getCPUCount();
+            },
+            else => @compileError("Architecture not supported"),
+        };
+    }
+};
+
+var initialization: Initialization = undefined;
+
+pub fn main() noreturn {
+    initialization.initialize() catch |err| {
+        UEFI.panic("Error happened while UEFI early initialization: {}", .{err});
+    };
+
+    bootloader.Information.initialize(&initialization, .rise, .uefi) catch |err| {
+        UEFI.panic("Error happened in bootloader initialization: {}", .{err});
+    };
+}

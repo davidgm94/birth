@@ -54,6 +54,13 @@ pub const DiskImage = extern struct {
         };
     }
 
+    pub fn readCache(disk: *Disk, sector_count: u64, sector_offset: u64) Disk.ReadError!Disk.ReadResult {
+        _ = sector_count;
+        _ = sector_offset;
+        _ = disk;
+        return error.read_error;
+    }
+
     pub fn fromZero(sector_count: usize, sector_size: u16) !DiskImage {
         const disk_bytes = try host.allocateZeroMemory(sector_count * sector_size);
         var disk_image = DiskImage{
@@ -62,9 +69,11 @@ pub const DiskImage = extern struct {
                 .callbacks = .{
                     .read = DiskImage.read,
                     .write = DiskImage.write,
+                    .readCache = DiskImage.readCache,
                 },
                 .disk_size = disk_bytes.len,
                 .sector_size = sector_size,
+                .cache_size = 0,
             },
             .buffer_ptr = disk_bytes.ptr,
         };
@@ -112,7 +121,7 @@ pub const DiskImage = extern struct {
 pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*const MBR.Partition) !FAT32.Cache {
     if (disk.type != .memory) @panic("disk is not memory");
     const fat_partition_mbr_lba = partition_range.first_lba;
-    const fat_partition_mbr = try disk.read_typed_sectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
+    const fat_partition_mbr = try disk.readTypedSectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
 
     const sectors_per_track = 32;
     const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
@@ -191,15 +200,15 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
         .partitions = lib.zeroes([4]MBR.LegacyPartition),
     };
 
-    try disk.write_typed_sectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
+    try disk.writeTypedSectors(MBR.Partition, fat_partition_mbr, fat_partition_mbr_lba, false);
 
     const backup_boot_record_sector = partition_range.first_lba + fat_partition_mbr.bpb.backup_boot_record_sector;
-    const backup_boot_record = try disk.read_typed_sectors(MBR.Partition, backup_boot_record_sector, null, .{});
+    const backup_boot_record = try disk.readTypedSectors(MBR.Partition, backup_boot_record_sector, null, .{});
     backup_boot_record.* = fat_partition_mbr.*;
-    try disk.write_typed_sectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, false);
+    try disk.writeTypedSectors(MBR.Partition, backup_boot_record, backup_boot_record_sector, false);
 
     const fs_info_lba = partition_range.first_lba + fat_partition_mbr.bpb.fs_info_sector;
-    const fs_info = try disk.read_typed_sectors(FAT32.FSInfo, fs_info_lba, null, .{});
+    const fs_info = try disk.readTypedSectors(FAT32.FSInfo, fs_info_lba, null, .{});
     fs_info.* = .{
         .lead_signature = 0x41615252,
         .signature = 0x61417272,
@@ -207,7 +216,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
         .last_allocated_cluster = 0,
         .trail_signature = 0xaa550000,
     };
-    try disk.write_typed_sectors(FAT32.FSInfo, fs_info, fs_info_lba, false);
+    try disk.writeTypedSectors(FAT32.FSInfo, fs_info, fs_info_lba, false);
 
     const cache = FAT32.Cache{
         .disk = disk,
@@ -227,9 +236,9 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     cache.fs_info.free_cluster_count = cluster_count_32 - 1;
 
     const backup_fs_info_lba = backup_boot_record_sector + backup_boot_record.bpb.fs_info_sector;
-    const backup_fs_info = try disk.read_typed_sectors(FAT32.FSInfo, backup_fs_info_lba, null, .{});
+    const backup_fs_info = try disk.readTypedSectors(FAT32.FSInfo, backup_fs_info_lba, null, .{});
     backup_fs_info.* = fs_info.*;
-    try disk.write_typed_sectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
+    try disk.writeTypedSectors(FAT32.FSInfo, backup_fs_info, backup_fs_info_lba, false);
 
     return cache;
 }

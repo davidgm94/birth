@@ -14,6 +14,7 @@ pub const Disk = extern struct {
     type: Type,
     disk_size: u64,
     partition_sizes: [GPT.default_max_partition_count]u64 = [1]u64{0} ** GPT.default_max_partition_count,
+    cache_size: u16,
     sector_size: u16,
     callbacks: Callbacks,
 
@@ -27,6 +28,9 @@ pub const Disk = extern struct {
         sector_count: u64,
         buffer: [*]u8,
     };
+
+    pub const ReadCacheFn = fn (disk: *Disk, sector_count: u64, sector_offset: u64) ReadError!ReadResult;
+
     pub const WriteFn = fn (disk: *Disk, bytes: []const u8, sector_offset: u64, commit_memory_to_disk: bool) WriteError!void;
     pub const WriteError = error{
         not_supported,
@@ -36,9 +40,10 @@ pub const Disk = extern struct {
     pub const Callbacks = extern struct {
         read: *const ReadFn,
         write: *const WriteFn,
+        readCache: *const ReadCacheFn,
     };
 
-    pub inline fn get_provided_buffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]u8 {
+    pub inline fn getProvidedBuffer(disk: *Disk, comptime T: type, count: usize, allocator: ?*lib.Allocator, force: bool) !?[]u8 {
         if ((disk.type == .memory and force) or (disk.type != .memory)) {
             if (allocator) |alloc| {
                 const size = @sizeOf(T) * count;
@@ -58,9 +63,9 @@ pub const Disk = extern struct {
         reserved: u7 = 0,
     };
 
-    pub fn read_typed_sectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
+    pub fn readTypedSectors(disk: *Disk, comptime T: type, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) !*T {
         const sector_count = @divExact(@sizeOf(T), disk.sector_size);
-        const provided_buffer = try disk.get_provided_buffer(T, 1, allocator, options.force);
+        const provided_buffer = try disk.getProvidedBuffer(T, 1, allocator, options.force);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("Sector count mismatch");
         // Don't need to write back since it's a memory disk
@@ -68,21 +73,21 @@ pub const Disk = extern struct {
         return result;
     }
 
-    pub inline fn write_typed_sectors(disk: *Disk, comptime T: type, content: *T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+    pub inline fn writeTypedSectors(disk: *Disk, comptime T: type, content: *T, sector_offset: u64, commit_memory_to_disk: bool) !void {
         try disk.callbacks.write(disk, asBytes(content), sector_offset, commit_memory_to_disk);
     }
 
-    pub inline fn read_slice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) ![]T {
+    pub inline fn readSlice(disk: *Disk, comptime T: type, len: usize, sector_offset: u64, allocator: ?*lib.Allocator, options: AdvancedReadOptions) ![]T {
         const element_count_per_sector = @divExact(disk.sector_size, @sizeOf(T));
         const sector_count = @divExact(len, element_count_per_sector);
-        const provided_buffer = try disk.get_provided_buffer(T, len, allocator, options.force);
+        const provided_buffer = try disk.getProvidedBuffer(T, len, allocator, options.force);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("read_slice: sector count mismatch");
         const result = @ptrCast([*]T, @alignCast(@alignOf(T), read_result.buffer))[0..len];
         return result;
     }
 
-    pub inline fn write_slice(disk: *Disk, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
+    pub inline fn writeSlice(disk: *Disk, comptime T: type, slice: []const T, sector_offset: u64, commit_memory_to_disk: bool) !void {
         const byte_slice = sliceAsBytes(slice);
         try disk.callbacks.write(disk, byte_slice, sector_offset, commit_memory_to_disk);
     }

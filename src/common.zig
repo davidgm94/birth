@@ -24,7 +24,11 @@ pub const CrossTarget = std.zig.CrossTarget;
 
 pub const log = std.log;
 
+pub const Reader = std.io.Reader;
 pub const Writer = std.io.Writer;
+
+pub const FixedBufferStream = std.io.FixedBufferStream;
+pub const fixedBufferStream = std.io.fixedBufferStream;
 
 pub fn assert(ok: bool) void {
     if (!ok) {
@@ -35,6 +39,8 @@ pub fn assert(ok: bool) void {
         }
     }
 }
+
+pub const deflate = std.compress.deflate;
 
 const debug = std.debug;
 pub const print = debug.print;
