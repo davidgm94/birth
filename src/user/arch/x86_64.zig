@@ -32,17 +32,15 @@ pub const Scheduler = extern struct {
 };
 
 // CRT0
-pub extern fn _start() noreturn;
-comptime {
-    asm (
-        \\.global _start
-        \\.extern riseInitializeDisabled
-        \\_start:
+pub fn _start() callconv(.Naked) noreturn {
+    asm volatile (
         \\mov %rdi, %rsp
         \\lea 0x4000(%rdi), %rsp
         \\push %rbp
         \\jmp riseInitializeDisabled
     );
+
+    unreachable;
 }
 
 pub inline fn setInitialState(register_arena: *RegisterArena, entry: VirtualAddress, stack: VirtualAddress, arguments: rise.syscall.Arguments) void {

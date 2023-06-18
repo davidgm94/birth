@@ -1,7 +1,3 @@
-comptime {
-    if (lib.os != .freestanding) @compileError("This file is not meant to be imported in build.zig");
-}
-
 const lib = @import("lib");
 const assert = lib.assert;
 const ExecutionMode = lib.Syscall.ExecutionMode;
@@ -12,6 +8,10 @@ pub const Syscall = rise.capabilities.Syscall;
 
 pub const arch = @import("user/arch.zig");
 pub const thread = @import("user/thread.zig");
+
+comptime {
+    @export(arch._start, .{ .linkage = .Strong, .name = "_start" });
+}
 
 pub const Scheduler = extern struct {
     time_slice: u32,
