@@ -73,7 +73,10 @@ fn archInitialize(bootloader_information: *bootloader.Information) !noreturn {
     // functionality is not available anymore
     bootloader_information.stage = .cpu;
     // Check that the bootloader has loaded some files as the CPU driver needs them to go forward
-    if (bootloader_information.getSlice(.bundle).len == 0) return InitializationError.no_files;
+    cpu.bundle = bootloader_information.getSlice(.bundle);
+    if (cpu.bundle.len == 0) return InitializationError.no_files;
+    cpu.bundle_files = bootloader_information.getSlice(.file_list);
+    if (cpu.bundle_files.len == 0) return InitializationError.no_files;
 
     const cpuid = lib.arch.x86_64.cpuid;
     if (x86_64.pcid) {
@@ -358,6 +361,7 @@ fn initialize(bootloader_information: *bootloader.Information) !noreturn {
     root_capability.* = .{
         .static = .{
             .cpu = true,
+            .boot = true,
         },
         .dynamic = .{
             .io = .{
@@ -818,7 +822,7 @@ const BSPEarlyAllocator = extern struct {
             assert(alignment < lib.arch.valid_page_sizes[0]);
             assert(heap.virtual_memory_region.size > size);
             if (!lib.isAligned(heap.virtual_memory_region.address.value(), alignment)) {
-                const misalignment = lib.alignForward(heap.virtual_memory_region.address.value(), alignment) - heap.virtual_memory_region.address.value();
+                const misalignment = lib.alignForward(usize, heap.virtual_memory_region.address.value(), alignment) - heap.virtual_memory_region.address.value();
                 _ = heap.virtual_memory_region.takeSlice(misalignment);
             }
 
@@ -836,7 +840,7 @@ const BSPEarlyAllocator = extern struct {
 
         // TODO: don't trash memory
         if (!lib.isAligned(allocator.base.offset(allocator.offset).value(), alignment)) {
-            const aligned = lib.alignForward(allocator.base.offset(allocator.offset).value(), alignment);
+            const aligned = lib.alignForward(usize, allocator.base.offset(allocator.offset).value(), alignment);
             allocator.offset += aligned - allocator.base.offset(allocator.offset).value();
         }
 
@@ -909,7 +913,7 @@ fn spawnInitBSP(init_file: []const u8, cpu_page_tables: paging.CPUPageTables) !n
 
     for (program_headers) |program_header| {
         if (program_header.type == .load) {
-            const aligned_size = lib.alignForward(program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
+            const aligned_size = lib.alignForward(usize, program_header.size_in_memory, lib.arch.valid_page_sizes[0]);
             const segment_virtual_address = VirtualAddress.new(program_header.virtual_address);
             const indexed_virtual_address = @bitCast(paging.IndexedVirtualAddress, program_header.virtual_address);
             _ = indexed_virtual_address;
@@ -1071,8 +1075,8 @@ const PageTableRegions = extern struct {
     const init_vas_page_count = @divExact(init_vas_size, lib.arch.valid_page_sizes[0]);
 
     const init_vas_pte_count = init_vas_page_count;
-    const init_vas_pde_count = lib.alignForward(@divExact(init_vas_pte_count, paging.page_table_entry_count), paging.page_table_entry_count);
-    const init_vas_pdpe_count = lib.alignForward(@divExact(init_vas_pde_count, paging.page_table_entry_count), paging.page_table_entry_count);
+    const init_vas_pde_count = lib.alignForward(usize, @divExact(init_vas_pte_count, paging.page_table_entry_count), paging.page_table_entry_count);
+    const init_vas_pdpe_count = lib.alignForward(usize, @divExact(init_vas_pde_count, paging.page_table_entry_count), paging.page_table_entry_count);
 
     const AccessOptions = packed struct {
         index: Index,
@@ -1468,6 +1472,7 @@ fn spawnInitCommon(cpu_page_tables: paging.CPUPageTables) !SpawnInitCommonResult
         .capability_root_node = cpu.capabilities.Root{
             .static = .{
                 .cpu = true,
+                .boot = true,
             },
             .dynamic = .{
                 .io = .{

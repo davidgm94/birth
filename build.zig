@@ -235,7 +235,7 @@ pub fn build(b_arg: *Build) !void {
             const user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
             try user_module_list.append(.{
                 .program = user_program,
-                .name = dir_name,
+                .name = b.dupe(dir_name), // we have to dupe here otherwise Windows CI fails
             });
         }
 

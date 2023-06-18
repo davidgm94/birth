@@ -18,6 +18,27 @@ pub const Scheduler = extern struct {
     core_id: u32,
 };
 
+const Writer = extern struct {
+    const syscall = Syscall(.io, .log);
+    const Error = Writer.syscall.ErrorSet.Error;
+
+    fn write(_: void, bytes: []const u8) Error!usize {
+        const result = try Writer.syscall.blocking(bytes);
+        return result;
+    }
+};
+
+pub const std_options = struct {
+    pub fn logFn(comptime level: lib.std.log.Level, comptime scope: @TypeOf(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+        lib.format(writer, format, args) catch unreachable;
+        writer.writeByte('\n') catch unreachable;
+        _ = scope;
+        _ = level;
+    }
+};
+
+pub const writer = lib.Writer(void, Writer.Error, Writer.write){ .context = {} };
+
 pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     @call(.always_inline, panic, .{ "{s}", .{message} });
 }

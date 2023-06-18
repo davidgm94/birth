@@ -126,7 +126,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     const fat_partition_mbr = try disk.readTypedSectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
 
     const sectors_per_track = 32;
-    const total_sector_count_32 = @intCast(u32, lib.alignBackward(partition_range.last_lba - partition_range.first_lba, sectors_per_track));
+    const total_sector_count_32 = @intCast(u32, lib.alignBackward(u64, partition_range.last_lba - partition_range.first_lba, sectors_per_track));
     const fat_count = FAT32.count;
 
     var cluster_size: u8 = 1;
@@ -137,9 +137,9 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
 
     while (true) {
         assert(cluster_size > 0);
-        fat_data_sector_count = total_sector_count_32 - lib.alignForwardGeneric(u32, FAT32.default_reserved_sector_count, cluster_size);
+        fat_data_sector_count = total_sector_count_32 - lib.alignForward(u32, FAT32.default_reserved_sector_count, cluster_size);
         cluster_count_32 = (fat_data_sector_count * disk.sector_size + fat_count * 8) / (cluster_size * disk.sector_size + fat_count * 4);
-        fat_length_32 = lib.alignForwardGeneric(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
+        fat_length_32 = lib.alignForward(u32, cdiv((cluster_count_32 + 2) * 4, disk.sector_size), cluster_size);
         cluster_count_32 = (fat_data_sector_count - fat_count * fat_length_32) / cluster_size;
         const max_cluster_size_32 = @min(fat_length_32 * disk.sector_size / 4, FAT32.getMaxCluster(.fat32));
         if (cluster_count_32 > max_cluster_size_32) {
@@ -161,7 +161,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     var root_directory_entries: u64 = 0;
     _ = root_directory_entries;
 
-    const reserved_sector_count = lib.alignForwardGeneric(u16, FAT32.default_reserved_sector_count, cluster_size);
+    const reserved_sector_count = lib.alignForward(u16, FAT32.default_reserved_sector_count, cluster_size);
 
     fat_partition_mbr.* = MBR.Partition{
         .bpb = .{

@@ -1,8 +1,6 @@
 const lib = @import("lib");
 const alignForward = lib.alignForward;
-const alignForwardGeneric = lib.alignForwardGeneric;
 const alignBackward = lib.alignBackward;
-const alignBackwardGeneric = lib.alignBackwardGeneric;
 const isAligned = lib.isAligned;
 const isAlignedGeneric = lib.isAlignedGeneric;
 const assert = lib.assert;
@@ -214,7 +212,7 @@ pub const Specific = extern struct {
 
                     return;
                 } else {
-                    const aligned_page_address = alignForwardGeneric(u64, asked_virtual_address.value(), reverse_page_size);
+                    const aligned_page_address = alignForward(u64, asked_virtual_address.value(), reverse_page_size);
                     const prologue_misalignment = aligned_page_address - asked_virtual_address.value();
                     const aligned_size_left = size - prologue_misalignment;
 
@@ -225,8 +223,8 @@ pub const Specific = extern struct {
 
                         const virtual_address = VirtualAddress.new(aligned_page_address);
                         const physical_address = asked_physical_address.offset(prologue_misalignment);
-                        const this_page_top_physical_address = PhysicalAddress.new(alignBackwardGeneric(u64, physical_address.offset(aligned_size_left).value(), reverse_page_size));
-                        const this_page_top_virtual_address = VirtualAddress.new(alignBackwardGeneric(u64, virtual_address.offset(aligned_size_left).value(), reverse_page_size));
+                        const this_page_top_physical_address = PhysicalAddress.new(alignBackward(u64, physical_address.offset(aligned_size_left).value(), reverse_page_size));
+                        const this_page_top_virtual_address = VirtualAddress.new(alignBackward(u64, virtual_address.offset(aligned_size_left).value(), reverse_page_size));
                         const this_huge_page_size = this_page_top_virtual_address.value() - virtual_address.value();
                         try specific.mapGeneric(physical_address, virtual_address, this_huge_page_size, reverse_page_size, flags, page_allocator);
 

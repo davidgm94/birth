@@ -47,16 +47,21 @@ fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Sy
                 .shutdown => privileged.exitFromQEMU(.success),
             },
             .cpu_memory => switch (command) {
-                .allocate => {
+                .allocate => blk: {
                     comptime assert(@TypeOf(arguments) == usize);
                     const size = arguments;
                     const physical_region = try cpu.user_scheduler.capability_root_node.allocatePages(size);
                     try cpu.user_scheduler.capability_root_node.allocateCPUMemory(physical_region, .{ .privileged = false });
-                    return physical_region.address;
+                    break :blk physical_region.address;
                 },
                 else => @panic(@tagName(command)),
             },
             .ram => unreachable,
+            .boot => switch (command) {
+                .get_bundle_size => cpu.bundle.len,
+                .get_bundle_file_list_size => cpu.bundle_files.len,
+                else => @panic(@tagName(command)),
+            },
         };
 
         return result;

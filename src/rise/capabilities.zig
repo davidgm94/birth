@@ -12,6 +12,7 @@ pub const Type = enum(u8) {
     cpu, // primitive
     ram, // primitive
     cpu_memory, // non-primitive
+    boot,
     // TODO: device_memory, // primitive
     // vnode,
     // scheduler,
@@ -64,6 +65,10 @@ pub fn Command(comptime capability: Type) type {
         .ram => [_][]const u8{},
         .cpu_memory => .{
             "allocate",
+        },
+        .boot => .{
+            "get_bundle_size",
+            "get_bundle_file_list_size",
         },
     };
 
@@ -199,6 +204,35 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
                 return result ++ .{0} ** (raw_argument_count - result.len);
             }
         },
+        .boot => switch (command_type) {
+            .get_bundle_file_list_size, .get_bundle_size => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(&.{
+                    "buffer_too_small",
+                });
+                pub const Result = usize;
+                pub const Arguments = void;
+
+                inline fn resultToRaw(result: Result) syscall.Result {
+                    return syscall.Result{
+                        .rise = .{
+                            .first = .{},
+                            .second = result,
+                        },
+                    };
+                }
+
+                inline fn toResult(raw_result: syscall.Result.Rise) Result {
+                    return raw_result.second;
+                }
+            },
+            else => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(&.{
+                    "buffer_too_small",
+                });
+                pub const Result = void;
+                pub const Arguments = void;
+            },
+        },
         // else => @compileError("TODO: " ++ @tagName(capability)),
     };
 
@@ -207,18 +241,15 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
         pub const Result = Types.Result;
         pub const Arguments = Types.Arguments;
         pub const toResult = Types.toResult;
-        pub const toArguments = if (Arguments == void)
+        pub const toArguments = if (Arguments != void)
+            Types.toArguments
+        else
             struct {
                 fn lambda(raw_arguments: syscall.Arguments) error{}!void {
-                    comptime {
-                        assert(Arguments == void);
-                    }
                     _ = raw_arguments;
                     return {};
                 }
-            }.lambda
-        else
-            Types.toArguments;
+            }.lambda;
         pub const capability = capability_type;
         pub const command = command_type;
 
