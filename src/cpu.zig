@@ -36,6 +36,9 @@ pub export var page_allocator = PageAllocator{
     },
 };
 
+pub var bundle: []const u8 = &.{};
+pub var bundle_files: []const u8 = &.{};
+
 pub export var user_scheduler: *UserScheduler = undefined;
 pub export var driver: *align(lib.arch.valid_page_sizes[0]) Driver = undefined;
 pub export var page_tables: CPUPageTables = undefined;
@@ -68,7 +71,7 @@ pub const UserScheduler = extern struct {
     padding: [padding_byte_count]u8 = .{0} ** padding_byte_count,
 
     const total_size = @sizeOf(capabilities.Root) + @sizeOf(*rise.UserScheduler);
-    const aligned_size = lib.alignForward(total_size, lib.arch.valid_page_sizes[0]);
+    const aligned_size = lib.alignForward(usize, total_size, lib.arch.valid_page_sizes[0]);
     const padding_byte_count = aligned_size - total_size;
 
     comptime {

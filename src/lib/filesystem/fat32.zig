@@ -350,7 +350,7 @@ pub const Cache = extern struct {
         const directory_entry = directory_entry_result.directory_entry;
         const first_cluster = directory_entry.getFirstCluster();
         const file_size = directory_entry.file_size;
-        const aligned_file_size = lib.alignForward(file_size, cache.disk.sector_size);
+        const aligned_file_size = lib.alignForward(usize, file_size, cache.disk.sector_size);
         const lba = cache.clusterToSector(first_cluster);
 
         log.debug("Start disk callback", .{});
@@ -368,7 +368,7 @@ pub const Cache = extern struct {
         const lba = cache.clusterToSector(first_cluster);
 
         const read_size = @min(file_size, size);
-        const aligned_read_size = lib.alignForward(read_size, cache.disk.sector_size);
+        const aligned_read_size = lib.alignForward(usize, read_size, cache.disk.sector_size);
 
         const result = try cache.disk.callbacks.readCache(cache.disk, @divExact(aligned_read_size, cache.disk.sector_size), lba);
         const result_slice = result.buffer[0..read_size];
@@ -477,7 +477,7 @@ pub const Cache = extern struct {
     fn allocateNewFile(cache: Cache, file_content: []const u8, maybe_allocator: ?*lib.Allocator) !u32 {
         assert(file_content.len > 0);
         const cluster_byte_count = cache.getClusterSectorCount() * cache.disk.sector_size;
-        const aligned_file_size = lib.alignForward(file_content.len, cluster_byte_count);
+        const aligned_file_size = lib.alignForward(usize, file_content.len, cluster_byte_count);
         const cluster_count = @divExact(aligned_file_size, cluster_byte_count);
         // log.debug("Need to allocate {} clusters for file", .{cluster_count});
         const allocator = maybe_allocator orelse @panic("We need an allocator");

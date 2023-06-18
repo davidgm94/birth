@@ -16,6 +16,7 @@ pub const RootDescriptor = extern struct {
 
 pub const Static = enum {
     cpu,
+    boot,
 
     pub const count = lib.enumCount(@This());
 
@@ -104,7 +105,7 @@ pub const RAM = extern struct {
         };
 
         inline fn allocateUnaligned(free_ram: *Region, size: usize, alignment: usize) ?UnalignedAllocationResult {
-            const aligned_region_address = lib.alignForward(free_ram.region.address.value(), alignment);
+            const aligned_region_address = lib.alignForward(usize, free_ram.region.address.value(), alignment);
             const wasted_space = aligned_region_address - free_ram.region.address.value();
             if (free_ram.region.size >= wasted_space + size) {
                 const wasted_region = free_ram.region.takeSlice(wasted_space);
@@ -152,8 +153,8 @@ pub const Root = extern struct {
     padding: [padding_byte_count]u8 = .{0} ** padding_byte_count,
 
     const max_alignment = @max(@alignOf(Static.Bitmap), @alignOf(Dynamic.Map), @alignOf(Scheduler), @alignOf(Heap));
-    const total_size = lib.alignForward(@sizeOf(Static.Bitmap) + @sizeOf(Dynamic.Map) + @sizeOf(Scheduler) + @sizeOf(Heap), max_alignment);
-    const page_aligned_size = lib.alignForward(total_size, lib.arch.valid_page_sizes[0]);
+    const total_size = lib.alignForward(usize, @sizeOf(Static.Bitmap) + @sizeOf(Dynamic.Map) + @sizeOf(Scheduler) + @sizeOf(Heap), max_alignment);
+    const page_aligned_size = lib.alignForward(usize, total_size, lib.arch.valid_page_sizes[0]);
     const padding_byte_count = page_aligned_size - total_size;
 
     comptime {
@@ -169,18 +170,14 @@ pub const Root = extern struct {
     pub inline fn hasPermissions(root: *const Root, comptime capability_type: rise.capabilities.Type, command: rise.capabilities.Command(capability_type)) bool {
         return switch (capability_type) {
             // static capabilities
-            .cpu => root.static.cpu,
+            inline .cpu, .boot => |static_capability| @field(root.static, @tagName(static_capability)),
             // dynamic capabilities
-            else => |capability| switch (capability) {
-                .io => switch (command) {
-                    .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
-                    .log => root.dynamic.io.debug,
-                },
-                .cpu => unreachable,
-                .cpu_memory => root.dynamic.cpu_memory.flags.allocate,
-                .ram => unreachable,
+            .io => switch (command) {
+                .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
+                .log => root.dynamic.io.debug,
             },
-            // _ => return false,
+            .cpu_memory => root.dynamic.cpu_memory.flags.allocate,
+            .ram => unreachable,
         };
     }
 
@@ -387,7 +384,7 @@ pub const Root = extern struct {
 
             inline fn canAllocateSplitting(region: Region, size: usize, alignment: usize) bool {
                 const free_region = region.getFreeRegion();
-                const aligned_region_address = lib.alignForward(free_region.address.value(), alignment);
+                const aligned_region_address = lib.alignForward(usize, free_region.address.value(), alignment);
                 const wasted_space = aligned_region_address - free_region.address.value();
                 log.warn("Wasted space: {} bytes", .{wasted_space});
                 _ = size;

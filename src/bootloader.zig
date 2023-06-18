@@ -215,7 +215,7 @@ pub const Information = extern struct {
         const aligned_extra_sizes = blk: {
             var result: [extra_sizes.len]usize = undefined;
             inline for (extra_sizes, &result) |extra_size, *element| {
-                element.* = lib.alignForward(extra_size, sector_size);
+                element.* = lib.alignForward(usize, extra_size, sector_size);
             }
 
             break :blk result;
@@ -303,7 +303,7 @@ pub const Information = extern struct {
         const bootloader_information_total_aligned_size = bootloader_information.getAlignedTotalSize();
         const extra_allocation_region = total_allocation.region.offset(bootloader_information_total_aligned_size).shrinked(total_aligned_extra_size);
         const decompressor_state_buffer = extra_allocation_region.toIdentityMappedVirtualAddress().access(u8)[0..decompressor_state_allocation_size];
-        const compressed_bundle_buffer = extra_allocation_region.offset(decompressor_state_allocation_size).toIdentityMappedVirtualAddress().access(u8)[0..lib.alignForwardGeneric(usize, bundle_compressed_size, sector_size)];
+        const compressed_bundle_buffer = extra_allocation_region.offset(decompressor_state_allocation_size).toIdentityMappedVirtualAddress().access(u8)[0..lib.alignForward(usize, bundle_compressed_size, sector_size)];
         const compressed_bundle = try initialization.filesystem.readFile("/bundle", compressed_bundle_buffer);
         assert(compressed_bundle.len > 0);
 
@@ -365,7 +365,7 @@ pub const Information = extern struct {
                         @panic("ELF program segment file size is smaller than memory size");
                     }
 
-                    const aligned_size = lib.alignForwardGeneric(u64, ph.size_in_memory, lib.arch.valid_page_sizes[0]);
+                    const aligned_size = lib.alignForward(u64, ph.size_in_memory, lib.arch.valid_page_sizes[0]);
                     const physical_allocation = try bootloader_information.allocatePages(aligned_size, lib.arch.valid_page_sizes[0], .{});
                     const physical_address = physical_allocation.address;
                     const virtual_address = VirtualAddress.new(ph.virtual_address);
@@ -421,7 +421,7 @@ pub const Information = extern struct {
         //for (bootloader_information.getMemoryMapEntries()[0..memory_map_entry_count]) |entry| {
         for (bootloader_information.getMemoryMapEntries()) |entry| {
             if (entry.type == .usable) {
-                try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
+                try minimal_paging.map(entry.region.address, entry.region.address.toHigherHalfVirtualAddress(), lib.alignForward(u64, entry.region.size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
             }
         }
 
@@ -429,7 +429,7 @@ pub const Information = extern struct {
         try initialization.ensureLoaderIsMapped(minimal_paging, page_allocator, bootloader_information);
 
         const framebuffer_physical_address = PhysicalAddress.new(if (bootloader_information.bootloader == .limine) bootloader_information.framebuffer.address - lib.config.cpu_driver_higher_half_address else bootloader_information.framebuffer.address);
-        try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForwardGeneric(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
+        try minimal_paging.map(framebuffer_physical_address, framebuffer_physical_address.toHigherHalfVirtualAddress(), lib.alignForward(u64, bootloader_information.framebuffer.getSize(), lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = false }, page_allocator);
         bootloader_information.framebuffer.address = framebuffer_physical_address.toHigherHalfVirtualAddress().value();
 
         try initialization.ensureStackIsMapped(minimal_paging, page_allocator);
@@ -465,7 +465,7 @@ pub const Information = extern struct {
 
     pub fn getAlignedTotalSize(information: *Information) u32 {
         if (information.total_size == 0) @panic("Information.getAlignedTotalSize");
-        return lib.alignForwardGeneric(u32, information.total_size, lib.arch.valid_page_sizes[0]);
+        return lib.alignForward(u32, information.total_size, lib.arch.valid_page_sizes[0]);
     }
 
     pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
@@ -510,8 +510,8 @@ pub const Information = extern struct {
                 return IntegrityError.bad_slice_size;
             }
 
-            total_size = lib.alignForwardGeneric(u32, total_size, slice.alignment);
-            total_size += lib.alignForwardGeneric(u32, slice.size, slice.alignment);
+            total_size = lib.alignForward(u32, total_size, slice.alignment);
+            total_size += lib.alignForward(u32, slice.size, slice.alignment);
         }
 
         if (total_size != original_total_size) {
@@ -558,7 +558,7 @@ pub const Information = extern struct {
                         const target_address = entry.region.address.offset(busy_size);
 
                         if (entry.type == .usable and target_address.value() <= lib.maxInt(usize) and size_left > size and entry.region.address.value() != 0) {
-                            const aligned_address = lib.alignForwardGeneric(u64, target_address.value(), alignment);
+                            const aligned_address = lib.alignForward(u64, target_address.value(), alignment);
                             const difference = aligned_address - target_address.value();
                             const allowed_quota = alignment / options.space_waste_allowed_to_guarantee_alignment;
 
@@ -602,7 +602,7 @@ pub const Information = extern struct {
                     return result;
                 }
             }
-            const size_to_page_allocate = lib.alignForwardGeneric(u64, size, lib.arch.valid_page_sizes[0]);
+            const size_to_page_allocate = lib.alignForward(u64, size, lib.arch.valid_page_sizes[0]);
             for (&bootloader_information.heap.regions) |*region| {
                 if (region.size == 0) {
                     const allocated_region = try bootloader_information.page_allocator.allocateBytes(size_to_page_allocate, lib.arch.valid_page_sizes[0]);
@@ -747,8 +747,8 @@ pub const LengthSizeTuples = extern struct {
             const tuple = &tuples.tuples.array.values[index];
             const size = tuple.length * @sizeOf(T);
             tuple.alignment = if (tuple.alignment < @alignOf(T)) @alignOf(T) else tuple.alignment;
-            total_size = lib.alignForwardGeneric(u32, total_size, tuple.alignment);
-            total_size += lib.alignForwardGeneric(u32, size, tuple.alignment);
+            total_size = lib.alignForward(u32, total_size, tuple.alignment);
+            total_size += lib.alignForward(u32, size, tuple.alignment);
             tuple.size = size;
         }
 
@@ -764,9 +764,9 @@ pub const LengthSizeTuples = extern struct {
         for (&slices.array.values, 0..) |*slice, index| {
             const tuple = tuples.tuples.array.values[index];
             const length = tuple.length;
-            const size = lib.alignForwardGeneric(u32, tuple.size, tuple.alignment);
+            const size = lib.alignForward(u32, tuple.size, tuple.alignment);
 
-            allocated_size = lib.alignForwardGeneric(u32, allocated_size, tuple.alignment);
+            allocated_size = lib.alignForward(u32, allocated_size, tuple.alignment);
             slice.* = .{
                 .offset = allocated_size,
                 .len = length,
@@ -784,7 +784,7 @@ pub const LengthSizeTuples = extern struct {
 
     pub fn getAlignedTotalSize(tuples: LengthSizeTuples) u32 {
         if (tuples.total_size == 0) @panic("LengthSizeTuples.getAlignedTotalSize");
-        return lib.alignForwardGeneric(u32, tuples.total_size, lib.arch.valid_page_sizes[0]);
+        return lib.alignForward(u32, tuples.total_size, lib.arch.valid_page_sizes[0]);
     }
 };
 

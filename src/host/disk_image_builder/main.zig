@@ -47,7 +47,7 @@ fn readFileAbsoluteToArrayList(array_list: *host.ArrayList(u8), absolute_file_pa
 }
 
 fn addFileToBundle(file: host.fs.File, file_list: *host.ArrayList(u8), name: []const u8, file_contents: *host.ArrayList(u8)) !void {
-    try file_contents.appendNTimes(0, lib.alignForward(file_contents.items.len, 0x10) - file_contents.items.len);
+    try file_contents.appendNTimes(0, lib.alignForward(usize, file_contents.items.len, 0x10) - file_contents.items.len);
     const offset = file_contents.items.len;
     try file.reader().readAllArrayList(file_contents, lib.maxInt(usize));
     const stat = try file.stat();
@@ -236,7 +236,7 @@ pub fn main() anyerror!void {
                 .rise => switch (configuration.boot_protocol) {
                     .bios => {
                         const partition_first_usable_lba = gpt_partition_cache.gpt.header.first_usable_lba;
-                        assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(loader_file.len, disk.sector_size));
+                        assert((fat_partition_cache.partition_range.first_lba - partition_first_usable_lba) * disk.sector_size > lib.alignForward(usize, loader_file.len, disk.sector_size));
                         try disk.writeSlice(u8, loader_file, partition_first_usable_lba, true);
 
                         // Build our own assembler
@@ -245,8 +245,8 @@ pub fn main() anyerror!void {
                         // const dap_offset = @offsetOf(BootDisk, "dap");
                         // _ = dap_offset;
                         // lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
-                        const aligned_file_size = lib.alignForward(loader_file.len, disk.sector_size);
-                        const text_section_guess = lib.alignBackwardGeneric(u32, @ptrCast(*align(1) const u32, &loader_file[0x18]).*, 0x1000);
+                        const aligned_file_size = lib.alignForward(usize, loader_file.len, disk.sector_size);
+                        const text_section_guess = lib.alignBackward(u32, @ptrCast(*align(1) const u32, &loader_file[0x18]).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("unexpected size");
                         const dap_top = bios.stack_top - bios.stack_size;
                         if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
