@@ -34,7 +34,6 @@ const Error = error{
 };
 
 const source_root_dir = "src";
-const entry_point_name = "entryPoint";
 const user_program_dir_path = "src/user/programs";
 
 var ci = false;
@@ -386,7 +385,6 @@ pub fn build(b_arg: *Build) !void {
                             },
                         };
 
-                        bootloader_compile_step.link_gc_sections = true;
                         bootloader_compile_step.disable_stack_probing = true;
                         bootloader_compile_step.stack_protector = false;
                         bootloader_compile_step.red_zone = false;
@@ -642,6 +640,10 @@ fn addCompileStep(executable_descriptor: ExecutableDescriptor) !*CompileStep {
     compile_step.compress_debug_sections = .zlib;
     compile_step.link_gc_sections = true;
 
+    if (executable_descriptor.target.getOs().tag == .freestanding) {
+        compile_step.entry_symbol_name = "_start";
+    }
+
     compile_step.setMainPkgPath(source_root_dir);
 
     for (executable_descriptor.modules) |module| {
@@ -710,10 +712,7 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
 
                 enabled_features.addFeature(@enumToInt(Feature.soft_float));
             },
-            else => |arch| {
-                std.log.debug("Arch: {s}", .{@tagName(arch)});
-                return Error.architecture_not_supported;
-            },
+            else => return Error.architecture_not_supported,
         }
     }
 
