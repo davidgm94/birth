@@ -29,7 +29,7 @@ pub const TaskPriorityRegister = packed struct(u32) {
     reserved: u24 = 0,
 
     pub inline fn write(tpr: TaskPriorityRegister) void {
-        APIC.write(.tpr, @bitCast(u32, tpr));
+        APIC.write(.tpr, @as(u32, @bitCast(tpr)));
     }
 };
 
@@ -49,7 +49,7 @@ pub const LVTTimer = packed struct(u32) {
     };
 
     pub inline fn write(timer: LVTTimer) void {
-        APIC.write(.lvt_timer, @bitCast(u32, timer));
+        APIC.write(.lvt_timer, @as(u32, @bitCast(timer)));
     }
 };
 
@@ -74,7 +74,7 @@ const DivideConfigurationRegister = packed struct(u32) {
     }
 
     inline fn write(dcr: DivideConfigurationRegister) void {
-        APIC.write(.timer_div, @bitCast(u32, dcr));
+        APIC.write(.timer_div, @as(u32, @bitCast(dcr)));
     }
 };
 
@@ -90,7 +90,7 @@ pub inline fn access(register: Register) *volatile u32 {
         else => @compileError("Architecture not supported"),
     };
 
-    return virtual_address.offset(@enumToInt(register)).access(*volatile u32);
+    return virtual_address.offset(@intFromEnum(register)).access(*volatile u32);
 }
 
 pub inline fn read(register: Register) u32 {
@@ -139,7 +139,7 @@ pub fn calibrateTimer() privileged.arch.x86_64.TicksPerMS {
 
     const ticks_per_ms = (maxInt(u32) - read(.timer_current_count)) >> 4;
     const timer_calibration_end = lib.arch.x86_64.readTimestamp();
-    const timestamp_ticks_per_ms = @intCast(u32, (timer_calibration_end - timer_calibration_start) >> 3);
+    const timestamp_ticks_per_ms = @as(u32, @intCast((timer_calibration_end - timer_calibration_start) >> 3));
 
     return .{
         .tsc = timestamp_ticks_per_ms,

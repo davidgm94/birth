@@ -9,7 +9,6 @@ const VirtualAddress = lib.VirtualAddress;
 const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 const PhysicalAddressSpace = lib.PhysicalAddressSpace;
-const VirtualAddressSpace = lib.VirtualAddressSpace;
 
 pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,
@@ -37,7 +36,7 @@ pub const cr3 = packed struct(u64) {
         };
 
         return .{
-            .address = @intCast(PackedAddressType, physical_address.value() >> @bitOffsetOf(cr3, "address")),
+            .address = @as(PackedAddressType, @intCast(physical_address.value() >> @bitOffsetOf(cr3, "address"))),
         };
     }
 
@@ -55,8 +54,8 @@ pub const cr3 = packed struct(u64) {
     }
 
     pub inline fn equal(self: cr3, other: cr3) bool {
-        const self_int = @bitCast(usize, self);
-        const other_int = @bitCast(usize, other);
+        const self_int = @as(usize, @bitCast(self));
+        const other_int = @as(usize, @bitCast(other));
         return self_int == other_int;
     }
 
@@ -191,8 +190,8 @@ pub fn SimpleMSR(comptime msr: u32) type {
         }
 
         pub inline fn write(value: u64) void {
-            const low = @truncate(u32, value);
-            const high = @truncate(u32, value >> 32);
+            const low = @as(u32, @truncate(value));
+            const high = @as(u32, @truncate(value >> 32));
 
             asm volatile ("wrmsr"
                 :
@@ -221,11 +220,11 @@ pub const IA32_PAT = extern struct {
     const MSR = SimpleMSR(0x277);
 
     pub fn read() IA32_PAT {
-        return @bitCast(IA32_PAT, MSR.read());
+        return @as(IA32_PAT, @bitCast(MSR.read()));
     }
 
     pub fn write(pat: IA32_PAT) void {
-        MSR.write(@bitCast(u64, pat));
+        MSR.write(@as(u64, @bitCast(pat)));
     }
 };
 
@@ -254,12 +253,12 @@ pub const IA32_EFER = packed struct(u64) {
 
     pub fn read() IA32_EFER {
         const result = MSR.read();
-        const typed_result = @bitCast(IA32_EFER, result);
+        const typed_result = @as(IA32_EFER, @bitCast(result));
         return typed_result;
     }
 
     pub fn write(typed_value: IA32_EFER) void {
-        const value = @bitCast(u64, typed_value);
+        const value = @as(u64, @bitCast(typed_value));
         MSR.write(value);
     }
 };
@@ -273,12 +272,12 @@ pub const IA32_STAR = packed struct(u64) {
 
     pub fn read() @This() {
         const result = MSR.read();
-        const typed_result = @bitCast(@This(), result);
+        const typed_result = @as(@This(), @bitCast(result));
         return typed_result;
     }
 
     pub fn write(typed_value: @This()) void {
-        const value = @bitCast(u64, typed_value);
+        const value = @as(u64, @bitCast(typed_value));
         MSR.write(value);
     }
 };
@@ -296,12 +295,12 @@ pub const IA32_APIC_BASE = packed struct(u64) {
 
     pub inline fn read() IA32_APIC_BASE {
         const result = MSR.read();
-        const typed_result = @bitCast(IA32_APIC_BASE, result);
+        const typed_result = @as(IA32_APIC_BASE, @bitCast(result));
         return typed_result;
     }
 
     pub inline fn write(typed_value: IA32_APIC_BASE) void {
-        const value = @bitCast(u64, typed_value);
+        const value = @as(u64, @bitCast(typed_value));
         MSR.write(value);
     }
 
@@ -337,14 +336,14 @@ pub const XCR0 = packed struct(u64) {
             : [ecx] "i" (@as(u32, 0)),
         );
 
-        const xcr0 = @bitCast(XCR0, @as(u64, edx) << 32 | eax);
+        const xcr0 = @as(XCR0, @bitCast(@as(u64, edx) << 32 | eax));
         return xcr0;
     }
 
     pub inline fn write(xcr0: XCR0) void {
-        const bitcasted_xcr0 = @bitCast(u64, xcr0);
-        const eax = @truncate(u32, bitcasted_xcr0);
-        const edx = @truncate(u32, bitcasted_xcr0 >> 32);
+        const bitcasted_xcr0 = @as(u64, @bitCast(xcr0));
+        const eax = @as(u32, @truncate(bitcasted_xcr0));
+        const edx = @as(u32, @truncate(bitcasted_xcr0 >> 32));
 
         asm volatile (
             \\xsetbv

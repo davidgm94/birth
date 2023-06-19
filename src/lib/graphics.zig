@@ -41,7 +41,7 @@ pub const Framebuffer = struct {
     }
 
     pub fn get_pointer(framebuffer: Framebuffer) [*]u32 {
-        return @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes));
+        return @as([*]u32, @ptrCast(@alignCast(@alignOf(u32), framebuffer.area.bytes)));
     }
 
     pub fn resize(framebuffer: *Framebuffer, allocator: lib.CustomAllocator, width: u32, height: u32) bool {
@@ -57,7 +57,7 @@ pub const Framebuffer = struct {
         // TODO: stop hardcoding the 4
         const new_buffer_memory = allocator.allocate_bytes(width * height * 4, 0x1000) catch unreachable;
         framebuffer.area = DrawingArea{
-            .bytes = @intToPtr([*]u8, new_buffer_memory.address),
+            .bytes = @as([*]u8, @ptrFromInt(new_buffer_memory.address)),
             .width = width,
             .height = height,
             .stride = width * 4,
@@ -72,7 +72,7 @@ pub const Framebuffer = struct {
     pub fn fill(framebuffer: *Framebuffer, color: u32) void {
         assert(@divExact(framebuffer.area.stride, framebuffer.area.width) == @sizeOf(u32));
 
-        for (@ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes))[0..framebuffer.get_pixel_count()]) |*pixel| {
+        for (@as([*]u32, @ptrCast(@alignCast(@alignOf(u32), framebuffer.area.bytes)))[0..framebuffer.get_pixel_count()]) |*pixel| {
             pixel.* = color;
         }
     }
@@ -86,7 +86,7 @@ pub const Framebuffer = struct {
             framebuffer.update_modified_region(destination_region);
         }
 
-        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * Rectangle.top(source_region) + 4 * Rectangle.left(source_region)));
+        const source_ptr = @as([*]u32, @ptrCast(@alignCast(@alignOf(u32), source.area.bytes + source.area.stride * Rectangle.top(source_region) + 4 * Rectangle.left(source_region))));
         framebuffer.draw_bitmap(surface_clip, destination_region, source_ptr, source.area.stride, .opaque_mode);
     }
 
@@ -98,7 +98,7 @@ pub const Framebuffer = struct {
     pub fn draw(framebuffer: *Framebuffer, source: *Framebuffer, destination_region: Rect, source_offset: Point, alpha: DrawBitmapMode) void {
         const surface_clip = Rectangle.from_area(framebuffer.area);
         framebuffer.update_modified_region(destination_region);
-        const source_ptr = @ptrCast([*]u32, @alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_offset.y + 4 * source_offset.x));
+        const source_ptr = @as([*]u32, @ptrCast(@alignCast(@alignOf(u32), source.area.bytes + source.area.stride * source_offset.y + 4 * source_offset.x)));
         framebuffer.draw_bitmap(surface_clip, destination_region, source_ptr, source.area.stride, alpha);
     }
 
@@ -109,7 +109,7 @@ pub const Framebuffer = struct {
             const source_stride = asked_source_stride / @sizeOf(u32);
             const stride = framebuffer.area.stride / @sizeOf(u32);
             const line_start_index = Rectangle.top(bounds) * stride + Rectangle.left(bounds);
-            var line_start = @ptrCast([*]u32, @alignCast(@alignOf(u32), framebuffer.area.bytes)) + line_start_index;
+            var line_start = @as([*]u32, @ptrCast(@alignCast(@alignOf(u32), framebuffer.area.bytes))) + line_start_index;
             const source_line_start_index = Rectangle.left(bounds) - Rectangle.left(region) + source_stride * (Rectangle.top(bounds) - Rectangle.top(region));
             var source_line_start = source_ptr + source_line_start_index;
 
@@ -126,7 +126,7 @@ pub const Framebuffer = struct {
                 var source = source_line_start;
 
                 var j = bounds_width;
-                if (@enumToInt(mode) == 0xff) {
+                if (@intFromEnum(mode) == 0xff) {
                     while (true) {
                         blend_pixel(&destination[0], source[0]);
                         destination += 1;
@@ -134,7 +134,7 @@ pub const Framebuffer = struct {
                         j -= 1;
                         if (j == 0) break;
                     }
-                } else if (@enumToInt(mode) <= 0xff) {
+                } else if (@intFromEnum(mode) <= 0xff) {
                     @panic("todo: mode <= 0xff");
                 } else if (mode == .xor) {
                     @panic("todo: mode xor");

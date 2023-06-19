@@ -49,7 +49,7 @@ pub const Disk = extern struct {
                 const size = @sizeOf(T) * count;
                 const alignment = @alignOf(T);
                 const result = try alloc.allocateBytes(size, alignment);
-                const slice = @intToPtr([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
+                const slice = @as([*]u8, @ptrFromInt(@as(usize, @intCast(result.address))))[0..@as(usize, @intCast(result.size))];
                 if (slice.len != size) @panic("WTQSAD/jasD");
                 return slice;
             }
@@ -69,7 +69,7 @@ pub const Disk = extern struct {
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("Sector count mismatch");
         // Don't need to write back since it's a memory disk
-        const result = @ptrCast(*T, @alignCast(@alignOf(T), read_result.buffer));
+        const result: *T = @ptrCast(@alignCast(read_result.buffer));
         return result;
     }
 
@@ -83,7 +83,7 @@ pub const Disk = extern struct {
         const provided_buffer = try disk.getProvidedBuffer(T, len, allocator, options.force);
         const read_result = try disk.callbacks.read(disk, sector_count, sector_offset, provided_buffer);
         if (read_result.sector_count != sector_count) @panic("read_slice: sector count mismatch");
-        const result = @ptrCast([*]T, @alignCast(@alignOf(T), read_result.buffer))[0..len];
+        const result = @as([*]T, @ptrCast(@alignCast(read_result.buffer)))[0..len];
         return result;
     }
 
@@ -111,8 +111,8 @@ pub const Disk = extern struct {
         // This is used by NVMe and AHCI, so it is needed to match these values
         comptime {
             assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-            assert(@enumToInt(Operation.read) == 0);
-            assert(@enumToInt(Operation.write) == 1);
+            assert(@intFromEnum(Operation.read) == 0);
+            assert(@intFromEnum(Operation.write) == 1);
         }
     };
 

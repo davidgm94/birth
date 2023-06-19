@@ -3,7 +3,7 @@ const lib = @import("lib");
 pub fn compute(bytes: []const u8) u32 {
     var result: u32 = lib.maxInt(u32);
     for (bytes) |byte| {
-        result = (result >> 8) ^ table[@truncate(u8, result ^ byte)];
+        result = (result >> 8) ^ table[@as(u8, @truncate(result ^ byte))];
     }
 
     result ^= lib.maxInt(u32);

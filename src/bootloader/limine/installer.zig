@@ -78,7 +78,7 @@ fn print_error_and_exit(e: InstallerError) InstallerError {
     return e;
 }
 
-const gpt_header_signature = @ptrCast(*align(1) const u64, "EFI PART").*;
+const gpt_header_signature = @as(*align(1) const u64, @ptrCast("EFI PART")).*;
 
 fn div_roundup(a: u64, b: u64) u64 {
     return (((a) + ((b) - 1)) / (b));
@@ -87,7 +87,7 @@ fn div_roundup(a: u64, b: u64) u64 {
 fn crc32(bytes: []const u8) u32 {
     var result: u32 = std.math.maxInt(u32);
     for (bytes) |byte| {
-        result = (result >> 8) ^ crc32_table[@truncate(u8, result ^ byte)];
+        result = (result >> 8) ^ crc32_table[@as(u8, @truncate(result ^ byte))];
     }
 
     result ^= std.math.maxInt(u32);
@@ -1480,7 +1480,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
     var lb_size: u64 = 0;
 
     for (lb_guesses) |guess| {
-        gpt_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), &device[guess]));
+        gpt_header = @as(*GPT.Header, @ptrCast(@alignCast(&device[guess])));
         if (gpt_header.signature == gpt_header_signature) {
             lb_size = guess;
             do_gpt = !force_mbr;
@@ -1491,7 +1491,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         }
     }
 
-    const secondary_GPT_header = @ptrCast(*GPT.Header, @alignCast(@alignOf(GPT.Header), &device[lb_size * gpt_header.alternate_LBA]));
+    const secondary_GPT_header: *GPT.Header = @ptrCast(@alignCast(&device[lb_size * gpt_header.alternate_LBA]));
     if (do_gpt) {
         //print("Installing to GPT. Logical block size of {}\nSecondary header at LBA 0x{x}\n", .{lb_size, gpt_header.alternate_LBA});
         if (secondary_GPT_header.signature != gpt_header_signature) {
@@ -1505,70 +1505,70 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         // Do MBR sanity checks
 
         {
-            const hint = @ptrCast(*u8, &device[446]);
+            const hint = @as(*u8, @ptrCast(&device[446]));
             if (hint.* != 0 and hint.* != 0x80) {
                 if (!force_mbr) mbr = false else hint.* = if (hint.* & 0x80 != 0) 0x80 else 0;
             }
         }
 
         {
-            const hint = @ptrCast(*u8, &device[462]);
+            const hint = @as(*u8, @ptrCast(&device[462]));
             if (hint.* != 0 and hint.* != 0x80) {
                 if (!force_mbr) mbr = false else hint.* = if (hint.* & 0x80 != 0) 0x80 else 0;
             }
         }
 
         {
-            const hint = @ptrCast(*u8, &device[478]);
+            const hint = @as(*u8, @ptrCast(&device[478]));
             if (hint.* != 0 and hint.* != 0x80) {
                 if (!force_mbr) mbr = false else hint.* = if (hint.* & 0x80 != 0) 0x80 else 0;
             }
         }
 
         {
-            const hint = @ptrCast(*u8, &device[494]);
+            const hint = @as(*u8, @ptrCast(&device[494]));
             if (hint.* != 0 and hint.* != 0x80) {
                 if (!force_mbr) mbr = false else hint.* = if (hint.* & 0x80 != 0) 0x80 else 0;
             }
         }
 
         {
-            const hint = @ptrCast(*[8]u8, &device[4]);
+            const hint = @as(*[8]u8, @ptrCast(&device[4]));
             if (std.mem.eql(u8, hint, "_ECH_FS_")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([8]u8);
             }
         }
 
         {
-            const hint = @ptrCast(*[4]u8, &device[3]);
+            const hint = @as(*[4]u8, @ptrCast(&device[3]));
             if (std.mem.eql(u8, hint, "NTFS")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([4]u8);
             }
         }
 
         {
-            const hint = @ptrCast(*[5]u8, &device[54]);
+            const hint = @as(*[5]u8, @ptrCast(&device[54]));
             if (std.mem.eql(u8, hint[0..3], "FAT")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
             }
         }
 
         {
-            const hint = @ptrCast(*[5]u8, &device[82]);
+            const hint = @as(*[5]u8, @ptrCast(&device[82]));
             if (std.mem.eql(u8, hint[0..3], "FAT")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
             }
         }
 
         {
-            const hint = @ptrCast(*[5]u8, &device[3]);
+            const hint = @as(*[5]u8, @ptrCast(&device[3]));
             if (std.mem.eql(u8, hint, "FAT32")) {
                 if (!force_mbr) mbr = false else hint.* = std.mem.zeroes([5]u8);
             }
         }
 
         {
-            const hint = @ptrCast(*align(1) u16, &device[1080]);
+            const hint = @as(*align(1) u16, @ptrCast(&device[1080]));
             if (hint.* == 0xef53) {
                 if (!force_mbr) mbr = false else hint.* = 0;
             }
@@ -1579,8 +1579,8 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
 
     const stage2_size = hdd.len - 512;
     const stage2_sections = div_roundup(stage2_size, 512);
-    var stage2_size_a = @intCast(u16, (stage2_sections / 2) * 512 + @as(u64, if (stage2_sections % 2 != 0) 512 else 0));
-    const stage2_size_b = @intCast(u16, (stage2_sections / 2) * 512);
+    var stage2_size_a = @as(u16, @intCast((stage2_sections / 2) * 512 + @as(u64, if (stage2_sections % 2 != 0) 512 else 0)));
+    const stage2_size_b = @as(u16, @intCast((stage2_sections / 2) * 512));
 
     var stage2_loc_a: u64 = 512;
     var stage2_loc_b = stage2_loc_a + stage2_size_a;
@@ -1591,14 +1591,14 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         } else {
             const partition_entry_count = gpt_header.partition_entry_count;
             if (partition_entry_count == 0) return error.TODO;
-            const partition_entry_base_address = @ptrToInt(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
+            const partition_entry_base_address = @intFromPtr(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
             var partition_entry_address = partition_entry_base_address;
 
             var max_partition_entry_used: u64 = 0;
 
             var partition_entry_i: u64 = 0;
             while (partition_entry_i < partition_entry_count) : (partition_entry_i += 1) {
-                const partition_entry = @intToPtr(*GPT.Entry, partition_entry_address);
+                const partition_entry = @as(*GPT.Entry, @ptrFromInt(partition_entry_address));
                 defer partition_entry_address += gpt_header.partition_entry_size;
 
                 if (partition_entry.unique_partition_guid0 != 0 or partition_entry.unique_partition_guid1 != 0) {
@@ -1635,13 +1635,13 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
             assert(gpt_header.partition_entry_count * @sizeOf(GPT.Entry) == gpt_header.partition_entry_count * gpt_header.partition_entry_size);
             assert(secondary_GPT_header.partition_entry_count * @sizeOf(GPT.Entry) == secondary_GPT_header.partition_entry_count * secondary_GPT_header.partition_entry_size);
 
-            gpt_header.partition_entry_array_CRC32 = crc32(@intToPtr([*]u8, partition_entry_base_address)[0 .. new_partition_entry_count * gpt_header.partition_entry_size]);
-            gpt_header.partition_entry_count = @intCast(u32, new_partition_entry_count);
+            gpt_header.partition_entry_array_CRC32 = crc32(@as([*]u8, @ptrFromInt(partition_entry_base_address))[0 .. new_partition_entry_count * gpt_header.partition_entry_size]);
+            gpt_header.partition_entry_count = @as(u32, @intCast(new_partition_entry_count));
             gpt_header.CRC32 = 0;
             gpt_header.CRC32 = crc32(std.mem.asBytes(gpt_header));
 
             secondary_GPT_header.partition_entry_array_CRC32 = gpt_header.partition_entry_array_CRC32;
-            secondary_GPT_header.partition_entry_count = @intCast(u32, new_partition_entry_count);
+            secondary_GPT_header.partition_entry_count = @as(u32, @intCast(new_partition_entry_count));
             secondary_GPT_header.CRC32 = 0;
             secondary_GPT_header.CRC32 = crc32(std.mem.asBytes(secondary_GPT_header));
         }
@@ -1649,8 +1649,8 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         //stdout_write("Installing to MBR\n");
     }
 
-    const original_timestamp = @ptrCast(*[6]u8, &device[218]).*;
-    const original_partition_table = @ptrCast(*[70]u8, &device[440]).*;
+    const original_timestamp = @as(*[6]u8, @ptrCast(&device[218])).*;
+    const original_partition_table = @as(*[70]u8, @ptrCast(&device[440])).*;
     @memcpy(device[0..512], hdd[0..512]);
 
     {
@@ -1666,11 +1666,11 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         @memcpy(dst, src);
     }
 
-    @ptrCast(*align(1) u16, &device[0x1a4 + 0]).* = stage2_size_a;
-    @ptrCast(*align(1) u16, &device[0x1a4 + 2]).* = stage2_size_b;
-    @ptrCast(*align(1) u64, &device[0x1a4 + 4]).* = stage2_loc_a;
-    @ptrCast(*align(1) u64, &device[0x1a4 + 12]).* = stage2_loc_b;
+    @as(*align(1) u16, @ptrCast(&device[0x1a4 + 0])).* = stage2_size_a;
+    @as(*align(1) u16, @ptrCast(&device[0x1a4 + 2])).* = stage2_size_b;
+    @as(*align(1) u64, @ptrCast(&device[0x1a4 + 4])).* = stage2_loc_a;
+    @as(*align(1) u64, @ptrCast(&device[0x1a4 + 12])).* = stage2_loc_b;
 
-    @ptrCast(*[6]u8, &device[218]).* = original_timestamp;
-    @ptrCast(*[70]u8, &device[440]).* = original_partition_table;
+    @as(*[6]u8, @ptrCast(&device[218])).* = original_timestamp;
+    @as(*[70]u8, @ptrCast(&device[440])).* = original_partition_table;
 }

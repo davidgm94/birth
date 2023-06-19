@@ -64,12 +64,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch {};
     writer.writeAll("\r\n") catch {};
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        asm volatile ("cli\nhlt");
-        unreachable;
-    }
+    privileged.shutdown(.failure);
 }
 
 const Filesystem = extern struct {
@@ -107,8 +102,8 @@ const Filesystem = extern struct {
         var file_info_size = file_info_buffer.len;
         try uefi.Try(file.handle.getInfo(&uefi.FileInfo.guid, &file_info_size, &file_info_buffer));
         if (file_info_buffer.len < file_info_size) @panic("getFileSize");
-        const file_info = @ptrCast(*uefi.FileInfo, &file_info_buffer);
-        return @intCast(u32, file_info.file_size);
+        const file_info = @as(*uefi.FileInfo, @ptrCast(&file_info_buffer));
+        return @as(u32, @intCast(file_info.file_size));
     }
 
     fn openFile(filesystem: *Filesystem, file_path: []const u8) !FileDescriptor {
@@ -131,7 +126,7 @@ const Filesystem = extern struct {
 
         const result = FileDescriptor{
             .handle = file,
-            .path_size = @intCast(u32, path.len * @sizeOf(u16)),
+            .path_size = @as(u32, @intCast(path.len * @sizeOf(u16))),
         };
 
         log.debug("opened file: {s}", .{file_path});
@@ -162,7 +157,7 @@ const MemoryMap = extern struct {
 
     pub fn next(memory_map: *MemoryMap) !?bootloader.MemoryMapEntry {
         if (memory_map.offset < memory_map.size) {
-            const entry = @ptrCast(*MemoryDescriptor, @alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[memory_map.offset..].ptr)).*;
+            const entry = @as(*MemoryDescriptor, @ptrCast(@alignCast(@alignOf(MemoryDescriptor), memory_map.buffer[memory_map.offset..].ptr))).*;
             memory_map.offset += memory_map.descriptor_size;
             const result = bootloader.MemoryMapEntry{
                 .region = PhysicalMemoryRegion.new(.{
@@ -214,14 +209,14 @@ const Initialization = struct {
     memory_map: MemoryMap,
 
     pub fn getRSDPAddress(init: *Initialization) u32 {
-        return @intCast(u32, @ptrToInt(init.architecture.rsdp));
+        return @as(u32, @intCast(@intFromPtr(init.architecture.rsdp)));
     }
 
     pub fn getCPUCount(init: *Initialization) !u32 {
         return switch (lib.cpu.arch) {
             .x86_64 => blk: {
                 const madt_header = try init.architecture.rsdp.findTable(.APIC);
-                const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
+                const madt = @as(*align(1) const ACPI.MADT, @ptrCast(madt_header));
                 break :blk madt.getCPUCount();
             },
             else => @compileError("Architecture not supported"),
@@ -300,7 +295,7 @@ const Initialization = struct {
                 .x86_64 => .{
                     .rsdp = for (system_table.configuration_table[0..system_table.number_of_table_entries]) |configuration_table| {
                         if (configuration_table.vendor_guid.eql(ConfigurationTable.acpi_20_table_guid)) {
-                            break @ptrCast(*ACPI.RSDP.Descriptor1, @alignCast(@alignOf(ACPI.RSDP.Descriptor1), configuration_table.vendor_table));
+                            break @as(*ACPI.RSDP.Descriptor1, @ptrCast(@alignCast(@alignOf(ACPI.RSDP.Descriptor1), configuration_table.vendor_table)));
                         }
                     } else return Error.rsdp_not_found,
                 },
@@ -309,8 +304,8 @@ const Initialization = struct {
         };
 
         log.debug("Memory map size: {}", .{init.memory_map.size});
-        _ = boot_services.getMemoryMap(&init.memory_map.size, @ptrCast([*]MemoryDescriptor, &init.memory_map.buffer), &init.memory_map.key, &init.memory_map.descriptor_size, &init.memory_map.descriptor_version);
-        init.memory_map.entry_count = @intCast(u32, @divExact(init.memory_map.size, init.memory_map.descriptor_size));
+        _ = boot_services.getMemoryMap(&init.memory_map.size, @as([*]MemoryDescriptor, @ptrCast(&init.memory_map.buffer)), &init.memory_map.key, &init.memory_map.descriptor_size, &init.memory_map.descriptor_version);
+        init.memory_map.entry_count = @as(u32, @intCast(@divExact(init.memory_map.size, init.memory_map.descriptor_size)));
         assert(init.memory_map.entry_count > 0);
 
         init.filesystem_initialized = true;
@@ -329,7 +324,7 @@ const Initialization = struct {
             log.debug("Getting memory map before exiting boot services...", .{});
 
             blk: while (init.memory_map.size < MemoryMap.buffer_len) : (init.memory_map.size += init.memory_map.descriptor_size) {
-                uefi.Try(init.boot_services.getMemoryMap(&init.memory_map.size, @ptrCast([*]MemoryDescriptor, &init.memory_map.buffer), &init.memory_map.key, &init.memory_map.descriptor_size, &init.memory_map.descriptor_version)) catch continue;
+                uefi.Try(init.boot_services.getMemoryMap(&init.memory_map.size, @as([*]MemoryDescriptor, @ptrCast(&init.memory_map.buffer)), &init.memory_map.key, &init.memory_map.descriptor_size, &init.memory_map.descriptor_version)) catch continue;
                 init.exited_boot_services = true;
                 break :blk;
             } else {
@@ -347,7 +342,7 @@ const Initialization = struct {
             }
             const real_memory_map_entry_count = @divExact(init.memory_map.size, init.memory_map.descriptor_size);
             const expected_memory_map_entry_count = @divExact(expected_memory_map_size, expected_memory_map_descriptor_size);
-            const diff = @intCast(i16, expected_memory_map_entry_count) - @intCast(i16, real_memory_map_entry_count);
+            const diff = @as(i16, @intCast(expected_memory_map_entry_count)) - @as(i16, @intCast(real_memory_map_entry_count));
             if (diff < 0) {
                 @panic("Memory map entry count diff < 0");
             }
@@ -369,7 +364,7 @@ const Initialization = struct {
         // Actually mapping the whole uefi executable so we don't have random problems with code being dereferenced by the trampoline
         switch (lib.cpu.arch) {
             .x86_64 => {
-                const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
+                const trampoline_code_start = @intFromPtr(&bootloader.arch.x86_64.jumpToKernel);
 
                 try init.deinitializeMemoryMap();
                 while (try init.memory_map.next()) |entry| {

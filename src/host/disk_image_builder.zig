@@ -126,7 +126,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
     const fat_partition_mbr = try disk.readTypedSectors(MBR.Partition, fat_partition_mbr_lba, null, .{});
 
     const sectors_per_track = 32;
-    const total_sector_count_32 = @intCast(u32, lib.alignBackward(u64, partition_range.last_lba - partition_range.first_lba, sectors_per_track));
+    const total_sector_count_32 = @as(u32, @intCast(lib.alignBackward(u64, partition_range.last_lba - partition_range.first_lba, sectors_per_track)));
     const fat_count = FAT32.count;
 
     var cluster_size: u8 = 1;
@@ -180,7 +180,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
                 },
                 .physical_sectors_per_track = sectors_per_track,
                 .disk_head_count = 8,
-                .hidden_sector_count = @intCast(u32, partition_range.first_lba),
+                .hidden_sector_count = @as(u32, @intCast(partition_range.first_lba)),
                 .total_sector_count_32 = total_sector_count_32,
             },
             .fat_sector_count_32 = fat_length_32,
@@ -191,7 +191,7 @@ pub fn format(disk: *Disk, partition_range: Disk.PartitionRange, copy_mbr: ?*con
             .backup_boot_record_sector = FAT32.default_backup_boot_record_sector,
             .drive_number = 0x80,
             .extended_boot_signature = 0x29,
-            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(u32, @intCast(u64, host.time.microTimestamp())),
+            .serial_number = if (copy_mbr) |copy_partition_mbr| copy_partition_mbr.bpb.serial_number else @truncate(@as(u64, @intCast(host.time.microTimestamp()))),
             .volume_label = "NO NAME    ".*,
             .filesystem_type = "FAT32   ".*,
         },

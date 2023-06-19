@@ -118,7 +118,8 @@ pub fn main() anyerror!void {
             const qemu_options = arguments_result.qemu_options;
 
             const config_file = try host.cwd().readFileAlloc(wrapped_allocator.zigUnwrap(), "config/qemu.json", max_file_length);
-            const arguments = try lib.json.parseFromSlice(Arguments, wrapped_allocator.zigUnwrap(), config_file, .{});
+            const parsed_arguments = try lib.json.parseFromSlice(Arguments, wrapped_allocator.zigUnwrap(), config_file, .{});
+            const arguments = parsed_arguments.value;
 
             var argument_list = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
 
@@ -239,11 +240,13 @@ pub fn main() anyerror!void {
                     try argument_list.append("-S");
                 }
 
+                // GF2, when not found in the PATH, can give problems
                 const use_gf = switch (lib.os) {
                     .macos => false,
-                    .linux => true,
+                    .linux => false,
                     else => false,
                 };
+
                 var command_line_gdb = host.ArrayList([]const u8).init(wrapped_allocator.zigUnwrap());
                 if (use_gf) {
                     try command_line_gdb.append("gf2");
@@ -284,7 +287,7 @@ pub fn main() anyerror!void {
                 };
 
                 var debugger_process = host.ChildProcess.init(debugger_process_arguments, wrapped_allocator.zigUnwrap());
-                _ = try debugger_process.spawn();
+                try debugger_process.spawn();
             }
 
             var process = host.ChildProcess.init(argument_list.items, wrapped_allocator.zigUnwrap());
@@ -297,11 +300,11 @@ pub fn main() anyerror!void {
                     const masked_exit_code = exit_code & mask;
 
                     if (masked_exit_code != 0) {
-                        const qemu_exit_code = @intToEnum(lib.QEMU.ExitCode, masked_exit_code >> 1);
+                        const qemu_exit_code = @as(lib.QEMU.ExitCode, @enumFromInt(masked_exit_code >> 1));
 
                         switch (qemu_exit_code) {
                             .success => return log.info("Success!", .{}),
-                            .failure => log.err("QEMU exited with failure code", .{}),
+                            .failure => log.err("QEMU exited with failure code 0x{x}", .{exit_code}),
                             _ => log.err("Totally unexpected value", .{}),
                         }
                     } else log.err("QEMU exited with unexpected code: {}. Masked: {}", .{ exit_code, masked_exit_code });

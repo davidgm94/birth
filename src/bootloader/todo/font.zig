@@ -5,15 +5,15 @@ pub const Font = extern struct {
     draw: *const fn (font: *const Font, framebuffer: *const Framebuffer, character: u8, color: u32, offset_x: u32, offset_y: u32) void,
 
     pub fn fromPSF1(file: []const u8) !Font {
-        const header = @ptrCast(*const lib.PSF1.Header, file.ptr);
+        const header = @as(*const lib.PSF1.Header, @ptrCast(file.ptr));
         if (!lib.equal(u8, &header.magic, &lib.PSF1.Header.magic)) {
             return lib.PSF1.Error.invalid_magic;
         }
 
-        const glyph_buffer_size = @as(u32, header.character_size) * (lib.maxInt(u8) + 1) * (1 + @boolToInt(header.mode == 1));
+        const glyph_buffer_size = @as(u32, header.character_size) * (lib.maxInt(u8) + 1) * (1 + @intFromBool(header.mode == 1));
 
         return .{
-            .file = PhysicalMemoryRegion.new(PhysicalAddress.new(@ptrToInt(file.ptr)), file.len),
+            .file = PhysicalMemoryRegion.new(PhysicalAddress.new(@intFromPtr(file.ptr)), file.len),
             .glyph_buffer_size = glyph_buffer_size,
             .character_size = header.character_size,
             .draw = drawPSF1,
@@ -31,7 +31,7 @@ pub const Font = extern struct {
         _ = glyph_index;
 
         const pixels_per_scanline = @divExact(framebuffer.pitch, @divExact(framebuffer.bpp, @bitSizeOf(u8)));
-        const fb = @intToPtr([*]u32, framebuffer.address)[0 .. pixels_per_scanline * framebuffer.height];
+        const fb = @as([*]u32, @ptrFromInt(framebuffer.address))[0 .. pixels_per_scanline * framebuffer.height];
         var y = offset_y;
 
         for (glyph) |byte| {

@@ -244,7 +244,7 @@ pub const BootDisk = extern struct {
             // }
             // lib.print("\n", .{});
             @memcpy(assembler.boot_disk.code[assembler.code_index .. assembler.code_index + instruction_bytes.len], instruction_bytes);
-            assembler.code_index += @intCast(u8, instruction_bytes.len);
+            assembler.code_index += @as(u8, @intCast(instruction_bytes.len));
         }
 
         pub fn add_instruction_with_label(assembler: *Assembler, instruction_bytes: []const u8, label: Label) !void {
@@ -336,16 +336,16 @@ pub const BootDisk = extern struct {
                             switch (patch_descriptor.label_type) {
                                 .absolute => {
                                     assert(patch_descriptor.label_size == @sizeOf(u16));
-                                    @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = bios.mbr_offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
+                                    @as(*align(1) u16, @ptrCast(&assembler.boot_disk.code[index])).* = bios.mbr_offset + @offsetOf(BootDisk, "code") + label_descriptor.offset;
                                 },
                                 .relative => {
                                     assert(patch_descriptor.label_size == @sizeOf(u8));
                                     assert(patch_descriptor.label_section == .code);
                                     const computed_after_instruction_offset = patch_descriptor.instruction_starting_offset + patch_descriptor.instruction_len;
-                                    const operand_a = @intCast(isize, label_descriptor.offset);
-                                    const operand_b = @intCast(isize, computed_after_instruction_offset);
-                                    const diff = @bitCast(u8, @intCast(i8, operand_a - operand_b));
-                                    @ptrCast(*align(1) u8, &assembler.boot_disk.code[index]).* = diff;
+                                    const operand_a = @as(isize, @intCast(label_descriptor.offset));
+                                    const operand_b = @as(isize, @intCast(computed_after_instruction_offset));
+                                    const diff = @as(u8, @bitCast(@as(i8, @intCast(operand_a - operand_b))));
+                                    @as(*align(1) u8, @ptrCast(&assembler.boot_disk.code[index])).* = diff;
                                 },
                             }
 
@@ -374,7 +374,7 @@ pub const BootDisk = extern struct {
                                     else => @panic("unreachable tag"),
                                 });
                                 // log.debug("Ptr patched: 0x{x}", .{ptr});
-                                @ptrCast(*align(1) u16, &assembler.boot_disk.code[index]).* = ptr;
+                                @as(*align(1) u16, @ptrCast(&assembler.boot_disk.code[index])).* = ptr;
                             },
                             .relative => @panic("unreachable relative"),
                         }

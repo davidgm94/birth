@@ -12,7 +12,7 @@ pub const RegisterArena = extern struct {
     registers: rise.arch.Registers,
 
     pub fn contextSwitch(register_arena: *align(lib.arch.stack_alignment) const RegisterArena) noreturn {
-        assert(lib.isAligned(@ptrToInt(register_arena), lib.arch.stack_alignment));
+        assert(lib.isAligned(@intFromPtr(register_arena), lib.arch.stack_alignment));
         //lib.log.debug("ASDASD: {}", .{register_arena});
         register_arena.fpu.load();
         register_arena.registers.restore();
@@ -116,7 +116,7 @@ pub const FPU = extern struct {
     reserved2: [12]u64 = .{0} ** 12,
 
     pub inline fn load(fpu: *align(lib.arch.stack_alignment) const FPU) void {
-        assert(@ptrToInt(fpu) % lib.arch.stack_alignment == 0);
+        assert(@intFromPtr(fpu) % lib.arch.stack_alignment == 0);
         asm volatile (
             \\fxrstor %[fpu]
             :

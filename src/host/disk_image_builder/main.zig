@@ -51,9 +51,9 @@ fn addFileToBundle(file: host.fs.File, file_list: *host.ArrayList(u8), name: []c
     const offset = file_contents.items.len;
     try file.reader().readAllArrayList(file_contents, lib.maxInt(usize));
     const stat = try file.stat();
-    try file_list.writer().writeIntLittle(u32, @intCast(u32, offset));
-    try file_list.writer().writeIntLittle(u32, @intCast(u32, stat.size));
-    try file_list.writer().writeIntLittle(u8, @intCast(u8, name.len));
+    try file_list.writer().writeIntLittle(u32, @as(u32, @intCast(offset)));
+    try file_list.writer().writeIntLittle(u32, @as(u32, @intCast(stat.size)));
+    try file_list.writer().writeIntLittle(u8, @as(u8, @intCast(name.len)));
     try file_list.appendSlice(name);
 }
 
@@ -76,7 +76,7 @@ pub fn main() anyerror!void {
 
         while (argument_parser.next()) |argument_type| switch (argument_type) {
             .disk_image_path => {
-                assert(@enumToInt(argument_type) == 0);
+                assert(@intFromEnum(argument_type) == 0);
                 argument_disk_image_path = arguments[argument_index];
                 argument_index += 1;
             },
@@ -149,7 +149,7 @@ pub fn main() anyerror!void {
             // Compressed bundle size
             try bundle_file_list.writer().writeIntLittle(u32, 0);
             // (cpu + programs + font) Bundle file count
-            try bundle_file_list.writer().writeIntLittle(u32, @intCast(u32, 1 + arguments_result.user_programs.len + 1));
+            try bundle_file_list.writer().writeIntLittle(u32, @as(u32, @intCast(1 + arguments_result.user_programs.len + 1)));
 
             const cpu_path = arguments_result.cpu;
             const cpu_file = try host.fs.openFileAbsolute(cpu_path, .{});
@@ -171,9 +171,9 @@ pub fn main() anyerror!void {
             try compressor.close();
 
             // Wait until here because reallocations can happen in the ArrayList
-            const bundle_sizes = @ptrCast(*align(1) [2]u32, &bundle_file_list.items[0]);
-            bundle_sizes[0] = @intCast(u32, uncompressed.items.len);
-            bundle_sizes[1] = @intCast(u32, compressed.items.len);
+            const bundle_sizes = @as(*align(1) [2]u32, @ptrCast(&bundle_file_list.items[0]));
+            bundle_sizes[0] = @as(u32, @intCast(uncompressed.items.len));
+            bundle_sizes[1] = @as(u32, @intCast(compressed.items.len));
 
             // {
             //     var stream = lib.fixedBufferStream(compressed.items);
@@ -220,15 +220,15 @@ pub fn main() anyerror!void {
                         break :blk limine_cfg_generator.buffer.items;
                     };
 
-                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    try fat_partition_cache.makeNewFile("/limine.cfg", limine_cfg, wrapped_allocator.unwrap(), null, @as(u64, @intCast(host.time.milliTimestamp())));
                     const limine_sys = try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "limine.sys", max_file_length);
-                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                    try fat_partition_cache.makeNewFile("/limine.sys", limine_sys, wrapped_allocator.unwrap(), null, @as(u64, @intCast(host.time.milliTimestamp())));
 
                     switch (configuration.architecture) {
                         .x86_64 => {
-                            try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
-                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @intCast(u64, host.time.milliTimestamp()));
+                            try fat_partition_cache.makeNewDirectory("/EFI", wrapped_allocator.unwrap(), null, @as(u64, @intCast(host.time.milliTimestamp())));
+                            try fat_partition_cache.makeNewDirectory("/EFI/BOOT", wrapped_allocator.unwrap(), null, @as(u64, @intCast(host.time.milliTimestamp())));
+                            try fat_partition_cache.makeNewFile("/EFI/BOOT/BOOTX64.EFI", try limine_installable_dir.readFileAlloc(wrapped_allocator.zigUnwrap(), "BOOTX64.EFI", max_file_length), wrapped_allocator.unwrap(), null, @as(u64, @intCast(host.time.milliTimestamp())));
                         },
                         else => unreachable,
                     }
@@ -246,13 +246,13 @@ pub fn main() anyerror!void {
                         // _ = dap_offset;
                         // lib.log.debug("DAP offset: 0x{x}", .{dap_offset});
                         const aligned_file_size = lib.alignForward(usize, loader_file.len, disk.sector_size);
-                        const text_section_guess = lib.alignBackward(u32, @ptrCast(*align(1) const u32, &loader_file[0x18]).*, 0x1000);
+                        const text_section_guess = lib.alignBackward(u32, @as(*align(1) const u32, @ptrCast(&loader_file[0x18])).*, 0x1000);
                         if (lib.maxInt(u32) - text_section_guess < aligned_file_size) @panic("unexpected size");
                         const dap_top = bios.stack_top - bios.stack_size;
                         if (aligned_file_size > dap_top) host.panic("File size: 0x{x} bytes", .{aligned_file_size});
                         // log.debug("DAP top: 0x{x}. Aligned file size: 0x{x}", .{ dap_top, aligned_file_size });
                         const dap = MBR.DAP{
-                            .sector_count = @intCast(u16, @divExact(aligned_file_size, disk.sector_size)),
+                            .sector_count = @as(u16, @intCast(@divExact(aligned_file_size, disk.sector_size))),
                             .offset = dap_file_read,
                             .segment = 0x0,
                             .lba = partition_first_usable_lba,

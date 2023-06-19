@@ -23,10 +23,10 @@ const heap = std.heap;
 pub const ArenaAllocator = heap.ArenaAllocator;
 pub const page_allocator = heap.page_allocator;
 
-pub const time = std.time;
-
 pub const ArrayList = std.ArrayList;
 pub const ArrayListAligned = std.ArrayListAligned;
+
+pub const time = std.time;
 
 // Build imports
 pub const build = std.build;
@@ -35,7 +35,7 @@ pub fn allocateZeroMemory(bytes: u64) ![]align(0x1000) u8 {
     switch (lib.os) {
         .windows => {
             const windows = std.os.windows;
-            return @ptrCast([*]align(0x1000) u8, @alignCast(0x1000, try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE)))[0..bytes];
+            return @as([*]align(0x1000) u8, @ptrCast(@alignCast(try windows.VirtualAlloc(null, bytes, windows.MEM_RESERVE | windows.MEM_COMMIT, windows.PAGE_READWRITE))))[0..bytes];
         },
         // Assume all systems are POSIX
         else => {

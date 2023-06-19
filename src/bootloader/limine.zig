@@ -42,7 +42,7 @@ pub const File = extern struct {
     }
 
     pub inline fn getContent(file: *const File) []const u8 {
-        const content = @intToPtr([*]const u8, file.address)[0..file.size];
+        const content = @as([*]const u8, @ptrFromInt(file.address))[0..file.size];
         return content;
     }
 };

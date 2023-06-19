@@ -132,8 +132,9 @@ pub fn EnumIndexer(comptime E: type) type {
     }
 
     const const_fields = lib.fields(E);
-    var fields = const_fields[0..const_fields.len].*;
-    if (fields.len == 0) {
+    comptime var fields = const_fields[0..const_fields.len].*;
+    const fields_len = fields.len;
+    if (fields_len == 0) {
         return extern struct {
             pub const Key = E;
             pub const count: usize = 0;
@@ -147,23 +148,34 @@ pub fn EnumIndexer(comptime E: type) type {
             }
         };
     }
-    lib.sort(lib.Type.EnumField, &fields, {}, ascByValue);
+    const SortContext = struct {
+        fields: []EnumField,
+
+        pub fn lessThan(comptime ctx: @This(), comptime a: usize, comptime b: usize) bool {
+            return ctx.fields[a].value < ctx.fields[b].value;
+        }
+
+        pub fn swap(comptime ctx: @This(), comptime a: usize, comptime b: usize) void {
+            return lib.swap(EnumField, &ctx.fields[a], &ctx.fields[b]);
+        }
+    };
+    lib.sort.insertionContext(0, fields_len, SortContext{ .fields = &fields });
+
     const min = fields[0].value;
     const max = fields[fields.len - 1].value;
-    const fields_len = fields.len;
     if (max - min == fields.len - 1) {
         return extern struct {
             pub const Key = E;
             pub const count = fields_len;
             pub fn indexOf(e: E) usize {
-                return @intCast(usize, @enumToInt(e) - min);
+                return @as(usize, @intCast(@intFromEnum(e) - min));
             }
             pub fn keyForIndex(i: usize) E {
                 // TODO fix addition semantics.  This calculation
                 // gives up some safety to avoid artificially limiting
                 // the range of signed enum values to max_isize.
-                const enum_value = if (min < 0) @bitCast(isize, i) +% min else i + min;
-                return @intToEnum(E, @intCast(lib.Tag(E), enum_value));
+                const enum_value = if (min < 0) @as(isize, @bitCast(i)) +% min else i + min;
+                return @as(E, @enumFromInt(@as(lib.Tag(E), @intCast(enum_value))));
             }
         };
     }
@@ -191,7 +203,7 @@ pub fn EnumFieldStruct(comptime E: type, comptime Data: type, comptime field_def
         fields = fields ++ &[_]StructField{.{
             .name = field.name,
             .type = Data,
-            .default_value = if (field_default) |d| @ptrCast(?*const anyopaque, &d) else null,
+            .default_value = if (field_default) |d| @as(?*const anyopaque, @ptrCast(&d)) else null,
             .is_comptime = false,
             .alignment = if (@sizeOf(Data) > 0) @alignOf(Data) else 0,
         }};

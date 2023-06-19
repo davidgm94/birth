@@ -86,7 +86,7 @@ pub const Date = packed struct(u16) {
         return Date{
             .day = day,
             .month = month,
-            .year = @intCast(u7, year - 1980),
+            .year = @as(u7, @intCast(year - 1980)),
         };
     }
 };
@@ -98,7 +98,7 @@ pub const Time = packed struct(u16) {
 
     pub fn new(seconds: u6, minutes: u6, hours: u5) Time {
         return Time{
-            .seconds_2_factor = @intCast(u5, seconds / 2),
+            .seconds_2_factor = @as(u5, @intCast(seconds / 2)),
             .minutes = minutes,
             .hours = hours,
         };
@@ -158,8 +158,8 @@ pub const DirectoryEntry = extern struct {
     }
 
     pub fn setFirstCluster(entry: *DirectoryEntry, cluster: u32) void {
-        entry.first_cluster_low = @truncate(u16, cluster);
-        entry.first_cluster_high = @truncate(u16, cluster >> 16);
+        entry.first_cluster_low = @as(u16, @truncate(cluster));
+        entry.first_cluster_high = @as(u16, @truncate(cluster >> 16));
     }
 
     pub fn getFirstCluster(entry: *DirectoryEntry) u32 {
@@ -242,7 +242,7 @@ pub const Entry = packed struct(u32) {
             value_bad_cluster => .bad_cluster,
             value_reserved_and_should_not_be_used_eof_start...value_reserved_and_should_not_be_used_eof_end => .reserved_and_should_not_be_used_eof,
             value_allocated_and_eof => .allocated_and_eof,
-            else => if (entry.value >= value_allocated_start and entry.value <= @intCast(u28, max_valid_cluster_number)) .allocated else if (entry.value >= @intCast(u28, max_valid_cluster_number) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else @panic("fat32: getType unexpected error"),
+            else => if (entry.value >= value_allocated_start and entry.value <= @as(u28, @intCast(max_valid_cluster_number))) .allocated else if (entry.value >= @as(u28, @intCast(max_valid_cluster_number)) + 1 and entry.value <= value_reserved_and_should_not_be_used_end) .reserved_and_should_not_be_used else @panic("fat32: getType unexpected error"),
         };
     }
 
@@ -471,7 +471,7 @@ pub const Cache = extern struct {
         const containing_dir_cluster = try cache.getDirectoryEntryCluster(containing_dir);
         const content_cluster = try cache.allocateNewFile(file_content, allocator);
         const file_name = file_path[last_slash_index + 1 ..];
-        try cache.addEntry(.{ .name = file_name, .size = @intCast(u32, file_content.len), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
+        try cache.addEntry(.{ .name = file_name, .size = @as(u32, @intCast(file_content.len)), .is_dir = false, .content_cluster = content_cluster, .containing_cluster = containing_dir_cluster }, allocator, copy_entry, milliseconds);
     }
 
     fn allocateNewFile(cache: Cache, file_content: []const u8, maybe_allocator: ?*lib.Allocator) !u32 {
@@ -483,7 +483,7 @@ pub const Cache = extern struct {
         const allocator = maybe_allocator orelse @panic("We need an allocator");
         const clusters = blk: {
             const alloc_result = try allocator.allocateBytes(@sizeOf(u32) * cluster_count, @alignOf(u32));
-            break :blk @intToPtr([*]u32, alloc_result.address)[0..cluster_count];
+            break :blk @as([*]u32, @ptrFromInt(alloc_result.address))[0..cluster_count];
         };
         try cache.allocateClusters(clusters, allocator);
 
@@ -523,7 +523,7 @@ pub const Cache = extern struct {
             }
         }
 
-        return .{ .len = @intCast(u16, len), .size = @intCast(u16, size) };
+        return .{ .len = @as(u16, @intCast(len)), .size = @as(u16, @intCast(size)) };
     }
 
     const BadChar = error{
@@ -584,7 +584,7 @@ pub const Cache = extern struct {
         } else @panic("nls: unexpected length");
 
         return ShortNameInfo{
-            .len = @intCast(u5, len),
+            .len = @as(u5, @intCast(len)),
             .lower = is_lower,
             .upper = is_upper,
             .valid = is_valid,
@@ -604,7 +604,7 @@ pub const Cache = extern struct {
 
         while (true) {
             extension_start = lib.maybePtrSub(u16, extension_start, 1);
-            if (@ptrToInt(extension_start) < @ptrToInt(&long_name[0])) break;
+            if (@intFromPtr(extension_start) < @intFromPtr(&long_name[0])) break;
 
             if (extension_start.?.* == '.') {
                 if (extension_start == lib.ptrSub(u16, end, 1)) {
@@ -620,7 +620,7 @@ pub const Cache = extern struct {
             size = long_name.len;
             extension_start = null;
         } else if (extension_start) |ext_start| {
-            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
+            const extension_start_index = @divExact(@intFromPtr(ext_start) - @intFromPtr(&long_name[0]), @sizeOf(u16));
             const index = blk: {
                 const slice = long_name[0..extension_start_index];
 
@@ -692,7 +692,7 @@ pub const Cache = extern struct {
         var extension_len: usize = 0;
         var extension: [4]u8 = undefined;
         if (extension_start) |ext_start| {
-            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
+            const extension_start_index = @divExact(@intFromPtr(ext_start) - @intFromPtr(&long_name[0]), @sizeOf(u16));
             const extension_slice = long_name[extension_start_index..];
             var extension_index: usize = 0;
             for (extension_slice, 0..) |extension_u16, extension_pointer_index| {
@@ -808,7 +808,7 @@ pub const Cache = extern struct {
                     .month = 0,
                     .year = 0,
                 },
-                .first_cluster_high = @truncate(u16, entry_setup.content_cluster >> 16),
+                .first_cluster_high = @as(u16, @truncate(entry_setup.content_cluster >> 16)),
                 .last_write_time = if (copy_entry) |e| e.last_write_time else .{
                     .seconds_2_factor = 0,
                     .minutes = 0,
@@ -819,7 +819,7 @@ pub const Cache = extern struct {
                     .month = 0,
                     .year = 0,
                 },
-                .first_cluster_low = @truncate(u16, entry_setup.content_cluster),
+                .first_cluster_low = @as(u16, @truncate(entry_setup.content_cluster)),
                 .file_size = entry_setup.size,
             },
         };
@@ -827,11 +827,11 @@ pub const Cache = extern struct {
         if (!can_get_away_with_short_name) {
             const checksum = shortNameCheckSum(&short_name_result.name);
 
-            const long_slot_count = @intCast(u5, size.size / character_count_per_long_entry);
+            const long_slot_count = @as(u5, @intCast(size.size / character_count_per_long_entry));
             entry.long_name_entries = blk: {
                 const allocator = maybe_allocator orelse @panic("fat32: allocator not provided");
-                const alloc_result = try allocator.allocateBytes(@intCast(usize, @sizeOf(LongNameEntry)) * long_slot_count, @alignOf(LongNameEntry));
-                break :blk @intToPtr([*]LongNameEntry, alloc_result.address)[0..long_slot_count];
+                const alloc_result = try allocator.allocateBytes(@as(usize, @intCast(@sizeOf(LongNameEntry))) * long_slot_count, @alignOf(LongNameEntry));
+                break :blk @as([*]LongNameEntry, @ptrFromInt(alloc_result.address))[0..long_slot_count];
             };
             var reverse_index = long_slot_count;
 
@@ -864,18 +864,18 @@ pub const Cache = extern struct {
 
         while (try entry_iterator.next(cache, maybe_allocator)) |cluster_entry| {
             if (cluster_entry.isFree()) {
-                if (free_slots == 0) current_cluster = @intCast(u32, entry_iterator.cluster);
+                if (free_slots == 0) current_cluster = @as(u32, @intCast(entry_iterator.cluster));
                 free_slots += 1;
 
                 if (free_slots == total_slots) {
-                    const last_current_cluster = @intCast(u32, entry_iterator.cluster);
+                    const last_current_cluster = @as(u32, @intCast(entry_iterator.cluster));
                     assert(last_current_cluster == current_cluster);
-                    const element_offset = @divExact(@ptrToInt(cluster_entry) - @ptrToInt(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
+                    const element_offset = @divExact(@intFromPtr(cluster_entry) - @intFromPtr(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
                     const entry_start_index = element_offset - (free_slots - 1);
 
                     var entry_index = entry_start_index;
                     for (entry.long_name_entries) |*long_name_entry| {
-                        entry_iterator.cluster_entries[entry_index] = @bitCast(DirectoryEntry, long_name_entry.*);
+                        entry_iterator.cluster_entries[entry_index] = @as(DirectoryEntry, @bitCast(long_name_entry.*));
                         entry_index += 1;
                     }
 
@@ -965,8 +965,8 @@ pub const Cache = extern struct {
             .creation_time_tenth = if (copy_entry) |ce| ce.creation_time_tenth else 0,
             .creation_time = if (copy_entry) |ce| ce.creation_time else time,
             .creation_date = if (copy_entry) |ce| ce.creation_date else date,
-            .first_cluster_high = @truncate(u16, cluster >> 16),
-            .first_cluster_low = @truncate(u16, cluster),
+            .first_cluster_high = @as(u16, @truncate(cluster >> 16)),
+            .first_cluster_low = @as(u16, @truncate(cluster)),
             .last_access_date = if (copy_entry) |ce| ce.last_access_date else date,
             .last_write_time = if (copy_entry) |ce| ce.last_write_time else time,
             .last_write_date = if (copy_entry) |ce| ce.last_write_date else date,
@@ -1035,7 +1035,7 @@ pub const Cache = extern struct {
                 }
                 const should_return = cluster_index == clusters.len - 1;
                 try cache.registerCluster(cluster, if (should_return) Entry.allocated_and_eof else Entry{
-                    .next_cluster = @intCast(u28, cluster + 1),
+                    .next_cluster = @as(u28, @intCast(cluster + 1)),
                 }, maybe_allocator);
                 clusters[cluster_index] = cluster;
                 cluster_index += 1;
@@ -1107,7 +1107,7 @@ pub const Cache = extern struct {
                         if (is_unused) {
                             @panic("fat32: unused entry found");
                         } else if (is_long_name) {
-                            const long_name_entry = @ptrCast(*FAT32.LongNameEntry, directory_entry);
+                            const long_name_entry = @as(*FAT32.LongNameEntry, @ptrCast(directory_entry));
                             const original_starting_index = entry_index;
 
                             if (long_name_entry.isLast()) {
@@ -1120,7 +1120,7 @@ pub const Cache = extern struct {
                                         if (u16_ch == 0) {
                                             break :blk arr[0..index];
                                         } else if (u16_ch <= lib.maxInt(u8)) {
-                                            arr[index] = @intCast(u8, u16_ch);
+                                            arr[index] = @as(u8, @intCast(u16_ch));
                                         } else {
                                             @panic("fat32: u16 unreachable");
                                         }
@@ -1133,7 +1133,7 @@ pub const Cache = extern struct {
                                 if (lib.equal(u8, long_name_u8, entry_name)) {
                                     const normal_entry = &directory_entries_in_cluster[entry_index];
                                     if (is_last) {
-                                        return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, original_starting_index), .directory_entry = normal_entry };
+                                        return .{ .cluster = upper_cluster, .entry_starting_index = @as(u32, @intCast(original_starting_index)), .directory_entry = normal_entry };
                                     } else {
                                         upper_cluster = normal_entry.getFirstCluster();
                                         continue :entry_loop;
@@ -1145,7 +1145,7 @@ pub const Cache = extern struct {
                         } else {
                             if (lib.equal(u8, &directory_entry.name, &normalized_name)) {
                                 if (is_last) {
-                                    return .{ .cluster = upper_cluster, .entry_starting_index = @intCast(u32, entry_index), .directory_entry = directory_entry };
+                                    return .{ .cluster = upper_cluster, .entry_starting_index = @as(u32, @intCast(entry_index)), .directory_entry = directory_entry };
                                 } else {
                                     upper_cluster = directory_entry.getFirstCluster();
                                     continue :entry_loop;

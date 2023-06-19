@@ -27,7 +27,6 @@ pub const page_shifter = lib.arch.page_shifter(page_size);
 const privileged = @import("privileged");
 const PhysicalAddress = privileged.PhysicalAddress;
 const VirtualAddress = privileged.VirtualAddress;
-const VirtualAddressSpace = privileged.VirtualAddressSpace;
 const VirtualMemoryRegion = privileged.VirtualMemoryRegion;
 const stopCPU = privileged.arch.stopCPU;
 
@@ -71,7 +70,7 @@ pub const Protocol = struct {
     }
 
     fn cast(comptime ProtocolT: type, ptr: ?*anyopaque) *ProtocolT {
-        return @ptrCast(*ProtocolT, @alignCast(@alignOf(ProtocolT), ptr));
+        return @as(*ProtocolT, @ptrCast(@alignCast(@alignOf(ProtocolT), ptr)));
     }
 };
 

@@ -99,8 +99,8 @@ const charset_to_upper: [256]u8 = [128]u8{
 
 fn unicode_to_character(wchar: u16, char_string: []u8) NLS.Error!void {
     //const unsigned char *uni2charset;
-    const wchar_low = @truncate(u8, wchar);
-    const wchar_high = @truncate(u8, wchar >> 8);
+    const wchar_low = @as(u8, @truncate(wchar));
+    const wchar_high = @as(u8, @truncate(wchar >> 8));
 
     if (char_string.len == 0) return NLS.Error.name_too_long;
 

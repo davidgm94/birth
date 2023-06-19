@@ -22,7 +22,7 @@ pub fn page_shifter(comptime asked_page_size: comptime_int) comptime_int {
 
 /// Returns the maximum number bits a physical address is allowed to have in this CPU
 pub inline fn get_max_physical_address_bit() u6 {
-    return @truncate(u6, cpuid(0x80000008).eax);
+    return @as(u6, @truncate(cpuid(0x80000008).eax));
 }
 
 pub const GDT = extern struct {

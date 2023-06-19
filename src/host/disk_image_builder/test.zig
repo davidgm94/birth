@@ -96,7 +96,7 @@ const ShellImage = struct {
     }
 
     fn toDiskImage(image: ShellImage, allocator: lib.ZigAllocator) !DiskImage {
-        return try DiskImage.fromFile(image.path, @intCast(u16, image.description.disk_sector_size), allocator);
+        return try DiskImage.fromFile(image.path, @as(u16, @intCast(image.description.disk_sector_size)), allocator);
     }
 
     fn delete(image: ShellImage) !void {
@@ -194,12 +194,12 @@ test "Limine barebones" {
 
             for (limine_directories) |directory| {
                 log.debug("Creating directory: {s}", .{directory});
-                try fat_partition_cache.makeNewDirectory(directory, null, original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewDirectory(directory, null, original_fat_cache, @as(u64, @intCast(host.time.milliTimestamp())));
             }
 
             for (limine_files) |file| {
                 log.debug("Creating file: {s}", .{file.path});
-                try fat_partition_cache.makeNewFile(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @intCast(u64, host.time.milliTimestamp()));
+                try fat_partition_cache.makeNewFile(file.path, file.content, wrapped_allocator.unwrap(), original_fat_cache, @as(u64, @intCast(host.time.milliTimestamp())));
             }
 
             var diff_count: u32 = 0;
@@ -209,7 +209,7 @@ test "Limine barebones" {
                 if (diff) {
                     log.debug("[0x{x}] Diff. Expected: 0x{x}. Actual: 0x{x}", .{ i, ob, mb });
                 }
-                diff_count += @boolToInt(diff);
+                diff_count += @intFromBool(diff);
             }
 
             if (diff_count > 0) {

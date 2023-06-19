@@ -86,19 +86,19 @@ pub const Information = extern struct {
 
         pub const TypeMap = blk: {
             var arr: [Slice.count]type = undefined;
-            arr[@enumToInt(Slice.Name.bootloader_information)] = Information;
-            arr[@enumToInt(Slice.Name.bundle)] = u8;
-            arr[@enumToInt(Slice.Name.file_list)] = u8;
-            arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
-            arr[@enumToInt(Slice.Name.page_counters)] = u32;
-            arr[@enumToInt(Slice.Name.smps)] = SMP;
+            arr[@intFromEnum(Slice.Name.bootloader_information)] = Information;
+            arr[@intFromEnum(Slice.Name.bundle)] = u8;
+            arr[@intFromEnum(Slice.Name.file_list)] = u8;
+            arr[@intFromEnum(Slice.Name.memory_map_entries)] = MemoryMapEntry;
+            arr[@intFromEnum(Slice.Name.page_counters)] = u32;
+            arr[@intFromEnum(Slice.Name.smps)] = SMP;
             break :blk arr;
         };
 
-        pub inline fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@enumToInt(slice_name)] {
-            const Type = Slice.TypeMap[@enumToInt(slice_name)];
-            const address = @ptrToInt(bootloader_information) + slice.offset;
-            return @intToPtr([*]Type, address)[0..slice.len];
+        pub inline fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@intFromEnum(slice_name)] {
+            const Type = Slice.TypeMap[@intFromEnum(slice_name)];
+            const address = @intFromPtr(bootloader_information) + slice.offset;
+            return @as([*]Type, @ptrFromInt(address))[0..slice.len];
         }
     };
 
@@ -266,7 +266,7 @@ pub const Information = extern struct {
             .smp = switch (lib.cpu.arch) {
                 .x86, .x86_64 => .{
                     .cpu_count = cpu_count,
-                    .bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*,
+                    .bsp_lapic_id = @as(*volatile u32, @ptrFromInt(0x0FEE00020)).*,
                 },
                 else => @compileError("Architecture not supported"),
             },
@@ -310,11 +310,11 @@ pub const Information = extern struct {
         if (bootloader_tag == .rise and protocol == .uefi) {
             // Check if the memory map entry count matches here is not useful because probably it's going to be less as exiting boot services seems
             // like making some deallocations
-            const new_memory_map_entry_count = @intCast(u32, try bootloader_information.initializeMemoryMap(initialization));
+            const new_memory_map_entry_count = @as(u32, @intCast(try bootloader_information.initializeMemoryMap(initialization)));
             if (new_memory_map_entry_count > memory_map_entry_count) {
                 return Error.unexpected_memory_map_entry_count;
             }
-            bootloader_information.configuration.memory_map_diff = @intCast(u8, memory_map_entry_count - new_memory_map_entry_count);
+            bootloader_information.configuration.memory_map_diff = @as(u8, @intCast(memory_map_entry_count - new_memory_map_entry_count));
         }
 
         // Check if the host entry still corresponds to the same index
@@ -468,8 +468,8 @@ pub const Information = extern struct {
         return lib.alignForward(u32, information.total_size, lib.arch.valid_page_sizes[0]);
     }
 
-    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
-        const slice_offset = information.slices.array.values[@enumToInt(offset_name)];
+    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@intFromEnum(offset_name)] {
+        const slice_offset = information.slices.array.values[@intFromEnum(offset_name)];
         return slice_offset.dereference(offset_name, information);
     }
 
@@ -525,7 +525,7 @@ pub const Information = extern struct {
                 if (size & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
                 if (alignment & lib.arch.page_mask(lib.arch.valid_page_sizes[0]) != 0) return Allocator.Allocate.Error.OutOfMemory;
 
-                const four_kb_pages = @intCast(u32, @divExact(size, lib.arch.valid_page_sizes[0]));
+                const four_kb_pages = @as(u32, @intCast(@divExact(size, lib.arch.valid_page_sizes[0])));
 
                 const entries = bootloader_information.getMemoryMapEntries();
                 const page_counters = bootloader_information.getPageCounters();
@@ -542,7 +542,7 @@ pub const Information = extern struct {
                                 .size = size,
                             });
 
-                            @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
+                            @memset(@as([*]u8, @ptrFromInt(lib.safeArchitectureCast(result.address.value())))[0..lib.safeArchitectureCast(result.size)], 0);
 
                             page_counters[entry_index] += four_kb_pages;
 
@@ -568,8 +568,8 @@ pub const Information = extern struct {
                                     .size = size,
                                 });
 
-                                @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
-                                page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
+                                @memset(@as([*]u8, @ptrFromInt(lib.safeArchitectureCast(result.address.value())))[0..lib.safeArchitectureCast(result.size)], 0);
+                                page_counters[entry_index] += @as(u32, @intCast(difference + size)) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
                                 break :blk result;
                             }
@@ -585,7 +585,7 @@ pub const Information = extern struct {
     }
 
     pub fn callbackAllocatePages(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        const bootloader_information = @ptrCast(*Information, @alignCast(@alignOf(Information), context));
+        const bootloader_information = @as(*Information, @ptrCast(@alignCast(context)));
         return try bootloader_information.allocatePages(size, alignment, options);
     }
 
@@ -631,7 +631,7 @@ pub const Information = extern struct {
 
         var index: usize = 0;
         index += 2 * @sizeOf(u32);
-        const file_count = @ptrCast(*align(1) const u32, &file_list[index]).*;
+        const file_count = @as(*align(1) const u32, @ptrCast(&file_list[index])).*;
         index += @sizeOf(u32);
         var file_index: u32 = 0;
 
@@ -642,8 +642,8 @@ pub const Information = extern struct {
             const file_name = file_list[index + file_name_offset ..][0..file_name_len];
 
             if (lib.equal(u8, wanted_file_name, file_name)) {
-                const file_offset = @ptrCast(*align(1) const u32, &file_list[index + 0]).*;
-                const file_size = @ptrCast(*align(1) const u32, &file_list[index + @sizeOf(u32)]).*;
+                const file_offset = @as(*align(1) const u32, @ptrCast(&file_list[index + 0])).*;
+                const file_size = @as(*align(1) const u32, @ptrCast(&file_list[index + @sizeOf(u32)])).*;
                 const bundle = bootloader_information.getSlice(.bundle);
                 const file_content = bundle[file_offset..][0..file_size];
 

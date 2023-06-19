@@ -89,7 +89,10 @@ inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
     privileged.arch.disableInterrupts();
     if (panic_count == 1) panic_lock.acquire();
 
+    try writer.writeAll(lib.Color.get(.bold));
+    try writer.writeAll(lib.Color.get(.red));
     try writer.writeAll("[CPU DRIVER] [PANIC] ");
+    try writer.writeAll(lib.Color.get(.reset));
     try writer.print(format, arguments);
     try writer.writeByte('\n');
 }
@@ -97,11 +100,7 @@ inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
 inline fn panicEpilogue() noreturn {
     if (panic_count == 1) panic_lock.release();
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        privileged.arch.stopCPU();
-    }
+    shutdown(.failure);
 }
 
 // inline fn printStackTrace(maybe_stack_trace: ?*lib.StackTrace) !void {
@@ -169,6 +168,15 @@ pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @call(.always_inline, panicFromInstructionPointerAndFramePointer, .{ @returnAddress(), @frameAddress(), format, arguments });
 }
 
+pub var syscall_count: usize = 0;
+
+pub inline fn shutdown(exit_code: lib.QEMU.ExitCode) noreturn {
+    log.debug("Printing stats...", .{});
+    log.debug("Syscall count: {}", .{syscall_count});
+
+    privileged.shutdown(exit_code);
+}
+
 pub const PageAllocator = extern struct {
     head: ?*Entry,
     list_allocator: ListAllocator,
@@ -184,7 +192,7 @@ pub const PageAllocator = extern struct {
 
     fn callbackAllocate(context: ?*anyopaque, size: u64, alignment: u64, options: PageAllocatorInterface.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
         _ = options;
-        const pa = @ptrCast(?*PageAllocator, @alignCast(@alignOf(PageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
+        const pa = @as(?*PageAllocator, @ptrCast(@alignCast(context))) orelse return Allocator.Allocate.Error.OutOfMemory;
         const result = try pa.allocate(size, alignment);
         return result;
     }
@@ -205,7 +213,7 @@ pub const PageAllocator = extern struct {
                     entry.region.address = entry.region.address.offset(size);
                     entry.region.size -= size;
 
-                    pa.total_allocated_size += @intCast(u32, size);
+                    pa.total_allocated_size += @as(u32, @intCast(size));
                     // log.debug("Allocated 0x{x}", .{size});
 
                     break :blk result;
@@ -327,7 +335,7 @@ pub const PageAllocator = extern struct {
 
                 memory_taken += memory_taken_from_region;
 
-                page_counter.* += @intCast(u32, memory_taken_from_region >> page_shifter);
+                page_counter.* += @as(u32, @intCast(memory_taken_from_region >> page_shifter));
                 const region_descriptor = .{
                     .address = entry.region.offset(occupied_size).address,
                     .size = memory_taken_from_region,

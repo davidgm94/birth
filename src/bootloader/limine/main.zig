@@ -44,11 +44,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch {};
     writer.writeByte('\n') catch {};
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        stopCPU();
-    }
+    privileged.shutdown(.failure);
 }
 
 pub const std_options = struct {
@@ -98,7 +94,7 @@ const Filesystem = struct {
 
     pub fn getFileSize(filesystem: *Filesystem, file_path: []const u8) !u32 {
         const file = try filesystem.getModule(file_path);
-        return @intCast(u32, file.size);
+        return @as(u32, @intCast(file.size));
     }
 
     pub fn getSectorSize(filesystem: *Filesystem) u16 {
@@ -112,7 +108,7 @@ const MemoryMap = struct {
     index: usize = 0,
 
     pub fn getEntryCount(memory_map: *const MemoryMap) u32 {
-        return @intCast(u32, memory_map.entries.len);
+        return @as(u32, @intCast(memory_map.entries.len));
     }
 
     pub fn next(memory_map: *MemoryMap) !?bootloader.MemoryMapEntry {
@@ -161,8 +157,8 @@ const Initialization = struct {
 
         inline for (comptime lib.enumValues(Section)) |section| {
             const section_name = @tagName(section);
-            const section_start = @ptrToInt(@extern(*const u8, .{ .name = section_name ++ "_section_start" }));
-            const section_end = @ptrToInt(@extern(*const u8, .{ .name = section_name ++ "_section_end" }));
+            const section_start = @intFromPtr(@extern(*const u8, .{ .name = section_name ++ "_section_start" }));
+            const section_end = @intFromPtr(@extern(*const u8, .{ .name = section_name ++ "_section_end" }));
 
             const offset = section_start - virtual_offset;
             const physical_address = PhysicalAddress.new(physical_offset + offset);
@@ -172,7 +168,7 @@ const Initialization = struct {
             log.debug("Trying to map {s}: 0x{x} -> 0x{x} for 0x{x} bytes...", .{ section_name, virtual_address.value(), physical_address.value(), size });
 
             if (section == .text) {
-                const address = @ptrToInt(&ensureLoaderIsMapped);
+                const address = @intFromPtr(&ensureLoaderIsMapped);
                 assert(address >= section_start and address <= section_end);
             }
 
@@ -216,7 +212,7 @@ const Initialization = struct {
             .x86_64 => blk: {
                 const rsdp = init.architecture.rsdp;
                 const madt_header = try rsdp.findTable(.APIC);
-                const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
+                const madt = @as(*align(1) const ACPI.MADT, @ptrCast(madt_header));
                 const cpu_count = madt.getCPUCount();
                 break :blk cpu_count;
             },
@@ -225,7 +221,7 @@ const Initialization = struct {
     }
 
     pub fn getRSDPAddress(init: *Initialization) usize {
-        return @ptrToInt(init.architecture.rsdp);
+        return @intFromPtr(init.architecture.rsdp);
     }
 
     pub fn deinitializeMemoryMap(init: *Initialization) !void {
@@ -241,9 +237,9 @@ const Initialization = struct {
                         const framebuffer = framebuffers[0];
                         break :blk .{
                             .address = framebuffer.address,
-                            .pitch = @intCast(u32, framebuffer.pitch),
-                            .width = @intCast(u32, framebuffer.width),
-                            .height = @intCast(u32, framebuffer.height),
+                            .pitch = @as(u32, @intCast(framebuffer.pitch)),
+                            .width = @as(u32, @intCast(framebuffer.width)),
+                            .height = @as(u32, @intCast(framebuffer.height)),
                             .bpp = framebuffer.bpp,
                             .red_mask = .{
                                 .shift = framebuffer.red_mask_shift,
@@ -291,7 +287,7 @@ const Initialization = struct {
                 .x86_64 => .{
                     .rsdp = blk: {
                         if (request.rsdp.response) |response| {
-                            break :blk @intToPtr(?*ACPI.RSDP.Descriptor1, response.address) orelse return Error.rsdp_not_found;
+                            break :blk @as(?*ACPI.RSDP.Descriptor1, @ptrFromInt(response.address)) orelse return Error.rsdp_not_found;
                         }
 
                         return Error.rsdp_not_found;

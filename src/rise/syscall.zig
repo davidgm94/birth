@@ -29,8 +29,8 @@ pub const Options = extern union {
         }
 
         pub inline fn getNumberInteger(general: General, comptime convention: Convention) NumberIntegerType(convention) {
-            const options_integer = @bitCast(u64, general);
-            return @truncate(NumberIntegerType(convention), options_integer);
+            const options_integer = @as(u64, @bitCast(general));
+            return @as(NumberIntegerType(convention), @truncate(options_integer));
         }
 
         pub fn NumberIntegerType(comptime convention: Convention) type {
@@ -103,7 +103,6 @@ pub const Result = extern union {
         };
 
         pub const Second = u64;
-
     };
 
     pub const Linux = extern struct {
