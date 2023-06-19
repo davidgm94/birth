@@ -21,7 +21,6 @@ const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 
 const cpu = @import("cpu");
 const Heap = cpu.Heap;
-const VirtualAddressSpace = cpu.VirtualAddressSpace;
 
 const init = @import("./x86/64/init.zig");
 pub const syscall = @import("./x86/64/syscall.zig");
@@ -147,7 +146,7 @@ pub const GDT = extern struct {
     pub fn getDescriptor(global_descriptor_table: *const GDT) GDT.Descriptor {
         return .{
             .limit = @sizeOf(GDT) - 1,
-            .address = @ptrToInt(global_descriptor_table),
+            .address = @intFromPtr(global_descriptor_table),
         };
     }
 };
@@ -206,7 +205,7 @@ pub const TSS = extern struct {
     };
 
     pub fn getDescriptor(tss_struct: *const TSS, offset: u64) Descriptor {
-        const address = @ptrToInt(tss_struct) + offset;
+        const address = @intFromPtr(tss_struct) + offset;
         return Descriptor{
             .low = .{
                 .limit_low = @truncate(u16, @sizeOf(TSS) - 1),
@@ -250,30 +249,6 @@ pub const IDT = extern struct {
     pub const entry_count = 256;
 };
 
-const ApicPageAllocator = extern struct {
-    pages: [4]PhysicalAddress = .{PhysicalAddress.invalid()} ** 4,
-
-    const PageEntry = cpu.VirtualAddressSpace.PageEntry;
-
-    fn allocate(context: ?*anyopaque, size: u64, alignment: u64, options: privileged.PageAllocator.AllocateOptions) Allocator.Allocate.Error!PhysicalMemoryRegion {
-        const apic_allocator = @ptrCast(?*ApicPageAllocator, @alignCast(@alignOf(ApicPageAllocator), context)) orelse return Allocator.Allocate.Error.OutOfMemory;
-        assert(size == lib.arch.valid_page_sizes[0]);
-        assert(alignment == lib.arch.valid_page_sizes[0]);
-        assert(options.count == 1);
-        assert(options.level_valid);
-        const physical_memory = try cpu.page_allocator.allocate(size, alignment);
-        apic_allocator.pages[@enumToInt(options.level)] = physical_memory.address;
-        return physical_memory;
-    }
-};
-
-var apic_page_allocator = ApicPageAllocator{};
-const apic_page_allocator_interface = privileged.PageAllocator{
-    .allocate = ApicPageAllocator.allocate,
-    .context = &apic_page_allocator,
-    .context_type = .cpu,
-};
-
 pub inline fn writerStart() void {
     writer_lock.acquire();
 }
@@ -282,28 +257,8 @@ pub inline fn writerEnd() void {
     writer_lock.release();
 }
 
-/// Architecture-specific implementation of mapping when you already can create user-space virtual address spaces
-pub fn map(virtual_address_space: *VirtualAddressSpace, asked_physical_address: PhysicalAddress, asked_virtual_address: VirtualAddress, size: u64, general_flags: privileged.Mapping.Flags) !void {
-    if (general_flags.user) {
-        assert(!general_flags.secret);
-    }
-
-    try virtual_address_space.arch.map(asked_physical_address, asked_virtual_address, size, general_flags, virtual_address_space.getPageAllocatorInterface());
-    if (!general_flags.secret) {
-        const cpu_pml4 = try virtual_address_space.arch.getCpuPML4Table();
-        const user_pml4 = try virtual_address_space.arch.getUserPML4Table();
-        const first_indices = paging.computeIndices(asked_virtual_address.value());
-        const last_indices = paging.computeIndices(asked_virtual_address.offset(size - lib.arch.valid_page_sizes[0]).value());
-        const first_index = first_indices[@enumToInt(paging.Level.PML4)];
-        const last_index = @intCast(u9, last_indices[@enumToInt(paging.Level.PML4)]) +| 1;
-
-        for (cpu_pml4[first_index..last_index], user_pml4[first_index..last_index]) |cpu_pml4te, *user_pml4te| {
-            user_pml4te.* = cpu_pml4te;
-        }
-    }
-}
 pub const PageTableEntry = paging.Level;
-pub const root_page_table_entry = @intToEnum(cpu.arch.PageTableEntry, 0);
+pub const root_page_table_entry = @enumFromInt(cpu.arch.PageTableEntry, 0);
 
 pub const IOMap = extern struct {
     debug: bool,

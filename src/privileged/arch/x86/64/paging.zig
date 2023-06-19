@@ -44,10 +44,10 @@ comptime {
     const pdp_index = baseFromVirtualAddress(.PDP, va);
     const pd_index = baseFromVirtualAddress(.PD, va);
     const pt_index = baseFromVirtualAddress(.PT, va);
-    assert(pml4_index == indices[@enumToInt(Level.PML4)]);
-    assert(pdp_index == indices[@enumToInt(Level.PDP)]);
-    assert(pd_index == indices[@enumToInt(Level.PD)]);
-    assert(pt_index == indices[@enumToInt(Level.PT)]);
+    assert(pml4_index == indices[@intFromEnum(Level.PML4)]);
+    assert(pdp_index == indices[@intFromEnum(Level.PDP)]);
+    assert(pd_index == indices[@intFromEnum(Level.PD)]);
+    assert(pt_index == indices[@intFromEnum(Level.PT)]);
 }
 
 const max_level_possible = 5;
@@ -330,7 +330,7 @@ pub const Specific = extern struct {
     pub inline fn switchTo(specific: *Specific, execution_mode: lib.TraditionalExecutionMode) void {
         const mask = ~@as(u64, 1 << 12);
         const masked_cr3 = (@bitCast(u64, specific.cr3) & mask);
-        const privileged_or = (@as(u64, @enumToInt(execution_mode)) << 12);
+        const privileged_or = (@as(u64, @intFromEnum(execution_mode)) << 12);
         const new_cr3 = @bitCast(cr3, masked_cr3 | privileged_or);
         specific.cr3 = new_cr3;
     }
@@ -382,7 +382,7 @@ pub const Specific = extern struct {
         // }
 
         //log.debug("pml4 table: 0x{x}", .{@ptrToInt(pml4_table)});
-        const pml4_index = indices[@enumToInt(Level.PML4)];
+        const pml4_index = indices[@intFromEnum(Level.PML4)];
         const pml4_entry = pml4_table[pml4_index];
         if (!pml4_entry.present) {
             log.err("Virtual address: 0x{x}.\nPML4 index: {}.\nValue: {}\n", .{ virtual_address.value(), pml4_index, pml4_entry });
@@ -400,13 +400,13 @@ pub const Specific = extern struct {
 
         const pdp_table = try getPDPTable(pml4_table, indices, undefined, null);
         if (is_desired) {
-            _ = try specific.translateAddress(VirtualAddress.new(@ptrToInt(pdp_table)), .{});
+            _ = try specific.translateAddress(VirtualAddress.new(@intFromPtr(pdp_table)), .{});
         }
         //log.debug("pdp table: 0x{x}", .{@ptrToInt(pdp_table)});
-        const pdp_index = indices[@enumToInt(Level.PDP)];
+        const pdp_index = indices[@intFromEnum(Level.PDP)];
         const pdp_entry = &pdp_table[pdp_index];
         if (!pdp_entry.present) {
-            log.err("PDP index {} not present in PDP table 0x{x}", .{ pdp_index, @ptrToInt(pdp_table) });
+            log.err("PDP index {} not present in PDP table 0x{x}", .{ pdp_index, @intFromPtr(pdp_table) });
             return TranslateError.pdp_entry_not_present;
         }
 
@@ -432,14 +432,14 @@ pub const Specific = extern struct {
 
         const pd_table = try accessPageTable(pdp_entry_address, *PDTable);
         if (is_desired) {
-            _ = try specific.translateAddress(VirtualAddress.new(@ptrToInt(pd_table)), .{});
+            _ = try specific.translateAddress(VirtualAddress.new(@intFromPtr(pd_table)), .{});
         }
         //log.debug("pd table: 0x{x}", .{@ptrToInt(pd_table)});
-        const pd_index = indices[@enumToInt(Level.PD)];
+        const pd_index = indices[@intFromEnum(Level.PD)];
         const pd_entry = &pd_table[pd_index];
         if (!pd_entry.present) {
             log.err("PD index: {}", .{pd_index});
-            log.err("PD entry: 0x{x}", .{@ptrToInt(pd_entry)});
+            log.err("PD entry: 0x{x}", .{@intFromPtr(pd_entry)});
             return TranslateError.pd_entry_not_present;
         }
 
@@ -465,17 +465,17 @@ pub const Specific = extern struct {
 
         const p_table = try accessPageTable(pd_entry_address, *PTable);
         if (is_desired) {
-            _ = try specific.translateAddress(VirtualAddress.new(@ptrToInt(p_table)), .{});
+            _ = try specific.translateAddress(VirtualAddress.new(@intFromPtr(p_table)), .{});
         }
         // log.debug("p table: 0x{x}", .{@ptrToInt(p_table)});
-        const pt_index = indices[@enumToInt(Level.PT)];
+        const pt_index = indices[@intFromEnum(Level.PT)];
         const pt_entry = &p_table[pt_index];
         if (!pt_entry.present) {
             log.err("Virtual address 0x{x} not mapped", .{virtual_address.value()});
             log.err("Indices: {any}", .{indices});
-            log.err("PTE: 0x{x}", .{@ptrToInt(pt_entry)});
-            log.err("PDE: 0x{x}", .{@ptrToInt(pd_entry)});
-            log.err("PDPE: 0x{x}", .{@ptrToInt(pdp_entry)});
+            log.err("PTE: 0x{x}", .{@intFromPtr(pt_entry)});
+            log.err("PDE: 0x{x}", .{@intFromPtr(pd_entry)});
+            log.err("PDPE: 0x{x}", .{@intFromPtr(pdp_entry)});
             return TranslateError.pt_entry_not_present;
         }
 
@@ -499,7 +499,7 @@ pub const Specific = extern struct {
         const pml4_physical_address = vas_cr3.getAddress();
 
         const pml4_table = try accessPageTable(pml4_physical_address, *PML4Table);
-        const pml4_entry = pml4_table[indices[@enumToInt(Level.PML4)]];
+        const pml4_entry = pml4_table[indices[@intFromEnum(Level.PML4)]];
         if (!pml4_entry.present) {
             return TranslateError.pml4_entry_not_present;
         }
@@ -510,7 +510,7 @@ pub const Specific = extern struct {
         }
 
         const pdp_table = try accessPageTable(pml4_entry_address, *PDPTable);
-        const pdp_entry = pdp_table[indices[@enumToInt(Level.PDP)]];
+        const pdp_entry = pdp_table[indices[@intFromEnum(Level.PDP)]];
         if (!pdp_entry.present) {
             return TranslateError.pdp_entry_not_present;
         }
@@ -521,7 +521,7 @@ pub const Specific = extern struct {
         }
 
         const pd_table = try accessPageTable(pdp_entry_address, *PDTable);
-        const pd_entry = pd_table[indices[@enumToInt(Level.PD)]];
+        const pd_entry = pd_table[indices[@intFromEnum(Level.PD)]];
         if (!pd_entry.present) {
             return TranslateError.pd_entry_not_present;
         }
@@ -532,7 +532,7 @@ pub const Specific = extern struct {
         }
 
         const pt_table = try accessPageTable(pd_entry_address, *PTable);
-        const pt_entry = &pt_table[indices[@enumToInt(Level.PT)]];
+        const pt_entry = &pt_table[indices[@intFromEnum(Level.PT)]];
         if (!pt_entry.present) {
             return TranslateError.pd_entry_not_present;
         }
@@ -640,7 +640,7 @@ pub fn accessPageTable(physical_address: PhysicalAddress, comptime Pointer: type
     };
 
     return switch (lib.cpu.arch) {
-        .x86 => @intToPtr(Pointer, try lib.tryDereferenceAddress(virtual_address.value())),
+        .x86 => @ptrFromInt(Pointer, try lib.tryDereferenceAddress(virtual_address.value())),
         else => virtual_address.access(Pointer),
     };
 }
@@ -651,7 +651,7 @@ fn getPML4Table(cr3r: cr3) !*PML4Table {
 }
 
 fn getPDPTable(pml4_table: *PML4Table, indices: Indices, flags: MemoryFlags, maybe_page_allocator: ?PageAllocator) !*PDPTable {
-    const index = indices[@enumToInt(Level.PML4)];
+    const index = indices[@intFromEnum(Level.PML4)];
     const entry_pointer = &pml4_table[index];
 
     const table_physical_address = physical_address_blk: {
@@ -707,7 +707,7 @@ pub inline fn getPageEntry(comptime Entry: type, physical_address: u64, flags: M
 }
 
 fn mapPageTable1GB(pdp_table: *PDPTable, indices: Indices, physical_address: u64, flags: MemoryFlags) MapError!void {
-    const entry_index = indices[@enumToInt(Level.PDP)];
+    const entry_index = indices[@intFromEnum(Level.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
     if (entry_pointer.present) return MapError.already_present_1gb;
@@ -718,7 +718,7 @@ fn mapPageTable1GB(pdp_table: *PDPTable, indices: Indices, physical_address: u64
 }
 
 fn mapPageTable2MB(pd_table: *PDTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_index = indices[@enumToInt(Level.PD)];
+    const entry_index = indices[@intFromEnum(Level.PD)];
     const entry_pointer = &pd_table[entry_index];
     const entry_value = entry_pointer.*;
 
@@ -733,7 +733,7 @@ fn mapPageTable2MB(pd_table: *PDTable, indices: Indices, physical_address: u64, 
 }
 
 fn mapPageTable4KB(p_table: *PTable, indices: Indices, physical_address: u64, flags: MemoryFlags) !void {
-    const entry_index = indices[@enumToInt(Level.PT)];
+    const entry_index = indices[@intFromEnum(Level.PT)];
     const entry_pointer = &p_table[entry_index];
 
     if (entry_pointer.present) {
@@ -751,7 +751,7 @@ const ToImplementError = error{
 };
 
 fn getPDTable(pdp_table: *PDPTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*PDTable {
-    const entry_index = indices[@enumToInt(Level.PDP)];
+    const entry_index = indices[@intFromEnum(Level.PDP)];
     const entry_pointer = &pdp_table[entry_index];
 
     const table_physical_address = physical_address_blk: {
@@ -782,7 +782,7 @@ fn getPDTable(pdp_table: *PDPTable, indices: Indices, flags: MemoryFlags, page_a
 }
 
 fn getPTable(pd_table: *PDTable, indices: Indices, flags: MemoryFlags, page_allocator: PageAllocator) !*PTable {
-    const entry_pointer = &pd_table[indices[@enumToInt(Level.PD)]];
+    const entry_pointer = &pd_table[indices[@intFromEnum(Level.PD)]];
     const table_physical_address = physical_address_blk: {
         const entry_value = entry_pointer.*;
         if (entry_value.present) {
@@ -892,22 +892,22 @@ pub fn EntryTypeMap(comptime page_size: comptime_int) [EntryTypeMapSize(page_siz
                 @compileError("TODO: type_map[@enumToInt(Level.PML5)] =");
             }
 
-            result[@enumToInt(Level.PML4)] = PML4TE;
+            result[@intFromEnum(Level.PML4)] = PML4TE;
 
             if (page_size == lib.arch.valid_page_sizes[2]) {
-                assert(map_size == 2 + @boolToInt(Level == Level5));
-                result[@enumToInt(Level.PDP)] = PDPTE_1GB;
+                assert(map_size == 2 + @intFromBool(Level == Level5));
+                result[@intFromEnum(Level.PDP)] = PDPTE_1GB;
             } else {
-                result[@enumToInt(Level.PDP)] = PDPTE;
+                result[@intFromEnum(Level.PDP)] = PDPTE;
 
                 if (page_size == lib.arch.valid_page_sizes[1]) {
-                    assert(map_size == @as(usize, 3) + @boolToInt(Level == Level5));
-                    result[@enumToInt(Level.PD)] = PDTE_2MB;
+                    assert(map_size == @as(usize, 3) + @intFromBool(Level == Level5));
+                    result[@intFromEnum(Level.PD)] = PDTE_2MB;
                 } else {
                     assert(page_size == lib.arch.valid_page_sizes[0]);
 
-                    result[@enumToInt(Level.PD)] = PDTE;
-                    result[@enumToInt(Level.PT)] = PTE;
+                    result[@intFromEnum(Level.PD)] = PDTE;
+                    result[@intFromEnum(Level.PT)] = PTE;
                 }
             }
         },

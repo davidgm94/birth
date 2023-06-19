@@ -49,7 +49,7 @@ pub const Disk = extern struct {
                 const size = @sizeOf(T) * count;
                 const alignment = @alignOf(T);
                 const result = try alloc.allocateBytes(size, alignment);
-                const slice = @intToPtr([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
+                const slice = @ptrFromInt([*]u8, @intCast(usize, result.address))[0..@intCast(usize, result.size)];
                 if (slice.len != size) @panic("WTQSAD/jasD");
                 return slice;
             }
@@ -111,8 +111,8 @@ pub const Disk = extern struct {
         // This is used by NVMe and AHCI, so it is needed to match these values
         comptime {
             assert(@bitSizeOf(Operation) == @bitSizeOf(u1));
-            assert(@enumToInt(Operation.read) == 0);
-            assert(@enumToInt(Operation.write) == 1);
+            assert(@intFromEnum(Operation.read) == 0);
+            assert(@intFromEnum(Operation.write) == 1);
         }
     };
 

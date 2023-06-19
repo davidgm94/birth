@@ -129,7 +129,7 @@ pub const Header = extern struct {
 
         pub fn getPartitionIndex(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
             assert(cache.header.partition_entry_size == @sizeOf(GPT.Partition));
-            return @divExact(@intCast(u32, @ptrToInt(partition) - @ptrToInt(partition_entries.ptr)), cache.header.partition_entry_size);
+            return @divExact(@intCast(u32, @intFromPtr(partition) - @intFromPtr(partition_entries.ptr)), cache.header.partition_entry_size);
         }
 
         pub fn getPartitionSector(cache: Cache, partition: *GPT.Partition, partition_entries: []GPT.Partition) u32 {
@@ -402,9 +402,9 @@ const limine_unique_partition_guid = GUID{
 
 const FilesystemCacheTypes = blk: {
     var types: [Filesystem.Type.count]type = undefined;
-    types[@enumToInt(Filesystem.Type.rise)] = void;
-    types[@enumToInt(Filesystem.Type.ext2)] = void;
-    types[@enumToInt(Filesystem.Type.fat32)] = FAT32.Cache;
+    types[@intFromEnum(Filesystem.Type.rise)] = void;
+    types[@intFromEnum(Filesystem.Type.ext2)] = void;
+    types[@intFromEnum(Filesystem.Type.fat32)] = FAT32.Cache;
 
     break :blk types;
 };

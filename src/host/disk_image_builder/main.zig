@@ -76,7 +76,7 @@ pub fn main() anyerror!void {
 
         while (argument_parser.next()) |argument_type| switch (argument_type) {
             .disk_image_path => {
-                assert(@enumToInt(argument_type) == 0);
+                assert(@intFromEnum(argument_type) == 0);
                 argument_disk_image_path = arguments[argument_index];
                 argument_index += 1;
             },

@@ -26,7 +26,7 @@ pub const GDT = extern struct {
     pub fn getDescriptor(gdt: *const GDT) GDT.Descriptor {
         return .{
             .limit = @sizeOf(GDT) - 1,
-            .address = @ptrToInt(gdt),
+            .address = @intFromPtr(gdt),
         };
     }
 };
@@ -37,7 +37,7 @@ const entry_point_offset = @offsetOf(bootloader.Information, "entry_point");
 const higher_half_offset = @offsetOf(bootloader.Information, "higher_half");
 
 pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal_paging: paging.Specific) noreturn {
-    if (@ptrToInt(bootloader_information_arg) >= lib.config.cpu_driver_higher_half_address) {
+    if (@intFromPtr(bootloader_information_arg) >= lib.config.cpu_driver_higher_half_address) {
         // Error
         privileged.arch.stopCPU();
     }
@@ -100,7 +100,7 @@ pub fn jumpToKernel(bootloader_information_arg: *bootloader.Information, minimal
 
     switch (lib.cpu.arch) {
         .x86_64 => {
-            const bootloader_information = @intToPtr(*bootloader.Information, @ptrToInt(bootloader_information_arg) + lib.config.cpu_driver_higher_half_address);
+            const bootloader_information = @ptrFromInt(*bootloader.Information, @intFromPtr(bootloader_information_arg) + lib.config.cpu_driver_higher_half_address);
             const entry_point = bootloader_information.entry_point;
             asm volatile (
                 \\.code64

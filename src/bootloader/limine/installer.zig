@@ -1591,14 +1591,14 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
         } else {
             const partition_entry_count = gpt_header.partition_entry_count;
             if (partition_entry_count == 0) return error.TODO;
-            const partition_entry_base_address = @ptrToInt(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
+            const partition_entry_base_address = @intFromPtr(device.ptr) + (gpt_header.partition_entry_LBA * lb_size);
             var partition_entry_address = partition_entry_base_address;
 
             var max_partition_entry_used: u64 = 0;
 
             var partition_entry_i: u64 = 0;
             while (partition_entry_i < partition_entry_count) : (partition_entry_i += 1) {
-                const partition_entry = @intToPtr(*GPT.Entry, partition_entry_address);
+                const partition_entry = @ptrFromInt(*GPT.Entry, partition_entry_address);
                 defer partition_entry_address += gpt_header.partition_entry_size;
 
                 if (partition_entry.unique_partition_guid0 != 0 or partition_entry.unique_partition_guid1 != 0) {
@@ -1635,7 +1635,7 @@ pub fn install(device: []u8, force_mbr: bool, partition_number: ?u32) !void {
             assert(gpt_header.partition_entry_count * @sizeOf(GPT.Entry) == gpt_header.partition_entry_count * gpt_header.partition_entry_size);
             assert(secondary_GPT_header.partition_entry_count * @sizeOf(GPT.Entry) == secondary_GPT_header.partition_entry_count * secondary_GPT_header.partition_entry_size);
 
-            gpt_header.partition_entry_array_CRC32 = crc32(@intToPtr([*]u8, partition_entry_base_address)[0 .. new_partition_entry_count * gpt_header.partition_entry_size]);
+            gpt_header.partition_entry_array_CRC32 = crc32(@ptrFromInt([*]u8, partition_entry_base_address)[0 .. new_partition_entry_count * gpt_header.partition_entry_size]);
             gpt_header.partition_entry_count = @intCast(u32, new_partition_entry_count);
             gpt_header.CRC32 = 0;
             gpt_header.CRC32 = crc32(std.mem.asBytes(gpt_header));

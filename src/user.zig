@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const log = lib.log;
 const assert = lib.assert;
 const ExecutionMode = lib.Syscall.ExecutionMode;
 
@@ -7,17 +8,20 @@ const capabilities = rise.capabilities;
 pub const Syscall = rise.capabilities.Syscall;
 
 pub const arch = @import("user/arch.zig");
+const core_state = @import("user/core_state.zig");
+pub const CoreState = core_state.CoreState;
 pub const thread = @import("user/thread.zig");
+pub const process = @import("user/process.zig");
+const vas = @import("user/virtual_address_space.zig");
+const VirtualAddress = lib.VirtualAddress;
+pub const VirtualAddressSpace = vas.VirtualAddressSpace;
+pub const MMUAwareVirtualAddressSpace = vas.MMUAwareVirtualAddressSpace;
 
 comptime {
     @export(arch._start, .{ .linkage = .Strong, .name = "_start" });
 }
 
-pub const Scheduler = extern struct {
-    time_slice: u32,
-    core_id: u32,
-};
-
+pub const writer = lib.Writer(void, Writer.Error, Writer.write){ .context = {} };
 const Writer = extern struct {
     const syscall = Syscall(.io, .log);
     const Error = Writer.syscall.ErrorSet.Error;
@@ -37,8 +41,6 @@ pub const std_options = struct {
     }
 };
 
-pub const writer = lib.Writer(void, Writer.Error, Writer.write){ .context = {} };
-
 pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     @call(.always_inline, panic, .{ "{s}", .{message} });
 }
@@ -46,9 +48,19 @@ pub fn zigPanic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     lib.log.scoped(.PANIC).err(format, arguments);
     while (true) {
-        asm volatile ("pause" ::: "memory");
+        Syscall(.process, .exit).blocking(false) catch |err| log.err("Exit failed: {}", .{err});
     }
 }
+
+pub const Scheduler = extern struct {
+    time_slice: u32,
+    core_id: u32,
+    core_state: CoreState,
+};
+
+pub const PhysicalMap = extern struct {
+    virtual_address_space: *VirtualAddressSpace,
+};
 
 pub inline fn currentScheduler() *Scheduler {
     return arch.currentScheduler();
@@ -72,29 +84,26 @@ export fn riseInitializeDisabled(scheduler: *arch.Scheduler, arg_init: bool) cal
     thread.initDisabled(scheduler);
 }
 
-pub const VirtualAddress = enum(usize) {
-    _,
+// Barrelfish: memobj
+pub const PhysicalMemoryRegion = extern struct {};
 
-    pub inline fn new(address: anytype) VirtualAddress {
-        const T = @TypeOf(address);
-        return switch (T) {
-            usize => @intToEnum(VirtualAddress, address),
-            else => switch (@typeInfo(T)) {
-                .Fn => @intToEnum(VirtualAddress, @ptrToInt(&address)),
-                .Pointer => @intToEnum(VirtualAddress, @ptrToInt(address)),
-                else => {
-                    @compileLog(T);
-                    @compileError("HA!");
-                },
-            },
-        };
-    }
+// Barrelfish: vregion
+pub const VirtualMemoryRegion = extern struct {
+    virtual_address_space: *VirtualAddressSpace,
+    physical_region: *PhysicalMemoryRegion,
+    offset: usize,
+    size: usize,
+    address: VirtualAddress,
+    flags: Flags,
+    next: ?*VirtualMemoryRegion = null,
 
-    pub inline fn value(va: VirtualAddress) usize {
-        return @enumToInt(va);
-    }
-
-    pub inline fn sub(va: *VirtualAddress, substraction: usize) void {
-        @ptrCast(*usize, va).* -= substraction;
-    }
+    pub const Flags = packed struct(u8) {
+        read: bool,
+        write: bool,
+        execute: bool,
+        caching: bool,
+        preferred_page_size: u2,
+        write_combining: bool,
+        reserved: u1 = 0,
+    };
 };

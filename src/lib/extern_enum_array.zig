@@ -156,14 +156,14 @@ pub fn EnumIndexer(comptime E: type) type {
             pub const Key = E;
             pub const count = fields_len;
             pub fn indexOf(e: E) usize {
-                return @intCast(usize, @enumToInt(e) - min);
+                return @intCast(usize, @intFromEnum(e) - min);
             }
             pub fn keyForIndex(i: usize) E {
                 // TODO fix addition semantics.  This calculation
                 // gives up some safety to avoid artificially limiting
                 // the range of signed enum values to max_isize.
                 const enum_value = if (min < 0) @bitCast(isize, i) +% min else i + min;
-                return @intToEnum(E, @intCast(lib.Tag(E), enum_value));
+                return @enumFromInt(E, @intCast(lib.Tag(E), enum_value));
             }
         };
     }

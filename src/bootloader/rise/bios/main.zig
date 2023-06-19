@@ -38,7 +38,7 @@ const FATAllocator = extern struct {
         if (aligned_allocated + size > fat.buffer.len) @panic("no alloc");
         fat.allocated = aligned_allocated;
         const result = Allocator.Allocate.Result{
-            .address = @ptrToInt(&fat.buffer) + fat.allocated,
+            .address = @intFromPtr(&fat.buffer) + fat.allocated,
             .size = size,
         };
         fat.allocated += @intCast(usize, size);
@@ -69,11 +69,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch stopCPU();
     writer.writeByte('\n') catch stopCPU();
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        privileged.arch.stopCPU();
-    }
+    privileged.shutdown(.failure);
 }
 
 const Filesystem = extern struct {
@@ -154,7 +150,7 @@ const Initialization = struct {
     pub fn getCPUCount(init: *Initialization) !u32 {
         return switch (lib.cpu.arch) {
             .x86, .x86_64 => blk: {
-                const rsdp = @intToPtr(*ACPI.RSDP.Descriptor1, init.architecture.rsdp);
+                const rsdp = @ptrFromInt(*ACPI.RSDP.Descriptor1, init.architecture.rsdp);
                 const madt_header = try rsdp.findTable(.APIC);
                 const madt = @ptrCast(*align(1) const ACPI.MADT, madt_header);
                 break :blk madt.getCPUCount();
@@ -174,8 +170,8 @@ const Initialization = struct {
     pub fn ensureLoaderIsMapped(init: *Initialization, paging: privileged.arch.paging.Specific, page_allocator: PageAllocator, bootloader_information: *bootloader.Information) !void {
         _ = init;
         _ = bootloader_information;
-        const loader_physical_start = PhysicalAddress.new(lib.alignBackward(usize, @ptrToInt(&loader_start), lib.arch.valid_page_sizes[0]));
-        const loader_size = lib.alignForward(u64, @ptrToInt(&loader_end) - @ptrToInt(&loader_start) + @ptrToInt(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
+        const loader_physical_start = PhysicalAddress.new(lib.alignBackward(usize, @intFromPtr(&loader_start), lib.arch.valid_page_sizes[0]));
+        const loader_size = lib.alignForward(u64, @intFromPtr(&loader_end) - @intFromPtr(&loader_start) + @intFromPtr(&loader_start) - loader_physical_start.value(), lib.arch.valid_page_sizes[0]);
         // Not caring about safety here
         try paging.map(loader_physical_start, loader_physical_start.toIdentityMappedVirtualAddress(), lib.alignForward(u64, loader_size, lib.arch.valid_page_sizes[0]), .{ .write = true, .execute = true }, page_allocator);
     }
@@ -200,7 +196,7 @@ const Initialization = struct {
             },
             .architecture = switch (lib.cpu.arch) {
                 .x86, .x86_64 => .{
-                    .rsdp = @ptrToInt(try bios.findRSDP()),
+                    .rsdp = @intFromPtr(try bios.findRSDP()),
                 },
                 else => @compileError("Architecture not supported"),
             },

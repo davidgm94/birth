@@ -97,11 +97,7 @@ inline fn panicPrologue(comptime format: []const u8, arguments: anytype) !void {
 inline fn panicEpilogue() noreturn {
     if (panic_count == 1) panic_lock.release();
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        privileged.arch.stopCPU();
-    }
+    shutdown(.failure);
 }
 
 // inline fn printStackTrace(maybe_stack_trace: ?*lib.StackTrace) !void {
@@ -167,6 +163,15 @@ pub fn panicFromInstructionPointerAndFramePointer(return_address: usize, frame_a
 
 pub fn panic(comptime format: []const u8, arguments: anytype) noreturn {
     @call(.always_inline, panicFromInstructionPointerAndFramePointer, .{ @returnAddress(), @frameAddress(), format, arguments });
+}
+
+pub var syscall_count: usize = 0;
+
+pub inline fn shutdown(exit_code: lib.QEMU.ExitCode) noreturn {
+    log.debug("Printing stats...", .{});
+    log.debug("Syscall count: {}", .{syscall_count});
+
+    privileged.shutdown(exit_code);
 }
 
 pub const PageAllocator = extern struct {

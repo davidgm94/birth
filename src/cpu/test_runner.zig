@@ -4,6 +4,8 @@ const log = lib.log.scoped(.TEST);
 const privileged = @import("privileged");
 const QEMU = lib.QEMU;
 
+const cpu = @import("cpu");
+
 const RunAllTestResult = error{
     failure,
 };
@@ -21,12 +23,16 @@ pub fn runAllTests() RunAllTestResult!void {
 
     const test_count = test_functions.len;
     assert(QEMU.isa_debug_exit.io_size == @sizeOf(u32));
-    const success = failed_test_count == 0;
-    if (success) {
-        log.info("All {} tests passed.", .{test_count});
-    } else {
-        log.info("Run {} tests. Failed {}.", .{ test_count, failed_test_count });
-    }
+    const exit_code = switch (failed_test_count) {
+        0 => blk: {
+            log.info("All {} tests passed.", .{test_count});
+            break :blk .success;
+        },
+        else => blk: {
+            log.info("Run {} tests. Failed {}.", .{ test_count, failed_test_count });
+            break :blk .failure;
+        },
+    };
 
-    privileged.exitFromQEMU(success);
+    cpu.shutdown(exit_code);
 }

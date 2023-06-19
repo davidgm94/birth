@@ -36,7 +36,7 @@ pub const DrawContext = extern struct {
     pub inline fn clearScreen(draw_context: *DrawContext, color: u32) void {
         const bootloader_information = @fieldParentPtr(Information, "draw_context", draw_context);
         const pixels_per_scanline = @divExact(bootloader_information.framebuffer.pitch, @divExact(bootloader_information.framebuffer.bpp, @bitSizeOf(u8)));
-        const framebuffer_pixels = @intToPtr([*]u32, bootloader_information.framebuffer.address)[0 .. pixels_per_scanline * bootloader_information.framebuffer.height];
+        const framebuffer_pixels = @ptrFromInt([*]u32, bootloader_information.framebuffer.address)[0 .. pixels_per_scanline * bootloader_information.framebuffer.height];
         var y: u32 = 0;
         while (y < bootloader_information.framebuffer.height) : (y += 1) {
             const line = framebuffer_pixels[y * pixels_per_scanline .. y * pixels_per_scanline + pixels_per_scanline];

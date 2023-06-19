@@ -109,7 +109,7 @@ pub fn diff(file1: []const u8, file2: []const u8) !void {
     for (file1, 0..) |byte1, index| {
         const byte2 = file2[index];
         const is_different_byte = byte1 != byte2;
-        different_bytes += @boolToInt(is_different_byte);
+        different_bytes += @intFromBool(is_different_byte);
         if (is_different_byte) {
             log.debug("Byte [0x{x}] is different: 0x{x} != 0x{x}", .{ index, byte1, byte2 });
         }
@@ -148,7 +148,7 @@ pub fn FieldType(comptime T: type, comptime name: []const u8) type {
 pub const AutoEnumArray = std.enums.EnumArray;
 pub const fields = std.meta.fields;
 pub const IntType = std.meta.Int;
-pub const intToEnum = std.meta.intToEnum;
+pub const enumFromInt = std.meta.enumFromInt;
 pub const stringToEnum = std.meta.stringToEnum;
 pub const Tag = std.meta.Tag;
 
@@ -283,7 +283,8 @@ pub const ImageConfig = struct {
 
     pub fn get(allocator: ZigAllocator, path: []const u8) !ImageConfig {
         const image_config_file = try std.fs.cwd().readFileAlloc(allocator, path, maxInt(usize));
-        return try std.json.parseFromSlice(ImageConfig, allocator, image_config_file, .{});
+        const parsed_image_configuration = try std.json.parseFromSlice(ImageConfig, allocator, image_config_file, .{});
+        return parsed_image_configuration.value;
     }
 };
 
@@ -444,7 +445,7 @@ pub const ArgumentParser = struct {
 
         pub fn next(argument_parser: *ArgumentParser.DiskImageBuilder) ?ArgumentType {
             if (argument_parser.argument_index < enumCount(ArgumentType)) {
-                const result = @intToEnum(ArgumentType, argument_parser.argument_index);
+                const result = @enumFromInt(ArgumentType, argument_parser.argument_index);
                 argument_parser.argument_index += 1;
                 return result;
             }
@@ -458,7 +459,7 @@ pub const ArgumentParser = struct {
 
         pub fn next(argument_parser: *ArgumentParser.Runner) ?ArgumentType {
             if (argument_parser.argument_index < enumCount(ArgumentType)) {
-                const result = @intToEnum(ArgumentType, argument_parser.argument_index);
+                const result = @enumFromInt(ArgumentType, argument_parser.argument_index);
                 argument_parser.argument_index += 1;
                 return result;
             }

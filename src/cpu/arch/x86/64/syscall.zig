@@ -25,49 +25,52 @@ const pcid_mask = 1 << pcid_bit;
 /// - R8:  argument 4
 /// - R9:  argument 5
 fn riseSyscall(comptime Syscall: type, raw_arguments: rise.syscall.Arguments) Syscall.ErrorSet.Error!Syscall.Result {
+    cpu.syscall_count += 1;
     comptime assert(Syscall == rise.capabilities.Syscall(Syscall.capability, Syscall.command));
     const capability: rise.capabilities.Type = Syscall.capability;
     const command: rise.capabilities.Command(capability) = Syscall.command;
     const arguments = try Syscall.toArguments(raw_arguments);
 
-    if (cpu.user_scheduler.capability_root_node.hasPermissions(capability, command)) {
-        const result = switch (capability) {
-            .io => switch (command) {
-                .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
-                .log => blk: {
-                    const message = arguments;
-                    cpu.writer.writeAll(message) catch unreachable;
-                    comptime assert(Syscall.Result == usize);
-                    break :blk message.len;
-                },
+    return if (cpu.user_scheduler.capability_root_node.hasPermissions(capability, command)) switch (capability) {
+        .io => switch (command) {
+            .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
+            .log => blk: {
+                const message = arguments;
+                cpu.writer.writeAll(message) catch unreachable;
+                comptime assert(Syscall.Result == usize);
+                break :blk message.len;
             },
-            .cpu => switch (command) {
-                .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
-                .get_core_id => cpu.core_id,
-                .shutdown => privileged.exitFromQEMU(.success),
+        },
+        .cpu => switch (command) {
+            .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
+            .get_core_id => cpu.core_id,
+            .shutdown => cpu.shutdown(.success),
+        },
+        .cpu_memory => switch (command) {
+            .allocate => blk: {
+                comptime assert(@TypeOf(arguments) == usize);
+                const size = arguments;
+                const physical_region = try cpu.user_scheduler.capability_root_node.allocatePages(size);
+                try cpu.user_scheduler.capability_root_node.allocateCPUMemory(physical_region, .{ .privileged = false });
+                break :blk physical_region.address;
             },
-            .cpu_memory => switch (command) {
-                .allocate => blk: {
-                    comptime assert(@TypeOf(arguments) == usize);
-                    const size = arguments;
-                    const physical_region = try cpu.user_scheduler.capability_root_node.allocatePages(size);
-                    try cpu.user_scheduler.capability_root_node.allocateCPUMemory(physical_region, .{ .privileged = false });
-                    break :blk physical_region.address;
-                },
-                else => @panic(@tagName(command)),
-            },
-            .ram => unreachable,
-            .boot => switch (command) {
-                .get_bundle_size => cpu.bundle.len,
-                .get_bundle_file_list_size => cpu.bundle_files.len,
-                else => @panic(@tagName(command)),
-            },
-        };
-
-        return result;
-    } else {
-        return error.forbidden;
-    }
+            else => @panic(@tagName(command)),
+        },
+        .ram => unreachable,
+        .boot => switch (command) {
+            .get_bundle_size => cpu.bundle.len,
+            .get_bundle_file_list_size => cpu.bundle_files.len,
+            else => @panic(@tagName(command)),
+        },
+        .process => switch (command) {
+            .exit => cpu.shutdown(switch (arguments) {
+                true => .success,
+                false => .failure,
+            }),
+            else => @panic(@tagName(command)),
+        },
+        .page_table => @panic("TODO: page_table"),
+    } else error.forbidden;
 }
 
 export fn syscall(registers: *const Registers) callconv(.C) rise.syscall.Result {
@@ -76,7 +79,7 @@ export fn syscall(registers: *const Registers) callconv(.C) rise.syscall.Result 
 
     return switch (options.general.convention) {
         .rise => switch (options.rise.type) {
-            inline else => |capability| switch (@intToEnum(rise.capabilities.Command(capability), options.rise.command)) {
+            inline else => |capability| switch (@enumFromInt(rise.capabilities.Command(capability), options.rise.command)) {
                 inline else => |command| blk: {
                     const Syscall = rise.capabilities.Syscall(capability, command);
                     const result: Syscall.Result = riseSyscall(Syscall, arguments) catch |err| break :blk Syscall.errorToRaw(err);

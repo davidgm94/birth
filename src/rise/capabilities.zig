@@ -13,8 +13,9 @@ pub const Type = enum(u8) {
     ram, // primitive
     cpu_memory, // non-primitive
     boot,
+    process, // Temporarily available
+    page_table, // Barrelfish: vnode
     // TODO: device_memory, // primitive
-    // vnode,
     // scheduler,
     // irq_table,
 
@@ -70,6 +71,10 @@ pub fn Command(comptime capability: Type) type {
             "get_bundle_size",
             "get_bundle_file_list_size",
         },
+        .process => .{
+            "exit",
+        },
+        .page_table => [_][]const u8{},
     };
 
     return CommandBuilder(&extra_command_list);
@@ -124,12 +129,12 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
                 }
 
                 inline fn argumentsToRaw(arguments: Arguments) syscall.Arguments {
-                    const result = [2]usize{ @ptrToInt(arguments.ptr), arguments.len };
+                    const result = [2]usize{ @intFromPtr(arguments.ptr), arguments.len };
                     return result ++ .{0} ** (raw_argument_count - result.len);
                 }
 
                 inline fn toArguments(raw_arguments: syscall.Arguments) !Arguments {
-                    const message_ptr = @intToPtr(?[*]const u8, raw_arguments[0]) orelse return error.invalid_input;
+                    const message_ptr = @ptrFromInt(?[*]const u8, raw_arguments[0]) orelse return error.invalid_input;
                     const message_len = raw_arguments[1];
                     if (message_len == 0) return error.invalid_input;
                     const message = message_ptr[0..message_len];
@@ -233,6 +238,34 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
                 pub const Arguments = void;
             },
         },
+        .process => switch (command_type) {
+            .exit => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
+                pub const Result = noreturn;
+                pub const Arguments = bool;
+
+                inline fn toArguments(raw_arguments: syscall.Arguments) !Arguments {
+                    const result = raw_arguments[0] != 0;
+                    return result;
+                }
+                inline fn argumentsToRaw(arguments: Arguments) syscall.Arguments {
+                    const result = [1]usize{@intFromBool(arguments)};
+                    return result ++ .{0} ** (raw_argument_count - result.len);
+                }
+            },
+            else => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
+                pub const Result = void;
+                pub const Arguments = void;
+            },
+        },
+        .page_table => switch (command_type) {
+            else => struct {
+                pub const ErrorSet = Capabilities.ErrorSet(&.{});
+                pub const Result = void;
+                pub const Arguments = void;
+            },
+        },
         // else => @compileError("TODO: " ++ @tagName(capability)),
     };
 
@@ -278,7 +311,7 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
             return syscall.Result{
                 .rise = .{
                     .first = .{
-                        .@"error" = @enumToInt(error_enum),
+                        .@"error" = @intFromEnum(error_enum),
                     },
                     .second = 0,
                 },
@@ -287,12 +320,12 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
 
         /// This is not meant to be called in the CPU driver
         pub fn blocking(arguments: Arguments) @This().ErrorSet.Error!Result {
-            const raw_arguments = if (Arguments == void) [1]usize{0} ** raw_argument_count else Types.argumentsToRaw(arguments);
+            const raw_arguments = if (Arguments != void) Types.argumentsToRaw(arguments) else [1]usize{0} ** raw_argument_count;
             // TODO: make this more reliable and robust?
             const options = rise.syscall.Options{
                 .rise = .{
                     .type = capability,
-                    .command = @enumToInt(command),
+                    .command = @intFromEnum(command),
                 },
             };
 
@@ -310,7 +343,7 @@ pub fn Syscall(comptime capability_type: Type, comptime command_type: Command(ca
                     noreturn => unreachable,
                     else => toResult(raw_result.rise),
                 },
-                else => switch (@intToEnum(@This().ErrorSet.Enum, raw_error_value)) {
+                else => switch (@enumFromInt(@This().ErrorSet.Enum, raw_error_value)) {
                     inline else => |comptime_error_enum| @field(@This().ErrorSet.Error, @tagName(comptime_error_enum)),
                 },
             };

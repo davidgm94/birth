@@ -209,7 +209,7 @@ test "Limine barebones" {
                 if (diff) {
                     log.debug("[0x{x}] Diff. Expected: 0x{x}. Actual: 0x{x}", .{ i, ob, mb });
                 }
-                diff_count += @boolToInt(diff);
+                diff_count += @intFromBool(diff);
             }
 
             if (diff_count > 0) {

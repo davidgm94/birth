@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const assert = lib.assert;
 const log = lib.log;
 const user = @import("user");
 const syscall = user.Syscall;
@@ -16,7 +17,9 @@ pub fn main() !noreturn {
     log.debug("Bundle file list size: {}", .{bundle_file_list_size});
     const bundle_size = try syscall(.boot, .get_bundle_size).blocking({});
     log.debug("Bundle size: {}", .{bundle_size});
-    const allocation = try syscall(.cpu_memory, .allocate).blocking(0x1000);
-    log.debug("Look allocation successful at 0x{x}", .{allocation.value()});
+    assert(bundle_size > 0);
+    const aligned_bundle_size = lib.alignForward(usize, bundle_size, lib.arch.valid_page_sizes[0]);
+    const bundle_allocation = try syscall(.cpu_memory, .allocate).blocking(aligned_bundle_size);
+    log.debug("Look allocation successful at 0x{x}", .{bundle_allocation.value()});
     try syscall(.cpu, .shutdown).blocking({});
 }

@@ -64,12 +64,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch {};
     writer.writeAll("\r\n") catch {};
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        asm volatile ("cli\nhlt");
-        unreachable;
-    }
+    privileged.shutdown(.failure);
 }
 
 const Filesystem = extern struct {
@@ -214,7 +209,7 @@ const Initialization = struct {
     memory_map: MemoryMap,
 
     pub fn getRSDPAddress(init: *Initialization) u32 {
-        return @intCast(u32, @ptrToInt(init.architecture.rsdp));
+        return @intCast(u32, @intFromPtr(init.architecture.rsdp));
     }
 
     pub fn getCPUCount(init: *Initialization) !u32 {
@@ -369,7 +364,7 @@ const Initialization = struct {
         // Actually mapping the whole uefi executable so we don't have random problems with code being dereferenced by the trampoline
         switch (lib.cpu.arch) {
             .x86_64 => {
-                const trampoline_code_start = @ptrToInt(&bootloader.arch.x86_64.jumpToKernel);
+                const trampoline_code_start = @intFromPtr(&bootloader.arch.x86_64.jumpToKernel);
 
                 try init.deinitializeMemoryMap();
                 while (try init.memory_map.next()) |entry| {

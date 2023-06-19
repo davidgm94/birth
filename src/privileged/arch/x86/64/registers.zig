@@ -9,7 +9,6 @@ const VirtualAddress = lib.VirtualAddress;
 const PhysicalMemoryRegion = lib.PhysicalMemoryRegion;
 const VirtualMemoryRegion = lib.VirtualMemoryRegion;
 const PhysicalAddressSpace = lib.PhysicalAddressSpace;
-const VirtualAddressSpace = lib.VirtualAddressSpace;
 
 pub const cr3 = packed struct(u64) {
     reserved0: u3 = 0,

@@ -120,7 +120,7 @@ pub const DirectoryTokenizer = struct {
 
         if (string[0] == '/') {
             for (string) |ch| {
-                count += @boolToInt(ch == '/');
+                count += @intFromBool(ch == '/');
             }
         } else unreachable;
 
@@ -196,19 +196,19 @@ pub const DirectoryTokenizer = struct {
 };
 
 pub inline fn ptrAdd(comptime T: type, ptr: *T, element_offset: usize) *T {
-    return @intToPtr(*T, @ptrToInt(ptr) + @sizeOf(T) * element_offset);
+    return @ptrFromInt(*T, @intFromPtr(ptr) + @sizeOf(T) * element_offset);
 }
 
 pub inline fn maybePtrAdd(comptime T: type, ptr: ?*T, element_offset: usize) ?*T {
-    return @intToPtr(*T, @ptrToInt(ptr) + @sizeOf(T) * element_offset);
+    return @ptrFromInt(*T, @intFromPtr(ptr) + @sizeOf(T) * element_offset);
 }
 
 pub inline fn ptrSub(comptime T: type, ptr: *T, element_offset: usize) *T {
-    return @intToPtr(*T, @ptrToInt(ptr) - @sizeOf(T) * element_offset);
+    return @ptrFromInt(*T, @intFromPtr(ptr) - @sizeOf(T) * element_offset);
 }
 
 pub inline fn maybePtrSub(comptime T: type, ptr: ?*T, element_offset: usize) ?*T {
-    return @intToPtr(*T, @ptrToInt(ptr) - @sizeOf(T) * element_offset);
+    return @ptrFromInt(*T, @intFromPtr(ptr) - @sizeOf(T) * element_offset);
 }
 
 test {
@@ -227,7 +227,7 @@ pub const Allocator = extern struct {
             size: u64,
 
             pub fn toBytes(result: Result) []u8 {
-                return @intToPtr([*]u8, result.address)[0..result.size];
+                return @ptrFromInt([*]u8, result.address)[0..result.size];
             }
         };
         pub const Fn = fn (allocator: *Allocator, size: u64, alignment: u64) Error!Result;
@@ -256,7 +256,7 @@ pub const Allocator = extern struct {
         const size = @sizeOf(T) * len;
         const alignment = @alignOf(T);
         const allocation_result = try allocator.callbacks.allocate(allocator, size, alignment);
-        const result = @intToPtr([*]T, safeArchitectureCast(allocation_result.address))[0..len];
+        const result = @ptrFromInt([*]T, safeArchitectureCast(allocation_result.address))[0..len];
         return result;
     }
 
@@ -342,7 +342,7 @@ pub const Allocator = extern struct {
             }
             const zig_result = zig_allocator.vtable.alloc(zig_allocator.ptr, size, @intCast(u8, alignment), @returnAddress());
             return .{
-                .address = @ptrToInt(zig_result),
+                .address = @intFromPtr(zig_result),
                 .size = size,
             };
         }
@@ -380,12 +380,12 @@ pub fn ELF(comptime bits: comptime_int) type {
             }
 
             pub fn getProgramHeaders(parser: *const Parser) []const ProgramHeader {
-                const program_headers = @intToPtr([*]const ProgramHeader, @ptrToInt(parser.file_header) + @intCast(usize, parser.file_header.program_header_offset))[0..parser.file_header.program_header_entry_count];
+                const program_headers = @ptrFromInt([*]const ProgramHeader, @intFromPtr(parser.file_header) + @intCast(usize, parser.file_header.program_header_offset))[0..parser.file_header.program_header_entry_count];
                 return program_headers;
             }
 
             pub fn getSectionHeaders(parser: *const Parser) []const SectionHeader {
-                const section_headers = @intToPtr([*]const SectionHeader, @ptrToInt(parser.file_header) + @intCast(usize, parser.file_header.section_header_offset))[0..parser.file_header.section_header_entry_count];
+                const section_headers = @ptrFromInt([*]const SectionHeader, @intFromPtr(parser.file_header) + @intCast(usize, parser.file_header.section_header_offset))[0..parser.file_header.section_header_entry_count];
                 return section_headers;
             }
 
@@ -801,7 +801,7 @@ pub fn RegionInterface(comptime Region: type) type {
             slice: []const u8,
         }) Region {
             return new(.{
-                .address = addressToAddrT(@ptrToInt(info.slice.ptr)),
+                .address = addressToAddrT(@intFromPtr(info.slice.ptr)),
                 .size = info.slice.len,
             });
         }
@@ -810,7 +810,7 @@ pub fn RegionInterface(comptime Region: type) type {
             _ = info;
             common.assert(@typeInfo(@TypeOf(any)) == .Pointer);
             return Region{
-                .address = VirtualAddress.new(@ptrToInt(any)),
+                .address = VirtualAddress.new(@intFromPtr(any)),
                 .size = @sizeOf(@TypeOf(any.*)),
             };
         }
@@ -935,7 +935,7 @@ pub fn AddressInterface(comptime AddressEnum: type) type {
 
     const Result = struct {
         pub inline fn newNoChecks(addr: AddrT) Addr {
-            return @intToEnum(Addr, addr);
+            return @enumFromInt(Addr, addr);
         }
 
         pub inline fn invalid() Addr {
@@ -943,7 +943,7 @@ pub fn AddressInterface(comptime AddressEnum: type) type {
         }
 
         pub inline fn value(addr: Addr) AddrT {
-            return @enumToInt(addr);
+            return @intFromEnum(addr);
         }
 
         pub inline fn offset(addr: Addr, asked_offset: AddrT) Addr {
@@ -980,7 +980,7 @@ pub const PhysicalAddress = enum(u64) {
 
     pub inline fn new(address: u64) PA {
         if (address >= config.cpu_driver_higher_half_address) @panic("Trying to write a higher half virtual address value into a physical address");
-        return @intToEnum(PA, address);
+        return @enumFromInt(PA, address);
     }
 
     pub inline fn toIdentityMappedVirtualAddress(physical_address: PA) VirtualAddress {
@@ -998,12 +998,23 @@ pub const VirtualAddress = enum(u64) {
 
     pub usingnamespace AddressInterface(@This());
 
-    pub inline fn new(address: u64) VirtualAddress {
-        return @intToEnum(VirtualAddress, address);
+    pub inline fn new(address: anytype) VirtualAddress {
+        const T = @TypeOf(address);
+        return @enumFromInt(VirtualAddress, switch (T) {
+            usize, u64, comptime_int => address,
+            else => switch (@typeInfo(T)) {
+                .Fn => @intFromPtr(&address),
+                .Pointer => @intFromPtr(address),
+                else => {
+                    @compileLog(T);
+                    @compileError("HA!");
+                },
+            },
+        });
     }
 
     pub inline fn access(virtual_address: VirtualAddress, comptime Ptr: type) Ptr {
-        return @intToPtr(Ptr, safeArchitectureCast(virtual_address.value()));
+        return @ptrFromInt(Ptr, safeArchitectureCast(virtual_address.value()));
     }
 
     pub inline fn isValid(virtual_address: VirtualAddress) bool {
@@ -1013,7 +1024,7 @@ pub const VirtualAddress = enum(u64) {
 
     pub inline fn toPhysicalAddress(virtual_address: VirtualAddress) PhysicalAddress {
         common.assert(virtual_address.value() >= config.cpu_driver_higher_half_address);
-        return @intToEnum(PhysicalAddress, virtual_address.value() - config.cpu_driver_higher_half_address);
+        return @enumFromInt(PhysicalAddress, virtual_address.value() - config.cpu_driver_higher_half_address);
     }
 
     pub inline fn toGuaranteedPhysicalAddress(virtual_address: VirtualAddress) PhysicalAddress {

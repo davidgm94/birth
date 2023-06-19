@@ -92,14 +92,21 @@ pub fn build(b_arg: *Build) !void {
 
     default_configuration = blk: {
         const default_json_file = try std.fs.cwd().readFileAlloc(b.allocator, default_cfg_override, common.maxInt(usize));
-        const cfg = try std.json.parseFromSlice(Configuration, b.allocator, default_json_file, .{});
+        const parsed_cfg = try std.json.parseFromSlice(Configuration, b.allocator, default_json_file, .{});
+        const cfg = parsed_cfg.value;
+
+        const optimize_mode = b.option(
+            std.builtin.Mode,
+            "optimize",
+            "Prioritize performance, safety, or binary size (-O flag)",
+        ) orelse cfg.optimize_mode;
 
         break :blk Configuration{
             .architecture = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = cfg.architecture } }).getCpuArch(),
             .bootloader = cfg.bootloader,
             .boot_protocol = cfg.boot_protocol,
             .execution_environment = cfg.execution_environment,
-            .optimize_mode = cfg.optimize_mode,
+            .optimize_mode = optimize_mode,
             .execution_type = cfg.execution_type,
             .executable_kind = .exe,
         };
@@ -232,7 +239,8 @@ pub fn build(b_arg: *Build) !void {
             const dir_name = entry.name;
             const file_path = try std.mem.concat(b.allocator, u8, &.{ dir_name, "/module.json" });
             const file = try user_program_dir.dir.readFileAlloc(b.allocator, file_path, common.maxInt(usize));
-            const user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
+            const parsed_user_program = try std.json.parseFromSlice(common.UserProgram, b.allocator, file, .{});
+            const user_program = parsed_user_program.value;
             try user_module_list.append(.{
                 .program = user_program,
                 .name = b.dupe(dir_name), // we have to dupe here otherwise Windows CI fails
@@ -431,7 +439,7 @@ pub fn build(b_arg: *Build) !void {
                                     .image_configuration_path => disk_image_builder_run.addArg(common.ImageConfig.default_path),
                                     .disk_image_path => {
                                         // Must be first
-                                        assert(@enumToInt(argument_type) == 0);
+                                        assert(@intFromEnum(argument_type) == 0);
                                     },
                                     .bootloader => {
                                         disk_image_builder_run.addArtifactArg(bootloader_compile_step);
@@ -702,15 +710,15 @@ fn getTarget(asked_arch: Cpu.Arch, execution_mode: common.TraditionalExecutionMo
             .x86, .x86_64 => {
                 // disable FPU
                 const Feature = Target.x86.Feature;
-                disabled_features.addFeature(@enumToInt(Feature.x87));
-                disabled_features.addFeature(@enumToInt(Feature.mmx));
-                disabled_features.addFeature(@enumToInt(Feature.sse));
-                disabled_features.addFeature(@enumToInt(Feature.sse2));
-                disabled_features.addFeature(@enumToInt(Feature.avx));
-                disabled_features.addFeature(@enumToInt(Feature.avx2));
-                disabled_features.addFeature(@enumToInt(Feature.avx512f));
+                disabled_features.addFeature(@intFromEnum(Feature.x87));
+                disabled_features.addFeature(@intFromEnum(Feature.mmx));
+                disabled_features.addFeature(@intFromEnum(Feature.sse));
+                disabled_features.addFeature(@intFromEnum(Feature.sse2));
+                disabled_features.addFeature(@intFromEnum(Feature.avx));
+                disabled_features.addFeature(@intFromEnum(Feature.avx2));
+                disabled_features.addFeature(@intFromEnum(Feature.avx512f));
 
-                enabled_features.addFeature(@enumToInt(Feature.soft_float));
+                enabled_features.addFeature(@intFromEnum(Feature.soft_float));
             },
             else => return Error.architecture_not_supported,
         }

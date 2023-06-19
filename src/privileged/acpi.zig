@@ -34,16 +34,16 @@ pub const RSDP = extern struct {
                         true => @fieldParentPtr(RSDP.Descriptor2, "descriptor1", rsdp).XSDT_address,
                     };
 
-                    const root_table_header = @intToPtr(*align(1) Header, root_table_address);
+                    const root_table_header = @ptrFromInt(*align(1) Header, root_table_address);
                     const EntryType = switch (is_xsdt) {
                         false => u32,
                         true => u64,
                     };
 
                     const entry_count = @divExact(root_table_header.length - @sizeOf(Header), @sizeOf(EntryType));
-                    const entries = @intToPtr([*]align(1) const EntryType, @ptrToInt(root_table_header) + @sizeOf(Header))[0..entry_count];
+                    const entries = @ptrFromInt([*]align(1) const EntryType, @intFromPtr(root_table_header) + @sizeOf(Header))[0..entry_count];
                     for (entries) |entry| {
-                        const table_header = @intToPtr(*align(1) const Header, entry);
+                        const table_header = @ptrFromInt(*align(1) const Header, entry);
                         if (table_signature == table_header.signature) {
                             return table_header;
                         }
@@ -123,7 +123,7 @@ pub const MADT = extern struct {
             cpu_count += switch (entry.type) {
                 .LAPIC => blk: {
                     const lapic_entry = @fieldParentPtr(LAPIC, "record", entry);
-                    break :blk @boolToInt((lapic_entry.flags.enabled and !lapic_entry.flags.online_capable) or (lapic_entry.flags.online_capable and !lapic_entry.flags.enabled));
+                    break :blk @intFromBool((lapic_entry.flags.enabled and !lapic_entry.flags.online_capable) or (lapic_entry.flags.online_capable and !lapic_entry.flags.enabled));
                 },
                 .x2APIC => @panic("x2apic not implemented"),
                 else => continue,
@@ -164,7 +164,7 @@ pub const MADT = extern struct {
 
         pub fn next(iterator: *Iterator) ?*const Record {
             if (iterator.offset < iterator.madt.header.length) {
-                const record = @intToPtr(*const Record, @ptrToInt(iterator.madt) + iterator.offset);
+                const record = @ptrFromInt(*const Record, @intFromPtr(iterator.madt) + iterator.offset);
                 iterator.offset += record.length;
                 return record;
             }
@@ -228,8 +228,8 @@ const MCFG = extern struct {
 
     fn getConfigurations(mcfg: *align(1) MCFG) []Configuration {
         const entry_count = (mcfg.header.length - @sizeOf(MCFG)) / @sizeOf(Configuration);
-        const configuration_base = @ptrToInt(mcfg) + @sizeOf(MCFG);
-        return @intToPtr([*]Configuration, configuration_base)[0..entry_count];
+        const configuration_base = @intFromPtr(mcfg) + @sizeOf(MCFG);
+        return @ptrFromInt([*]Configuration, configuration_base)[0..entry_count];
     }
 
     comptime {

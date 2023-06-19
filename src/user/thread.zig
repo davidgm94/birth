@@ -3,7 +3,7 @@ const log = lib.log.scoped(.thread);
 const user = @import("user");
 const rise = @import("rise");
 
-const VirtualAddress = user.VirtualAddress;
+const VirtualAddress = lib.VirtualAddress;
 
 pub const Thread = extern struct {
     self: *Thread,
@@ -50,9 +50,51 @@ pub fn initDisabled(scheduler: *user.arch.Scheduler) noreturn {
     scheduler.restore(&thread.register_arena);
 }
 
-fn bootstrapThread(parameters: ?*anyopaque) callconv(.C) noreturn {
-    // TODO: Implement libc glue code
-    // TODO: Implement rise glue code
+const SpawnDomainParams = struct {};
+
+// TODO:
+const Foo = struct {};
+
+pub var slab_allocator: Foo = undefined;
+pub var slab_virtual_address_space: user.MMUAwareVirtualAddressSpace = undefined;
+
+fn initThread(parameters: *SpawnDomainParams) !void {
+    _ = parameters;
+    // TODO:
+    // - waitset
+    // - ram alloc init
+    const virtual_address_space = user.process.getVirtualAddressSpace();
+    const physical_map = user.process.getPhysicalMap();
+    virtual_address_space.physical_map = physical_map;
+
+    const root_page_level = 0;
+    try user.arch.initPhysicalMap(physical_map, virtual_address_space, root_page_level, {});
+
+    @panic("TODO: initThread");
+}
+
+fn bootstrapThread(parameters: *SpawnDomainParams) callconv(.C) noreturn {
+
+    // TODO: Do we have TLS data?
+    // tls_block_init_base = params->tls_init_base;
+    // tls_block_init_len = params->tls_init_len;
+    // tls_block_total_len = params->tls_total_len;
+
+    initThread(parameters) catch |err| user.panic("initThread failed: {}", .{err});
+    // // Allocate storage region for real threads
+    // size_t blocksize = sizeof(struct thread) + tls_block_total_len + THREAD_ALIGNMENT;
+    // err = vspace_mmu_aware_init(&thread_slabs_vm, MAX_THREADS * blocksize);
+    try slab_virtual_address_space.init();
+    // if (err_is_fail(err)) {
+    //     USER_PANIC_ERR(err, "vspace_mmu_aware_init for thread region failed\n");
+    // }
+    // // XXX: do this nicer, but we need struct threads to be in Vspace < 4GB so
+    // // we can set the thread segment register. -SG, 2017-02-28.
+    // // We can't use the assertion yet, as the init domain has it's thread
+    // // slabs above 4G.
+    // //assert(vregion_get_base_addr(&thread_slabs_vm.vregion) + vregion_get_size(&thread_slabs_vm.vregion) < 1ul << 32);
+    // slab_init(&thread_slabs, blocksize, refill_thread_slabs);
+
     if (user.is_init) {
         // No allocation path
         mainThread(parameters);

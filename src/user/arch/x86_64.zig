@@ -1,4 +1,5 @@
 const lib = @import("lib");
+const log = lib.log;
 const assert = lib.assert;
 const rise = @import("rise");
 const user = @import("user");
@@ -6,8 +7,12 @@ const user = @import("user");
 const FPU = rise.arch.FPU;
 const Registers = rise.arch.Registers;
 const RegisterArena = rise.arch.RegisterArena;
+
+const VirtualAddress = lib.VirtualAddress;
+
+const PhysicalMap = user.PhysicalMap;
 const Thread = user.Thread;
-const VirtualAddress = user.VirtualAddress;
+const VirtualAddressSpace = user.VirtualAddressSpace;
 
 pub const Scheduler = extern struct {
     common: rise.arch.UserScheduler,
@@ -48,7 +53,7 @@ pub inline fn setInitialState(register_arena: *RegisterArena, entry: VirtualAddr
     assert(lib.isAligned(stack.value(), lib.arch.stack_alignment));
     var stack_address = stack;
     // x86_64 ABI
-    stack_address.sub(@sizeOf(usize));
+    stack_address.subOffset(@sizeOf(usize));
 
     register_arena.registers.rip = entry.value();
     register_arena.registers.rsp = stack_address.value();
@@ -77,4 +82,11 @@ pub fn maybeCurrentScheduler() ?*user.Scheduler {
 pub inline fn currentScheduler() *user.Scheduler {
     const result = maybeCurrentScheduler().?;
     return result;
+}
+
+pub fn initPhysicalMap(physical_map: *PhysicalMap, virtual_address_space: *VirtualAddressSpace, page_level: u3, slot_allocator: void) !void {
+    _ = page_level;
+    _ = slot_allocator;
+    physical_map.virtual_address_space = virtual_address_space;
+    log.warn("TODO: PhysicalMap", .{});
 }

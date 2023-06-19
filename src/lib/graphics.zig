@@ -57,7 +57,7 @@ pub const Framebuffer = struct {
         // TODO: stop hardcoding the 4
         const new_buffer_memory = allocator.allocate_bytes(width * height * 4, 0x1000) catch unreachable;
         framebuffer.area = DrawingArea{
-            .bytes = @intToPtr([*]u8, new_buffer_memory.address),
+            .bytes = @ptrFromInt([*]u8, new_buffer_memory.address),
             .width = width,
             .height = height,
             .stride = width * 4,
@@ -126,7 +126,7 @@ pub const Framebuffer = struct {
                 var source = source_line_start;
 
                 var j = bounds_width;
-                if (@enumToInt(mode) == 0xff) {
+                if (@intFromEnum(mode) == 0xff) {
                     while (true) {
                         blend_pixel(&destination[0], source[0]);
                         destination += 1;
@@ -134,7 +134,7 @@ pub const Framebuffer = struct {
                         j -= 1;
                         if (j == 0) break;
                     }
-                } else if (@enumToInt(mode) <= 0xff) {
+                } else if (@intFromEnum(mode) <= 0xff) {
                     @panic("todo: mode <= 0xff");
                 } else if (mode == .xor) {
                     @panic("todo: mode xor");

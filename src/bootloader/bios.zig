@@ -50,7 +50,7 @@ pub const Disk = extern struct {
             }
         }
 
-        const disk_buffer_address = @ptrToInt(&buffer);
+        const disk_buffer_address = @intFromPtr(&buffer);
         if (disk_buffer_address > lib.maxInt(u16)) @panic("address too high");
 
         var sectors_left = sector_count;
@@ -69,7 +69,7 @@ pub const Disk = extern struct {
             };
             lib.log.debug("DAP: {}", .{dap});
 
-            const dap_address = @ptrToInt(&dap);
+            const dap_address = @intFromPtr(&dap);
             lib.log.debug("DAP address: 0x{x}", .{dap_address});
             const dap_offset = offset(dap_address);
             const dap_segment = segment(dap_address);
@@ -191,13 +191,13 @@ const Registers = extern struct {
 fn A20IsEnabled() bool {
     const address = 0x7dfe;
     const address_with_offset = address + 0x100000;
-    if (@intToPtr(*volatile u16, address).* != @intToPtr(*volatile u16, address_with_offset).*) {
+    if (@ptrFromInt(*volatile u16, address).* != @ptrFromInt(*volatile u16, address_with_offset).*) {
         return true;
     }
 
-    @intToPtr(*volatile u16, address).* = ~(@intToPtr(*volatile u16, address).*);
+    @ptrFromInt(*volatile u16, address).* = ~(@ptrFromInt(*volatile u16, address).*);
 
-    if (@intToPtr(*volatile u16, address).* != @intToPtr(*volatile u16, address_with_offset).*) {
+    if (@ptrFromInt(*volatile u16, address).* != @ptrFromInt(*volatile u16, address_with_offset).*) {
         return true;
     }
 
@@ -252,7 +252,7 @@ pub const E820Iterator = extern struct {
         iterator.registers.eax = 0xe820;
         iterator.registers.ecx = @sizeOf(MemoryMapEntry);
         iterator.registers.edx = 0x534d4150;
-        iterator.registers.edi = @ptrToInt(&memory_map_entry);
+        iterator.registers.edi = @intFromPtr(&memory_map_entry);
 
         interrupt(0x15, &iterator.registers, &iterator.registers);
 
@@ -317,7 +317,7 @@ pub fn getEBDAAddress() u32 {
     const expected_EBDA_base = 0x80000;
     const expected_EBDA_top = 0xa0000;
 
-    const base = @as(u32, @intToPtr(*u16, 0x40e).*) << 4;
+    const base = @as(u32, @ptrFromInt(*u16, 0x40e).*) << 4;
 
     if (base < expected_EBDA_base or base > expected_EBDA_top) {
         return expected_EBDA_base;
@@ -337,14 +337,14 @@ pub fn findRSDP() FindRSDP!*ACPI.RSDP.Descriptor1 {
     const RSDP_PTR = "RSD PTR ".*;
 
     const pointers = [2]u32{ ebda_address, main_bios_area_base_address };
-    const limits = [2]u32{ ebda_address + @intCast(u32, @enumToInt(lib.SizeUnit.kilobyte)), @intCast(u32, @enumToInt(lib.SizeUnit.megabyte)) };
+    const limits = [2]u32{ ebda_address + @intCast(u32, @intFromEnum(lib.SizeUnit.kilobyte)), @intCast(u32, @intFromEnum(lib.SizeUnit.megabyte)) };
 
     for (pointers, 0..) |pointer, index| {
         var ptr = pointer;
         const limit = limits[index];
 
         while (ptr < limit) : (ptr += 16) {
-            const rsdp_descriptor = @intToPtr(*ACPI.RSDP.Descriptor1, ptr);
+            const rsdp_descriptor = @ptrFromInt(*ACPI.RSDP.Descriptor1, ptr);
 
             if (lib.equal(u8, &rsdp_descriptor.signature, &RSDP_PTR)) {
                 switch (rsdp_descriptor.revision) {
@@ -377,7 +377,7 @@ pub const RealModePointer = extern struct {
     segment: u16,
 
     pub inline fn desegment(real_mode_pointer: RealModePointer, comptime Ptr: type) Ptr {
-        return @intToPtr(Ptr, (@as(u32, real_mode_pointer.segment) << 4) + real_mode_pointer.offset);
+        return @ptrFromInt(Ptr, (@as(u32, real_mode_pointer.segment) << 4) + real_mode_pointer.offset);
     }
 };
 
@@ -418,7 +418,7 @@ pub const VBE = extern struct {
                 var mode: VBE.Mode = undefined;
 
                 registers.ecx = video_mode_number;
-                registers.edi = @ptrToInt(&mode);
+                registers.edi = @intFromPtr(&mode);
 
                 VBEinterrupt(.get_mode_information, &registers) catch continue;
 
@@ -551,7 +551,7 @@ pub const VBE = extern struct {
     const vbe_code = 0x4f;
 
     pub fn VBEinterrupt(call: Call, registers: *Registers) !void {
-        const source_ax = @as(u16, vbe_code << 8) | @enumToInt(call);
+        const source_ax = @as(u16, vbe_code << 8) | @intFromEnum(call);
         registers.eax = source_ax;
         interrupt(interrupt_number, registers, registers);
 
@@ -562,7 +562,7 @@ pub const VBE = extern struct {
 
         const ah = @truncate(u8, ax >> 8);
         if (ah > 3) @panic("Return value too high");
-        const return_value = @intToEnum(ReturnValue, ah);
+        const return_value = @enumFromInt(ReturnValue, ah);
         return switch (return_value) {
             .failure => Error.failure,
             .not_supported_in_hardware => Error.not_supported_in_hardware,
@@ -574,7 +574,7 @@ pub const VBE = extern struct {
     pub fn getControllerInformation(vbe_info: *VBE.Information) VBE.Error!void {
         var registers = Registers{};
 
-        registers.edi = @ptrToInt(vbe_info);
+        registers.edi = @intFromPtr(vbe_info);
         try VBEinterrupt(.get_controller_information, &registers);
     }
 
@@ -630,9 +630,9 @@ pub const VBE = extern struct {
         var edid_info: EDID = undefined;
 
         var registers = Registers{};
-        registers.ds = segment(@ptrToInt(&edid_info));
+        registers.ds = segment(@intFromPtr(&edid_info));
         registers.es = registers.ds;
-        registers.edi = offset(@ptrToInt(&edid_info));
+        registers.edi = offset(@intFromPtr(&edid_info));
         registers.ebx = 1;
 
         try VBEinterrupt(.get_edid_information, &registers);

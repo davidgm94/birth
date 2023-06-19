@@ -90,7 +90,7 @@ pub inline fn access(register: Register) *volatile u32 {
         else => @compileError("Architecture not supported"),
     };
 
-    return virtual_address.offset(@enumToInt(register)).access(*volatile u32);
+    return virtual_address.offset(@intFromEnum(register)).access(*volatile u32);
 }
 
 pub inline fn read(register: Register) u32 {

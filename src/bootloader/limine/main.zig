@@ -44,11 +44,7 @@ pub fn panic(message: []const u8, _: ?*lib.StackTrace, _: ?usize) noreturn {
     writer.writeAll(message) catch {};
     writer.writeByte('\n') catch {};
 
-    if (lib.is_test) {
-        privileged.exitFromQEMU(.failure);
-    } else {
-        stopCPU();
-    }
+    privileged.shutdown(.failure);
 }
 
 pub const std_options = struct {
@@ -161,8 +157,8 @@ const Initialization = struct {
 
         inline for (comptime lib.enumValues(Section)) |section| {
             const section_name = @tagName(section);
-            const section_start = @ptrToInt(@extern(*const u8, .{ .name = section_name ++ "_section_start" }));
-            const section_end = @ptrToInt(@extern(*const u8, .{ .name = section_name ++ "_section_end" }));
+            const section_start = @intFromPtr(@extern(*const u8, .{ .name = section_name ++ "_section_start" }));
+            const section_end = @intFromPtr(@extern(*const u8, .{ .name = section_name ++ "_section_end" }));
 
             const offset = section_start - virtual_offset;
             const physical_address = PhysicalAddress.new(physical_offset + offset);
@@ -172,7 +168,7 @@ const Initialization = struct {
             log.debug("Trying to map {s}: 0x{x} -> 0x{x} for 0x{x} bytes...", .{ section_name, virtual_address.value(), physical_address.value(), size });
 
             if (section == .text) {
-                const address = @ptrToInt(&ensureLoaderIsMapped);
+                const address = @intFromPtr(&ensureLoaderIsMapped);
                 assert(address >= section_start and address <= section_end);
             }
 
@@ -225,7 +221,7 @@ const Initialization = struct {
     }
 
     pub fn getRSDPAddress(init: *Initialization) usize {
-        return @ptrToInt(init.architecture.rsdp);
+        return @intFromPtr(init.architecture.rsdp);
     }
 
     pub fn deinitializeMemoryMap(init: *Initialization) !void {
@@ -291,7 +287,7 @@ const Initialization = struct {
                 .x86_64 => .{
                     .rsdp = blk: {
                         if (request.rsdp.response) |response| {
-                            break :blk @intToPtr(?*ACPI.RSDP.Descriptor1, response.address) orelse return Error.rsdp_not_found;
+                            break :blk @ptrFromInt(?*ACPI.RSDP.Descriptor1, response.address) orelse return Error.rsdp_not_found;
                         }
 
                         return Error.rsdp_not_found;

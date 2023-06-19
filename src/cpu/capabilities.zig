@@ -17,6 +17,7 @@ pub const RootDescriptor = extern struct {
 pub const Static = enum {
     cpu,
     boot,
+    process,
 
     pub const count = lib.enumCount(@This());
 
@@ -63,19 +64,21 @@ pub const Dynamic = enum {
     io,
     ram, // Barrelfish equivalent: RAM (no PhysAddr)
     cpu_memory, // Barrelfish equivalent: Frame
+    page_table, // Barrelfish equivalent: VNode
     // irq_table,
     // device_memory,
-    // cpu_memory,
-    // vnode,
     // scheduler,
 
     pub const Map = extern struct {
         io: IO,
         ram: RAM,
         cpu_memory: CPUMemory,
+        page_table: PageTables,
 
         comptime {
-            assert(lib.fields(@This()).len == lib.enumCount(Dynamic));
+            inline for (lib.fields(Dynamic.Map), lib.fields(Dynamic)) |struct_field, enum_field| {
+                assert(lib.equal(u8, enum_field.name, struct_field.name));
+            }
         }
     };
 };
@@ -132,6 +135,10 @@ pub const CPUMemory = extern struct {
     };
 };
 
+pub const PageTables = extern struct {
+    foo: u32 = 0,
+};
+
 pub const IO = extern struct {
     debug: bool,
 };
@@ -170,7 +177,10 @@ pub const Root = extern struct {
     pub inline fn hasPermissions(root: *const Root, comptime capability_type: rise.capabilities.Type, command: rise.capabilities.Command(capability_type)) bool {
         return switch (capability_type) {
             // static capabilities
-            inline .cpu, .boot => |static_capability| @field(root.static, @tagName(static_capability)),
+            inline .cpu,
+            .boot,
+            .process,
+            => |static_capability| @field(root.static, @tagName(static_capability)),
             // dynamic capabilities
             .io => switch (command) {
                 .copy, .mint, .retype, .delete, .revoke, .create => unreachable,
@@ -178,6 +188,7 @@ pub const Root = extern struct {
             },
             .cpu_memory => root.dynamic.cpu_memory.flags.allocate,
             .ram => unreachable,
+            .page_table => unreachable,
         };
     }
 

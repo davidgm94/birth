@@ -483,7 +483,7 @@ pub const Cache = extern struct {
         const allocator = maybe_allocator orelse @panic("We need an allocator");
         const clusters = blk: {
             const alloc_result = try allocator.allocateBytes(@sizeOf(u32) * cluster_count, @alignOf(u32));
-            break :blk @intToPtr([*]u32, alloc_result.address)[0..cluster_count];
+            break :blk @ptrFromInt([*]u32, alloc_result.address)[0..cluster_count];
         };
         try cache.allocateClusters(clusters, allocator);
 
@@ -604,7 +604,7 @@ pub const Cache = extern struct {
 
         while (true) {
             extension_start = lib.maybePtrSub(u16, extension_start, 1);
-            if (@ptrToInt(extension_start) < @ptrToInt(&long_name[0])) break;
+            if (@intFromPtr(extension_start) < @intFromPtr(&long_name[0])) break;
 
             if (extension_start.?.* == '.') {
                 if (extension_start == lib.ptrSub(u16, end, 1)) {
@@ -620,7 +620,7 @@ pub const Cache = extern struct {
             size = long_name.len;
             extension_start = null;
         } else if (extension_start) |ext_start| {
-            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
+            const extension_start_index = @divExact(@intFromPtr(ext_start) - @intFromPtr(&long_name[0]), @sizeOf(u16));
             const index = blk: {
                 const slice = long_name[0..extension_start_index];
 
@@ -692,7 +692,7 @@ pub const Cache = extern struct {
         var extension_len: usize = 0;
         var extension: [4]u8 = undefined;
         if (extension_start) |ext_start| {
-            const extension_start_index = @divExact(@ptrToInt(ext_start) - @ptrToInt(&long_name[0]), @sizeOf(u16));
+            const extension_start_index = @divExact(@intFromPtr(ext_start) - @intFromPtr(&long_name[0]), @sizeOf(u16));
             const extension_slice = long_name[extension_start_index..];
             var extension_index: usize = 0;
             for (extension_slice, 0..) |extension_u16, extension_pointer_index| {
@@ -831,7 +831,7 @@ pub const Cache = extern struct {
             entry.long_name_entries = blk: {
                 const allocator = maybe_allocator orelse @panic("fat32: allocator not provided");
                 const alloc_result = try allocator.allocateBytes(@intCast(usize, @sizeOf(LongNameEntry)) * long_slot_count, @alignOf(LongNameEntry));
-                break :blk @intToPtr([*]LongNameEntry, alloc_result.address)[0..long_slot_count];
+                break :blk @ptrFromInt([*]LongNameEntry, alloc_result.address)[0..long_slot_count];
             };
             var reverse_index = long_slot_count;
 
@@ -870,7 +870,7 @@ pub const Cache = extern struct {
                 if (free_slots == total_slots) {
                     const last_current_cluster = @intCast(u32, entry_iterator.cluster);
                     assert(last_current_cluster == current_cluster);
-                    const element_offset = @divExact(@ptrToInt(cluster_entry) - @ptrToInt(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
+                    const element_offset = @divExact(@intFromPtr(cluster_entry) - @intFromPtr(&entry_iterator.cluster_entries[0]), @sizeOf(DirectoryEntry));
                     const entry_start_index = element_offset - (free_slots - 1);
 
                     var entry_index = entry_start_index;

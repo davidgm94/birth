@@ -103,7 +103,6 @@ pub const Result = extern union {
         };
 
         pub const Second = u64;
-
     };
 
     pub const Linux = extern struct {

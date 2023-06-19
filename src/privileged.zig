@@ -35,11 +35,19 @@ pub const ResourceOwner = enum(u2) {
 
 const panic_logger = lib.log.scoped(.PANIC);
 
-pub inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {
+inline fn exitFromQEMU(exit_code: lib.QEMU.ExitCode) noreturn {
     comptime assert(@sizeOf(lib.QEMU.ExitCode) == @sizeOf(u32));
-    arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @enumToInt(exit_code));
+    arch.io.write(u32, lib.QEMU.isa_debug_exit.io_base, @intFromEnum(exit_code));
 
     arch.stopCPU();
+}
+
+pub inline fn shutdown(exit_code: lib.QEMU.ExitCode) noreturn {
+    if (lib.is_test) {
+        exitFromQEMU(exit_code);
+    } else {
+        arch.stopCPU();
+    }
 }
 
 pub const Mapping = extern struct {

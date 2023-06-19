@@ -86,19 +86,19 @@ pub const Information = extern struct {
 
         pub const TypeMap = blk: {
             var arr: [Slice.count]type = undefined;
-            arr[@enumToInt(Slice.Name.bootloader_information)] = Information;
-            arr[@enumToInt(Slice.Name.bundle)] = u8;
-            arr[@enumToInt(Slice.Name.file_list)] = u8;
-            arr[@enumToInt(Slice.Name.memory_map_entries)] = MemoryMapEntry;
-            arr[@enumToInt(Slice.Name.page_counters)] = u32;
-            arr[@enumToInt(Slice.Name.smps)] = SMP;
+            arr[@intFromEnum(Slice.Name.bootloader_information)] = Information;
+            arr[@intFromEnum(Slice.Name.bundle)] = u8;
+            arr[@intFromEnum(Slice.Name.file_list)] = u8;
+            arr[@intFromEnum(Slice.Name.memory_map_entries)] = MemoryMapEntry;
+            arr[@intFromEnum(Slice.Name.page_counters)] = u32;
+            arr[@intFromEnum(Slice.Name.smps)] = SMP;
             break :blk arr;
         };
 
-        pub inline fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@enumToInt(slice_name)] {
-            const Type = Slice.TypeMap[@enumToInt(slice_name)];
-            const address = @ptrToInt(bootloader_information) + slice.offset;
-            return @intToPtr([*]Type, address)[0..slice.len];
+        pub inline fn dereference(slice: Slice, comptime slice_name: Slice.Name, bootloader_information: *const Information) []Slice.TypeMap[@intFromEnum(slice_name)] {
+            const Type = Slice.TypeMap[@intFromEnum(slice_name)];
+            const address = @intFromPtr(bootloader_information) + slice.offset;
+            return @ptrFromInt([*]Type, address)[0..slice.len];
         }
     };
 
@@ -266,7 +266,7 @@ pub const Information = extern struct {
             .smp = switch (lib.cpu.arch) {
                 .x86, .x86_64 => .{
                     .cpu_count = cpu_count,
-                    .bsp_lapic_id = @intToPtr(*volatile u32, 0x0FEE00020).*,
+                    .bsp_lapic_id = @ptrFromInt(*volatile u32, 0x0FEE00020).*,
                 },
                 else => @compileError("Architecture not supported"),
             },
@@ -468,8 +468,8 @@ pub const Information = extern struct {
         return lib.alignForward(u32, information.total_size, lib.arch.valid_page_sizes[0]);
     }
 
-    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@enumToInt(offset_name)] {
-        const slice_offset = information.slices.array.values[@enumToInt(offset_name)];
+    pub inline fn getSlice(information: *const Information, comptime offset_name: Slice.Name) []Slice.TypeMap[@intFromEnum(offset_name)] {
+        const slice_offset = information.slices.array.values[@intFromEnum(offset_name)];
         return slice_offset.dereference(offset_name, information);
     }
 
@@ -542,7 +542,7 @@ pub const Information = extern struct {
                                 .size = size,
                             });
 
-                            @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
+                            @memset(@ptrFromInt([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
 
                             page_counters[entry_index] += four_kb_pages;
 
@@ -568,7 +568,7 @@ pub const Information = extern struct {
                                     .size = size,
                                 });
 
-                                @memset(@intToPtr([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
+                                @memset(@ptrFromInt([*]u8, lib.safeArchitectureCast(result.address.value()))[0..lib.safeArchitectureCast(result.size)], 0);
                                 page_counters[entry_index] += @intCast(u32, difference + size) >> lib.arch.page_shifter(lib.arch.valid_page_sizes[0]);
 
                                 break :blk result;
